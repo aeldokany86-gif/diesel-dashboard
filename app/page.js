@@ -56,6 +56,9 @@ export default function Home() {
   const [stations, setStations] = useState([]);
   const [fuelers, setFuelers] = useState([]);
   const [projects, setProjects] = useState([]);
+
+  const [assetProjectHistory, setAssetProjectHistory] = useState([]);
+  const [assetOdometerHistory, setAssetOdometerHistory] = useState([]);
  
   useEffect(() => {
     async function fetchData() {
@@ -216,6 +219,7 @@ setProjects(mappedProjects);
           literPrice={literPrice}
           getLiterPriceByDate={getLiterPriceByDate}
           currency={currency}
+          assetProjectHistory={assetProjectHistory}
         />
       );
     }
@@ -228,6 +232,10 @@ setProjects(mappedProjects);
           showToast={showToast}
           data={data}
           headers={headers}
+          assetProjectHistory={assetProjectHistory}
+          setAssetProjectHistory={setAssetProjectHistory}
+          assetOdometerHistory={assetOdometerHistory}
+          setAssetOdometerHistory={setAssetOdometerHistory}
         />
       );
     }
@@ -262,11 +270,24 @@ setProjects(mappedProjects);
 }
  
 if (page === "projects") {
-  return <ProjectsPage projects={projects} />;
+  return (
+    <ProjectsPage
+      projects={projects}
+      assets={assets}
+      stations={stations}
+      fuelers={fuelers}
+      data={data}
+      headers={headers}
+      showToast={showToast}
+      currency={currency}
+      getLiterPriceByDate={getLiterPriceByDate}
+      assetProjectHistory={assetProjectHistory}
+    />
+  );
 }
      return (
       <div className="bg-gray-900 min-h-screen text-white p-6">
-        <h2 className="text-2xl font-bold">{page} Page</h2>
+        <h2 className="text-xl sm:text-2xl font-bold">{page} Page</h2>
       </div>
     );
   };
@@ -282,7 +303,7 @@ const showToast = (type, message) => {
   return (
     <div className="min-h-screen bg-gray-900 flex overflow-hidden">
       <div className="w-64 bg-gray-950 text-white shadow p-4">
-        <h1 className="text-2xl font-bold mb-6 text-yellow-400">
+        <h1 className="text-xl sm:text-2xl font-bold mb-6 text-yellow-400">
           Diesel System
         </h1>
  
@@ -346,6 +367,7 @@ function OperationsPage({
   literPrice = 2.33,
   getLiterPriceByDate,
   currency = "SAR",
+  assetProjectHistory = [],
 }) {
   const [showForm, setShowForm] = useState(false);
   const [transactionType, setTransactionType] = useState("");
@@ -403,6 +425,7 @@ function OperationsPage({
   // Operation review / edit
   const [selectedEquipmentHistory, setSelectedEquipmentHistory] = useState(null);
   const [editedRows, setEditedRows] = useState({});
+  const [localAddedRows, setLocalAddedRows] = useState([]);
   const [auditLog, setAuditLog] = useState([]);
   const [editCell, setEditCell] = useState(null);
 
@@ -472,6 +495,42 @@ function OperationsPage({
   const getStation = (stationId) => stations.find((s) => s.id === stationId);
   const getFueler = (fuelerId) => fuelers.find((f) => f.id === fuelerId);
 
+  const getAssetProjectByDate = (assetId, transactionDate) => {
+    const asset = getAsset(assetId);
+
+    const operationDate = parseOperationDate(transactionDate);
+
+    if (!assetId || !operationDate) {
+      return asset?.project || "-";
+    }
+
+    const history = assetProjectHistory
+      .filter((item) => item.assetId === assetId)
+      .filter((item) => item.effectiveDate)
+      .sort(
+        (a, b) => new Date(a.effectiveDate) - new Date(b.effectiveDate)
+      );
+
+    if (history.length === 0) {
+      return asset?.project || "-";
+    }
+
+    let project = history[0]?.oldProject || asset?.project || "-";
+
+    history.forEach((item) => {
+      const effectiveDate = new Date(item.effectiveDate);
+
+      if (
+        !Number.isNaN(effectiveDate.getTime()) &&
+        effectiveDate <= operationDate
+      ) {
+        project = item.newProject || project;
+      }
+    });
+
+    return project || asset?.project || "-";
+  };
+
   const destinationOptions =
     transactionType === "Direct_Refuel"
       ? assets.map((a) => a.id)
@@ -487,6 +546,48 @@ function OperationsPage({
     setStationMeterPhoto(null);
     setAssetPhoto(null);
     setAssetMeterPhoto(null);
+  };
+
+  const saveNewOperation = (operation) => {
+    const newRow = Array(headers.length).fill("");
+
+    if (operationIdIndex !== -1) {
+      newRow[operationIdIndex] =
+        operation.operationId || `OP-${Date.now()}`;
+    }
+
+    if (dateIndex !== -1) {
+      newRow[dateIndex] =
+        operation.transactionDate || new Date().toISOString();
+    }
+
+    if (typeIndex !== -1) {
+      newRow[typeIndex] = operation.transactionType;
+    }
+
+    if (sourceIndex !== -1) {
+      newRow[sourceIndex] = operation.sourceStation;
+    }
+
+    if (fuelerIndex !== -1) {
+      newRow[fuelerIndex] = operation.fuelerId;
+    }
+
+    if (destinationIndex !== -1) {
+      newRow[destinationIndex] = operation.destinationId;
+    }
+
+    if (dieselIndex !== -1) {
+      newRow[dieselIndex] = String(operation.dieselQuantity);
+    }
+
+    if (odometerIndex !== -1) {
+      newRow[odometerIndex] = String(operation.odometer);
+    }
+
+    setLocalAddedRows((prev) => [...prev, newRow]);
+    closeForm();
+    alert("Operation added locally successfully. Backend save will be connected later.");
   };
 
   const exportRowsToCSV = (fileName, csvHeaders, csvRows) => {
@@ -790,7 +891,9 @@ function OperationsPage({
     return newRow;
   };
 
-  const workingData = data.map((row, originalIndex) => ({
+  const combinedData = [...data, ...localAddedRows];
+
+  const workingData = combinedData.map((row, originalIndex) => ({
     row: applyEditsToRow(row, originalIndex),
     originalIndex,
   }));
@@ -1010,7 +1113,7 @@ function OperationsPage({
       if (!acc[equipmentNo]) {
         acc[equipmentNo] = {
           equipmentNo,
-          project: asset?.project || "-",
+          project: getAssetProjectByDate(equipmentNo, row[dateIndex]),
           equipmentType: asset?.type || "-",
           fuelConsumption: 0,
           totalCost: 0,
@@ -1279,16 +1382,16 @@ function OperationsPage({
 
   return (
     <div className="bg-gray-900 min-h-screen text-white overflow-y-auto h-screen">
-      <div className="max-w-none ml-0 mr-[120px] p-5 text-[13px]">
+      <div className="max-w-none ml-0 mr-3 sm:mr-4 lg:mr-8 xl:mr-[120px] p-3 sm:p-4 lg:p-5 text-[12px] lg:text-[13px]">
       <div className="flex justify-between items-center mb-4">
         <div>
-          <h1 className="text-2xl font-bold">Diesel Dashboard</h1>
+          <h1 className="text-xl sm:text-2xl font-bold">Diesel Dashboard</h1>
           <p className="text-gray-400">Fuel transactions monitoring</p>
         </div>
 
         <button
           onClick={() => setShowForm(true)}
-          className="bg-yellow-500 text-black px-4 py-2 rounded-lg font-semibold"
+          className="bg-yellow-500 text-black px-3 lg:px-4 py-2 rounded-lg font-semibold"
         >
           + Add Operation
         </button>
@@ -1299,7 +1402,7 @@ function OperationsPage({
           <div ref={dateFilterRef} className="relative">
             <button
               onClick={() => setShowDateFilter(!showDateFilter)}
-              className="bg-gray-900 border border-gray-700 hover:border-yellow-400 text-white px-4 py-3 rounded-xl min-w-[220px] flex justify-between items-center"
+              className="bg-gray-900 border border-gray-700 hover:border-yellow-400 text-white px-3 lg:px-4 py-2 lg:py-3 rounded-xl w-full sm:min-w-[220px] flex justify-between items-center text-[12px] lg:text-sm"
             >
               <span>
                 {fromDate || toDate
@@ -1312,12 +1415,12 @@ function OperationsPage({
             {showDateFilter && (
               <div className="absolute left-0 mt-3 bg-white text-black border border-gray-300 rounded-2xl z-50 w-[650px] shadow-2xl overflow-hidden">
                 <div className="bg-gray-900 text-white p-3 flex justify-end border-b border-gray-700">
-                  <button className="border border-gray-500 px-4 py-2 rounded-lg text-sm">
+                  <button className="border border-gray-500 px-3 lg:px-4 py-2 rounded-lg text-sm">
                     Auto date range ▾
                   </button>
                 </div>
 
-                <div className="grid grid-cols-2 gap-8 p-5">
+                <div className="grid grid-cols-1 md:grid-cols-2 gap-4 lg:gap-8 p-3 sm:p-5">
                   <div>
                     <p className="text-sm font-semibold mb-3">Start Date</p>
 
@@ -1353,7 +1456,7 @@ function OperationsPage({
                       setFromDate("");
                       setToDate("");
                     }}
-                    className="bg-gray-200 px-4 py-2 rounded-lg text-sm"
+                    className="bg-gray-200 px-3 lg:px-4 py-2 rounded-lg text-sm"
                   >
                     Clear
                   </button>
@@ -1372,7 +1475,7 @@ function OperationsPage({
           <div ref={equipmentDropdownRef} className="relative">
             <button
               onClick={() => setShowEquipmentDropdown(!showEquipmentDropdown)}
-              className="bg-gray-900 border border-gray-700 hover:border-yellow-400 text-white px-4 py-3 rounded-xl min-w-[220px] text-left"
+              className="bg-gray-900 border border-gray-700 hover:border-yellow-400 text-white px-3 lg:px-4 py-2 lg:py-3 rounded-xl w-full sm:min-w-[220px] text-left text-[12px] lg:text-sm"
             >
               {getEquipmentFilterLabel()} ▾
             </button>
@@ -1436,7 +1539,7 @@ function OperationsPage({
               onClick={() =>
                 setShowEquipmentTypeDropdown(!showEquipmentTypeDropdown)
               }
-              className="bg-gray-900 border border-gray-700 hover:border-yellow-400 text-white px-4 py-3 rounded-xl min-w-[220px] text-left"
+              className="bg-gray-900 border border-gray-700 hover:border-yellow-400 text-white px-3 lg:px-4 py-2 lg:py-3 rounded-xl w-full sm:min-w-[220px] text-left text-[12px] lg:text-sm"
             >
               {getEquipmentTypeFilterLabel()} ▾
             </button>
@@ -1505,14 +1608,14 @@ function OperationsPage({
               setEquipmentSearch("");
               setEquipmentTypeSearch("");
             }}
-            className="bg-red-500/20 hover:bg-red-500/30 text-red-300 border border-red-500/40 px-4 py-3 rounded-xl cursor-pointer"
+            className="bg-red-500/20 hover:bg-red-500/30 text-red-300 border border-red-500/40 px-3 lg:px-4 py-2 lg:py-3 rounded-xl cursor-pointer"
           >
             Reset Filters
           </button>
         </div>
       </div>
 
-      <div className="grid grid-cols-4 gap-3 mb-4">
+      <div className="grid grid-cols-1 sm:grid-cols-2 xl:grid-cols-4 gap-3 mb-4">
         <Card title="Total Quantity (L)" value={formatNumber(totalDiesel)} />
 
         <Card
@@ -1532,8 +1635,8 @@ function OperationsPage({
       </div>
 
       <div className="bg-gray-800 rounded-xl shadow overflow-hidden mb-4">
-        <div className="p-3 border-b border-gray-700 flex justify-between items-center">
-          <h2 className="text-lg font-bold text-yellow-400 italic underline">
+        <div className="p-2 sm:p-3 border-b border-gray-700 flex flex-col sm:flex-row gap-2 sm:gap-3 justify-between sm:items-center">
+          <h2 className="text-base sm:text-lg font-bold text-yellow-400 italic underline">
             Equipment Consumption Summary
           </h2>
 
@@ -1584,7 +1687,7 @@ function OperationsPage({
         <div className="max-h-[360px] overflow-auto">
           <table
               id="equipment-summary-table"
-              className="min-w-[1350px] w-full border-collapse text-sm"
+              className="min-w-[980px] lg:min-w-[1180px] xl:min-w-[1350px] w-full border-collapse text-[11px] sm:text-xs lg:text-sm table-fixed"
             >
             <thead className="bg-gray-700 sticky top-0 z-10">
               <tr>
@@ -1632,7 +1735,7 @@ function OperationsPage({
 
       <div className="grid grid-cols-1 xl:grid-cols-2 gap-4 mb-5">
         <div className="bg-gray-800 rounded-xl shadow overflow-hidden border border-gray-700">
-          <div className="p-3 border-b border-gray-700 flex justify-between items-center">
+          <div className="p-2 sm:p-3 border-b border-gray-700 flex flex-col sm:flex-row gap-2 sm:gap-3 justify-between sm:items-center">
             <div>
               <h2 className="text-base font-bold text-yellow-400 italic underline">
                 Consumed Quantity per Equipment Type
@@ -1687,7 +1790,7 @@ function OperationsPage({
           <div className="max-h-[320px] overflow-auto">
             <table
                 id="equipment-type-table"
-                className="min-w-[650px] w-full border-collapse text-sm"
+                className="min-w-[560px] lg:min-w-[650px] w-full border-collapse text-[11px] sm:text-xs lg:text-sm table-fixed"
               >
               <thead className="bg-gray-700 sticky top-0 z-10">
                 <tr>
@@ -1715,7 +1818,7 @@ function OperationsPage({
         </div>
 
         <div className="bg-gray-800 rounded-xl shadow overflow-hidden border border-gray-700">
-          <div className="p-3 border-b border-gray-700 flex justify-between items-center">
+          <div className="p-2 sm:p-3 border-b border-gray-700 flex flex-col sm:flex-row gap-2 sm:gap-3 justify-between sm:items-center">
             <div>
               <h2 className="text-base font-bold text-yellow-400 italic underline">
                 Daily Consumption
@@ -1772,7 +1875,7 @@ function OperationsPage({
           <div className="max-h-[320px] overflow-auto">
             <table
                 id="daily-consumption-table"
-                className="min-w-[650px] w-full border-collapse text-sm"
+                className="min-w-[560px] lg:min-w-[650px] w-full border-collapse text-[11px] sm:text-xs lg:text-sm table-fixed"
               >
               <thead className="bg-gray-700 sticky top-0 z-10">
                 <tr>
@@ -1800,8 +1903,8 @@ function OperationsPage({
         </div>
       </div>
 
-      <div className="bg-gray-800 p-3 rounded-xl mb-4">
-        <h3 className="text-lg font-bold text-yellow-400 italic underline mb-3">
+      <div className="bg-gray-800 p-2 sm:p-3 rounded-xl mb-4">
+        <h3 className="text-base sm:text-lg font-bold text-yellow-400 italic underline mb-3">
           Consumed Quantity Over Time
         </h3>
 
@@ -1817,8 +1920,8 @@ function OperationsPage({
       </div>
 
       <div className="grid grid-cols-1 xl:grid-cols-2 gap-5 mb-5">
-        <div className="bg-gray-800 rounded-xl shadow overflow-hidden border border-gray-700 p-4">
-          <h2 className="text-lg font-bold text-yellow-400 italic underline mb-3">
+        <div className="bg-gray-800 rounded-xl shadow overflow-hidden border border-gray-700 p-3 lg:p-4">
+          <h2 className="text-base sm:text-lg font-bold text-yellow-400 italic underline mb-3">
             Consumed Quantity Per Equipment No.
           </h2>
 
@@ -1832,8 +1935,8 @@ function OperationsPage({
           </ResponsiveContainer>
         </div>
 
-        <div className="bg-gray-800 rounded-xl shadow overflow-hidden border border-gray-700 p-4">
-          <h2 className="text-lg font-bold text-yellow-400 italic underline mb-3">
+        <div className="bg-gray-800 rounded-xl shadow overflow-hidden border border-gray-700 p-3 lg:p-4">
+          <h2 className="text-base sm:text-lg font-bold text-yellow-400 italic underline mb-3">
             Consumed Quantity Ratio per Asset Type
           </h2>
 
@@ -1910,9 +2013,9 @@ function OperationsPage({
       {selectedEquipmentHistory && (
         <div className="fixed inset-0 bg-black/70 flex items-center justify-center z-50">
           <div className="bg-gray-900 text-white w-[1150px] max-h-[88vh] rounded-3xl shadow-2xl border border-gray-700 overflow-hidden">
-            <div className="p-5 border-b border-gray-700 flex justify-between items-start">
+            <div className="p-3 sm:p-5 border-b border-gray-700 flex justify-between items-start gap-3">
               <div>
-                <h2 className="text-2xl font-bold text-yellow-400 italic underline">
+                <h2 className="text-xl sm:text-2xl font-bold text-yellow-400 italic underline">
                   Equipment Operations History
                 </h2>
                 <p className="text-gray-400 mt-1">
@@ -1931,13 +2034,14 @@ function OperationsPage({
               </button>
             </div>
 
-            <div className="p-5 overflow-auto max-h-[68vh]">
-              <table className="min-w-[1050px] w-full border-collapse text-sm">
+            <div className="p-3 sm:p-5 overflow-auto max-h-[68vh]">
+              <table className="min-w-[900px] lg:min-w-[1050px] xl:min-w-[1180px] w-full border-collapse text-[11px] sm:text-xs lg:text-sm table-fixed">
                 <thead className="bg-gray-800 sticky top-0 z-10">
                   <tr>
                     <Th>#</Th>
                     <Th>Date</Th>
                     <Th>Operation ID</Th>
+                    <Th>Project</Th>
                     <Th>Station</Th>
                     <Th>Fueler</Th>
                     <Th>Equipment</Th>
@@ -1963,6 +2067,13 @@ function OperationsPage({
                             {operationIdIndex !== -1
                               ? row[operationIdIndex]
                               : item.originalIndex + 1}
+                          </Td>
+
+                          <Td>
+                            {getAssetProjectByDate(
+                              row[destinationIndex],
+                              row[dateIndex]
+                            )}
                           </Td>
 
                           <Td>
@@ -2053,7 +2164,7 @@ function OperationsPage({
         <div className="fixed inset-0 bg-black/70 flex items-center justify-center z-[60]">
           <div className="bg-white text-black w-[560px] rounded-2xl shadow-2xl p-6">
             <div className="flex justify-between items-center mb-5 border-b pb-3">
-              <h2 className="text-2xl font-bold">
+              <h2 className="text-xl sm:text-2xl font-bold">
                 Edit{" "}
                 {editCell.field === "equipment"
                   ? "Equipment"
@@ -2177,14 +2288,14 @@ function OperationsPage({
             <div className="flex justify-end gap-3 border-t pt-4">
               <button
                 onClick={closeEditCell}
-                className="bg-gray-200 px-4 py-2 rounded-lg"
+                className="bg-gray-200 px-3 lg:px-4 py-2 rounded-lg"
               >
                 Cancel
               </button>
 
               <button
                 onClick={saveCellEdit}
-                className="bg-red-600 text-white px-4 py-2 rounded-lg"
+                className="bg-red-600 text-white px-3 lg:px-4 py-2 rounded-lg"
               >
                 Save Correction
               </button>
@@ -2198,6 +2309,7 @@ function OperationsPage({
           closeForm={closeForm}
           fuelers={fuelers}
           stations={stations}
+          assets={assets}
           transactionType={transactionType}
           setTransactionType={setTransactionType}
           destinationOptions={destinationOptions}
@@ -2207,13 +2319,25 @@ function OperationsPage({
           setAssetPhoto={setAssetPhoto}
           assetMeterPhoto={assetMeterPhoto}
           setAssetMeterPhoto={setAssetMeterPhoto}
+          getLastOdometerForEquipment={getLastOdometerForEquipment}
+          onSaveOperation={saveNewOperation}
         />
       )}
       </div>
     </div>
   );
 }
-function AssetsPage({ assets, projects = [], showToast, data = [], headers = [] }) {
+function AssetsPage({
+  assets,
+  projects = [],
+  showToast,
+  data = [],
+  headers = [],
+  assetProjectHistory = [],
+  setAssetProjectHistory,
+  assetOdometerHistory = [],
+  setAssetOdometerHistory,
+}) {
   const [showForm, setShowForm] = useState(false);
   const [searchTerm, setSearchTerm] = useState("");
 
@@ -2232,6 +2356,7 @@ useOutsideClick(assetSettingsRef, () => {
 
   const [projectTargetAsset, setProjectTargetAsset] = useState(null);
   const [selectedProjectValue, setSelectedProjectValue] = useState("");
+  const [projectEffectiveDate, setProjectEffectiveDate] = useState("");
   const [showProjectConfirm, setShowProjectConfirm] = useState(false);
   const [showProjectPassword, setShowProjectPassword] = useState(false);
   const [projectPassword, setProjectPassword] = useState("");
@@ -2243,7 +2368,9 @@ useOutsideClick(assetSettingsRef, () => {
   const [deletePassword, setDeletePassword] = useState("");
 
   const [odometerTargetAsset, setOdometerTargetAsset] = useState(null);
+  const [oldOdometerBeforeReset, setOldOdometerBeforeReset] = useState("");
   const [newOdometer, setNewOdometer] = useState("");
+  const [odometerEffectiveDate, setOdometerEffectiveDate] = useState("");
   const [odometerReason, setOdometerReason] = useState("");
   const [showOdometerConfirm, setShowOdometerConfirm] = useState(false);
   const [showOdometerPassword, setShowOdometerPassword] = useState(false);
@@ -2253,6 +2380,7 @@ useOutsideClick(assetSettingsRef, () => {
     ...asset,
     status: localAssetUpdates[asset.id]?.status || asset.status,
     project: localAssetUpdates[asset.id]?.project || asset.project,
+    odometer: localAssetUpdates[asset.id]?.odometer ?? asset.odometer,
   }));
 
   const activeAssets = displayAssets.filter(
@@ -2374,6 +2502,7 @@ useOutsideClick(assetSettingsRef, () => {
   const openProjectChange = (asset) => {
     setProjectTargetAsset(asset);
     setSelectedProjectValue(asset.project || "");
+    setProjectEffectiveDate("");
   };
 
   const proceedProjectConfirm = () => {
@@ -2381,6 +2510,13 @@ useOutsideClick(assetSettingsRef, () => {
       showToast
         ? showToast("warning", "Please select a project.")
         : alert("Please select a project.");
+      return;
+    }
+
+    if (!projectEffectiveDate) {
+      showToast
+        ? showToast("warning", "Please select project effective date.")
+        : alert("Please select project effective date.");
       return;
     }
 
@@ -2400,6 +2536,20 @@ useOutsideClick(assetSettingsRef, () => {
       return;
     }
 
+    const projectHistoryRecord = {
+      assetId: projectTargetAsset.id,
+      oldProject: projectTargetAsset.project || "-",
+      newProject: selectedProjectValue,
+      effectiveDate: projectEffectiveDate,
+      changedBy: "Amr",
+      changedAt: new Date().toISOString(),
+      status: "Local",
+    };
+
+    if (setAssetProjectHistory) {
+      setAssetProjectHistory((prev) => [...prev, projectHistoryRecord]);
+    }
+
     setLocalAssetUpdates((prev) => ({
       ...prev,
       [projectTargetAsset.id]: {
@@ -2410,6 +2560,7 @@ useOutsideClick(assetSettingsRef, () => {
 
     setProjectTargetAsset(null);
     setSelectedProjectValue("");
+    setProjectEffectiveDate("");
     setShowProjectConfirm(false);
     setShowProjectPassword(false);
     setProjectPassword("");
@@ -2458,17 +2609,34 @@ useOutsideClick(assetSettingsRef, () => {
   };
 
   const proceedOdometerConfirm = () => {
-    if (!newOdometer || Number(newOdometer) <= 0) {
+    const oldReading = Number(oldOdometerBeforeReset);
+    const newReading = Number(newOdometer);
+
+    if (oldOdometerBeforeReset === "" || Number.isNaN(oldReading) || oldReading < 0) {
       showToast
-        ? showToast("warning", "Please enter valid odometer.")
-        : alert("Please enter valid odometer.");
+        ? showToast("warning", "Please enter valid old odometer before reset.")
+        : alert("Please enter valid old odometer before reset.");
+      return;
+    }
+
+    if (newOdometer === "" || Number.isNaN(newReading) || newReading < 0) {
+      showToast
+        ? showToast("warning", "Please enter valid new odometer after reset.")
+        : alert("Please enter valid new odometer after reset.");
+      return;
+    }
+
+    if (!odometerEffectiveDate) {
+      showToast
+        ? showToast("warning", "Please select odometer reset effective date.")
+        : alert("Please select odometer reset effective date.");
       return;
     }
 
     if (!odometerReason) {
       showToast
-        ? showToast("warning", "Please enter correction reason.")
-        : alert("Please enter correction reason.");
+        ? showToast("warning", "Please enter reset reason.")
+        : alert("Please enter reset reason.");
       return;
     }
 
@@ -2488,8 +2656,30 @@ useOutsideClick(assetSettingsRef, () => {
       return;
     }
 
+    const oldReading = Number(oldOdometerBeforeReset) || 0;
+    const newReading = Number(newOdometer) || 0;
+
+    const odometerHistoryRecord = {
+      assetId: odometerTargetAsset.id,
+      oldOdometerBeforeReset: oldReading,
+      newOdometerAfterReset: newReading,
+      effectiveDate: odometerEffectiveDate,
+      odometerOffset: oldReading,
+      actualOdometerAfterReset: oldReading + newReading,
+      reason: odometerReason,
+      requestedBy: "Amr",
+      requestedAt: new Date().toISOString(),
+      status: "Pending Approval",
+    };
+
+    if (setAssetOdometerHistory) {
+      setAssetOdometerHistory((prev) => [...prev, odometerHistoryRecord]);
+    }
+
     setOdometerTargetAsset(null);
+    setOldOdometerBeforeReset("");
     setNewOdometer("");
+    setOdometerEffectiveDate("");
     setOdometerReason("");
     setOdometerPassword("");
     setShowOdometerConfirm(false);
@@ -2498,9 +2688,9 @@ useOutsideClick(assetSettingsRef, () => {
     showToast
       ? showToast(
           "success",
-          "Odometer correction request submitted for manager approval."
+          "Odometer reset request submitted for manager approval."
         )
-      : alert("Odometer correction request submitted for manager approval.");
+      : alert("Odometer reset request submitted for manager approval.");
   };
 
 const exportAssetsToCSV = () => {
@@ -2682,10 +2872,10 @@ const printAssetsReport = () => {
 };
   return (
     <div className="bg-gray-900 min-h-screen text-white overflow-y-auto h-screen">
-      <div className="max-w-none ml-0 mr-[120px] p-5 text-[13px]">
+      <div className="max-w-none ml-0 mr-3 sm:mr-4 lg:mr-8 xl:mr-[120px] p-3 sm:p-4 lg:p-5 text-[12px] lg:text-[13px]">
       <div className="flex justify-between items-center mb-4 gap-4">
   <div>
-    <h1 className="text-2xl font-bold">Assets</h1>
+    <h1 className="text-xl sm:text-2xl font-bold">Assets</h1>
     <p className="text-gray-400">Fleet master data</p>
   </div>
 
@@ -2701,7 +2891,7 @@ const printAssetsReport = () => {
     <div ref={assetSettingsRef} className="relative">
       <button
         onClick={() => setShowAssetSettings(!showAssetSettings)}
-        className="bg-gray-800 hover:bg-gray-700 border border-gray-700 hover:border-yellow-400 text-yellow-400 px-4 py-3 rounded-xl shadow-lg transition-all duration-300 hover:scale-105"
+        className="bg-gray-800 hover:bg-gray-700 border border-gray-700 hover:border-yellow-400 text-yellow-400 px-3 lg:px-4 py-2 lg:py-3 rounded-xl shadow-lg transition-all duration-300 hover:scale-105"
       >
         ⋮
       </button>
@@ -2774,7 +2964,7 @@ const printAssetsReport = () => {
   </div>
 </div>
 
-      <div className="grid grid-cols-4 gap-3 mb-4">
+      <div className="grid grid-cols-1 sm:grid-cols-2 xl:grid-cols-4 gap-3 mb-4">
         <Card title="Total Assets" value={visibleAssets.length} />
         <Card title="Active Assets" value={activeAssets.length} />
         <Card title="Inactive Assets" value={inactiveAssets.length} />
@@ -2783,9 +2973,9 @@ const printAssetsReport = () => {
 
 
       <div className="bg-gray-800 rounded-xl shadow overflow-hidden mb-4">
-        <div className="p-3 border-b border-gray-700 flex justify-between items-center">
+        <div className="p-2 sm:p-3 border-b border-gray-700 flex flex-col sm:flex-row gap-2 sm:gap-3 justify-between sm:items-center">
           <div>
-            <h2 className="text-lg font-bold text-yellow-400 italic underline">
+            <h2 className="text-base sm:text-lg font-bold text-yellow-400 italic underline">
               Assets List
             </h2>
             <p className="text-sm text-gray-400">Fleet operational assets</p>
@@ -2797,7 +2987,7 @@ const printAssetsReport = () => {
         </div>
 
         <div className="max-h-[520px] overflow-auto">
-          <table className="min-w-[800px] w-full border-collapse text-sm">
+          <table className="min-w-[680px] lg:min-w-[800px] w-full border-collapse text-[11px] sm:text-xs lg:text-sm table-fixed">
             <thead className="bg-gray-700 sticky top-0 z-10">
               <tr>
                 <Th>#</Th>
@@ -2859,7 +3049,7 @@ const printAssetsReport = () => {
 
 
       <div className="bg-gray-800 rounded-xl shadow overflow-hidden border border-gray-700 p-4 mb-4">
-        <h2 className="text-lg font-bold text-yellow-400 italic underline mb-3">
+        <h2 className="text-base sm:text-lg font-bold text-yellow-400 italic underline mb-3">
           Consumed Quantity Per Equipment No.
         </h2>
 
@@ -2890,7 +3080,7 @@ const printAssetsReport = () => {
           <Field label="Current Odometer" placeholder="Current reading" />
           <Field label="Fuel Tank Capacity" placeholder="Liters" />
 
-          <div className="grid grid-cols-3 items-center gap-4">
+          <div className="grid grid-cols-1 sm:grid-cols-3 items-start sm:items-center gap-2 sm:gap-4">
             <label className="font-medium text-gray-700">Status</label>
             <select className="col-span-2 border rounded-lg p-2">
               <option>Active</option>
@@ -2941,7 +3131,7 @@ const printAssetsReport = () => {
                 <StatusBadge status={selectedAsset.status} />
               </div>
 
-              <div className="grid grid-cols-2 gap-5">
+              <div className="grid grid-cols-1 md:grid-cols-2 gap-4 lg:gap-5">
                 <div>
                   <p className="text-xs text-gray-400">Asset Type</p>
                   <p className="text-lg font-semibold">
@@ -2961,7 +3151,13 @@ const printAssetsReport = () => {
                     <p className="text-xs text-gray-400">Current Odometer</p>
 
                     <button
-                      onClick={() => setOdometerTargetAsset(selectedAsset)}
+                      onClick={() => {
+                        setOdometerTargetAsset(selectedAsset);
+                        setOldOdometerBeforeReset(selectedAsset.odometer || "");
+                        setNewOdometer("0");
+                        setOdometerEffectiveDate("");
+                        setOdometerReason("");
+                      }}
                       className="text-gray-400 hover:text-yellow-400 transition text-sm cursor-pointer"
                     >
                       ✏️
@@ -3016,11 +3212,26 @@ const printAssetsReport = () => {
               ))}
             </select>
 
+            <label className="block text-sm font-medium text-gray-700 mb-2">
+              Effective Date
+            </label>
+            <input
+              type="date"
+              value={projectEffectiveDate}
+              onChange={(e) => setProjectEffectiveDate(e.target.value)}
+              className="border rounded-lg p-2 w-full mb-6"
+            />
+
+            <p className="text-xs text-gray-500 mb-5 bg-yellow-50 border border-yellow-200 rounded-lg p-3">
+              Operations before this date will remain assigned to the old project. Operations on or after this date will be assigned to the new project when project history is connected.
+            </p>
+
             <div className="flex justify-end gap-3">
               <button
                 onClick={() => {
                   setProjectTargetAsset(null);
                   setSelectedProjectValue("");
+                  setProjectEffectiveDate("");
                 }}
                 className="bg-gray-200 px-4 py-2 rounded"
               >
@@ -3050,7 +3261,13 @@ const printAssetsReport = () => {
                 <strong>Asset:</strong> {projectTargetAsset.id}
               </p>
               <p>
+                <strong>Old Project:</strong> {projectTargetAsset.project || "-"}
+              </p>
+              <p>
                 <strong>New Project:</strong> {selectedProjectValue}
+              </p>
+              <p>
+                <strong>Effective Date:</strong> {projectEffectiveDate}
               </p>
             </div>
 
@@ -3113,7 +3330,7 @@ const printAssetsReport = () => {
       {deleteTargetAsset && (
         <div className="fixed inset-0 bg-black/70 flex items-center justify-center z-50">
           <div className="bg-white text-black w-[520px] rounded-2xl p-6 shadow-2xl">
-            <h2 className="text-2xl font-bold mb-2 text-red-600">
+            <h2 className="text-xl sm:text-2xl font-bold mb-2 text-red-600">
               Delete Asset
             </h2>
 
@@ -3134,14 +3351,14 @@ const printAssetsReport = () => {
                   setDeleteTargetAsset(null);
                   setDeleteReason("");
                 }}
-                className="bg-gray-200 px-4 py-2 rounded-lg"
+                className="bg-gray-200 px-3 lg:px-4 py-2 rounded-lg"
               >
                 Cancel
               </button>
 
               <button
                 onClick={proceedDeleteConfirm}
-                className="bg-red-600 text-white px-4 py-2 rounded-lg"
+                className="bg-red-600 text-white px-3 lg:px-4 py-2 rounded-lg"
               >
                 Continue
               </button>
@@ -3165,14 +3382,14 @@ const printAssetsReport = () => {
             <div className="flex justify-end gap-3">
               <button
                 onClick={() => setShowDeleteConfirm(false)}
-                className="bg-gray-200 px-4 py-2 rounded-lg"
+                className="bg-gray-200 px-3 lg:px-4 py-2 rounded-lg"
               >
                 Cancel
               </button>
 
               <button
                 onClick={proceedDeletePassword}
-                className="bg-red-600 text-white px-4 py-2 rounded-lg"
+                className="bg-red-600 text-white px-3 lg:px-4 py-2 rounded-lg"
               >
                 Yes, Continue
               </button>
@@ -3199,14 +3416,14 @@ const printAssetsReport = () => {
             <div className="flex justify-end gap-3">
               <button
                 onClick={() => setShowDeletePassword(false)}
-                className="bg-gray-200 px-4 py-2 rounded-lg"
+                className="bg-gray-200 px-3 lg:px-4 py-2 rounded-lg"
               >
                 Cancel
               </button>
 
               <button
                 onClick={confirmDeleteRequest}
-                className="bg-red-600 text-white px-4 py-2 rounded-lg"
+                className="bg-red-600 text-white px-3 lg:px-4 py-2 rounded-lg"
               >
                 Confirm Request
               </button>
@@ -3218,26 +3435,50 @@ const printAssetsReport = () => {
       {odometerTargetAsset && (
         <div className="fixed inset-0 bg-black/70 flex items-center justify-center z-50">
           <div className="bg-white text-black w-[520px] rounded-2xl p-6 shadow-2xl">
-            <h2 className="text-2xl font-bold mb-2 text-yellow-600">
-              Odometer Correction
+            <h2 className="text-xl sm:text-2xl font-bold mb-2 text-yellow-600">
+              Odometer Reset
             </h2>
 
             <p className="text-gray-600 mb-5">
               Asset: <strong>{odometerTargetAsset.id}</strong>
             </p>
 
+            <label className="block text-sm font-medium text-gray-700 mb-2">
+              Old Odometer Before Reset
+            </label>
+            <input
+              type="number"
+              value={oldOdometerBeforeReset}
+              onChange={(e) => setOldOdometerBeforeReset(e.target.value)}
+              placeholder="Reading before computer / meter replacement"
+              className="border rounded-xl p-3 w-full mb-4"
+            />
+
+            <label className="block text-sm font-medium text-gray-700 mb-2">
+              New Odometer After Reset
+            </label>
             <input
               type="number"
               value={newOdometer}
               onChange={(e) => setNewOdometer(e.target.value)}
-              placeholder="Enter new odometer"
+              placeholder="Usually 0 after reset"
+              className="border rounded-xl p-3 w-full mb-4"
+            />
+
+            <label className="block text-sm font-medium text-gray-700 mb-2">
+              Effective Date
+            </label>
+            <input
+              type="date"
+              value={odometerEffectiveDate}
+              onChange={(e) => setOdometerEffectiveDate(e.target.value)}
               className="border rounded-xl p-3 w-full mb-4"
             />
 
             <textarea
               value={odometerReason}
               onChange={(e) => setOdometerReason(e.target.value)}
-              placeholder="Enter correction reason..."
+              placeholder="Enter reset reason, e.g. computer / meter replaced..."
               className="border rounded-xl p-3 w-full h-28 mb-5"
             />
 
@@ -3245,17 +3486,19 @@ const printAssetsReport = () => {
               <button
                 onClick={() => {
                   setOdometerTargetAsset(null);
+                  setOldOdometerBeforeReset("");
                   setNewOdometer("");
+                  setOdometerEffectiveDate("");
                   setOdometerReason("");
                 }}
-                className="bg-gray-200 px-4 py-2 rounded-lg"
+                className="bg-gray-200 px-3 lg:px-4 py-2 rounded-lg"
               >
                 Cancel
               </button>
 
               <button
                 onClick={proceedOdometerConfirm}
-                className="bg-yellow-500 text-black px-4 py-2 rounded-lg"
+                className="bg-yellow-500 text-black px-3 lg:px-4 py-2 rounded-lg"
               >
                 Continue
               </button>
@@ -3268,25 +3511,38 @@ const printAssetsReport = () => {
         <div className="fixed inset-0 bg-black/70 flex items-center justify-center z-50">
           <div className="bg-white text-black w-[500px] rounded-2xl p-6">
             <h2 className="text-xl font-bold mb-4">
-              Confirm Odometer Correction
+              Confirm Odometer Reset
             </h2>
 
-            <p className="mb-6">
-              Submit odometer correction request for:
-              <strong> {odometerTargetAsset?.id}</strong> ?
-            </p>
+            <div className="bg-gray-100 p-4 rounded mb-6 space-y-1">
+              <p>
+                <strong>Asset:</strong> {odometerTargetAsset?.id}
+              </p>
+              <p>
+                <strong>Old Odometer Before Reset:</strong> {formatNumber(oldOdometerBeforeReset)}
+              </p>
+              <p>
+                <strong>New Odometer After Reset:</strong> {formatNumber(newOdometer)}
+              </p>
+              <p>
+                <strong>Effective Date:</strong> {odometerEffectiveDate}
+              </p>
+              <p>
+                <strong>Actual Odometer After Reset:</strong> {formatNumber((Number(oldOdometerBeforeReset) || 0) + (Number(newOdometer) || 0))}
+              </p>
+            </div>
 
             <div className="flex justify-end gap-3">
               <button
                 onClick={() => setShowOdometerConfirm(false)}
-                className="bg-gray-200 px-4 py-2 rounded-lg"
+                className="bg-gray-200 px-3 lg:px-4 py-2 rounded-lg"
               >
                 Cancel
               </button>
 
               <button
                 onClick={proceedOdometerPassword}
-                className="bg-yellow-500 text-black px-4 py-2 rounded-lg"
+                className="bg-yellow-500 text-black px-3 lg:px-4 py-2 rounded-lg"
               >
                 Yes, Continue
               </button>
@@ -3313,14 +3569,14 @@ const printAssetsReport = () => {
             <div className="flex justify-end gap-3">
               <button
                 onClick={() => setShowOdometerPassword(false)}
-                className="bg-gray-200 px-4 py-2 rounded-lg"
+                className="bg-gray-200 px-3 lg:px-4 py-2 rounded-lg"
               >
                 Cancel
               </button>
 
               <button
                 onClick={confirmOdometerRequest}
-                className="bg-yellow-500 text-black px-4 py-2 rounded-lg"
+                className="bg-yellow-500 text-black px-3 lg:px-4 py-2 rounded-lg"
               >
                 Confirm Request
               </button>
@@ -3731,10 +3987,10 @@ function StationsPage({
 
   return (
     <div className="bg-gray-900 min-h-screen text-white overflow-y-auto h-screen">
-      <div className="max-w-none ml-0 mr-[120px] p-5 text-[13px]">
+      <div className="max-w-none ml-0 mr-3 sm:mr-4 lg:mr-8 xl:mr-[120px] p-3 sm:p-4 lg:p-5 text-[12px] lg:text-[13px]">
       <div className="flex justify-between items-center mb-4">
         <div>
-          <h1 className="text-2xl font-bold">Fuel Stations</h1>
+          <h1 className="text-xl sm:text-2xl font-bold">Fuel Stations</h1>
           <p className="text-gray-400">Fuel stock management</p>
         </div>
 
@@ -3867,7 +4123,7 @@ function StationsPage({
           <select
             value={selectedProject}
             onChange={(e) => setSelectedProject(e.target.value)}
-            className="bg-gray-900 border border-gray-700 hover:border-yellow-400 text-white px-4 py-3 rounded-xl min-w-[240px] outline-none"
+            className="bg-gray-900 border border-gray-700 hover:border-yellow-400 text-white px-3 lg:px-4 py-2 lg:py-3 rounded-xl w-full sm:min-w-[240px] outline-none text-[12px] lg:text-sm"
           >
             {projectOptions.map((project) => (
               <option key={project} value={project}>
@@ -3878,14 +4134,14 @@ function StationsPage({
 
           <button
             onClick={() => setSelectedProject("All")}
-            className="bg-red-500/20 hover:bg-red-500/30 text-red-300 border border-red-500/40 px-4 py-3 rounded-xl cursor-pointer"
+            className="bg-red-500/20 hover:bg-red-500/30 text-red-300 border border-red-500/40 px-3 lg:px-4 py-2 lg:py-3 rounded-xl cursor-pointer"
           >
             Reset Filter
           </button>
         </div>
       </div>
 
-      <div className="grid grid-cols-3 gap-3 mb-4">
+      <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-3 mb-4">
         <Card title="Total Stations" value={filteredStations.length} />
 
         <Card
@@ -3909,7 +4165,7 @@ function StationsPage({
       <div className="bg-gray-800 rounded-xl shadow overflow-hidden border border-gray-700 p-4 mb-4">
         <div className="flex justify-between items-center mb-4">
           <div>
-            <h2 className="text-lg font-bold text-yellow-400 italic underline">
+            <h2 className="text-base sm:text-lg font-bold text-yellow-400 italic underline">
               Stations Stock
             </h2>
             <p className="text-sm text-gray-400">
@@ -3972,7 +4228,7 @@ function StationsPage({
       <div className="bg-gray-800 rounded-xl shadow overflow-hidden border border-gray-700 p-4 mb-4">
         <div className="flex justify-between items-center mb-3">
           <div>
-            <h2 className="text-lg font-bold text-yellow-400 italic underline">
+            <h2 className="text-base sm:text-lg font-bold text-yellow-400 italic underline">
               Total Consumption per Station
             </h2>
             <p className="text-xs text-gray-400 mt-1">
@@ -4020,9 +4276,9 @@ function StationsPage({
       {selectedStationHistory && (
         <div className="fixed inset-0 bg-black/70 flex items-center justify-center z-50">
           <div className="bg-gray-900 text-white w-[1150px] max-h-[88vh] rounded-3xl shadow-2xl border border-gray-700 overflow-hidden">
-            <div className="p-5 border-b border-gray-700 flex justify-between items-start">
+            <div className="p-3 sm:p-5 border-b border-gray-700 flex justify-between items-start gap-3">
               <div>
-                <h2 className="text-2xl font-bold text-yellow-400 italic underline">
+                <h2 className="text-xl sm:text-2xl font-bold text-yellow-400 italic underline">
                   Station Operations History
                 </h2>
 
@@ -4046,8 +4302,8 @@ function StationsPage({
               </button>
             </div>
 
-            <div className="p-5 overflow-auto max-h-[68vh]">
-              <table className="min-w-[1050px] w-full border-collapse text-sm">
+            <div className="p-3 sm:p-5 overflow-auto max-h-[68vh]">
+              <table className="min-w-[820px] lg:min-w-[960px] xl:min-w-[1050px] w-full border-collapse text-[11px] sm:text-xs lg:text-sm table-fixed">
                 <thead className="bg-gray-800 sticky top-0 z-10">
                   <tr>
                     <Th>#</Th>
@@ -4128,14 +4384,14 @@ function StationsPage({
         <div className="fixed inset-0 bg-black/60 flex items-center justify-center z-50">
           <div className="bg-white text-black w-[650px] rounded-xl shadow-xl p-6">
             <div className="flex justify-between items-center mb-6 border-b pb-3">
-              <h2 className="text-2xl font-bold">Add Station</h2>
+              <h2 className="text-xl sm:text-2xl font-bold">Add Station</h2>
               <button onClick={() => setShowForm(false)}>×</button>
             </div>
 
             <div className="grid grid-cols-1 gap-4">
               <Field label="Station ID" placeholder="Main_Station" />
 
-              <div className="grid grid-cols-3 items-center gap-4">
+              <div className="grid grid-cols-1 sm:grid-cols-3 items-start sm:items-center gap-2 sm:gap-4">
                 <label className="font-medium text-gray-700">Station Type</label>
                 <select className="col-span-2 border rounded-lg p-2">
                   <option>Main</option>
@@ -4147,7 +4403,7 @@ function StationsPage({
               <Field label="Capacity" placeholder="Liters" />
               <Field label="Opening Balance" placeholder="Liters" />
 
-              <div className="grid grid-cols-3 items-center gap-4">
+              <div className="grid grid-cols-1 sm:grid-cols-3 items-start sm:items-center gap-2 sm:gap-4">
                 <label className="font-medium text-gray-700">Status</label>
                 <select className="col-span-2 border rounded-lg p-2">
                   <option>Active</option>
@@ -4159,12 +4415,12 @@ function StationsPage({
             <div className="flex justify-end gap-3 mt-6 border-t pt-4">
               <button
                 onClick={() => setShowForm(false)}
-                className="bg-gray-200 px-4 py-2 rounded-lg"
+                className="bg-gray-200 px-3 lg:px-4 py-2 rounded-lg"
               >
                 Cancel
               </button>
 
-              <button className="bg-green-600 text-white px-4 py-2 rounded-lg">
+              <button className="bg-green-600 text-white px-3 lg:px-4 py-2 rounded-lg">
                 Save Station
               </button>
             </div>
@@ -4176,12 +4432,12 @@ function StationsPage({
         <div className="fixed inset-0 bg-black/60 flex items-center justify-center z-50">
           <div className="bg-white text-black w-[650px] rounded-xl shadow-xl p-6">
             <div className="flex justify-between items-center mb-6 border-b pb-3">
-              <h2 className="text-2xl font-bold">Edit Station</h2>
+              <h2 className="text-xl sm:text-2xl font-bold">Edit Station</h2>
               <button onClick={() => setShowEdit(false)}>×</button>
             </div>
 
             <div className="grid grid-cols-1 gap-4">
-              <div className="grid grid-cols-3 items-center gap-4">
+              <div className="grid grid-cols-1 sm:grid-cols-3 items-start sm:items-center gap-2 sm:gap-4">
                 <label className="font-medium text-gray-700">Select Station</label>
                 <select className="col-span-2 border rounded-lg p-2">
                   <option>Select Station</option>
@@ -4193,7 +4449,7 @@ function StationsPage({
 
               <Field label="Project" placeholder="New project" />
 
-              <div className="grid grid-cols-3 items-center gap-4">
+              <div className="grid grid-cols-1 sm:grid-cols-3 items-start sm:items-center gap-2 sm:gap-4">
                 <label className="font-medium text-gray-700">Status</label>
                 <select className="col-span-2 border rounded-lg p-2">
                   <option>Active</option>
@@ -4205,12 +4461,12 @@ function StationsPage({
             <div className="flex justify-end gap-3 mt-6 border-t pt-4">
               <button
                 onClick={() => setShowEdit(false)}
-                className="bg-gray-200 px-4 py-2 rounded-lg"
+                className="bg-gray-200 px-3 lg:px-4 py-2 rounded-lg"
               >
                 Cancel
               </button>
 
-              <button className="bg-green-600 text-white px-4 py-2 rounded-lg">
+              <button className="bg-green-600 text-white px-3 lg:px-4 py-2 rounded-lg">
                 Save Changes
               </button>
             </div>
@@ -4326,7 +4582,7 @@ function StationsPage({
         <div className="fixed inset-0 bg-black/60 flex items-center justify-center z-50">
           <div className="bg-white text-black w-[520px] rounded-xl shadow-xl p-6">
             <div className="flex justify-between items-center mb-6 border-b pb-3">
-              <h2 className="text-2xl font-bold">Liter Price</h2>
+              <h2 className="text-xl sm:text-2xl font-bold">Liter Price</h2>
 
               <button onClick={() => setShowLiterPrice(false)}>
                 ×
@@ -4341,7 +4597,7 @@ function StationsPage({
                 </strong>
               </div>
 
-              <div className="grid grid-cols-3 items-center gap-4">
+              <div className="grid grid-cols-1 sm:grid-cols-3 items-start sm:items-center gap-2 sm:gap-4">
                 <label className="font-medium text-gray-700">
                   New Liter Price
                 </label>
@@ -4355,7 +4611,7 @@ function StationsPage({
                 />
               </div>
 
-              <div className="grid grid-cols-3 items-center gap-4">
+              <div className="grid grid-cols-1 sm:grid-cols-3 items-start sm:items-center gap-2 sm:gap-4">
                 <label className="font-medium text-gray-700">
                   Effective Date & Time
                 </label>
@@ -4372,14 +4628,14 @@ function StationsPage({
             <div className="flex justify-end gap-3 mt-6 border-t pt-4">
               <button
                 onClick={() => setShowLiterPrice(false)}
-                className="bg-gray-200 px-4 py-2 rounded-lg"
+                className="bg-gray-200 px-3 lg:px-4 py-2 rounded-lg"
               >
                 Cancel
               </button>
 
               <button
                 onClick={proceedLiterPriceConfirm}
-                className="bg-red-600 text-white px-4 py-2 rounded-lg"
+                className="bg-red-600 text-white px-3 lg:px-4 py-2 rounded-lg"
               >
                 Continue
               </button>
@@ -5029,10 +5285,10 @@ function FuelersPage({
 
   return (
     <div className="bg-gray-900 min-h-screen text-white overflow-y-auto h-screen">
-      <div className="max-w-none ml-0 mr-[120px] p-5 text-[13px]">
+      <div className="max-w-none ml-0 mr-3 sm:mr-4 lg:mr-8 xl:mr-[120px] p-3 sm:p-4 lg:p-5 text-[12px] lg:text-[13px]">
         <div className="flex justify-between items-center mb-5">
           <div>
-            <h1 className="text-2xl font-bold">Fuelers Management</h1>
+            <h1 className="text-xl sm:text-2xl font-bold">Fuelers Management</h1>
             <p className="text-gray-400">
               Fuelers monitoring, Direct Refuel KPI and performance tracking
             </p>
@@ -5040,13 +5296,13 @@ function FuelersPage({
 
           <button
             onClick={() => setShowAddFueler(true)}
-            className="bg-yellow-500 hover:bg-yellow-400 text-black px-4 py-2 rounded-lg font-semibold transition"
+            className="bg-yellow-500 hover:bg-yellow-400 text-black px-3 lg:px-4 py-2 rounded-lg font-semibold transition"
           >
             + Add Fueler
           </button>
         </div>
 
-        <div className="grid grid-cols-4 gap-3 mb-4">
+        <div className="grid grid-cols-1 sm:grid-cols-2 xl:grid-cols-4 gap-3 mb-4">
           <Card title="Total Fuelers" value={formatNumber(fuelersWithKpi.length)} />
           <Card
             title="On Duty"
@@ -5065,7 +5321,7 @@ function FuelersPage({
         <div className="bg-gray-800 rounded-2xl border border-gray-700 overflow-hidden mb-5">
           <div className="p-4 border-b border-gray-700 flex justify-between items-center">
             <div>
-              <h2 className="text-lg font-bold text-yellow-400 italic underline">
+              <h2 className="text-base sm:text-lg font-bold text-yellow-400 italic underline">
                 Fuelers List
               </h2>
               <p className="text-xs text-gray-400 mt-1">
@@ -5116,7 +5372,7 @@ function FuelersPage({
           <div className="overflow-auto">
             <table
               id="fuelers-table"
-              className="min-w-[1150px] w-full border-collapse text-sm"
+              className="min-w-[900px] lg:min-w-[1050px] xl:min-w-[1150px] w-full border-collapse text-[11px] sm:text-xs lg:text-sm table-fixed"
             >
               <thead className="bg-gray-700 sticky top-0 z-10">
                 <tr>
@@ -5195,7 +5451,7 @@ function FuelersPage({
         <div className="bg-gray-800 rounded-xl shadow overflow-hidden border border-gray-700 p-4 mb-5">
           <div className="flex justify-between items-start mb-3">
             <div>
-              <h2 className="text-lg font-bold text-yellow-400 italic underline">
+              <h2 className="text-base sm:text-lg font-bold text-yellow-400 italic underline">
                 Diesel Quantity Per Fueler
               </h2>
               <p className="text-xs text-gray-400 mt-1">
@@ -5252,9 +5508,9 @@ function FuelersPage({
         {selectedFuelerHistory && (
           <div className="fixed inset-0 bg-black/70 flex items-center justify-center z-50">
             <div className="bg-gray-900 text-white w-[1180px] max-h-[88vh] rounded-3xl shadow-2xl border border-gray-700 overflow-hidden">
-              <div className="p-5 border-b border-gray-700 flex justify-between items-start">
+              <div className="p-3 sm:p-5 border-b border-gray-700 flex justify-between items-start gap-3">
                 <div>
-                  <h2 className="text-2xl font-bold text-yellow-400 italic underline">
+                  <h2 className="text-xl sm:text-2xl font-bold text-yellow-400 italic underline">
                     Fueler Operations History
                   </h2>
                   <p className="text-gray-400 mt-1">
@@ -5276,7 +5532,7 @@ function FuelersPage({
                 </button>
               </div>
 
-              <div className="grid grid-cols-3 gap-3 p-5 border-b border-gray-700 bg-gray-950/40">
+              <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-3 p-3 sm:p-4 lg:p-5 border-b border-gray-700 bg-gray-950/40">
                 <Card
                   title="Fueler Operations"
                   value={formatNumber(selectedFuelerHistory.operationsCount)}
@@ -5292,7 +5548,7 @@ function FuelersPage({
               </div>
 
               <div className="p-5 overflow-auto max-h-[58vh]">
-                <table className="min-w-[1050px] w-full border-collapse text-sm">
+                <table className="min-w-[820px] lg:min-w-[960px] xl:min-w-[1050px] w-full border-collapse text-[11px] sm:text-xs lg:text-sm table-fixed">
                   <thead className="bg-gray-800 sticky top-0 z-10">
                     <tr>
                       <Th>#</Th>
@@ -5351,7 +5607,7 @@ function FuelersPage({
             <div className="bg-white text-black w-[620px] rounded-2xl shadow-2xl p-6">
               <div className="flex justify-between items-center mb-5 border-b pb-3">
                 <div>
-                  <h2 className="text-2xl font-bold">Add Fueler</h2>
+                  <h2 className="text-xl sm:text-2xl font-bold">Add Fueler</h2>
                   <p className="text-sm text-gray-500 mt-1">
                     Local entry now, backend-ready structure later
                   </p>
@@ -5365,7 +5621,7 @@ function FuelersPage({
                 </button>
               </div>
 
-              <div className="grid grid-cols-2 gap-4 mb-4">
+              <div className="grid grid-cols-1 md:grid-cols-2 gap-4 mb-4">
                 <div>
                   <label className="font-medium text-gray-700">Fueler ID</label>
                   <input
@@ -5432,14 +5688,14 @@ function FuelersPage({
               <div className="flex justify-end gap-3 border-t pt-4">
                 <button
                   onClick={closeAddFueler}
-                  className="bg-gray-200 px-4 py-2 rounded-lg"
+                  className="bg-gray-200 px-3 lg:px-4 py-2 rounded-lg"
                 >
                   Cancel
                 </button>
 
                 <button
                   onClick={saveNewFueler}
-                  className="bg-yellow-500 hover:bg-yellow-400 text-black px-4 py-2 rounded-lg font-semibold"
+                  className="bg-yellow-500 hover:bg-yellow-400 text-black px-3 lg:px-4 py-2 rounded-lg font-semibold"
                 >
                   Save Fueler
                 </button>
@@ -5453,7 +5709,7 @@ function FuelersPage({
             <div className="bg-white text-black w-[560px] rounded-2xl shadow-2xl p-6">
               <div className="flex justify-between items-center mb-5 border-b pb-3">
                 <div>
-                  <h2 className="text-2xl font-bold">
+                  <h2 className="text-xl sm:text-2xl font-bold">
                     Edit {editFueler.field === "mobile"
                       ? "Mobile"
                       : editFueler.field === "status"
@@ -5551,14 +5807,14 @@ function FuelersPage({
               <div className="flex justify-end gap-3 border-t pt-4">
                 <button
                   onClick={closeFuelerEdit}
-                  className="bg-gray-200 px-4 py-2 rounded-lg"
+                  className="bg-gray-200 px-3 lg:px-4 py-2 rounded-lg"
                 >
                   Cancel
                 </button>
 
                 <button
                   onClick={saveFuelerEdit}
-                  className="bg-red-600 text-white px-4 py-2 rounded-lg"
+                  className="bg-red-600 text-white px-3 lg:px-4 py-2 rounded-lg"
                 >
                   Save Correction
                 </button>
@@ -5571,205 +5827,1196 @@ function FuelersPage({
   );
 }
 
-function ProjectsPage({ projects }) {
+function ProjectsPage({
+  projects = [],
+  assets = [],
+  stations = [],
+  fuelers = [],
+  data = [],
+  headers = [],
+  showToast,
+  currency = "SAR",
+  getLiterPriceByDate,
+  assetProjectHistory = [],
+}) {
   const [showForm, setShowForm] = useState(false);
- 
+  const [searchTerm, setSearchTerm] = useState("");
+  const [selectedProject, setSelectedProject] = useState(null);
+  const [projectOperationSearch, setProjectOperationSearch] = useState("");
+  const [showSettings, setShowSettings] = useState(false);
+  const [localProjects, setLocalProjects] = useState([]);
+  const [newProject, setNewProject] = useState({
+    id: "",
+    name: "",
+    status: "Active",
+    location: "",
+    approvalStatus: "Pending Approval",
+  });
+
+  const [statusEdit, setStatusEdit] = useState(null);
+  const settingsRef = useRef(null);
+
+  useOutsideClick(settingsRef, () => setShowSettings(false));
+
+  const operationIdIndex = getHeaderIndex(headers, [
+    "operation_id",
+    "Operation ID",
+    "operation id",
+    "transaction_id",
+    "Transaction ID",
+    "id",
+  ]);
+
+  const dateIndex = getHeaderIndex(headers, [
+    "transaction_datetime",
+    "Transaction datetime",
+    "transaction datetime",
+    "date",
+  ]);
+
+  const typeIndex = getHeaderIndex(headers, [
+    "transaction_type",
+    "Transaction type",
+    "transaction type",
+    "operation_type",
+    "Operation type",
+  ]);
+
+  const sourceIndex = getHeaderIndex(headers, [
+    "source_station",
+    "Source station",
+    "source station",
+    "source_station_id",
+    "station_id",
+  ]);
+
+  const destinationIndex = getHeaderIndex(headers, [
+    "destination_id",
+    "Destination ID",
+    "destination id",
+    "destination",
+  ]);
+
+  const dieselIndex = getHeaderIndex(headers, [
+    "diesel_quantity",
+    "Diesel quantity",
+    "diesel quantity",
+    "quantity",
+    "qty",
+  ]);
+
+  const fuelerIndex = getHeaderIndex(headers, [
+    "fueler_id",
+    "Fueler ID",
+    "fueler id",
+    "fueler",
+  ]);
+
+  const odometerIndex = getHeaderIndex(headers, [
+    "odometer_at_fueling",
+    "Odometer at fueling",
+    "odometer at fueling",
+    "odometer",
+  ]);
+
+  const baseProjects = projects.map((project) => ({
+    ...project,
+    approvalStatus: project.approvalStatus || "Approved",
+  }));
+
+  const allProjects = Object.values(
+    [...baseProjects, ...localProjects].reduce((acc, project) => {
+      if (!project?.id) return acc;
+      acc[normalizeText(project.id)] = project;
+      return acc;
+    }, {})
+  );
+
+  const matchProject = (value, project) => {
+    return isSameText(value, project.id) || isSameText(value, project.name);
+  };
+
+  const getProjectAssets = (project) => {
+    return assets.filter((asset) => {
+      const currentProject = getAssetProjectByDate(
+        asset.id,
+        new Date().toISOString()
+      );
+
+      return matchProject(currentProject, project);
+    });
+  };
+
+  const getProjectStations = (project) => {
+    return stations.filter((station) => matchProject(station.project, project));
+  };
+
+  const getProjectFuelers = (project) => {
+    return fuelers.filter((fueler) => matchProject(fueler.projectName, project));
+  };
+
+  const parseProjectDate = (rawDate) => {
+    if (!rawDate) return null;
+    const d = new Date(rawDate);
+    if (Number.isNaN(d.getTime())) return null;
+    return d;
+  };
+
+  const formatProjectDate = (rawDate) => {
+    const d = parseProjectDate(rawDate);
+    if (!d) return rawDate || "-";
+
+    return d.toLocaleString("en-GB", {
+      year: "numeric",
+      month: "2-digit",
+      day: "2-digit",
+      hour: "2-digit",
+      minute: "2-digit",
+    });
+  };
+
+  const getAssetProjectByDate = (assetId, transactionDate) => {
+    const asset = assets.find((item) => item.id === assetId);
+    const operationDate = parseProjectDate(transactionDate);
+
+    if (!assetId || !operationDate) {
+      return asset?.project || "-";
+    }
+
+    const history = assetProjectHistory
+      .filter((item) => item.assetId === assetId)
+      .filter((item) => item.effectiveDate)
+      .sort((a, b) => new Date(a.effectiveDate) - new Date(b.effectiveDate));
+
+    if (history.length === 0) {
+      return asset?.project || "-";
+    }
+
+    let project = history[0]?.oldProject || asset?.project || "-";
+
+    history.forEach((item) => {
+      const effectiveDate = new Date(item.effectiveDate);
+
+      if (
+        !Number.isNaN(effectiveDate.getTime()) &&
+        effectiveDate <= operationDate
+      ) {
+        project = item.newProject || project;
+      }
+    });
+
+    return project || asset?.project || "-";
+  };
+
+  const getDirectRefuelOperations = (project) => {
+    return data
+      .map((row, originalIndex) => ({ row, originalIndex }))
+      .filter((item) => {
+        const row = item.row;
+        const operationType = typeIndex !== -1 ? row[typeIndex] : "";
+        const destination = destinationIndex !== -1 ? row[destinationIndex] : "";
+        const transactionDate = dateIndex !== -1 ? row[dateIndex] : "";
+        const assetProjectAtOperation = getAssetProjectByDate(
+          destination,
+          transactionDate
+        );
+
+        return (
+          isSameText(operationType, "Direct_Refuel") &&
+          matchProject(assetProjectAtOperation, project)
+        );
+      })
+      .sort((a, b) => {
+        const da = dateIndex !== -1 ? parseProjectDate(a.row[dateIndex])?.getTime() || 0 : 0;
+        const db = dateIndex !== -1 ? parseProjectDate(b.row[dateIndex])?.getTime() || 0 : 0;
+        return db - da;
+      });
+  };
+
+  const getFilteredProjectOperations = (project) => {
+    const search = projectOperationSearch.trim().toLowerCase();
+    const operations = getDirectRefuelOperations(project);
+
+    if (!search) return operations;
+
+    return operations.filter((item) => {
+      const row = item.row;
+      const searchableValues = [
+        operationIdIndex !== -1 ? row[operationIdIndex] : item.originalIndex + 1,
+        dateIndex !== -1 ? row[dateIndex] : "",
+        sourceIndex !== -1 ? row[sourceIndex] : "",
+        fuelerIndex !== -1 ? row[fuelerIndex] : "",
+        destinationIndex !== -1 ? row[destinationIndex] : "",
+        dieselIndex !== -1 ? row[dieselIndex] : "",
+        odometerIndex !== -1 ? row[odometerIndex] : "",
+      ];
+
+      return searchableValues.some((value) =>
+        String(value || "").toLowerCase().includes(search)
+      );
+    });
+  };
+
+  const getOperationLiterPrice = (row) => {
+    const date = dateIndex !== -1 ? row[dateIndex] : "";
+    return getLiterPriceByDate ? getLiterPriceByDate(date) : 2.33;
+  };
+
+  const getProjectDieselQuantity = (project) => {
+    return getDirectRefuelOperations(project).reduce((sum, item) => {
+      const diesel = dieselIndex !== -1 ? parseFloat(item.row[dieselIndex]) || 0 : 0;
+      return sum + diesel;
+    }, 0);
+  };
+
+  const getProjectDieselCost = (project) => {
+    return getDirectRefuelOperations(project).reduce((sum, item) => {
+      const diesel = dieselIndex !== -1 ? parseFloat(item.row[dieselIndex]) || 0 : 0;
+      return sum + diesel * getOperationLiterPrice(item.row);
+    }, 0);
+  };
+
+  const projectSummary = allProjects.map((project) => {
+    const assignedAssets = getProjectAssets(project);
+    const assignedStations = getProjectStations(project);
+    const assignedFuelers = getProjectFuelers(project);
+    const directRefuelOperations = getDirectRefuelOperations(project);
+    const dieselQty = getProjectDieselQuantity(project);
+    const dieselCost = getProjectDieselCost(project);
+
+    return {
+      ...project,
+      assignedAssetsCount: assignedAssets.length,
+      assignedStationsCount: assignedStations.length,
+      assignedFuelersCount: assignedFuelers.length,
+      operationsCount: directRefuelOperations.length,
+      dieselQty,
+      dieselCost,
+    };
+  });
+
+  const filteredProjects = projectSummary.filter((project) => {
+    const search = searchTerm.trim().toLowerCase();
+    const matchesSearch =
+      !search ||
+      String(project.id || "").toLowerCase().includes(search) ||
+      String(project.name || "").toLowerCase().includes(search) ||
+      String(project.status || "").toLowerCase().includes(search);
+
+    return matchesSearch;
+  });
+
+  const activeProjects = projectSummary.filter((p) => isSameText(p.status, "Active")).length;
+  const inactiveProjects = projectSummary.filter((p) => !isSameText(p.status, "Active")).length;
+  const totalDiesel = projectSummary.reduce((sum, project) => sum + project.dieselQty, 0);
+  const totalCost = projectSummary.reduce((sum, project) => sum + project.dieselCost, 0);
+
+  const closeForm = () => {
+    setShowForm(false);
+    setNewProject({
+      id: "",
+      name: "",
+      status: "Active",
+      location: "",
+      approvalStatus: "Pending Approval",
+    });
+  };
+
+  const saveProject = () => {
+    if (!newProject.id.trim()) {
+      alert("Please enter Project ID.");
+      return;
+    }
+
+    if (!newProject.name.trim()) {
+      alert("Please enter Project Name.");
+      return;
+    }
+
+    const duplicated = allProjects.some((project) => isSameText(project.id, newProject.id));
+    if (duplicated) {
+      alert("Project ID already exists.");
+      return;
+    }
+
+    setLocalProjects((prev) => [
+      ...prev,
+      {
+        ...newProject,
+        source: "Local Pending Add",
+        createdAt: new Date().toISOString(),
+      },
+    ]);
+
+    showToast?.("success", "Project saved locally and ready for backend submission.");
+    closeForm();
+  };
+
+  const openStatusEdit = (project) => {
+    setStatusEdit({
+      id: project.id,
+      name: project.name,
+      oldStatus: project.status || "Inactive",
+      newStatus: isSameText(project.status, "Active") ? "Inactive" : "Active",
+      reason: "",
+      password: "",
+    });
+  };
+
+  const saveStatusEdit = () => {
+    if (!statusEdit) return;
+
+    if (!statusEdit.reason.trim()) {
+      alert("Please enter status change reason.");
+      return;
+    }
+
+    if (!statusEdit.password.trim()) {
+      alert("Please enter admin password.");
+      return;
+    }
+
+    setLocalProjects((prev) => {
+      const exists = prev.some((project) => isSameText(project.id, statusEdit.id));
+
+      if (exists) {
+        return prev.map((project) =>
+          isSameText(project.id, statusEdit.id)
+            ? {
+                ...project,
+                status: statusEdit.newStatus,
+                approvalStatus: "Pending Approval",
+                statusChangeReason: statusEdit.reason,
+                statusChangedAt: new Date().toISOString(),
+              }
+            : project
+        );
+      }
+
+      const baseProject = allProjects.find((project) => isSameText(project.id, statusEdit.id));
+
+      return [
+        ...prev,
+        {
+          ...baseProject,
+          status: statusEdit.newStatus,
+          approvalStatus: "Pending Approval",
+          source: "Local Status Update",
+          statusChangeReason: statusEdit.reason,
+          statusChangedAt: new Date().toISOString(),
+        },
+      ];
+    });
+
+    showToast?.("warning", "Project status change saved as pending approval.");
+    setStatusEdit(null);
+  };
+
+  const exportRowsToCSV = (fileName, csvHeaders, csvRows) => {
+    const csvContent = [csvHeaders, ...csvRows]
+      .map((row) =>
+        row
+          .map((cell) => `"${String(cell ?? "").replace(/"/g, '""')}"`)
+          .join(",")
+      )
+      .join("\n");
+
+    const blob = new Blob([csvContent], { type: "text/csv;charset=utf-8;" });
+    const url = URL.createObjectURL(blob);
+    const link = document.createElement("a");
+    const today = new Date().toISOString().split("T")[0];
+
+    link.href = url;
+    link.download = `${fileName}_${today}.csv`;
+    link.click();
+    URL.revokeObjectURL(url);
+  };
+
+  const exportProjectsCSV = () => {
+    exportRowsToCSV(
+      "projects_cards_summary",
+      [
+        "#",
+        "Project ID",
+        "Project Name",
+        "Status",
+        "Approval Status",
+        "Assigned Assets",
+        "Assigned Stations",
+        "Assigned Fuelers",
+        "Direct Refuel Operations",
+        "Diesel Qty",
+        "Total Cost",
+      ],
+      filteredProjects.map((project, i) => [
+        i + 1,
+        project.id,
+        project.name,
+        project.status,
+        project.approvalStatus,
+        project.assignedAssetsCount,
+        project.assignedStationsCount,
+        project.assignedFuelersCount,
+        project.operationsCount,
+        project.dieselQty,
+        project.dieselCost,
+      ])
+    );
+
+    setShowSettings(false);
+  };
+
+  const printProjectsCards = () => {
+    const cardsElement = document.getElementById("projects-cards-print-area");
+    if (!cardsElement) return;
+
+    const printWindow = window.open("", "", "width=1400,height=900");
+
+    printWindow.document.write(`
+      <html>
+        <head>
+          <title>Projects / Sites Cards</title>
+          <style>
+            body { font-family: Arial, sans-serif; padding: 25px; color: #111; }
+            h2 { margin-bottom: 8px; font-size: 22px; }
+            .report-meta { margin-bottom: 18px; font-size: 12px; color: #555; }
+            .print-grid { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 14px; }
+            .project-card-print { border: 1px solid #ccc; border-radius: 14px; padding: 14px; break-inside: avoid; }
+            .project-title { font-size: 16px; font-weight: bold; margin-bottom: 4px; }
+            .project-id { font-size: 12px; color: #555; margin-bottom: 12px; }
+            .metrics { display: grid; grid-template-columns: repeat(3, 1fr); gap: 8px; margin-top: 12px; }
+            .metric { background: #f3f4f6; border-radius: 10px; padding: 8px; }
+            .label { font-size: 11px; color: #666; }
+            .value { font-size: 15px; font-weight: bold; margin-top: 3px; }
+          </style>
+        </head>
+        <body>
+          <h2>Projects / Sites Cards</h2>
+          <div class="report-meta">Generated at: ${new Date().toLocaleString()}</div>
+          ${cardsElement.outerHTML}
+        </body>
+      </html>
+    `);
+
+    printWindow.document.close();
+    printWindow.focus();
+    printWindow.print();
+    setShowSettings(false);
+  };
+
   return (
-    <div className="bg-gray-900 min-h-screen text-white p-6 overflow-y-auto h-screen">
-      <div className="flex justify-between items-center mb-6">
-        <div>
-          <h1 className="text-3xl font-bold">
-            Projects / Sites
-          </h1>
- 
-          <p className="text-gray-400">
-            Projects master data
-          </p>
-        </div>
- 
-        <button
-          onClick={() => setShowForm(true)}
-          className="bg-yellow-500 text-black px-4 py-2 rounded-lg font-semibold"
-        >
-          + Add Project
-        </button>
-      </div>
- 
-      <div className="grid grid-cols-3 gap-4 mb-6">
-        <Card
-          title="Total Projects"
-          value={projects.length}
-        />
- 
-        <Card
-          title="Active Projects"
-          value={
-            projects.filter(
-              (p) => p.status === "Active"
-            ).length
-          }
-        />
- 
-        <Card
-          title="Inactive Projects"
-          value={
-            projects.filter(
-              (p) => p.status !== "Active"
-            ).length
-          }
-        />
-      </div>
- 
-      <div className="bg-gray-800 rounded-xl shadow overflow-hidden">
-        <div className="p-4 border-b border-gray-700">
-          <h2 className="text-xl font-semibold text-yellow-400">
-            Projects List
-          </h2>
-        </div>
- 
-        <div className="overflow-auto">
-          <table className="w-full border-collapse text-sm">
-            <thead className="bg-gray-700">
-              <tr>
-                <Th>#</Th>
-                <Th>Project ID</Th>
-                <Th>Project Name</Th>
-                <Th>Status</Th>
-              </tr>
-            </thead>
- 
-            <tbody>
-              {projects.map((project, i) => (
-                <tr
-                  key={project.id}
-                  className="hover:bg-gray-700 transition"
-                >
-                  <Td>{i + 1}</Td>
- 
-                  <Td strong>{project.id}</Td>
- 
-                  <Td>{project.name}</Td>
- 
-                  <Td>{project.status}</Td>
-                </tr>
-              ))}
-            </tbody>
-          </table>
-        </div>
-      </div>
- 
-      {showForm && (
-        <GenericModal title="Add Project" closeForm={() => setShowForm(false)} saveText="Save Project">
-          <Field label="Project ID" placeholder="PRJ-001" />
-          <Field label="Project Name" placeholder="Project name" />
-          <div className="grid grid-cols-3 items-center gap-4">
-            <label className="font-medium text-gray-700">Status</label>
-            <select className="col-span-2 border rounded-lg p-2">
-              <option>Active</option>
-              <option>Inactive</option>
-            </select>
+    <div className="bg-gray-900 min-h-screen text-white overflow-y-auto h-screen">
+      <div className="max-w-none ml-0 mr-3 sm:mr-4 lg:mr-8 xl:mr-[120px] p-3 sm:p-4 lg:p-5 text-[12px] lg:text-[13px]">
+        <div className="flex flex-wrap justify-between items-start gap-4 mb-4">
+          <div>
+            <h1 className="text-xl sm:text-2xl font-bold">Projects / Sites</h1>
+            <p className="text-gray-400">Project cards, direct refuel tracking, and site assignment overview</p>
           </div>
-        </GenericModal>
-      )}
- 
+
+          <div className="flex flex-wrap items-center gap-3">
+            <input
+              value={searchTerm}
+              onChange={(e) => setSearchTerm(e.target.value)}
+              placeholder="Search projects..."
+              className="bg-gray-800 border border-gray-700 focus:border-yellow-400 outline-none text-white px-3 lg:px-4 py-2 lg:py-3 rounded-xl w-full sm:min-w-[260px] lg:min-w-[320px] text-[12px] lg:text-sm"
+            />
+
+            {searchTerm && (
+              <button
+                onClick={() => setSearchTerm("")}
+                className="bg-red-500/20 hover:bg-red-500/30 text-red-300 border border-red-500/40 px-3 lg:px-4 py-2 lg:py-3 rounded-xl transition"
+              >
+                Clear
+              </button>
+            )}
+
+            <div ref={settingsRef} className="relative">
+              <button
+                onClick={() => setShowSettings(!showSettings)}
+                className="bg-gray-800 hover:bg-gray-700 border border-gray-700 hover:border-yellow-400 text-yellow-400 px-3 lg:px-4 py-2 lg:py-3 rounded-xl transition"
+                title="Projects settings"
+              >
+                ⋮
+              </button>
+
+              {showSettings && (
+                <div className="absolute right-0 mt-2 w-48 bg-gray-900 border border-gray-700 rounded-xl shadow-2xl z-40 overflow-hidden">
+                  <button
+                    onClick={() => {
+                      setShowForm(true);
+                      setShowSettings(false);
+                    }}
+                    className="block w-full text-left px-4 py-3 hover:bg-gray-800 transition text-white"
+                  >
+                    + Add Project
+                  </button>
+
+                  <button
+                    onClick={exportProjectsCSV}
+                    className="block w-full text-left px-4 py-3 hover:bg-gray-800 transition text-white border-t border-gray-700"
+                  >
+                    Export CSV
+                  </button>
+
+                  <button
+                    onClick={printProjectsCards}
+                    className="block w-full text-left px-4 py-3 hover:bg-gray-800 transition text-white border-t border-gray-700"
+                  >
+                    Print Cards
+                  </button>
+                </div>
+              )}
+            </div>
+          </div>
+        </div>
+
+        <div className="grid grid-cols-1 sm:grid-cols-2 xl:grid-cols-5 gap-3 mb-4">
+          <Card title="Total Projects" value={formatNumber(projectSummary.length)} />
+          <Card title="Active Projects" value={formatNumber(activeProjects)} />
+          <Card title="Inactive Projects" value={formatNumber(inactiveProjects)} />
+          <Card title="Total Quantity (L)" value={formatNumber(totalDiesel)} />
+          <Card title={`Total Cost (${currency})`} value={formatNumber(totalCost)} />
+        </div>
+
+        <div className="bg-gray-800 rounded-2xl shadow overflow-hidden border border-gray-700 mb-4">
+          <div className="p-4 border-b border-gray-700 flex justify-between items-center">
+            <div>
+              <h2 className="text-base sm:text-lg font-bold text-yellow-400 italic underline">Projects Cards</h2>
+              <p className="text-xs text-gray-400 mt-1">
+                {filteredProjects.length} cards shown from {projectSummary.length} projects
+              </p>
+            </div>
+          </div>
+
+          <div id="projects-cards-print-area" className="print-grid grid grid-cols-1 md:grid-cols-2 xl:grid-cols-3 gap-4 p-4">
+            {filteredProjects.map((project) => (
+              <div
+                key={project.id}
+                className="project-card-print bg-gray-900 border border-gray-700 hover:border-yellow-400 rounded-2xl p-4 shadow-xl transition"
+              >
+                <div className="flex justify-between items-start gap-3 mb-4">
+                  <div className="min-w-0">
+                    <button
+                      onClick={() => {
+                        setSelectedProject(project);
+                        setProjectOperationSearch("");
+                      }}
+                      className="project-title text-left text-base sm:text-lg font-bold text-blue-300 hover:text-yellow-400 transition block truncate"
+                    >
+                      {project.name || project.id}
+                    </button>
+                    <p className="project-id text-xs text-gray-400 mt-1">Project ID: {project.id}</p>
+                  </div>
+
+                  <button
+                    onClick={() => openStatusEdit(project)}
+                    title="Click to change status"
+                    className="rounded-full transition hover:scale-105"
+                  >
+                    <StatusBadge status={project.status || "Inactive"} />
+                  </button>
+                </div>
+
+                <div className="grid grid-cols-1 sm:grid-cols-3 gap-2 mb-3">
+                  <div className="metric bg-gray-800 rounded-xl p-2 lg:p-3 border border-gray-700 min-w-0">
+                    <p className="label text-[11px] text-gray-400">Assets</p>
+                    <p className="value text-xl font-bold text-white mt-1">{formatNumber(project.assignedAssetsCount)}</p>
+                  </div>
+
+                  <div className="metric bg-gray-800 rounded-xl p-2 lg:p-3 border border-gray-700 min-w-0">
+                    <p className="label text-[11px] text-gray-400">Stations</p>
+                    <p className="value text-xl font-bold text-white mt-1">{formatNumber(project.assignedStationsCount)}</p>
+                  </div>
+
+                  <div className="metric bg-gray-800 rounded-xl p-2 lg:p-3 border border-gray-700 min-w-0">
+                    <p className="label text-[11px] text-gray-400">Fuelers</p>
+                    <p className="value text-xl font-bold text-white mt-1">{formatNumber(project.assignedFuelersCount)}</p>
+                  </div>
+                </div>
+
+                <div className="grid grid-cols-1 sm:grid-cols-3 gap-2">
+                  <div className="metric bg-gray-800 rounded-xl p-2 lg:p-3 border border-gray-700 min-w-0">
+                    <p className="label text-[11px] text-gray-400">Direct Refuel</p>
+                    <p className="value text-xl font-bold text-yellow-300 mt-1">{formatNumber(project.operationsCount)}</p>
+                  </div>
+
+                  <div className="metric bg-gray-800 rounded-xl p-2 lg:p-3 border border-gray-700 min-w-0">
+                    <p className="label text-[11px] text-gray-400">Qty Liters</p>
+                    <p className="value text-xl font-bold text-green-300 mt-1">{formatNumber(project.dieselQty)}</p>
+                  </div>
+
+                  <div className="metric bg-gray-800 rounded-xl p-2 lg:p-3 border border-gray-700 min-w-0">
+                    <p className="label text-[11px] text-gray-400">Cost</p>
+                    <p className="value text-base sm:text-lg font-bold text-blue-300 mt-1">{formatNumber(project.dieselCost)}</p>
+                  </div>
+                </div>
+
+                <div className="mt-4 flex justify-between items-center text-xs text-gray-400 border-t border-gray-700 pt-3">
+                  <span>Approval: {project.approvalStatus || "Approved"}</span>
+                  <span>{currency}</span>
+                </div>
+              </div>
+            ))}
+          </div>
+        </div>
+
+        {selectedProject && (
+          <div className="fixed inset-0 bg-black/70 flex items-center justify-center z-50">
+            <div className="bg-gray-900 text-white w-[1200px] max-h-[90vh] rounded-3xl shadow-2xl border border-gray-700 overflow-hidden">
+              <div className="p-3 sm:p-5 border-b border-gray-700 flex justify-between items-start gap-3">
+                <div>
+                  <h2 className="text-xl sm:text-2xl font-bold text-yellow-400 italic underline">
+                    Project Direct Refuel Operations
+                  </h2>
+                  <p className="text-gray-400 mt-1">
+                    Project: <span className="text-blue-300 font-semibold">{selectedProject.name || selectedProject.id}</span>
+                  </p>
+                </div>
+
+                <button
+                  onClick={() => {
+                    setSelectedProject(null);
+                    setProjectOperationSearch("");
+                  }}
+                  className="text-gray-400 hover:text-red-400 text-2xl"
+                >
+                  ×
+                </button>
+              </div>
+
+              <div className="grid grid-cols-1 sm:grid-cols-2 xl:grid-cols-5 gap-3 p-3 sm:p-4 lg:p-5 border-b border-gray-800">
+                <Card title="Assets" value={formatNumber(selectedProject.assignedAssetsCount)} />
+                <Card title="Stations" value={formatNumber(selectedProject.assignedStationsCount)} />
+                <Card title="Fuelers" value={formatNumber(selectedProject.assignedFuelersCount)} />
+                <Card title="Direct Refuel" value={formatNumber(selectedProject.operationsCount)} />
+                <Card title="Qty Liters" value={formatNumber(selectedProject.dieselQty)} />
+              </div>
+
+              <div className="p-5 overflow-auto max-h-[62vh]">
+                <div className="bg-gray-800 rounded-xl border border-gray-700 p-4 mb-5 flex flex-wrap justify-between items-center gap-3">
+                  <div>
+                    <h3 className="text-base sm:text-lg font-bold text-yellow-400 italic underline">
+                      Direct Refuel Operations Table
+                    </h3>
+                    <p className="text-xs text-gray-400 mt-1">
+                      {getFilteredProjectOperations(selectedProject).length} shown from {getDirectRefuelOperations(selectedProject).length} operations
+                    </p>
+                  </div>
+
+                  <input
+                    value={projectOperationSearch}
+                    onChange={(e) => setProjectOperationSearch(e.target.value)}
+                    placeholder="Search by operation, equipment, station, fueler..."
+                    className="bg-gray-900 border border-gray-700 focus:border-yellow-400 outline-none rounded-xl px-3 lg:px-4 py-2 lg:py-3 text-white w-full sm:min-w-[280px] lg:min-w-[360px] text-[12px] lg:text-sm"
+                  />
+                </div>
+
+                <table className="min-w-[860px] lg:min-w-[980px] xl:min-w-[1100px] w-full border-collapse text-[11px] sm:text-xs lg:text-sm table-fixed">
+                  <thead className="bg-gray-800 sticky top-0 z-10">
+                    <tr>
+                      <Th>#</Th>
+                      <Th>Date</Th>
+                      <Th>Operation ID</Th>
+                      <Th>Station</Th>
+                      <Th>Fueler</Th>
+                      <Th>Equipment</Th>
+                      <Th>Liters</Th>
+                      <Th>Odometer</Th>
+                      <Th>Cost</Th>
+                    </tr>
+                  </thead>
+
+                  <tbody>
+                    {getFilteredProjectOperations(selectedProject).map((item, i) => {
+                      const row = item.row;
+                      const diesel = dieselIndex !== -1 ? parseFloat(row[dieselIndex]) || 0 : 0;
+                      const cost = diesel * getOperationLiterPrice(row);
+
+                      return (
+                        <tr key={item.originalIndex} className="hover:bg-gray-800 transition">
+                          <Td>{i + 1}</Td>
+                          <Td>{dateIndex !== -1 ? formatProjectDate(row[dateIndex]) : "-"}</Td>
+                          <Td>{operationIdIndex !== -1 ? row[operationIdIndex] : item.originalIndex + 1}</Td>
+                          <Td>{sourceIndex !== -1 ? row[sourceIndex] || "-" : "-"}</Td>
+                          <Td>{fuelerIndex !== -1 ? row[fuelerIndex] || "-" : "-"}</Td>
+                          <Td strong>{destinationIndex !== -1 ? row[destinationIndex] || "-" : "-"}</Td>
+                          <Td>{formatNumber(diesel)}</Td>
+                          <Td>{odometerIndex !== -1 ? formatNumber(row[odometerIndex]) : "-"}</Td>
+                          <Td>{formatNumber(cost)} {currency}</Td>
+                        </tr>
+                      );
+                    })}
+                  </tbody>
+                </table>
+
+                {getFilteredProjectOperations(selectedProject).length === 0 && (
+                  <div className="text-center text-gray-400 py-8">
+                    No matching Direct Refuel operations found for this project.
+                  </div>
+                )}
+              </div>
+            </div>
+          </div>
+        )}
+
+        {statusEdit && (
+          <div className="fixed inset-0 bg-black/70 flex items-center justify-center z-[60]">
+            <div className="bg-white text-black w-[520px] rounded-2xl shadow-2xl p-6">
+              <div className="flex justify-between items-center mb-5 border-b pb-3">
+                <h2 className="text-xl sm:text-2xl font-bold">Change Project Status</h2>
+                <button
+                  onClick={() => setStatusEdit(null)}
+                  className="text-gray-500 hover:text-black text-xl"
+                >
+                  ×
+                </button>
+              </div>
+
+              <div className="bg-gray-100 rounded-xl p-4 mb-4">
+                <p className="text-sm text-gray-600">Project</p>
+                <p className="text-base sm:text-lg font-bold">{statusEdit.name || statusEdit.id}</p>
+                <p className="text-sm text-gray-600 mt-2">
+                  {statusEdit.oldStatus} → <span className="font-bold">{statusEdit.newStatus}</span>
+                </p>
+              </div>
+
+              <div className="mb-4">
+                <label className="font-medium text-gray-700">Status Change Reason</label>
+                <textarea
+                  value={statusEdit.reason}
+                  onChange={(e) => setStatusEdit({ ...statusEdit, reason: e.target.value })}
+                  className="border rounded-lg p-3 w-full mt-2 h-24"
+                  placeholder="Enter reason for changing project status..."
+                />
+              </div>
+
+              <div className="mb-5">
+                <label className="font-medium text-gray-700">Admin Password</label>
+                <input
+                  type="password"
+                  value={statusEdit.password}
+                  onChange={(e) => setStatusEdit({ ...statusEdit, password: e.target.value })}
+                  className="border rounded-lg p-3 w-full mt-2"
+                  placeholder="Enter admin password"
+                />
+              </div>
+
+              <div className="flex justify-end gap-3 border-t pt-4">
+                <button
+                  onClick={() => setStatusEdit(null)}
+                  className="bg-gray-200 px-3 lg:px-4 py-2 rounded-lg"
+                >
+                  Cancel
+                </button>
+
+                <button
+                  onClick={saveStatusEdit}
+                  className="bg-red-600 text-white px-3 lg:px-4 py-2 rounded-lg"
+                >
+                  Save Status Change
+                </button>
+              </div>
+            </div>
+          </div>
+        )}
+
+        {showForm && (
+          <GenericModal title="Add Project" closeForm={closeForm} saveText="Save Project" onSave={saveProject}>
+            <Field
+              label="Project ID"
+              value={newProject.id}
+              onChange={(e) => setNewProject({ ...newProject, id: e.target.value })}
+              placeholder="Example: PRJ-001"
+            />
+
+            <Field
+              label="Project Name"
+              value={newProject.name}
+              onChange={(e) => setNewProject({ ...newProject, name: e.target.value })}
+              placeholder="Example: NEOM Site A"
+            />
+
+            <SelectField
+              label="Status"
+              value={newProject.status}
+              onChange={(e) => setNewProject({ ...newProject, status: e.target.value })}
+              options={["Active", "Inactive"]}
+              placeholder="Select status"
+            />
+
+            <Field
+              label="Location"
+              value={newProject.location}
+              onChange={(e) => setNewProject({ ...newProject, location: e.target.value })}
+              placeholder="Optional"
+            />
+          </GenericModal>
+        )}
+      </div>
     </div>
   );
 }
- 
- 
+
 function AddOperationModal({
   closeForm,
   fuelers,
   stations,
+  assets = [],
   transactionType,
   setTransactionType,
-  destinationOptions,
   stationMeterPhoto,
   setStationMeterPhoto,
   assetPhoto,
   setAssetPhoto,
   assetMeterPhoto,
   setAssetMeterPhoto,
+  getLastOdometerForEquipment,
+  onSaveOperation,
 }) {
+  const [sourceStation, setSourceStation] = useState("");
+  const [fuelerId, setFuelerId] = useState("");
+  const [destinationId, setDestinationId] = useState("");
+  const [dieselQuantity, setDieselQuantity] = useState("");
+  const [odometer, setOdometer] = useState("");
+
+  const selectedStation = stations.find((s) => s.id === sourceStation);
+  const selectedStationProject = selectedStation?.project || "";
+
+  const activeSourceStations = stations.filter((station) => {
+    const status = String(station.status || "Active").trim().toLowerCase();
+    return (
+      station.id &&
+      !isSameText(station.id, "External_Supply") &&
+      (status === "active" || status === "on duty")
+    );
+  });
+
+  const availableFuelers = fuelers.filter((fueler) => {
+    const status = String(fueler.status || "On Duty").trim().toLowerCase();
+    const sameProject = isSameText(fueler.projectName, selectedStationProject);
+
+    return (
+      sourceStation &&
+      sameProject &&
+      (status === "on duty" || status === "active")
+    );
+  });
+
+  const availableDestinations =
+    transactionType === "Direct_Refuel"
+      ? assets.filter((asset) => {
+          const status = String(asset.status || "").trim().toLowerCase();
+          const sameProject = isSameText(asset.project, selectedStationProject);
+
+          return (
+            sourceStation &&
+            sameProject &&
+            status === "active"
+          );
+        })
+      : transactionType === "Internal_Transfer"
+      ? stations.filter((station) => {
+          const status = String(station.status || "Active").trim().toLowerCase();
+
+          return (
+            sourceStation &&
+            station.id !== sourceStation &&
+            !isSameText(station.id, "External_Supply") &&
+            isSameText(station.project, selectedStationProject) &&
+            status === "active"
+          );
+        })
+      : transactionType === "External_Supply"
+      ? stations.filter((station) => {
+          const status = String(station.status || "Active").trim().toLowerCase();
+
+          return (
+            !isSameText(station.id, "External_Supply") &&
+            status === "active"
+          );
+        })
+      : [];
+
+  const lastOdometer =
+    transactionType === "Direct_Refuel" && destinationId
+      ? getLastOdometerForEquipment?.(destinationId) || 0
+      : 0;
+
+  const resetAfterStationChange = () => {
+    setFuelerId("");
+    setTransactionType("");
+    setDestinationId("");
+    setDieselQuantity("");
+    setOdometer("");
+  };
+
+  const resetAfterTransactionTypeChange = () => {
+    setDestinationId("");
+    setDieselQuantity("");
+    setOdometer("");
+  };
+
+  const handleDestinationChange = (value) => {
+    setDestinationId(value);
+
+    if (transactionType === "Direct_Refuel") {
+      const lastReading = getLastOdometerForEquipment?.(value) || 0;
+      setOdometer(lastReading ? String(lastReading) : "");
+    }
+  };
+
+  const validateAndSave = () => {
+    if (!sourceStation) {
+      alert("Please select source station.");
+      return;
+    }
+
+    if (!fuelerId) {
+      alert("Please select fueler.");
+      return;
+    }
+
+    if (!transactionType) {
+      alert("Please select transaction type.");
+      return;
+    }
+
+    if (!destinationId) {
+      alert("Please select destination.");
+      return;
+    }
+
+    const qty = Number(dieselQuantity);
+
+    if (!qty || qty <= 0) {
+      alert("Diesel quantity must be greater than 0.");
+      return;
+    }
+if (transactionType === "Direct_Refuel") {
+  const selectedAsset = assets.find((asset) => asset.id === destinationId);
+  const tankCapacity = Number(selectedAsset?.fuelTank) || 0;
+
+  if (tankCapacity > 0 && qty > tankCapacity) {
+    alert(
+      `Diesel quantity cannot be greater than asset tank capacity (${formatNumber(
+        tankCapacity
+      )} L).`
+    );
+    return;
+  }
+}
+
+    if (transactionType === "Direct_Refuel") {
+      const newOdometer = Number(odometer);
+
+      if (!newOdometer || newOdometer <= 0) {
+        alert("Please enter valid odometer / hour meter.");
+        return;
+      }
+
+      if (lastOdometer > 0 && newOdometer < lastOdometer) {
+        alert(
+          `Odometer / hour meter cannot be less than last recorded reading (${formatNumber(
+            lastOdometer
+          )}).`
+        );
+        return;
+      }
+    }
+
+    if (!stationMeterPhoto || !assetPhoto || !assetMeterPhoto) {
+      alert("All 3 photos are required before saving the operation.");
+      return;
+    }
+
+    onSaveOperation?.({
+      operationId: `OP-${Date.now()}`,
+      transactionDate: new Date().toISOString(),
+      sourceStation,
+      fuelerId,
+      transactionType,
+      destinationId,
+      dieselQuantity: qty,
+      odometer: transactionType === "Direct_Refuel" ? Number(odometer) : "",
+      photos: {
+        stationMeterPhoto,
+        assetPhoto,
+        assetMeterPhoto,
+      },
+    });
+  };
+
   return (
     <div className="fixed inset-0 bg-black/60 flex items-center justify-center z-50">
       <div className="bg-white text-black w-[760px] rounded-xl shadow-xl p-6 overflow-y-auto max-h-[90vh]">
         <div className="flex justify-between items-center mb-6 border-b pb-3">
-          <h2 className="text-2xl font-bold">Add Operation</h2>
-          <button onClick={closeForm} className="text-gray-500 hover:text-black text-xl">×</button>
+          <div>
+            <h2 className="text-xl sm:text-2xl font-bold">Add Operation</h2>
+            <p className="text-sm text-gray-500 mt-1">
+              Source station controls available fuelers and destinations
+            </p>
+          </div>
+
+          <button
+            onClick={closeForm}
+            className="text-gray-500 hover:text-black text-xl cursor-pointer"
+          >
+            ×
+          </button>
         </div>
- 
+
         <div className="grid grid-cols-1 gap-4">
           <SelectField
-            label="Fueler ID"
-            options={fuelers
-              .filter((f) => {
-                const status = String(f.status || "On Duty").trim().toLowerCase();
-                return status === "on duty" || status === "active";
-              })
-              .map((f) => f.id || f)}
-            placeholder="Select Fueler"
-          />
- 
-          <SelectField
             label="Source Station"
-            options={stations.map((s) => s.id)}
+            value={sourceStation}
+            onChange={(e) => {
+              setSourceStation(e.target.value);
+              resetAfterStationChange();
+            }}
+            options={activeSourceStations.map((s) => s.id)}
             placeholder="Select Source Station"
           />
- 
-          <div className="grid grid-cols-3 items-center gap-4">
+
+          {sourceStation && (
+            <div className="grid grid-cols-1 sm:grid-cols-3 items-start sm:items-center gap-2 sm:gap-4">
+              <label className="font-medium text-gray-700">Station Project</label>
+              <div className="col-span-2 bg-gray-100 border rounded-lg p-2 text-gray-700">
+                {selectedStationProject || "-"}
+              </div>
+            </div>
+          )}
+
+          <SelectField
+            label="Fueler ID"
+            value={fuelerId}
+            onChange={(e) => setFuelerId(e.target.value)}
+            options={availableFuelers.map((f) => f.id)}
+            placeholder={
+              sourceStation
+                ? "Select Fueler"
+                : "Select Source Station First"
+            }
+            disabled={!sourceStation}
+          />
+
+          <div className="grid grid-cols-1 sm:grid-cols-3 items-start sm:items-center gap-2 sm:gap-4">
             <label className="font-medium text-gray-700">Transaction Type</label>
             <select
               className="col-span-2 border rounded-lg p-2"
               value={transactionType}
-              onChange={(e) => setTransactionType(e.target.value)}
+              disabled={!sourceStation || !fuelerId}
+              onChange={(e) => {
+                setTransactionType(e.target.value);
+                resetAfterTransactionTypeChange();
+              }}
             >
-              <option value="">Select Transaction Type</option>
+              <option value="">
+                {!sourceStation || !fuelerId
+                  ? "Select Station and Fueler First"
+                  : "Select Transaction Type"}
+              </option>
               <option value="Direct_Refuel">Direct_Refuel</option>
               <option value="Internal_Transfer">Internal_Transfer</option>
               <option value="External_Supply">External_Supply</option>
             </select>
           </div>
- 
+
           <SelectField
             label="Destination ID"
-            options={destinationOptions}
+            value={destinationId}
+            onChange={(e) => handleDestinationChange(e.target.value)}
+            options={availableDestinations.map((item) => item.id)}
             placeholder={
               transactionType === ""
                 ? "Select Transaction Type First"
                 : transactionType === "Direct_Refuel"
-                ? "Select Asset"
-                : "Select Station"
+                ? "Select Active Asset in Same Project"
+                : "Select Destination Station"
             }
             disabled={transactionType === ""}
           />
- 
-          <Field label="Diesel Quantity" placeholder="Liters" />
-          <Field label="Odometer" placeholder="Current odometer" />
- 
+
+          {transactionType === "Direct_Refuel" && destinationId && (
+            <div className="grid grid-cols-1 sm:grid-cols-3 items-start sm:items-center gap-2 sm:gap-4">
+              <label className="font-medium text-gray-700">Last Reading</label>
+              <div className="col-span-2 bg-gray-100 border rounded-lg p-2 text-gray-700">
+                {lastOdometer > 0 ? formatNumber(lastOdometer) : "-"}
+              </div>
+            </div>
+          )}
+
+          <Field
+            label="Diesel Quantity"
+            placeholder="Liters"
+            type="number"
+            value={dieselQuantity}
+            onChange={(e) => setDieselQuantity(e.target.value)}
+          />
+
+          <Field
+            label="Odometer / Hour Meter"
+            placeholder={
+              transactionType === "Direct_Refuel"
+                ? "New reading must be >= last reading"
+                : "Not required for this transaction type"
+            }
+            type="number"
+            value={odometer}
+            onChange={(e) => setOdometer(e.target.value)}
+          />
+
           <div className="mt-4 border-t pt-4">
-            <h3 className="text-lg font-semibold mb-3">Photos</h3>
-            <ImageField label="Station Meter Photo" preview={stationMeterPhoto} setPreview={setStationMeterPhoto} />
-            <ImageField label="Asset Photo" preview={assetPhoto} setPreview={setAssetPhoto} />
-            <ImageField label="Asset Meter Photo" preview={assetMeterPhoto} setPreview={setAssetMeterPhoto} />
+            <h3 className="text-lg font-bold italic underline mb-3">
+              Required Photos
+            </h3>
+
+            <ImageField
+              label="Station Meter Photo *"
+              preview={stationMeterPhoto}
+              setPreview={setStationMeterPhoto}
+            />
+
+            <ImageField
+              label="Asset / Destination Photo *"
+              preview={assetPhoto}
+              setPreview={setAssetPhoto}
+            />
+
+            <ImageField
+              label="Asset Meter Photo *"
+              preview={assetMeterPhoto}
+              setPreview={setAssetMeterPhoto}
+            />
           </div>
         </div>
- 
+
         <div className="flex justify-end gap-3 mt-6 border-t pt-4">
-          <button onClick={closeForm} className="bg-gray-200 px-4 py-2 rounded-lg">Cancel</button>
-          <button className="bg-green-600 text-white px-4 py-2 rounded-lg">Save Operation</button>
+          <button
+            onClick={closeForm}
+            className="bg-gray-200 px-3 lg:px-4 py-2 rounded-lg cursor-pointer"
+          >
+            Cancel
+          </button>
+
+          <button
+            onClick={validateAndSave}
+            className="bg-green-600 text-white px-3 lg:px-4 py-2 rounded-lg cursor-pointer"
+          >
+            Save Operation
+          </button>
         </div>
       </div>
     </div>
   );
 }
- 
-function GenericModal({ title, closeForm, saveText, children }) {
+
+
+function GenericModal({ title, closeForm, saveText, onSave, children }) {
   return (
     <div className="fixed inset-0 bg-black/60 flex items-center justify-center z-50">
       <div className="bg-white text-black w-[650px] rounded-xl shadow-xl p-6">
         <div className="flex justify-between items-center mb-6 border-b pb-3">
-          <h2 className="text-2xl font-bold">{title}</h2>
+          <h2 className="text-xl sm:text-2xl font-bold">{title}</h2>
           <button onClick={closeForm} className="text-gray-500 hover:text-black text-xl">×</button>
         </div>
  
@@ -5778,22 +7025,27 @@ function GenericModal({ title, closeForm, saveText, children }) {
         </div>
  
         <div className="flex justify-end gap-3 mt-6 border-t pt-4">
-          <button onClick={closeForm} className="bg-gray-200 px-4 py-2 rounded-lg">Cancel</button>
-          <button className="bg-green-600 text-white px-4 py-2 rounded-lg">{saveText}</button>
+          <button onClick={closeForm} className="bg-gray-200 px-3 lg:px-4 py-2 rounded-lg">Cancel</button>
+          <button onClick={onSave} className="bg-green-600 text-white px-3 lg:px-4 py-2 rounded-lg">{saveText}</button>
         </div>
       </div>
     </div>
   );
 }
  
-function SelectField({ label, options, placeholder, disabled = false }) {
+function SelectField({ label, options, placeholder, disabled = false, value, onChange }) {
   return (
-    <div className="grid grid-cols-3 items-center gap-4">
+    <div className="grid grid-cols-1 sm:grid-cols-3 items-start sm:items-center gap-2 sm:gap-4">
       <label className="font-medium text-gray-700">{label}</label>
-      <select className="col-span-2 border rounded-lg p-2" disabled={disabled}>
-        <option>{placeholder}</option>
+      <select
+        className="col-span-2 border rounded-lg p-2"
+        disabled={disabled}
+        value={value}
+        onChange={onChange}
+      >
+        <option value="">{placeholder}</option>
         {options.map((item, i) => (
-          <option key={i}>{item}</option>
+          <option key={i} value={item}>{item}</option>
         ))}
       </select>
     </div>
@@ -5802,7 +7054,7 @@ function SelectField({ label, options, placeholder, disabled = false }) {
  
 function ImageField({ label, preview, setPreview }) {
   return (
-    <div className="grid grid-cols-3 items-start gap-4 mb-4">
+    <div className="grid grid-cols-1 sm:grid-cols-3 items-start gap-2 sm:gap-4 mb-4">
       <label className="font-medium text-gray-700">{label}</label>
       <div className="col-span-2">
         <input
@@ -5872,7 +7124,7 @@ function formatNumber(value) {
  
 function Th({ children }) {
   return (
-    <th className="p-3 text-left border border-gray-600 text-yellow-300 whitespace-nowrap">
+    <th className="p-2 lg:p-3 text-left border border-gray-600 text-yellow-300 whitespace-normal xl:whitespace-nowrap break-words leading-tight">
       {children}
     </th>
   );
@@ -5881,7 +7133,7 @@ function Th({ children }) {
 function Td({ children, strong = false }) {
   return (
     <td
-      className={`p-3 border border-gray-600 whitespace-nowrap ${
+      className={`p-2 lg:p-3 border border-gray-600 whitespace-normal xl:whitespace-nowrap break-words leading-tight max-w-[220px] ${
         strong
           ? "font-bold text-blue-200"
           : "text-gray-100"
@@ -5896,15 +7148,19 @@ function Field({
   label,
   placeholder = "",
   type = "text",
+  value,
+  onChange,
 }) {
   return (
-    <div className="grid grid-cols-3 items-center gap-4">
+    <div className="grid grid-cols-1 sm:grid-cols-3 items-start sm:items-center gap-2 sm:gap-4">
       <label className="font-medium text-gray-700">
         {label}
       </label>
  
       <input
         type={type}
+        value={value}
+        onChange={onChange}
         className="col-span-2 border rounded-lg p-2"
         placeholder={placeholder}
       />
@@ -5914,10 +7170,10 @@ function Field({
  
 function Card({ title, value }) {
   return (
-    <div className="bg-gray-800 p-4 rounded-xl shadow">
-      <p className="text-gray-400">{title}</p>
+    <div className="bg-gray-800 p-3 lg:p-4 rounded-xl shadow min-w-0 overflow-hidden">
+      <p className="text-[11px] sm:text-xs lg:text-sm text-gray-400 truncate">{title}</p>
  
-      <h2 className="text-3xl font-bold text-blue-200">
+      <h2 className="text-xl sm:text-2xl xl:text-3xl font-bold text-blue-200 leading-tight break-words tabular-nums">
         {value}
       </h2>
     </div>
