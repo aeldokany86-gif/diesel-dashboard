@@ -1,8 +1,7 @@
 "use client";
  
-import { useEffect, useRef, useState } from "react";
+import React, { useEffect, useRef, useState } from "react";
 import {
-  ResponsiveContainer,
   LineChart,
   Line,
   XAxis,
@@ -101,6 +100,44 @@ function FileBarChart2({ size = 18, className = "" }) {
       <path d="M12 17v-7" />
       <path d="M15 17v-2" />
     </SidebarSvgIcon>
+  );
+}
+
+
+function ChartFrame({ children, height = 260 }) {
+  const frameRef = useRef(null);
+  const [width, setWidth] = useState(800);
+
+  useEffect(() => {
+    if (!frameRef.current) return;
+
+    const updateSize = () => {
+      const nextWidth = frameRef.current?.clientWidth || 800;
+      setWidth(Math.max(320, Math.floor(nextWidth)));
+    };
+
+    updateSize();
+
+    const resizeObserver = new ResizeObserver(updateSize);
+    resizeObserver.observe(frameRef.current);
+
+    window.addEventListener("resize", updateSize);
+
+    return () => {
+      resizeObserver.disconnect();
+      window.removeEventListener("resize", updateSize);
+    };
+  }, []);
+
+  return (
+    <div ref={frameRef} className="fleet-chart-frame">
+      {width > 0
+        ? React.cloneElement(children, {
+            width,
+            height,
+          })
+        : null}
+    </div>
   );
 }
 
@@ -866,9 +903,17 @@ function getAllowedTransactionTypesForUser(user) {
   if (!user || user.status !== "Active") return [];
   if (user.role === "Operator") return ["Direct_Refuel"];
   if (user.role === "Officer") return [];
-  if (["Admin", "Manager", "Supervisor"].includes(user.role)) {
+
+  // External_Transfer is a cross-project diesel transfer.
+  // It must be available only for Manager and Admin.
+  if (["Admin", "Manager"].includes(user.role)) {
+    return ["Direct_Refuel", "Internal_Transfer", "External_Supply", "External_Transfer"];
+  }
+
+  if (user.role === "Supervisor") {
     return ["Direct_Refuel", "Internal_Transfer", "External_Supply"];
   }
+
   return ["Direct_Refuel"];
 }
 
@@ -1312,6 +1357,7 @@ setProjects(mappedProjects);
           headers={headers}
           assets={scopedAssets}
           stations={scopedStations}
+          allStations={stations}
           fuelers={scopedFuelers}
           literPrice={literPrice}
           getLiterPriceByDate={getLiterPriceByDate}
@@ -1321,6 +1367,7 @@ setProjects(mappedProjects);
           hasPermission={hasPermission}
           trackActivity={trackActivity}
           submitApprovalRequest={submitApprovalRequest}
+          projects={projects}
         />
       );
     }
@@ -1721,11 +1768,20 @@ const sidebarItems = [
           max-width: none;
         }
 
-        @media (max-width: 1536px) {
-          .recharts-wrapper,
-          .recharts-surface {
-            max-width: 100% !important;
-          }
+        /* Modal layering fix */
+        .fleet-modal-backdrop {
+          position: fixed;
+          inset: 0;
+          z-index: 9998 !important;
+        }
+
+        .fleet-modal-panel {
+          position: relative;
+          z-index: 9999 !important;
+        }
+
+        .fleet-sticky-layer {
+          z-index: 5 !important;
         }
 
       `}</style>
@@ -1888,6 +1944,7 @@ function OperationsPage({
   headers,
   assets,
   stations,
+  allStations = [],
   fuelers,
   literPrice = 2.33,
   getLiterPriceByDate,
@@ -1897,6 +1954,7 @@ function OperationsPage({
   hasPermission = () => false,
   trackActivity = () => {},
   submitApprovalRequest = () => {},
+  projects = [],
 }) {
   const [showForm, setShowForm] = useState(false);
   const [transactionType, setTransactionType] = useState("");
@@ -2997,7 +3055,7 @@ function OperationsPage({
 
   return (
     <div className="bg-transparent min-h-screen text-slate-100 overflow-y-auto h-screen scroll-smooth [scrollbar-color:#334155_transparent]">
-      <div className="relative isolate w-full max-w-[1920px] mx-auto px-3 sm:px-4 lg:px-5 xl:px-6 2xl:px-8 py-3 sm:py-4 lg:py-5 text-[12px] lg:text-[13px]">
+      <div className="fleet-page-shell relative isolate w-full max-w-[1920px] mx-auto px-2 sm:px-3 lg:px-4 xl:px-5 2xl:px-8 py-3 sm:py-4 lg:py-5 text-[12px] lg:text-[13px]">
       <div className="flex flex-col sm:flex-row justify-between sm:items-start xl:items-center gap-3 mb-4">
         <div>
           <h1 className="text-xl sm:text-2xl font-black tracking-tight text-slate-100">Diesel Dashboard</h1>
@@ -3419,11 +3477,11 @@ function OperationsPage({
         </div>
       </div>
 
-      <div className="grid grid-cols-1 2xl:grid-cols-2 gap-4 mb-5">
+      <div className="fleet-chart-grid grid grid-cols-1 xl:grid-cols-2 gap-4 mb-5">
         <div className="relative z-0 bg-slate-900/80 rounded-2xl shadow-xl shadow-black/10 overflow-hidden border border-slate-700/80">
           <div className="p-3 sm:p-4 border-b border-slate-700/80 flex flex-col sm:flex-row gap-2 sm:gap-3 justify-between sm:items-center bg-slate-900/60">
             <div>
-              <h2 className="text-base font-extrabold text-amber-300">
+              <h2 className="fleet-chart-title text-base font-extrabold text-amber-300">
                 Consumed Quantity per Equipment Type
               </h2>
               <p className="text-xs text-gray-400 mt-1">
@@ -3506,7 +3564,7 @@ function OperationsPage({
         <div className="relative z-0 bg-slate-900/80 rounded-2xl shadow-xl shadow-black/10 overflow-hidden border border-slate-700/80">
           <div className="p-3 sm:p-4 border-b border-slate-700/80 flex flex-col sm:flex-row gap-2 sm:gap-3 justify-between sm:items-center bg-slate-900/60">
             <div>
-              <h2 className="text-base font-extrabold text-amber-300">
+              <h2 className="fleet-chart-title text-base font-extrabold text-amber-300">
                 Daily Consumption
               </h2>
               <p className="text-xs text-gray-400 mt-1">
@@ -3589,61 +3647,63 @@ function OperationsPage({
         </div>
       </div>
 
-      <div className="relative z-0 bg-slate-900/80 p-3 sm:p-4 rounded-2xl mb-4 border border-slate-700/80 shadow-xl shadow-black/10 overflow-hidden">
-        <h3 className="text-base sm:text-lg font-extrabold text-amber-300 mb-3">
+      <div className="fleet-chart-card relative z-0 bg-slate-900/80 p-3 sm:p-4 rounded-2xl mb-4 border border-slate-700/80 shadow-xl shadow-black/10 overflow-hidden">
+        <h3 className="fleet-chart-title text-base sm:text-lg font-extrabold text-amber-300 mb-3">
           Consumed Quantity Over Time
         </h3>
 
         <div className="h-[260px] sm:h-[300px] xl:h-[340px]">
-          <ResponsiveContainer width="100%" height="100%">
+          <ChartFrame height={260}>
           <LineChart data={dailyData}>
-            <XAxis dataKey="date" stroke="#ccc" />
+            <XAxis dataKey="date" stroke="#ccc" tick={{ fontSize: 11 }} minTickGap={24} />
             <YAxis stroke="#ccc" />
             <Tooltip />
 
             <Line type="monotone" dataKey="value" stroke="#60a5fa" />
           </LineChart>
-          </ResponsiveContainer>
+          </ChartFrame>
         </div>
       </div>
 
-      <div className="grid grid-cols-1 2xl:grid-cols-2 gap-5 mb-5">
-        <div className="relative z-0 bg-slate-900/80 rounded-2xl shadow-xl shadow-black/10 overflow-hidden border border-slate-700/80 p-3 lg:p-4">
-          <h2 className="text-base sm:text-lg font-extrabold text-amber-300 mb-3">
+      <div className="fleet-chart-grid grid grid-cols-1 xl:grid-cols-2 gap-4 2xl:gap-5 mb-5">
+        <div className="fleet-chart-card relative z-0 bg-slate-900/80 rounded-2xl shadow-xl shadow-black/10 overflow-hidden border border-slate-700/80 p-3 lg:p-4">
+          <h2 className="fleet-chart-title text-base sm:text-lg font-extrabold text-amber-300 mb-3">
             Consumed Quantity Per Equipment No.
           </h2>
 
           <div className="h-[300px] sm:h-[340px] xl:h-[360px]">
-            <ResponsiveContainer width="100%" height="100%">
+            <ChartFrame height={260}>
               <BarChart data={topEquipmentConsumptionChartData}>
-              <XAxis dataKey="equipmentNo" stroke="#ccc" tick={{ fontSize: 11 }} />
+              <XAxis dataKey="equipmentNo" stroke="#ccc" tick={{ fontSize: 11 }} minTickGap={16} />
               <YAxis stroke="#ccc" tick={{ fontSize: 11 }} />
               <Tooltip />
               <Bar dataKey="qtyLiters" fill="#86efac" name="Qty Liters" />
             </BarChart>
-            </ResponsiveContainer>
+            </ChartFrame>
           </div>
         </div>
 
-        <div className="relative z-0 bg-slate-900/80 rounded-2xl shadow-xl shadow-black/10 overflow-hidden border border-slate-700/80 p-3 lg:p-4">
-          <h2 className="text-base sm:text-lg font-extrabold text-amber-300 mb-3">
+        <div className="fleet-chart-card relative z-0 bg-slate-900/80 rounded-2xl shadow-xl shadow-black/10 overflow-hidden border border-slate-700/80 p-3 lg:p-4">
+          <h2 className="fleet-chart-title text-base sm:text-lg font-extrabold text-amber-300 mb-3">
             Consumed Quantity Ratio per Asset Type
           </h2>
 
           <div className="grid grid-cols-1 xl:grid-cols-[1fr_230px] gap-4 items-center">
             <div className="h-[300px] sm:h-[340px] xl:h-[360px]">
-              <ResponsiveContainer width="100%" height="100%">
+              <ChartFrame height={260}>
                 <PieChart>
                 <Pie
-                  data={equipmentTypeRatioChartData}
-                  dataKey="value"
-                  nameKey="name"
-                  innerRadius={70}
-                  outerRadius={115}
-                  paddingAngle={2}
-                  labelLine={false}
-                  label={false}
-                >
+  data={equipmentTypeRatioChartData}
+  dataKey="value"
+  nameKey="name"
+  cx="50%"
+  cy="50%"
+  innerRadius={55}
+  outerRadius={85}
+  paddingAngle={2}
+  labelLine={false}
+  label={false}
+>
                   {equipmentTypeRatioChartData.map((entry, index) => (
                     <Cell
                       key={`cell-${entry.name}`}
@@ -3663,7 +3723,7 @@ function OperationsPage({
                   }}
                 />
               </PieChart>
-              </ResponsiveContainer>
+              </ChartFrame>
             </div>
 
             <div className="max-h-[310px] overflow-y-auto pr-2 xl:border-l border-gray-700 xl:pl-3">
@@ -3704,7 +3764,7 @@ function OperationsPage({
 
       {selectedEquipmentHistory && (
         <div className="fixed inset-0 bg-black/75 backdrop-blur-sm flex items-center justify-center z-[10000] p-3">
-          <div className="bg-slate-950 text-white w-full max-w-[min(1150px,calc(100vw-2rem))] max-h-[88vh] rounded-3xl shadow-2xl border border-slate-700 overflow-hidden">
+          <div className="bg-slate-950 text-white w-full max-w-[min(1150px,calc(100vw-2rem))] max-h-[92vh] rounded-3xl shadow-2xl border border-slate-700 overflow-hidden">
             <div className="p-3 sm:p-5 border-b border-gray-700 flex justify-between items-start gap-3">
               <div>
                 <h2 className="text-xl sm:text-2xl font-bold text-yellow-400 italic underline">
@@ -4001,7 +4061,10 @@ function OperationsPage({
           closeForm={closeForm}
           fuelers={fuelers}
           stations={stations}
+          allStations={allStations}
           assets={assets}
+          projects={projects}
+          currentUser={currentUser}
           transactionType={transactionType}
           setTransactionType={setTransactionType}
           stationMeterPhoto={stationMeterPhoto}
@@ -4012,8 +4075,6 @@ function OperationsPage({
           setAssetMeterPhoto={setAssetMeterPhoto}
           getLastOdometerForEquipment={getLastOdometerForEquipment}
           onSaveOperation={saveNewOperation}
-          currentUser={currentUser}
-          allowedTransactionTypes={getAllowedTransactionTypesForUser(currentUser)}
         />
       )}
       </div>
@@ -4607,7 +4668,7 @@ const printAssetsReport = () => {
 };
   return (
     <div className="bg-gray-900 min-h-screen text-white overflow-y-auto h-screen">
-      <div className="w-full max-w-[1920px] mx-auto px-3 sm:px-4 lg:px-5 xl:px-6 2xl:px-8 py-3 sm:py-4 lg:py-5 text-[12px] lg:text-[13px]">
+      <div className="fleet-page-shell w-full max-w-[1920px] mx-auto px-2 sm:px-3 lg:px-4 xl:px-5 2xl:px-8 py-3 sm:py-4 lg:py-5 text-[12px] lg:text-[13px]">
       <div className="flex justify-between items-center mb-4 gap-4">
   <div>
     <h1 className="text-xl sm:text-2xl font-bold">Assets</h1>
@@ -4784,20 +4845,20 @@ const printAssetsReport = () => {
 
 
       <div className="bg-gray-800 rounded-xl shadow overflow-hidden border border-gray-700 p-4 mb-4">
-        <h2 className="text-base sm:text-lg font-extrabold text-amber-300 mb-3">
+        <h2 className="fleet-chart-title text-base sm:text-lg font-extrabold text-amber-300 mb-3">
           Consumed Quantity Per Equipment No.
         </h2>
 
         <div className="overflow-x-auto overflow-y-hidden pb-2">
           <div style={{ width: `${assetConsumptionChartWidth}px`, height: "340px" }}>
-            <ResponsiveContainer width="100%" height="100%">
+            <ChartFrame height={260}>
               <BarChart data={assetConsumptionChartData}>
-                <XAxis dataKey="equipmentNo" stroke="#ccc" tick={{ fontSize: 11 }} />
+                <XAxis dataKey="equipmentNo" stroke="#ccc" tick={{ fontSize: 11 }} minTickGap={16} />
                 <YAxis stroke="#ccc" tick={{ fontSize: 11 }} />
                 <Tooltip />
                 <Bar dataKey="qtyLiters" fill="#86efac" name="Qty Liters" />
               </BarChart>
-            </ResponsiveContainer>
+            </ChartFrame>
           </div>
         </div>
       </div>
@@ -4926,7 +4987,7 @@ const printAssetsReport = () => {
       )}
 
       {projectTargetAsset && (
-        <div className="fixed inset-0 bg-black/60 flex items-center justify-center z-50">
+        <div className="fleet-modal-backdrop fixed inset-0 z-[9998] bg-black/60 flex items-center justify-center z-50">
           <div className="bg-white text-black w-[520px] rounded-xl shadow-xl p-6">
             <h2 className="text-xl font-bold mb-4">Change Project</h2>
 
@@ -4985,7 +5046,7 @@ const printAssetsReport = () => {
       )}
 
       {showProjectConfirm && (
-        <div className="fixed inset-0 bg-black/60 flex items-center justify-center z-50">
+        <div className="fleet-modal-backdrop fixed inset-0 z-[9998] bg-black/60 flex items-center justify-center z-50">
           <div className="bg-white text-black w-[520px] rounded-xl shadow-xl p-6">
             <h2 className="text-xl font-bold mb-4 text-red-600">
               Confirm Project Change
@@ -5026,7 +5087,7 @@ const printAssetsReport = () => {
       )}
 
       {showProjectPassword && (
-        <div className="fixed inset-0 bg-black/60 flex items-center justify-center z-50">
+        <div className="fleet-modal-backdrop fixed inset-0 z-[9998] bg-black/60 flex items-center justify-center z-50">
           <div className="bg-white text-black w-[520px] rounded-xl shadow-xl p-6">
             <h2 className="text-xl font-bold mb-4">
               Admin Password Required
@@ -5729,7 +5790,7 @@ function StationsPage({
 
   return (
     <div className="bg-gray-900 min-h-screen text-white overflow-y-auto h-screen">
-      <div className="w-full max-w-[1920px] mx-auto px-3 sm:px-4 lg:px-5 xl:px-6 2xl:px-8 py-3 sm:py-4 lg:py-5 text-[12px] lg:text-[13px]">
+      <div className="fleet-page-shell w-full max-w-[1920px] mx-auto px-2 sm:px-3 lg:px-4 xl:px-5 2xl:px-8 py-3 sm:py-4 lg:py-5 text-[12px] lg:text-[13px]">
       <div className="flex flex-col sm:flex-row justify-between sm:items-start xl:items-center gap-3 mb-4">
         <div>
           <h1 className="text-xl sm:text-2xl font-bold">Fuel Stations</h1>
@@ -5983,10 +6044,7 @@ function StationsPage({
           </span>
         </div>
 
-        <ResponsiveContainer
-          width="100%"
-          height={Math.max(220, stationConsumptionChartData.length * 45)}
-        >
+        <ChartFrame height={260}>
           <BarChart
             data={stationConsumptionChartData}
             barCategoryGap="35%"
@@ -6012,12 +6070,12 @@ function StationsPage({
               maxBarSize={45}
             />
           </BarChart>
-        </ResponsiveContainer>
+        </ChartFrame>
       </div>
 
       {selectedStationHistory && (
         <div className="fixed inset-0 bg-black/75 backdrop-blur-sm flex items-center justify-center z-[10000] p-3">
-          <div className="bg-slate-950 text-white w-full max-w-[min(1150px,calc(100vw-2rem))] max-h-[88vh] rounded-3xl shadow-2xl border border-slate-700 overflow-hidden">
+          <div className="bg-slate-950 text-white w-full max-w-[min(1150px,calc(100vw-2rem))] max-h-[92vh] rounded-3xl shadow-2xl border border-slate-700 overflow-hidden">
             <div className="p-3 sm:p-5 border-b border-gray-700 flex justify-between items-start gap-3">
               <div>
                 <h2 className="text-xl sm:text-2xl font-bold text-yellow-400 italic underline">
@@ -6123,7 +6181,7 @@ function StationsPage({
       )}
 
       {showForm && (
-        <div className="fixed inset-0 bg-black/60 flex items-center justify-center z-50">
+        <div className="fleet-modal-backdrop fixed inset-0 z-[9998] bg-black/60 flex items-center justify-center z-50">
           <div className="bg-white text-black w-[650px] rounded-xl shadow-xl p-6">
             <div className="flex justify-between items-center mb-6 border-b pb-3">
               <h2 className="text-xl sm:text-2xl font-bold">Add Station</h2>
@@ -6181,7 +6239,7 @@ function StationsPage({
       )}
 
       {showEdit && (
-        <div className="fixed inset-0 bg-black/60 flex items-center justify-center z-50">
+        <div className="fleet-modal-backdrop fixed inset-0 z-[9998] bg-black/60 flex items-center justify-center z-50">
           <div className="bg-white text-black w-[650px] rounded-xl shadow-xl p-6">
             <div className="flex justify-between items-center mb-6 border-b pb-3">
               <h2 className="text-xl sm:text-2xl font-bold">Edit Station</h2>
@@ -6237,7 +6295,7 @@ function StationsPage({
       )}
 
       {showConfirm && (
-        <div className="fixed inset-0 bg-black/60 flex items-center justify-center z-50">
+        <div className="fleet-modal-backdrop fixed inset-0 z-[9998] bg-black/60 flex items-center justify-center z-50">
           <div className="bg-white text-black w-[560px] rounded-xl shadow-xl p-6">
             <h2 className="text-xl font-bold mb-4 text-red-600">
               Inventory Adjustment
@@ -6303,7 +6361,7 @@ function StationsPage({
       )}
 
       {showPassword && selectedStation && (
-        <div className="fixed inset-0 bg-black/60 flex items-center justify-center z-50">
+        <div className="fleet-modal-backdrop fixed inset-0 z-[9998] bg-black/60 flex items-center justify-center z-50">
           <div className="bg-white text-black w-[520px] rounded-xl shadow-xl p-6">
             <h2 className="text-xl font-bold mb-4">
               Admin Password Required
@@ -6341,7 +6399,7 @@ function StationsPage({
       )}
 
       {showLiterPrice && (
-        <div className="fixed inset-0 bg-black/60 flex items-center justify-center z-50">
+        <div className="fleet-modal-backdrop fixed inset-0 z-[9998] bg-black/60 flex items-center justify-center z-50">
           <div className="bg-white text-black w-[520px] rounded-xl shadow-xl p-6">
             <div className="flex justify-between items-center mb-6 border-b pb-3">
               <h2 className="text-xl sm:text-2xl font-bold">Liter Price</h2>
@@ -6407,7 +6465,7 @@ function StationsPage({
       )}
 
       {showPriceConfirm && (
-        <div className="fixed inset-0 bg-black/60 flex items-center justify-center z-50">
+        <div className="fleet-modal-backdrop fixed inset-0 z-[9998] bg-black/60 flex items-center justify-center z-50">
           <div className="bg-white text-black w-[520px] rounded-xl shadow-xl p-6">
             <h2 className="text-xl font-bold mb-4 text-red-600">
               Confirm Liter Price Update
@@ -6449,7 +6507,7 @@ function StationsPage({
       )}
 
       {showPricePassword && (
-        <div className="fixed inset-0 bg-black/60 flex items-center justify-center z-50">
+        <div className="fleet-modal-backdrop fixed inset-0 z-[9998] bg-black/60 flex items-center justify-center z-50">
           <div className="bg-white text-black w-[520px] rounded-xl shadow-xl p-6">
             <h2 className="text-xl font-bold mb-4">
               Admin Password Required
@@ -7064,7 +7122,7 @@ function FuelersPage({
 
   return (
     <div className="bg-gray-900 min-h-screen text-white overflow-y-auto h-screen">
-      <div className="w-full max-w-[1920px] mx-auto px-3 sm:px-4 lg:px-5 xl:px-6 2xl:px-8 py-3 sm:py-4 lg:py-5 text-[12px] lg:text-[13px]">
+      <div className="fleet-page-shell w-full max-w-[1920px] mx-auto px-2 sm:px-3 lg:px-4 xl:px-5 2xl:px-8 py-3 sm:py-4 lg:py-5 text-[12px] lg:text-[13px]">
         <div className="flex flex-col sm:flex-row justify-between sm:items-start xl:items-center gap-3 mb-5">
           <div>
             <h1 className="text-xl sm:text-2xl font-bold">Fuelers Management</h1>
@@ -7246,14 +7304,14 @@ function FuelersPage({
             </div>
           </div>
 
-          <ResponsiveContainer width="100%" height={340}>
+          <ChartFrame height={260}>
             <BarChart data={chartData}>
               <XAxis dataKey="name" stroke="#ccc" tick={{ fontSize: 11 }} />
               <YAxis stroke="#ccc" tick={{ fontSize: 11 }} />
               <Tooltip />
               <Bar dataKey="dieselQty" fill="#60a5fa" name="Diesel Qty" />
             </BarChart>
-          </ResponsiveContainer>
+          </ChartFrame>
         </div>
 
         {fuelerAuditLog.length > 0 && (
@@ -7286,7 +7344,7 @@ function FuelersPage({
 
         {selectedFuelerHistory && (
           <div className="fixed inset-0 bg-black/75 backdrop-blur-sm flex items-center justify-center z-[10000] p-3">
-            <div className="bg-gray-900 text-white w-[1180px] max-h-[88vh] rounded-3xl shadow-2xl border border-gray-700 overflow-hidden">
+            <div className="bg-gray-900 text-white w-[1180px] max-h-[92vh] rounded-3xl shadow-2xl border border-gray-700 overflow-hidden">
               <div className="p-3 sm:p-5 border-b border-gray-700 flex justify-between items-start gap-3">
                 <div>
                   <h2 className="text-xl sm:text-2xl font-bold text-yellow-400 italic underline">
@@ -8090,7 +8148,7 @@ function ProjectsPage({
 
   return (
     <div className="bg-gray-900 min-h-screen text-white overflow-y-auto h-screen">
-      <div className="w-full max-w-[1920px] mx-auto px-3 sm:px-4 lg:px-5 xl:px-6 2xl:px-8 py-3 sm:py-4 lg:py-5 text-[12px] lg:text-[13px]">
+      <div className="fleet-page-shell w-full max-w-[1920px] mx-auto px-2 sm:px-3 lg:px-4 xl:px-5 2xl:px-8 py-3 sm:py-4 lg:py-5 text-[12px] lg:text-[13px]">
         <div className="flex flex-col lg:flex-row lg:justify-between lg:items-start gap-4 mb-4">
           <div>
             <h1 className="text-xl sm:text-2xl font-bold">Projects / Sites</h1>
@@ -8445,7 +8503,10 @@ function AddOperationModal({
   closeForm,
   fuelers,
   stations,
+  allStations = [],
   assets = [],
+  projects = [],
+  currentUser,
   transactionType,
   setTransactionType,
   stationMeterPhoto,
@@ -8456,8 +8517,6 @@ function AddOperationModal({
   setAssetMeterPhoto,
   getLastOdometerForEquipment,
   onSaveOperation,
-  currentUser,
-  allowedTransactionTypes = ["Direct_Refuel", "Internal_Transfer", "External_Supply"],
 }) {
   const [sourceStation, setSourceStation] = useState("");
   const [fuelerId, setFuelerId] = useState("");
@@ -8465,93 +8524,129 @@ function AddOperationModal({
   const [dieselQuantity, setDieselQuantity] = useState("");
   const [odometer, setOdometer] = useState("");
 
+  const [transactionTypeSearch, setTransactionTypeSearch] = useState("");
   const [sourceStationSearch, setSourceStationSearch] = useState("");
   const [fuelerSearch, setFuelerSearch] = useState("");
-  const [transactionTypeSearch, setTransactionTypeSearch] = useState("");
   const [destinationSearch, setDestinationSearch] = useState("");
 
-  const selectedStation = stations.find((station) => station.id === sourceStation);
-  const selectedProject = selectedStation?.project || "";
+  const isOperator = currentUser?.role === "Operator";
+  const userProjectScope = getUserProjectScope(currentUser);
+  const isAllProjectsUser = userCanAccessAllProjects(currentUser);
 
-  const activeSourceStations = stations.filter((station) => {
+  const isItemInUserProject = (projectValue) => {
+    return isAllProjectsUser || isProjectAllowedForUser(currentUser, projectValue, projects);
+  };
+
+  const allowedTransactionTypes = getAllowedTransactionTypesForUser(currentUser);
+  const transactionTypesForAdd = allowedTransactionTypes.includes("External_Transfer")
+    ? allowedTransactionTypes
+    : ["Admin", "Manager"].includes(currentUser?.role)
+    ? [...allowedTransactionTypes, "External_Transfer"]
+    : allowedTransactionTypes;
+
+  const currentProjectStations = stations.filter((station) => {
     const status = String(station.status || "Active").trim().toLowerCase();
 
     return (
       station.id &&
       !isSameText(station.id, "External_Supply") &&
-      (status === "active" || status === "on duty")
-    );
-  });
-
-  const availableFuelers = fuelers.filter((fueler) => {
-    const sameProject = isSameText(fueler.projectName, selectedProject);
-    const status = String(fueler.status || "On Duty").trim().toLowerCase();
-
-    return (
-      sourceStation &&
-      sameProject &&
-      (status === "on duty" || status === "active")
-    );
-  });
-
-  const availableAssets = assets.filter((asset) => {
-    const sameProject = isSameText(asset.project, selectedProject);
-    const status = String(asset.status || "").trim().toLowerCase();
-
-    return sourceStation && sameProject && status === "active";
-  });
-
-  const availableDestinationStations = stations.filter((station) => {
-    const sameProject = isSameText(station.project, selectedProject);
-    const status = String(station.status || "Active").trim().toLowerCase();
-
-    return (
-      sourceStation &&
-      station.id !== sourceStation &&
-      !isSameText(station.id, "External_Supply") &&
-      sameProject &&
+      isItemInUserProject(station.project) &&
       status === "active"
     );
   });
 
+  const otherProjectStations = (allStations.length ? allStations : stations).filter((station) => {
+    const status = String(station.status || "Active").trim().toLowerCase();
+
+    return (
+      station.id &&
+      !isSameText(station.id, "External_Supply") &&
+      !isItemInUserProject(station.project) &&
+      status === "active"
+    );
+  });
+
+  const currentProjectAssets = assets.filter((asset) => {
+    const status = String(asset.status || "").trim().toLowerCase();
+    return asset.id && isItemInUserProject(asset.project) && status === "active";
+  });
+
+  const currentProjectFuelers = fuelers.filter((fueler) => {
+    const status = String(fueler.status || "On Duty").trim().toLowerCase();
+
+    return (
+      fueler.id &&
+      isItemInUserProject(fueler.projectName) &&
+      (status === "on duty" || status === "active")
+    );
+  });
+
+  const operatorFueler =
+    currentProjectFuelers.find((fueler) =>
+      normalizeScopeValue(fueler.id) === normalizeScopeValue(currentUser?.fuelerId)
+    ) ||
+    currentProjectFuelers.find((fueler) =>
+      normalizeScopeValue(fueler.name) === normalizeScopeValue(currentUser?.fullName)
+    ) ||
+    currentProjectFuelers[0];
+
+  useEffect(() => {
+    if (isOperator && operatorFueler?.id) {
+      setFuelerId(operatorFueler.id);
+    }
+  }, [isOperator, operatorFueler?.id]);
+
+  const sourceStationDisabled = transactionType === "External_Supply";
+
+  const sourceStationOptions =
+    transactionType === "External_Supply"
+      ? []
+      : currentProjectStations.map((station) => station.id);
+
   const destinationOptions =
     transactionType === "Direct_Refuel"
-      ? availableAssets.map((asset) => asset.id)
+      ? currentProjectAssets.map((asset) => asset.id)
       : transactionType === "Internal_Transfer"
-      ? availableDestinationStations.map((station) => station.id)
+      ? currentProjectStations
+          .filter((station) => station.id !== sourceStation)
+          .map((station) => station.id)
       : transactionType === "External_Supply"
-      ? activeSourceStations.map((station) => station.id)
+      ? currentProjectStations.map((station) => station.id)
+      : transactionType === "External_Transfer"
+      ? otherProjectStations.map((station) => station.id)
       : [];
 
   const selectedAsset = assets.find((asset) => asset.id === destinationId);
   const tankCapacity = Number(selectedAsset?.fuelTank) || 0;
+  const selectedSourceStation = stations.find((station) => station.id === sourceStation);
+  const selectedDestinationStation = (allStations.length ? allStations : stations).find(
+    (station) => station.id === destinationId
+  );
 
   const lastOdometer =
     transactionType === "Direct_Refuel" && destinationId
       ? getLastOdometerForEquipment?.(destinationId) || 0
       : 0;
 
-  const resetAfterStationChange = () => {
-    setFuelerId("");
-    setTransactionType("");
+  const resetAfterTransactionTypeChange = (nextType) => {
+    setSourceStation("");
     setDestinationId("");
     setDieselQuantity("");
     setOdometer("");
-    setFuelerSearch("");
-    setTransactionTypeSearch("");
+    setSourceStationSearch("");
     setDestinationSearch("");
+
+    if (!isOperator) {
+      setFuelerId("");
+      setFuelerSearch("");
+    }
+
+    if (nextType === "External_Supply") {
+      setSourceStation("");
+    }
   };
 
-  const resetAfterFuelerChange = () => {
-    setTransactionType("");
-    setDestinationId("");
-    setDieselQuantity("");
-    setOdometer("");
-    setTransactionTypeSearch("");
-    setDestinationSearch("");
-  };
-
-  const resetAfterTransactionTypeChange = () => {
+  const resetAfterSourceStationChange = () => {
     setDestinationId("");
     setDieselQuantity("");
     setOdometer("");
@@ -8570,18 +8665,23 @@ function AddOperationModal({
   };
 
   const handleSave = () => {
-    if (!sourceStation) {
+    if (!transactionType) {
+      alert("Please select transaction type.");
+      return;
+    }
+
+    if (!transactionTypesForAdd.includes(transactionType)) {
+      alert("You are not allowed to add this transaction type.");
+      return;
+    }
+
+    if (transactionType !== "External_Supply" && !sourceStation) {
       alert("Please select source station.");
       return;
     }
 
     if (!fuelerId) {
       alert("Please select fueler.");
-      return;
-    }
-
-    if (!transactionType) {
-      alert("Please select transaction type.");
       return;
     }
 
@@ -8603,9 +8703,7 @@ function AddOperationModal({
       qty > tankCapacity
     ) {
       alert(
-        `Diesel quantity cannot exceed tank capacity (${formatNumber(
-          tankCapacity
-        )} L).`
+        `Diesel quantity cannot exceed tank capacity (${formatNumber(tankCapacity)} L).`
       );
       return;
     }
@@ -8620,9 +8718,7 @@ function AddOperationModal({
 
       if (lastOdometer > 0 && newOdometer < lastOdometer) {
         alert(
-          `Odometer / hour meter cannot be less than last reading (${formatNumber(
-            lastOdometer
-          )}).`
+          `Odometer / hour meter cannot be less than last reading (${formatNumber(lastOdometer)}).`
         );
         return;
       }
@@ -8637,7 +8733,7 @@ function AddOperationModal({
       operationId: `OP-${Date.now()}`,
       transactionDate: new Date().toISOString(),
       transactionType,
-      sourceStation,
+      sourceStation: transactionType === "External_Supply" ? "" : sourceStation,
       fuelerId,
       destinationId,
       dieselQuantity: qty,
@@ -8651,13 +8747,13 @@ function AddOperationModal({
   };
 
   return (
-    <div className="fixed inset-0 bg-black/70 flex items-center justify-center z-50 p-4">
+    <div className="fleet-modal-backdrop fixed inset-0 z-[9998] bg-black/70 flex items-center justify-center z-50 p-4">
       <div className="bg-white text-black w-full max-w-3xl rounded-2xl shadow-2xl overflow-hidden">
         <div className="flex justify-between items-center p-5 border-b">
           <div>
             <h2 className="text-2xl font-bold">Add Diesel Operation</h2>
             <p className="text-sm text-gray-500 mt-1">
-              Source station controls project, fuelers, and destinations
+              User project scope controls stations, fuelers, and destinations
             </p>
           </div>
 
@@ -8670,27 +8766,51 @@ function AddOperationModal({
         </div>
 
         <div className="p-5 grid grid-cols-1 gap-4 max-h-[80vh] overflow-y-auto">
+          <div className="bg-yellow-100 border border-yellow-300 rounded-xl p-3 text-sm">
+            User Project Scope:{" "}
+            <span className="font-bold">
+              {isAllProjectsUser ? "All Projects" : userProjectScope.join(", ") || "-"}
+            </span>
+          </div>
+
           <SearchableSelectField
-            label="Source Station"
-            value={sourceStation}
+            label="Transaction Type"
+            value={transactionType}
             onChange={(value) => {
-              setSourceStation(value);
-              resetAfterStationChange();
+              setTransactionType(value);
+              resetAfterTransactionTypeChange(value);
             }}
-            options={activeSourceStations.map((station) => station.id)}
-            placeholder="Select Source Station"
-            searchValue={sourceStationSearch}
-            setSearchValue={setSourceStationSearch}
+            options={transactionTypesForAdd}
+            placeholder="Select Transaction Type"
+            searchValue={transactionTypeSearch}
+            setSearchValue={setTransactionTypeSearch}
           />
 
-          {sourceStation && (
-            <div className="grid grid-cols-1 sm:grid-cols-3 items-start sm:items-center gap-2 sm:gap-4">
-              <label className="font-medium text-gray-700">
-                Station Project
-              </label>
+          <SearchableSelectField
+            label="Source Station"
+            value={transactionType === "External_Supply" ? "" : sourceStation}
+            onChange={(value) => {
+              setSourceStation(value);
+              resetAfterSourceStationChange();
+            }}
+            options={sourceStationOptions}
+            placeholder={
+              transactionType === "External_Supply"
+                ? "External Supply - No source station"
+                : transactionType
+                ? "Select Source Station"
+                : "Select Transaction Type First"
+            }
+            searchValue={sourceStationSearch}
+            setSearchValue={setSourceStationSearch}
+            disabled={!transactionType || sourceStationDisabled}
+          />
 
+          {transactionType !== "External_Supply" && sourceStation && (
+            <div className="grid grid-cols-1 sm:grid-cols-3 items-start sm:items-center gap-2 sm:gap-4">
+              <label className="font-medium text-gray-700">Source Project</label>
               <div className="col-span-2 bg-yellow-100 border border-yellow-300 rounded-lg p-2 text-gray-800 font-semibold">
-                {selectedProject || "-"}
+                {selectedSourceStation?.project || "-"}
               </div>
             </div>
           )}
@@ -8698,37 +8818,16 @@ function AddOperationModal({
           <SearchableSelectField
             label="Fueler"
             value={fuelerId}
-            onChange={(value) => {
-              setFuelerId(value);
-              resetAfterFuelerChange();
-            }}
-            options={availableFuelers.map((fueler) => fueler.id)}
+            onChange={(value) => setFuelerId(value)}
+            options={currentProjectFuelers.map((fueler) => fueler.id)}
             placeholder={
-              sourceStation
-                ? "Select Fueler"
-                : "Select Source Station First"
+              isOperator
+                ? operatorFueler?.id || "Operator fueler is not linked"
+                : "Select Fueler"
             }
             searchValue={fuelerSearch}
             setSearchValue={setFuelerSearch}
-            disabled={!sourceStation}
-          />
-
-          <SearchableSelectField
-            label="Transaction Type"
-            value={transactionType}
-            onChange={(value) => {
-              setTransactionType(value);
-              resetAfterTransactionTypeChange();
-            }}
-            options={allowedTransactionTypes}
-            placeholder={
-              fuelerId
-                ? "Select Transaction Type"
-                : "Select Fueler First"
-            }
-            searchValue={transactionTypeSearch}
-            setSearchValue={setTransactionTypeSearch}
-            disabled={!sourceStation || !fuelerId}
+            disabled={isOperator}
           />
 
           <SearchableSelectField
@@ -8737,16 +8836,30 @@ function AddOperationModal({
             onChange={(value) => handleDestinationChange(value)}
             options={destinationOptions}
             placeholder={
-              transactionType === ""
+              !transactionType
                 ? "Select Transaction Type First"
                 : transactionType === "Direct_Refuel"
-                ? "Search / Select Active Asset in Same Project"
+                ? "Search / Select Active Asset in Your Project"
+                : transactionType === "External_Transfer"
+                ? "Search / Select Station from Other Projects"
                 : "Search / Select Destination Station"
             }
             searchValue={destinationSearch}
             setSearchValue={setDestinationSearch}
-            disabled={!transactionType}
+            disabled={
+              !transactionType ||
+              (transactionType !== "External_Supply" && !sourceStation)
+            }
           />
+
+          {transactionType === "External_Transfer" && destinationId && (
+            <div className="grid grid-cols-1 sm:grid-cols-3 items-start sm:items-center gap-2 sm:gap-4">
+              <label className="font-medium text-gray-700">Destination Project</label>
+              <div className="col-span-2 bg-blue-50 border border-blue-200 rounded-lg p-2 text-gray-800 font-semibold">
+                {selectedDestinationStation?.project || "-"}
+              </div>
+            </div>
+          )}
 
           {transactionType === "Direct_Refuel" && destinationId && (
             <>
@@ -8754,21 +8867,15 @@ function AddOperationModal({
                 <label className="font-medium text-gray-700">
                   Last Odometer / Hour Meter
                 </label>
-
                 <div className="col-span-2 bg-gray-100 border rounded-lg p-2 text-gray-700">
                   {lastOdometer > 0 ? formatNumber(lastOdometer) : "-"}
                 </div>
               </div>
 
               <div className="grid grid-cols-1 sm:grid-cols-3 items-start sm:items-center gap-2 sm:gap-4">
-                <label className="font-medium text-gray-700">
-                  Tank Capacity
-                </label>
-
+                <label className="font-medium text-gray-700">Tank Capacity</label>
                 <div className="col-span-2 bg-gray-100 border rounded-lg p-2 text-gray-700">
-                  {tankCapacity > 0
-                    ? `${formatNumber(tankCapacity)} L`
-                    : "-"}
+                  {tankCapacity > 0 ? `${formatNumber(tankCapacity)} L` : "-"}
                 </div>
               </div>
             </>
@@ -8827,12 +8934,6 @@ function AddOperationModal({
             Cancel
           </button>
 
-          {transactionType === "External_Supply" && shouldExternalSupplyRequireApproval(currentUser) && (
-            <div className="mr-auto text-xs sm:text-sm bg-yellow-100 border border-yellow-300 text-yellow-800 rounded-xl px-3 py-2">
-              External Supply will be saved as Pending Manager Approval.
-            </div>
-          )}
-
           <button
             onClick={handleSave}
             className="bg-green-600 hover:bg-green-700 text-white px-5 py-2 rounded-xl font-semibold cursor-pointer"
@@ -8867,8 +8968,6 @@ function SearchableSelectField({
       .includes(String(searchValue || "").toLowerCase())
   );
 
-  const displayValue = value || placeholder;
-
   return (
     <div className="grid grid-cols-1 sm:grid-cols-3 items-start sm:items-center gap-2 sm:gap-4">
       <label className="font-medium text-gray-700">{label}</label>
@@ -8887,7 +8986,7 @@ function SearchableSelectField({
           }`}
         >
           <span className={value ? "text-black" : "text-gray-400"}>
-            {displayValue}
+            {value || placeholder}
           </span>
 
           <span className="text-gray-500">▾</span>
@@ -8937,7 +9036,7 @@ function SearchableSelectField({
 
 function GenericModal({ title, closeForm, saveText, onSave, children }) {
   return (
-    <div className="fixed inset-0 bg-black/60 flex items-center justify-center z-50">
+    <div className="fleet-modal-backdrop fixed inset-0 z-[9998] bg-black/60 flex items-center justify-center z-50">
       <div className="bg-white text-black w-[650px] rounded-xl shadow-xl p-6">
         <div className="flex justify-between items-center mb-6 border-b pb-3">
           <h2 className="text-xl sm:text-2xl font-bold">{title}</h2>
@@ -9111,7 +9210,7 @@ function Field({
  
 function Card({ title, value }) {
   return (
-    <div className="relative bg-slate-900/80 border border-slate-700/80 p-4 rounded-2xl shadow-xl shadow-black/10 min-w-0 overflow-hidden transition-all duration-200 hover:border-amber-400/50 hover:-translate-y-0.5">
+    <div className="fleet-modal-panel relative bg-slate-900/80 border border-slate-700/80 p-4 rounded-2xl shadow-xl shadow-black/10 min-w-0 overflow-hidden transition-all duration-200 hover:border-amber-400/50 hover:-translate-y-0.5">
       <div className="absolute top-4 right-4 h-2 w-2 rounded-full bg-amber-400/80" />
       <p className="text-[11px] sm:text-xs lg:text-sm text-slate-400 truncate pr-5">{title}</p>
  
@@ -9188,7 +9287,7 @@ function AuditTimelinePage({
 
   return (
     <div className="bg-transparent min-h-screen text-slate-100 overflow-y-auto h-screen scroll-smooth [scrollbar-color:#334155_transparent]">
-      <div className="relative isolate w-full max-w-[1920px] mx-auto px-3 sm:px-4 lg:px-5 xl:px-6 2xl:px-8 py-3 sm:py-4 lg:py-5 text-[12px] lg:text-[13px]">
+      <div className="fleet-page-shell relative isolate w-full max-w-[1920px] mx-auto px-2 sm:px-3 lg:px-4 xl:px-5 2xl:px-8 py-3 sm:py-4 lg:py-5 text-[12px] lg:text-[13px]">
         <div className="flex flex-col lg:flex-row lg:items-center justify-between gap-3 mb-4">
           <div>
             <h1 className="text-xl sm:text-2xl font-black tracking-tight text-slate-100">Enterprise Audit Timeline</h1>
@@ -9301,7 +9400,7 @@ function AuditTimelinePage({
       </div>
 
       {selectedEvent && (
-        <div className="fixed inset-0 z-[9999] bg-black/70 backdrop-blur-sm flex items-center justify-center p-4">
+        <div className="fleet-modal-backdrop fixed inset-0 z-[9998] bg-black/70 backdrop-blur-sm flex items-center justify-center p-4">
           <div className="bg-slate-950 border border-slate-700 rounded-3xl shadow-2xl w-full max-w-4xl max-h-[90vh] overflow-y-auto">
             <div className="p-5 border-b border-slate-800 flex items-start justify-between gap-4">
               <div>
@@ -9417,7 +9516,7 @@ function NotificationCenterPage({
 
   return (
     <div className="bg-transparent min-h-screen text-slate-100 overflow-y-auto h-screen scroll-smooth [scrollbar-color:#334155_transparent]">
-      <div className="w-full max-w-[1920px] mx-auto px-3 sm:px-4 lg:px-5 xl:px-6 2xl:px-8 py-4 text-[12px] lg:text-[13px]">
+      <div className="w-full max-w-[1920px] mx-auto px-2 sm:px-3 lg:px-4 xl:px-5 2xl:px-8 py-4 text-[12px] lg:text-[13px]">
         <div className="flex flex-col xl:flex-row xl:items-center justify-between gap-4 mb-5">
           <div>
             <h1 className="text-xl sm:text-2xl font-black tracking-tight text-slate-100">Notification Center</h1>
@@ -9522,7 +9621,7 @@ function NotificationCenterPage({
       </div>
 
       {selectedNotification && (
-        <div className="fixed inset-0 bg-black/70 backdrop-blur-sm z-[9999] flex items-center justify-center p-4">
+        <div className="fleet-modal-backdrop fixed inset-0 z-[9998] bg-black/70 backdrop-blur-sm z-[9999] flex items-center justify-center p-4">
           <div className="bg-slate-950 border border-slate-700 rounded-3xl shadow-2xl w-full max-w-3xl overflow-hidden">
             <div className="p-5 border-b border-slate-800 flex items-start justify-between gap-3">
               <div>
@@ -9942,7 +10041,7 @@ function ApprovalsPage({
       </div>
 
       {selectedRequest && (
-        <div className="fixed inset-0 bg-black/70 backdrop-blur-sm z-[9999] flex items-center justify-center p-4">
+        <div className="fleet-modal-backdrop fixed inset-0 z-[9998] bg-black/70 backdrop-blur-sm z-[9999] flex items-center justify-center p-4">
           <div className="bg-slate-950 border border-slate-700 rounded-3xl shadow-2xl w-full max-w-5xl max-h-[90vh] overflow-hidden">
             <div className="p-5 border-b border-slate-800 flex flex-col sm:flex-row sm:items-start justify-between gap-3">
               <div>
@@ -10280,7 +10379,7 @@ function UsersPage({
 
   return (
     <div className="bg-transparent min-h-screen text-slate-100 overflow-y-auto h-screen scroll-smooth [scrollbar-color:#334155_transparent]">
-      <div className="w-full max-w-[1920px] mx-auto px-3 sm:px-4 lg:px-5 xl:px-6 2xl:px-8 py-3 sm:py-4 lg:py-5 text-[12px] lg:text-[13px]">
+      <div className="fleet-page-shell w-full max-w-[1920px] mx-auto px-2 sm:px-3 lg:px-4 xl:px-5 2xl:px-8 py-3 sm:py-4 lg:py-5 text-[12px] lg:text-[13px]">
         <div className="flex flex-col xl:flex-row justify-between xl:items-center gap-3 mb-4">
           <div>
             <h1 className="text-xl sm:text-2xl font-black tracking-tight text-slate-100">Users & Roles</h1>
@@ -10373,7 +10472,7 @@ function UsersPage({
 
             <div className="max-h-72 overflow-auto rounded-xl border border-slate-800">
               <table className="w-full text-left text-sm">
-                <thead className="bg-slate-950 sticky top-0 z-10">
+                <thead className="bg-slate-950 sticky top-0 z-[5]">
                   <tr>
                     <th className="p-3">Time</th>
                     <th className="p-3">User</th>
@@ -10407,7 +10506,7 @@ function UsersPage({
         <div className="bg-slate-900/80 border border-slate-700/80 rounded-2xl shadow-xl overflow-hidden">
           <div className="overflow-x-auto">
             <table className="w-full text-left text-sm min-w-[1050px]">
-              <thead className="bg-slate-950 sticky top-0 z-10">
+              <thead className="bg-slate-950 sticky top-0 z-[5]">
                 <tr>
                   <th className="p-3">User</th>
                   <th className="p-3">Role</th>
@@ -10484,7 +10583,7 @@ function UsersPage({
       </div>
 
       {showForm && (
-        <div className="fixed inset-0 z-[9999] bg-black/70 backdrop-blur-sm flex items-center justify-center p-4">
+        <div className="fleet-modal-backdrop fixed inset-0 z-[9998] bg-black/70 backdrop-blur-sm flex items-center justify-center p-4">
           <div className="bg-slate-950 border border-slate-700 rounded-2xl shadow-2xl w-full max-w-3xl max-h-[90vh] overflow-y-auto">
             <div className="p-5 border-b border-slate-800 flex items-center justify-between">
               <div>
