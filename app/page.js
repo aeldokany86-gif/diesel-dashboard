@@ -11212,19 +11212,28 @@ function SelectField({
 }
  
 function ImageField({ label, preview, setPreview }) {
+  const isMobile =
+    /Android|iPhone|iPad|iPod/i.test(navigator.userAgent);
+
   return (
     <div className="grid grid-cols-1 sm:grid-cols-3 items-start gap-2 sm:gap-4 mb-4">
       <label className="font-medium text-gray-700">{label}</label>
+
       <div className="col-span-2">
         <input
           type="file"
           accept="image/*"
+          capture={isMobile ? "environment" : undefined}
           className="border rounded-lg p-2 w-full"
           onChange={(e) => {
             const file = e.target.files[0];
-            if (file) setPreview(URL.createObjectURL(file));
+
+            if (file) {
+              setPreview(URL.createObjectURL(file));
+            }
           }}
         />
+
         {preview && (
           <img
             src={preview}
