@@ -1257,6 +1257,7 @@ export default function Home() {
   const [theme, setTheme] = useState("dark");
   const [showThemeSettings, setShowThemeSettings] = useState(false);
   const [sidebarCollapsed, setSidebarCollapsed] = useState(false);
+  const [mobileSidebarOpen, setMobileSidebarOpen] = useState(false);
  
   const [data, setData] = useState([]);
   const [headers, setHeaders] = useState([]);
@@ -1350,6 +1351,7 @@ export default function Home() {
     localStorage.removeItem(AUTH_SESSION_KEY);
     setCurrentUserId("");
     setPage("operations");
+    setMobileSidebarOpen(false);
   };
 
   const handleDevUserSwitch = (userId) => {
@@ -1850,6 +1852,8 @@ const currentUserProjectLabel =
         ? currentUser.assignedProjects.join(", ")
         : "No Project Assigned");
 
+const sidebarContentCollapsed = sidebarCollapsed && !mobileSidebarOpen;
+
 if (users.length === 0 || !authLoaded) {
   return (
     <div className="min-h-screen bg-[#070b14] flex items-center justify-center text-slate-100">
@@ -2121,19 +2125,70 @@ if (!currentUser) {
         .fleet-sticky-layer {
           z-index: 5 !important;
         }
+
+
+        /* Settings dropdown clipping fix */
+        .fleet-page-shell,
+        .settings-layer-safe {
+          overflow: visible;
+        }
+
+
+        /* Mobile sidebar drawer */
+        .fleet-mobile-topbar {
+          display: none;
+        }
+
+        @media (max-width: 1023px) {
+          .fleet-mobile-topbar {
+            display: flex;
+          }
+
+          .fleet-mobile-sidebar {
+            width: min(288px, 86vw) !important;
+            max-width: 86vw;
+          }
+
+          .theme-main-bg {
+            width: 100%;
+          }
+        }
+
 `}</style>
 
       <div data-theme={theme} className="min-h-screen bg-[#070b14] flex overflow-hidden text-slate-100">
-      <div className={`${sidebarCollapsed ? "w-20" : "w-64"} shrink-0 bg-[#050814] text-white border-r border-slate-800/80 shadow-2xl p-4 hidden lg:flex lg:flex-col transition-all duration-300`}>
+      {mobileSidebarOpen && (
+        <button
+          type="button"
+          aria-label="Close mobile sidebar overlay"
+          onClick={() => setMobileSidebarOpen(false)}
+          className="fixed inset-0 z-[10030] bg-black/65 backdrop-blur-sm lg:hidden"
+        />
+      )}
+
+      <div
+        className={`fleet-mobile-sidebar ${sidebarContentCollapsed ? "lg:w-20" : "lg:w-64"} fixed lg:static inset-y-0 left-0 z-[10040] shrink-0 bg-[#050814] text-white border-r border-slate-800/80 shadow-2xl p-4 flex flex-col transition-all duration-300 ${
+          mobileSidebarOpen ? "translate-x-0" : "-translate-x-full"
+        } lg:translate-x-0`}
+      >
+        <button
+          type="button"
+          onClick={() => setMobileSidebarOpen(false)}
+          className="lg:hidden absolute top-3 right-3 h-9 w-9 rounded-xl border border-slate-700 bg-slate-900 text-slate-300"
+          aria-label="Close sidebar menu"
+        >
+          ×
+        </button>
+
         <div className="flex flex-col items-center mb-5">
           <img
             src={theme === "dark" ? "/icons/fleet-fuel-pro-dark.png" : "/icons/fleet-fuel-pro-light.png"}
             alt="Fleet Fuel PRO"
-            className={`${sidebarCollapsed ? "w-12" : "w-28"} h-auto object-contain mb-3 select-none transition-all duration-300`}
+            className={`${sidebarContentCollapsed ? "w-12" : "w-28"} h-auto object-contain mb-3 select-none transition-all duration-300`}
             draggable={false}
           />
 
-          {!sidebarCollapsed && (
+          {!sidebarContentCollapsed && (
             <p className="text-[11px] text-slate-500 uppercase tracking-[0.22em] text-center">
               Fleet Fuel Management System
             </p>
@@ -2141,24 +2196,27 @@ if (!currentUser) {
         </div>
 
         <button
-          onClick={() => setSidebarCollapsed(!sidebarCollapsed)}
-          className="mb-4 w-full flex items-center justify-center gap-2 px-3 py-2 rounded-xl text-xs font-semibold cursor-pointer transition-all duration-200 text-slate-400 hover:bg-slate-800/70 hover:text-white border border-slate-800/80"
-          title={sidebarCollapsed ? "Expand sidebar" : "Collapse sidebar"}
+          onClick={() => setSidebarCollapsed(!sidebarContentCollapsed)}
+          className="mb-4 w-full hidden lg:flex items-center justify-center gap-2 px-3 py-2 rounded-xl text-xs font-semibold cursor-pointer transition-all duration-200 text-slate-400 hover:bg-slate-800/70 hover:text-white border border-slate-800/80"
+          title={sidebarContentCollapsed ? "Expand sidebar" : "Collapse sidebar"}
         >
-          <span>{sidebarCollapsed ? "»" : "«"}</span>
-          {!sidebarCollapsed && <span>Collapse</span>}
+          <span>{sidebarContentCollapsed ? "»" : "«"}</span>
+          {!sidebarContentCollapsed && <span>Collapse</span>}
         </button>
  
         <ul className="space-y-2">
           {sidebarItems.map(({ key, label, Icon }) => (
             <li key={key}>
               <button
-                onClick={() => setPage(key)}
-                className={`w-full flex items-center ${sidebarCollapsed ? "justify-center px-3" : "gap-3 text-left px-4"} py-3 rounded-xl text-sm font-semibold cursor-pointer transition-all duration-200 ${page === key ? "bg-amber-400 text-slate-950 shadow-lg shadow-amber-500/15" : "text-slate-300 hover:bg-slate-800/70 hover:text-white"}`}
+                onClick={() => {
+                  setPage(key);
+                  setMobileSidebarOpen(false);
+                }}
+                className={`w-full flex items-center ${sidebarContentCollapsed ? "justify-center px-3" : "gap-3 text-left px-4"} py-3 rounded-xl text-sm font-semibold cursor-pointer transition-all duration-200 ${page === key ? "bg-amber-400 text-slate-950 shadow-lg shadow-amber-500/15" : "text-slate-300 hover:bg-slate-800/70 hover:text-white"}`}
                 title={label}
               >
                 <Icon size={18} className="shrink-0" />
-                {!sidebarCollapsed && (
+                {!sidebarContentCollapsed && (
                   <span className="flex items-center gap-2">
                     <span>{label}</span>
                     {key === "notifications" && unreadNotificationCount > 0 && (
@@ -2178,7 +2236,7 @@ if (!currentUser) {
           ))}
         </ul>
 
-        {!sidebarCollapsed && currentUser && (
+        {!sidebarContentCollapsed && currentUser && (
           <div className="mt-4 rounded-2xl border border-slate-800/80 bg-slate-900/60 p-3">
             <p className="text-[10px] uppercase tracking-[0.2em] text-slate-500 mb-1">Signed in as</p>
             <p className="login-text text-sm font-bold text-slate-100 truncate">{currentUser.fullName}</p>
@@ -2222,7 +2280,7 @@ if (!currentUser) {
           <div className="relative">
             <button
               onClick={() => setShowThemeSettings(!showThemeSettings)}
-              className={`w-full flex items-center ${sidebarCollapsed ? "justify-center px-3" : "justify-between gap-3 px-4"} py-3 rounded-xl text-sm font-semibold cursor-pointer transition-all duration-200 text-slate-300 hover:bg-slate-800/70 hover:text-white`}
+              className={`w-full flex items-center ${sidebarContentCollapsed ? "justify-center px-3" : "justify-between gap-3 px-4"} py-3 rounded-xl text-sm font-semibold cursor-pointer transition-all duration-200 text-slate-300 hover:bg-slate-800/70 hover:text-white`}
             >
               <span className="flex flex-wrap items-center gap-3">
                 <SidebarSvgIcon size={18} className="shrink-0">
@@ -2236,9 +2294,9 @@ if (!currentUser) {
                   <path d="m6.34 17.66-1.41 1.41" />
                   <path d="m19.07 4.93-1.41 1.41" />
                 </SidebarSvgIcon>
-                {!sidebarCollapsed && <span>Settings</span>}
+                {!sidebarContentCollapsed && <span>Settings</span>}
               </span>
-              {!sidebarCollapsed && <span className="text-xs text-slate-500">Theme</span>}
+              {!sidebarContentCollapsed && <span className="text-xs text-slate-500">Theme</span>}
             </button>
 
             {showThemeSettings && (
@@ -2277,6 +2335,73 @@ if (!currentUser) {
       </div>
  
       <div className="theme-main-bg flex-1 min-w-0 overflow-hidden bg-[radial-gradient(circle_at_top_left,rgba(245,158,11,0.08),transparent_34%),#0b1220]">
+        <div className="fleet-mobile-topbar lg:hidden sticky top-0 z-[10010] items-center justify-between gap-3 px-3 py-3 border-b border-slate-800 bg-[#050814]/95 backdrop-blur text-white">
+          <button
+            type="button"
+            onClick={() => setMobileSidebarOpen(true)}
+            className="h-10 w-10 flex items-center justify-center rounded-xl border border-slate-700 bg-slate-900 text-amber-300 shadow-lg"
+            aria-label="Open sidebar menu"
+          >
+            ☰
+          </button>
+
+          <div className="flex items-center gap-2 min-w-0">
+            <img
+              src={theme === "dark" ? "/icons/fleet-fuel-pro-dark.png" : "/icons/fleet-fuel-pro-light.png"}
+              alt="Fleet Fuel PRO"
+              className="h-8 w-auto object-contain shrink-0"
+              draggable={false}
+            />
+            <div className="min-w-0">
+              <p className="text-sm font-black text-slate-100 truncate">Fleet Fuel PRO</p>
+              <p className="text-[10px] uppercase tracking-[0.14em] text-slate-500 truncate">
+                {currentUser?.role || "User"} • {currentUserProjectLabel}
+              </p>
+            </div>
+          </div>
+
+          <button
+            type="button"
+            onClick={() => setShowThemeSettings((prev) => !prev)}
+            className="h-10 w-10 flex items-center justify-center rounded-xl border border-slate-700 bg-slate-900 text-slate-300 shadow-lg"
+            aria-label="Open theme settings"
+          >
+            ⚙
+          </button>
+        </div>
+
+        {showThemeSettings && (
+          <div className="lg:hidden fixed right-3 top-[62px] z-[10020] w-44 bg-slate-950 border border-slate-700 rounded-2xl shadow-2xl overflow-hidden">
+            <button
+              onClick={() => {
+                setTheme("dark");
+                setShowThemeSettings(false);
+              }}
+              className={`w-full text-left px-4 py-3 text-sm transition-colors ${
+                theme === "dark"
+                  ? "bg-amber-400 text-slate-950 font-bold"
+                  : "text-slate-200 hover:bg-slate-800"
+              }`}
+            >
+              Dark Theme
+            </button>
+
+            <button
+              onClick={() => {
+                setTheme("light");
+                setShowThemeSettings(false);
+              }}
+              className={`w-full text-left px-4 py-3 text-sm border-t border-slate-700 transition-colors ${
+                theme === "light"
+                  ? "bg-amber-400 text-slate-950 font-bold"
+                  : "text-slate-200 hover:bg-slate-800"
+              }`}
+            >
+              Light Theme
+            </button>
+          </div>
+        )}
+
         {renderPage()}
 	{toast && <Toast type={toast.type} message={toast.message} />}
       </div>
@@ -4045,7 +4170,7 @@ function OperationsPage({
         </div>
       </div>
 
-      <div className="fleet-chart-card relative z-0 bg-slate-900/80 p-3 sm:p-4 rounded-2xl mb-4 border border-slate-700/80 shadow-xl shadow-black/10 overflow-hidden">
+      <div className="fleet-chart-card relative z-0 bg-slate-900/80 p-3 sm:p-4 rounded-2xl mb-4 border border-slate-700/80 shadow-xl shadow-black/10 overflow-visible">
         <h3 className="fleet-chart-title text-base sm:text-lg font-extrabold text-amber-300 mb-3">
           Consumed Quantity Over Time
         </h3>
@@ -4064,7 +4189,7 @@ function OperationsPage({
       </div>
 
       <div className="fleet-chart-grid grid grid-cols-1 xl:grid-cols-2 gap-4 2xl:gap-5 mb-5">
-        <div className="fleet-chart-card relative z-0 bg-slate-900/80 rounded-2xl shadow-xl shadow-black/10 overflow-hidden border border-slate-700/80 p-3 lg:p-4">
+        <div className="fleet-chart-card relative z-0 bg-slate-900/80 rounded-2xl shadow-xl shadow-black/10 overflow-visible border border-slate-700/80 p-3 lg:p-4">
           <h2 className="fleet-chart-title text-base sm:text-lg font-extrabold text-amber-300 mb-3">
             Consumed Quantity Per Equipment No.
           </h2>
@@ -4081,7 +4206,7 @@ function OperationsPage({
           </div>
         </div>
 
-        <div className="fleet-chart-card relative z-0 bg-slate-900/80 rounded-2xl shadow-xl shadow-black/10 overflow-hidden border border-slate-700/80 p-3 lg:p-4">
+        <div className="fleet-chart-card relative z-0 bg-slate-900/80 rounded-2xl shadow-xl shadow-black/10 overflow-visible border border-slate-700/80 p-3 lg:p-4">
           <h2 className="fleet-chart-title text-base sm:text-lg font-extrabold text-amber-300 mb-3">
             Consumed Quantity Ratio per Asset Type
           </h2>
@@ -5310,7 +5435,7 @@ const printAssetsReport = () => {
       className="bg-gray-800 border border-gray-700 rounded-xl px-4 py-3 text-white w-[380px] focus:outline-none focus:border-yellow-400"
     />
 
-    <div ref={assetSettingsRef} className="relative">
+    <div ref={assetSettingsRef} className="relative settings-layer-safe">
       <button
         onClick={() => setShowAssetSettings(!showAssetSettings)}
         className="bg-gray-800 hover:bg-gray-700 border border-gray-700 hover:border-yellow-400 text-yellow-400 px-3 lg:px-4 py-2 lg:py-3 rounded-xl shadow-lg transition-all duration-300 hover:scale-105"
@@ -5319,7 +5444,7 @@ const printAssetsReport = () => {
       </button>
 
       {showAssetSettings && (
-        <div className="absolute right-0 mt-3 w-56 bg-gray-900 border border-gray-700 rounded-2xl shadow-2xl overflow-hidden z-[10020]">
+        <div className="absolute right-0 mt-3 w-56 bg-gray-900 border border-gray-700 rounded-2xl shadow-2xl overflow-visible z-[10020]">
           {hasPermission("assets", "add") && (
             <button
               onClick={() => {
@@ -5396,7 +5521,7 @@ const printAssetsReport = () => {
       </div>
 
 
-      <div className="bg-gray-800 rounded-2xl shadow-xl overflow-hidden mb-4 border border-slate-700/70">
+      <div className="bg-gray-800 rounded-2xl shadow-xl overflow-visible mb-4 border border-slate-700/70">
         <div className="p-3 sm:p-4 border-b border-slate-700/80 flex flex-col sm:flex-row gap-2 sm:gap-3 justify-between sm:items-center bg-slate-900/70">
           <div>
             <h2 className="text-base sm:text-lg font-extrabold text-amber-300">
@@ -7155,7 +7280,7 @@ const [showConfirm, setShowConfirm] = useState(false);
           <p className="text-gray-400">Fuel stock management</p>
         </div>
 
-        <div ref={stationSettingsRef} className="relative">
+        <div ref={stationSettingsRef} className="relative settings-layer-safe">
          <button
   onClick={(e) => {
     e.stopPropagation();
@@ -7173,7 +7298,7 @@ const [showConfirm, setShowConfirm] = useState(false);
           {showSettings && (
             <div
               onClick={(e) => e.stopPropagation()}
-              className="absolute right-0 mt-3 w-64 bg-gray-900 border border-gray-700 rounded-2xl shadow-2xl overflow-hidden z-[10020] backdrop-blur-xl"
+              className="absolute right-0 mt-3 w-64 bg-gray-900 border border-gray-700 rounded-2xl shadow-2xl overflow-visible z-[10020] backdrop-blur-xl"
             >
               {hasPermission("stations", "add") && (
                 <button
@@ -10020,7 +10145,7 @@ function ProjectsPage({
               </button>
             )}
 
-            <div ref={settingsRef} className="relative shrink-0">
+            <div ref={settingsRef} className="relative shrink-0 settings-layer-safe">
               <button
                 onClick={() => setShowSettings(!showSettings)}
                 className="h-[48px] w-[48px] flex items-center justify-center bg-gray-800 hover:bg-gray-700 border border-gray-700 hover:border-yellow-400 text-yellow-400 rounded-xl transition"
@@ -10030,7 +10155,7 @@ function ProjectsPage({
               </button>
 
               {showSettings && (
-                <div className="absolute right-0 mt-2 w-48 bg-gray-900 border border-gray-700 rounded-xl shadow-2xl z-[10020] overflow-hidden">
+                <div className="absolute right-0 mt-2 w-48 bg-gray-900 border border-gray-700 rounded-xl shadow-2xl z-[10020] overflow-visible">
                   {hasPermission("projects", "add") && (
                     <button
                       onClick={() => {
