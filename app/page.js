@@ -1,6 +1,6 @@
 "use client";
  
-import React, { useEffect, useRef, useState } from "react";
+import React, { useEffect, useMemo, useRef, useState } from "react";
 import {
   LineChart,
   Line,
@@ -12,7 +12,6 @@ import {
   PieChart,
   Pie,
   Cell,
-  Legend,
 } from "recharts"; 
 
 function SidebarSvgIcon({ children, size = 18, className = "" }) {
@@ -164,6 +163,240 @@ const FUELERS_CSV =
 const PROJECTS_CSV =
   "https://docs.google.com/spreadsheets/d/e/2PACX-1vRX0JNF_J9UzMQ5lyr7pxPrdL0GeLD8TkCf4MPNGdyOPT9rATlsmUnBQjx0MVoNy4nPHiRKc7jtmeku/pub?gid=2050998594&single=true&output=csv";
 
+const USERS_ROLES_CSV =
+  "https://docs.google.com/spreadsheets/d/e/2PACX-1vRX0JNF_J9UzMQ5lyr7pxPrdL0GeLD8TkCf4MPNGdyOPT9rATlsmUnBQjx0MVoNy4nPHiRKc7jtmeku/pub?gid=877848969&single=true&output=csv";
+
+const SAUDI_PROJECT_LOCATIONS = [
+  "Riyadh Region",
+  "Makkah Region",
+  "Madinah Region",
+  "Eastern Province",
+  "Qassim Region",
+  "Asir Region",
+  "Tabuk Region",
+  "Hail Region",
+  "Northern Borders Region",
+  "Jazan Region",
+  "Najran Region",
+  "Al Bahah Region",
+  "Al Jouf Region",
+];
+
+const AUTH_SESSION_KEY = "fleet_fuel_pro_auth_session_v1";
+const DEFAULT_SESSION_MS = 8 * 60 * 60 * 1000;
+const REMEMBER_SESSION_MS = 7 * 24 * 60 * 60 * 1000;
+
+function buildAuthSession(userId, remember = false) {
+  const now = Date.now();
+
+  return {
+    userId,
+    loginAt: new Date(now).toISOString(),
+    lastActivityAt: new Date(now).toISOString(),
+    expiresAt: new Date(now + (remember ? REMEMBER_SESSION_MS : DEFAULT_SESSION_MS)).toISOString(),
+    remember,
+    source: "frontend-local-session",
+  };
+}
+
+function isAuthSessionValid(session) {
+  if (!session?.userId || !session?.expiresAt) return false;
+  const expiresAt = new Date(session.expiresAt).getTime();
+  return !Number.isNaN(expiresAt) && expiresAt > Date.now();
+}
+
+
+function notifyUser(showToastFn, type, message) {
+  const safeType = type || "info";
+  const safeMessage = String(message ?? "");
+
+  if (typeof showToastFn === "function") {
+    showToastFn(safeType, safeMessage);
+    return;
+  }
+
+  // Avoid browser-native alert boxes so the UI remains consistent.
+  if (safeType === "warning" || safeType === "error") {
+    console.warn(safeMessage);
+  } else {
+    console.log(safeMessage);
+  }
+}
+
+function inferToastTypeFromMessage(message) {
+  const normalized = String(message || "").toLowerCase();
+
+  if (
+    normalized.includes("success") ||
+    normalized.includes("saved") ||
+    normalized.includes("updated") ||
+    normalized.includes("exported") ||
+    normalized.includes("completed") ||
+    normalized.includes("submitted") ||
+    normalized.includes("added")
+  ) {
+    return "success";
+  }
+
+  if (
+    normalized.includes("not allowed") ||
+    normalized.includes("cannot") ||
+    normalized.includes("invalid") ||
+    normalized.includes("failed") ||
+    normalized.includes("error")
+  ) {
+    return "warning";
+  }
+
+  return "warning";
+}
+
+
+function cleanCsvCell(value) {
+  return String(value ?? "")
+    .replace(/^\uFEFF/, "")
+    .replace(/\r/g, "")
+    .trim()
+    .replace(/^"(.*)"$/s, "$1")
+    .replace(/""/g, '"')
+    .trim();
+}
+
+function parseCSV(csvText) {
+  const rows = [];
+  let currentRow = [];
+  let currentCell = "";
+  let insideQuotes = false;
+
+  for (let i = 0; i < String(csvText || "").length; i += 1) {
+    const char = csvText[i];
+    const nextChar = csvText[i + 1];
+
+    if (char === '"' && insideQuotes && nextChar === '"') {
+      currentCell += '"';
+      i += 1;
+      continue;
+    }
+
+    if (char === '"') {
+      insideQuotes = !insideQuotes;
+      continue;
+    }
+
+    if (char === "," && !insideQuotes) {
+      currentRow.push(cleanCsvCell(currentCell));
+      currentCell = "";
+      continue;
+    }
+
+    if ((char === "\n" || char === "\r") && !insideQuotes) {
+      if (char === "\r" && nextChar === "\n") {
+        i += 1;
+      }
+
+      currentRow.push(cleanCsvCell(currentCell));
+
+      if (currentRow.some((cell) => String(cell).trim() !== "")) {
+        rows.push(currentRow);
+      }
+
+      currentRow = [];
+      currentCell = "";
+      continue;
+    }
+
+    currentCell += char;
+  }
+
+  currentRow.push(cleanCsvCell(currentCell));
+
+  if (currentRow.some((cell) => String(cell).trim() !== "")) {
+    rows.push(currentRow);
+  }
+
+  return rows;
+}
+
+function normalizeSystemUserStatus(value) {
+  const normalized = String(value || "")
+    .trim()
+    .toLowerCase()
+    .replace(/[\s_-]+/g, "");
+
+  if (["inactive", "disabled", "deactivated"].includes(normalized)) return "Inactive";
+  if (["suspended", "blocked"].includes(normalized)) return "Suspended";
+  return "Active";
+}
+
+function normalizeSystemRole(value) {
+  const normalized = String(value || "Operator").trim().toLowerCase();
+  const compact = normalized.replace(/[\s_-]+/g, "");
+
+  if (normalized === "admin") return "Admin";
+  if (normalized === "manager") return "Manager";
+  if (normalized === "officer") return "Officer";
+  if (normalized === "supervisor") return "Supervisor";
+  if (compact === "topmanagement") return "TopManagement";
+  return "Operator";
+}
+
+function makeUsernameFromUser({ id, fullName, email }) {
+  const emailName = String(email || "").split("@")[0];
+  const raw = emailName || fullName || id || "user";
+
+  return String(raw)
+    .trim()
+    .toLowerCase()
+    .replace(/[^a-z0-9._-]+/g, ".")
+    .replace(/\.+/g, ".")
+    .replace(/^\.|\.$/g, "") || String(id || "user");
+}
+
+function getTeamMemberForUserId(userId, teamMembers = []) {
+  return teamMembers.find(
+    (member) => normalizeScopeValue(member.id) === normalizeScopeValue(userId)
+  );
+}
+
+function buildUsersFromRolesRows(userRows = [], userHeaders = [], teamMembers = []) {
+  return userRows
+    .slice(1)
+    .map((row) => {
+      const id = getValue(row, userHeaders, ["user_id", "User_id", "user id", "team_id", "Team_id", "id"]);
+      const linkedTeam = getTeamMemberForUserId(id, teamMembers);
+      const fullName = getValue(row, userHeaders, ["full_name", "Full Name", "full name", "name", "Team_name"]) || linkedTeam?.name || id;
+      const email = getValue(row, userHeaders, ["email", "Email", "user_email"]) || linkedTeam?.email || "";
+      const role = normalizeSystemRole(getValue(row, userHeaders, ["role", "Role"]));
+      const status = normalizeSystemUserStatus(getValue(row, userHeaders, ["user_status", "User Status", "status", "Status"]));
+      const projectName = linkedTeam?.projectName || "";
+      const projectScope = role === "Admin" ? ["All"] : projectName ? [projectName] : [];
+      const managedProjectScope = role === "Admin" ? ["All"] : role === "Manager" ? projectScope : [];
+      const loginEnabledRaw = getValue(row, userHeaders, ["login_enabled", "Login Enabled", "login", "enabled"]);
+      const loginEnabled = loginEnabledRaw === "" ? true : !["false", "no", "0", "disabled"].includes(String(loginEnabledRaw).trim().toLowerCase());
+
+      return {
+        id,
+        fullName,
+        username: makeUsernameFromUser({ id, fullName, email }),
+        email,
+        role,
+        status: loginEnabled ? status : "Inactive",
+        fuelerId: id,
+        teamId: id,
+        assignedProjects: projectScope,
+        managedProjects: managedProjectScope,
+        reportingManagerId: getValue(row, userHeaders, ["reporting_manager", "reporting_manager_id", "reporting manager"]),
+        mobile: linkedTeam?.mobile || "",
+        teamProject: projectName,
+        teamStatus: linkedTeam?.status || "",
+        passwordResetRequired: false,
+        lastLogin: "",
+        createdAt: new Date().toISOString(),
+      };
+    })
+    .filter((user) => user.id);
+}
+
 
 // ======================================================
 // USERS, ROLES & PERMISSIONS - ENTERPRISE READY LAYER
@@ -173,7 +406,7 @@ const ROLE_PERMISSIONS = {
     operations: { view: true, add: true, edit: true, delete: true, approve: true, export: true, print: true },
     assets: { view: true, add: true, edit: true, delete: true, approve: true, export: true, print: true },
     stations: { view: true, add: true, edit: true, delete: true, approve: true, adjustInventory: true, updatePrice: true, export: true, print: true },
-    fuelers: { view: true, add: true, edit: true, delete: true, approve: true, export: true, print: true },
+    team: { view: true, add: true, edit: true, delete: true, approve: true, export: true, print: true },
     projects: { view: true, add: true, edit: true, delete: true, approve: true, export: true, print: true },
     reports: { view: true, export: true, print: true },
     users: { view: true, add: true, edit: true, deactivate: true, resetPassword: true, assignRoles: true },
@@ -187,7 +420,7 @@ const ROLE_PERMISSIONS = {
     operations: { view: true, add: true, edit: true, delete: false, approve: true, export: true, print: true },
     assets: { view: true, add: true, edit: true, delete: false, approve: true, export: true, print: true },
     stations: { view: true, add: true, edit: true, delete: false, approve: true, adjustInventory: true, updatePrice: false, export: true, print: true },
-    fuelers: { view: true, add: true, edit: true, delete: false, approve: true, export: true, print: true },
+    team: { view: true, add: true, edit: true, delete: false, approve: true, export: true, print: true },
     projects: { view: true, add: true, edit: true, delete: false, approve: true, export: true, print: true },
     reports: { view: true, export: true, print: true },
     // Manager can monitor users later, but cannot manage the Users & Roles page in Phase 1.
@@ -205,7 +438,7 @@ const ROLE_PERMISSIONS = {
     operations: { view: true, add: false, edit: false, delete: false, approve: false, export: true, print: true },
     assets: { view: true, add: true, edit: true, delete: false, approve: false, export: true, print: true },
     stations: { view: true, add: true, edit: true, delete: false, approve: false, adjustInventory: true, updatePrice: false, export: true, print: true },
-    fuelers: { view: true, add: true, edit: true, delete: false, approve: false, export: true, print: true },
+    team: { view: true, add: true, edit: true, delete: false, approve: false, export: true, print: true },
     projects: { view: true, add: true, edit: true, delete: false, approve: false, export: true, print: true },
     reports: { view: true, export: true, print: true },
     users: { view: false, add: false, edit: false, deactivate: false, resetPassword: false, assignRoles: false },
@@ -215,13 +448,30 @@ const ROLE_PERMISSIONS = {
     auditLog: { view: true, export: false },
   },
 
+  TopManagement: {
+    // Executive visibility role.
+    // Can view all operational pages and reports, but cannot perform actions or access governance/security pages.
+    operations: { view: true, add: false, edit: false, delete: false, approve: false, export: true, print: true },
+    assets: { view: true, add: false, edit: false, delete: false, approve: false, export: true, print: true },
+    stations: { view: true, add: false, edit: false, delete: false, approve: false, adjustInventory: false, updatePrice: false, export: true, print: true },
+    team: { view: true, add: false, edit: false, delete: false, approve: false, export: true, print: true },
+    projects: { view: true, add: false, edit: false, delete: false, approve: false, export: true, print: true },
+    reports: { view: true, export: true, print: true },
+    users: { view: false, add: false, edit: false, deactivate: false, resetPassword: false, assignRoles: false },
+    approvals: { view: false, approve: false, reject: false },
+    notifications: { view: false, markRead: false },
+    auditTimeline: { view: false, export: false },
+    auditLog: { view: false, export: false },
+  },
+
+
   Supervisor: {
     // Supervisor is site-limited in Phase 2.
     // He can access Operations only, and can edit operations inside his assigned project scope.
     operations: { view: true, add: true, edit: true, delete: false, approve: false, export: true, print: true },
     assets: { view: false, add: false, edit: false, delete: false, approve: false, export: false, print: false },
     stations: { view: false, add: false, edit: false, delete: false, approve: false, adjustInventory: false, updatePrice: false, export: false, print: false },
-    fuelers: { view: false, add: false, edit: false, delete: false, approve: false, export: false, print: false },
+    team: { view: false, add: false, edit: false, delete: false, approve: false, export: false, print: false },
     projects: { view: false, add: false, edit: false, delete: false, approve: false, export: false, print: false },
     reports: { view: false, export: false, print: false },
     users: { view: false, add: false, edit: false, deactivate: false, resetPassword: false, assignRoles: false },
@@ -237,7 +487,7 @@ const ROLE_PERMISSIONS = {
     operations: { view: true, add: true, edit: false, delete: false, approve: false, export: false, print: false },
     assets: { view: false, add: false, edit: false, delete: false, approve: false, export: false, print: false },
     stations: { view: false, add: false, edit: false, delete: false, approve: false, adjustInventory: false, updatePrice: false, export: false, print: false },
-    fuelers: { view: false, add: false, edit: false, delete: false, approve: false, export: false, print: false },
+    team: { view: false, add: false, edit: false, delete: false, approve: false, export: false, print: false },
     projects: { view: false, add: false, edit: false, delete: false, approve: false, export: false, print: false },
     reports: { view: false, export: false, print: false },
     users: { view: false, add: false, edit: false, deactivate: false, resetPassword: false, assignRoles: false },
@@ -248,98 +498,7 @@ const ROLE_PERMISSIONS = {
   },
 };
 
-const INITIAL_USERS = [
-  {
-    id: "USR-001",
-    fullName: "Amr Eldokany",
-    username: "amr",
-    email: "amr@fleetfuel.local",
-    role: "Admin",
-    status: "Active",
-    assignedProjects: ["All"],
-    managedProjects: ["All"],
-    reportingManagerId: "",
-    mobile: "",
-    passwordResetRequired: false,
-    lastLogin: "2026-05-10T08:00:00.000Z",
-    createdAt: "2026-05-10T08:00:00.000Z",
-  },
-  {
-    id: "USR-002",
-    fullName: "KAFD Project Manager",
-    username: "manager.kafd",
-    email: "manager.kafd@fleetfuel.local",
-    role: "Manager",
-    status: "Active",
-    assignedProjects: ["KAFD", "kafd", "الكافد", "كافد"],
-    managedProjects: ["KAFD", "kafd", "الكافد", "كافد"],
-    reportingManagerId: "",
-    mobile: "",
-    passwordResetRequired: true,
-    lastLogin: "",
-    createdAt: "2026-05-10T08:10:00.000Z",
-  },
-  {
-    id: "USR-006",
-    fullName: "Qiddiya Project Manager",
-    username: "manager.qiddiya",
-    email: "manager.qiddiya@fleetfuel.local",
-    role: "Manager",
-    status: "Active",
-    assignedProjects: ["Qiddiya", "qiddiya", "القادسية", "قدية"],
-    managedProjects: ["Qiddiya", "qiddiya", "القادسية", "قدية"],
-    reportingManagerId: "",
-    mobile: "",
-    passwordResetRequired: true,
-    lastLogin: "",
-    createdAt: "2026-05-10T08:12:00.000Z",
-  },
-  {
-    id: "USR-003",
-    fullName: "KAFD Fleet Officer",
-    username: "officer.kafd",
-    email: "officer.kafd@fleetfuel.local",
-    role: "Officer",
-    status: "Active",
-    assignedProjects: ["KAFD", "kafd", "الكافد", "كافد"],
-    managedProjects: [],
-    reportingManagerId: "USR-002",
-    mobile: "",
-    passwordResetRequired: true,
-    lastLogin: "",
-    createdAt: "2026-05-10T08:15:00.000Z",
-  },
-  {
-    id: "USR-005",
-    fullName: "KAFD Site Supervisor",
-    username: "supervisor.kafd",
-    email: "supervisor.kafd@fleetfuel.local",
-    role: "Supervisor",
-    status: "Active",
-    assignedProjects: ["KAFD", "kafd", "الكافد", "كافد"],
-    managedProjects: [],
-    reportingManagerId: "USR-002",
-    mobile: "",
-    passwordResetRequired: true,
-    lastLogin: "",
-    createdAt: "2026-05-10T08:20:00.000Z",
-  },
-  {
-    id: "USR-004",
-    fullName: "KAFD Fuel Operator",
-    username: "operator.kafd",
-    email: "operator.kafd@fleetfuel.local",
-    role: "Operator",
-    status: "Active",
-    assignedProjects: ["KAFD", "kafd", "الكافد", "كافد"],
-    managedProjects: [],
-    reportingManagerId: "USR-002",
-    mobile: "",
-    passwordResetRequired: true,
-    lastLogin: "",
-    createdAt: "2026-05-10T08:30:00.000Z",
-  },
-];
+const INITIAL_USERS = [];
 
 function getRolePermissions(role) {
   return ROLE_PERMISSIONS[role] || {};
@@ -352,6 +511,23 @@ function hasPermissionForUser(user, module, action = "view") {
 
 function canAccessPageForUser(user, pageKey) {
   return hasPermissionForUser(user, pageKey, "view");
+}
+
+
+function actionRequiresManagerApproval(user) {
+  if (!user || user.status !== "Active") return true;
+  return !["Admin", "Manager"].includes(user.role);
+}
+
+function canPerformWriteAction(user, module) {
+  if (!user || user.status !== "Active") return false;
+  if (user.role === "TopManagement") return false;
+  return Boolean(
+    hasPermissionForUser(user, module, "add") ||
+    hasPermissionForUser(user, module, "edit") ||
+    hasPermissionForUser(user, module, "delete") ||
+    hasPermissionForUser(user, module, "approve")
+  );
 }
 
 function createActivityRecord({ user, action, module, details }) {
@@ -721,45 +897,59 @@ function getNotificationPriority(item) {
 }
 
 function buildNotificationItems({ approvals = [], activityLog = [], currentUser, readMap = {} }) {
-  const isManagerial = ["Admin", "Manager"].includes(currentUser?.role);
+  // Notifications are intentionally targeted.
+  // Audit Timeline remains the comprehensive record for all activities.
+  // Notification Center should show only items that need attention from the current user.
   const visibleApprovals = approvals.filter((item) => canUserViewApproval(currentUser, item));
 
-  const approvalNotifications = visibleApprovals.map((item) => {
-    const needsDecision = isManagerial && item.status === "Pending";
-    const isOwnRequest = item.requestedById === currentUser?.id;
-    const title = needsDecision
-      ? `Approval required: ${item.title}`
-      : isOwnRequest
-      ? `Your request is ${item.status}: ${item.title}`
-      : `${item.status}: ${item.title}`;
+  const approvalNotifications = visibleApprovals
+    .map((item) => {
+      const needsDecision = canUserReviewApproval(currentUser, item);
+      const isOwnRequest = item.requestedById === currentUser?.id;
+      const userIsApprover = item.approvalRoute?.requiredApprovers?.some(
+        (approver) => approver.userId === currentUser?.id
+      );
 
-    return {
-      id: `NTF-APR-${item.id}`,
-      sourceId: item.id,
-      type: "approval",
-      category: needsDecision ? "Approval Required" : "Approval Update",
-      module: item.module,
-      title,
-      message: item.details || "Approval workflow update.",
-      status: item.status,
-      priority: getNotificationPriority(item),
-      entityType: item.entityType,
-      entityId: item.entityId,
-      createdAt: item.reviewedAt || item.requestedAt,
-      read: Boolean(readMap[`NTF-APR-${item.id}`]),
-      route: "approvals",
-      actionable: needsDecision,
-    };
-  });
+      const title = needsDecision
+        ? `Approval required: ${item.title}`
+        : isOwnRequest
+        ? `Your request is ${item.status}: ${item.title}`
+        : userIsApprover
+        ? `${item.status}: ${item.title}`
+        : "";
 
+      if (!title) return null;
+
+      return {
+        id: `NTF-APR-${item.id}`,
+        sourceId: item.id,
+        type: "approval",
+        category: needsDecision ? "Approval Required" : "Approval Update",
+        module: item.module,
+        title,
+        message: item.details || "Approval workflow update.",
+        status: item.status,
+        priority: getNotificationPriority(item),
+        entityType: item.entityType,
+        entityId: item.entityId,
+        createdAt: item.reviewedAt || item.requestedAt,
+        read: Boolean(readMap[`NTF-APR-${item.id}`]),
+        route: "approvals",
+        actionable: needsDecision,
+      };
+    })
+    .filter(Boolean);
+
+  // Activity notifications are personal only.
+  // Managers/Admins should use Audit Timeline for company-wide activity review.
   const visibleActivities = activityLog
-    .filter((item) => isManagerial || item.userId === currentUser?.id)
-    .slice(0, 12)
+    .filter((item) => item.userId === currentUser?.id)
+    .slice(0, 8)
     .map((item) => ({
       id: `NTF-ACT-${item.id}`,
       sourceId: item.id,
       type: "activity",
-      category: "Activity",
+      category: "My Activity",
       module: item.module,
       title: item.action,
       message: item.details,
@@ -779,7 +969,6 @@ function buildNotificationItems({ approvals = [], activityLog = [], currentUser,
     return db - da;
   });
 }
-
 
 function buildAuditTimelineItems({ approvals = [], activityLog = [], currentUser }) {
   const canViewCompanyWide = ["Admin", "Manager", "Officer"].includes(currentUser?.role);
@@ -902,7 +1091,7 @@ function exportAuditTimelineCSV(timelineItems = []) {
 function getAllowedTransactionTypesForUser(user) {
   if (!user || user.status !== "Active") return [];
   if (user.role === "Operator") return ["Direct_Refuel"];
-  if (user.role === "Officer") return [];
+  if (["Officer", "TopManagement"].includes(user.role)) return [];
 
   // External_Transfer is a cross-project diesel transfer.
   // It must be available only for Manager and Admin.
@@ -935,16 +1124,24 @@ function normalizeScopeValue(value) {
   return String(value ?? "").trim().toLowerCase();
 }
 
+function isActiveProject(project) {
+  return normalizeScopeValue(project?.status || "Active") === "active";
+}
+
+function filterActiveProjects(projects = []) {
+  return projects.filter((project) => project?.id && isActiveProject(project));
+}
+
 function userCanAccessAllProjects(user) {
   if (!user) return false;
 
   // Admin remains company-wide.
   // Managers are project-scoped unless they are explicitly assigned to All.
   // This makes approval-routing tests easier and closer to real project ownership.
-  if (user.role === "Admin") return true;
+  if (["Admin", "TopManagement"].includes(user.role)) return true;
 
   const scope = getUserProjectScope(user);
-  return scope.includes("All") && user.role !== "Operator" && user.role !== "Supervisor";
+  return scope.includes("All") && !["Operator", "Supervisor"].includes(user.role);
 }
 
 function isProjectAllowedForUser(user, projectValue, projects = []) {
@@ -1072,16 +1269,92 @@ export default function Home() {
   const [assetProjectHistory, setAssetProjectHistory] = useState([]);
   const [assetOdometerHistory, setAssetOdometerHistory] = useState([]);
 
-  const [users, setUsers] = useState(INITIAL_USERS);
-  const [currentUserId, setCurrentUserId] = useState("USR-001");
+  const [users, setUsers] = useState([]);
+  const [currentUserId, setCurrentUserId] = useState("");
+  const [authLoaded, setAuthLoaded] = useState(false);
+  const [loginIdentifier, setLoginIdentifier] = useState("");
+  const [rememberSession, setRememberSession] = useState(true);
+  const [loginError, setLoginError] = useState("");
   const [activityLog, setActivityLog] = useState([]);
   const [pendingApprovals, setPendingApprovals] = useState([]);
   const [notificationReadMap, setNotificationReadMap] = useState({});
 
   const currentUser =
     users.find((user) => user.id === currentUserId && user.status === "Active") ||
-    users.find((user) => user.status === "Active") ||
-    users[0];
+    null;
+
+  useEffect(() => {
+    try {
+      const storedSession = JSON.parse(localStorage.getItem(AUTH_SESSION_KEY) || "null");
+
+      if (isAuthSessionValid(storedSession)) {
+        setCurrentUserId(storedSession.userId);
+      } else {
+        localStorage.removeItem(AUTH_SESSION_KEY);
+      }
+    } catch (error) {
+      localStorage.removeItem(AUTH_SESSION_KEY);
+    } finally {
+      setAuthLoaded(true);
+    }
+  }, []);
+
+  useEffect(() => {
+    if (!authLoaded || !users.length || !currentUserId) return;
+
+    const matchedUser = users.find((user) => user.id === currentUserId && user.status === "Active");
+
+    if (!matchedUser) {
+      localStorage.removeItem(AUTH_SESSION_KEY);
+      setCurrentUserId("");
+    }
+  }, [authLoaded, users, currentUserId]);
+
+  const startLocalSession = (userId, remember = rememberSession) => {
+    const nextSession = buildAuthSession(userId, remember);
+    localStorage.setItem(AUTH_SESSION_KEY, JSON.stringify(nextSession));
+    setCurrentUserId(userId);
+  };
+
+  const handleLogin = (event) => {
+    event?.preventDefault?.();
+
+    const loginValue = normalizeScopeValue(loginIdentifier);
+    const matchedUser = users.find((user) => {
+      return [user.id, user.username, user.email, user.fullName]
+        .filter(Boolean)
+        .some((value) => normalizeScopeValue(value) === loginValue);
+    });
+
+    if (!matchedUser) {
+      setLoginError("User not found. Use User ID, email, username, or full name from UsersRoles.");
+      return;
+    }
+
+    if (matchedUser.status !== "Active") {
+      setLoginError("This user is inactive and cannot access the system.");
+      return;
+    }
+
+    startLocalSession(matchedUser.id, rememberSession);
+    setLoginError("");
+    setLoginIdentifier("");
+    trackActivity("Login", "auth", `${matchedUser.fullName} signed in using frontend session.`);
+  };
+
+  const handleLogout = () => {
+    if (currentUser) {
+      trackActivity("Logout", "auth", `${currentUser.fullName} signed out.`);
+    }
+
+    localStorage.removeItem(AUTH_SESSION_KEY);
+    setCurrentUserId("");
+    setPage("operations");
+  };
+
+  const handleDevUserSwitch = (userId) => {
+    startLocalSession(userId, true);
+  };
 
   const hasPermission = (module, action = "view") =>
     hasPermissionForUser(currentUser, module, action);
@@ -1117,7 +1390,7 @@ export default function Home() {
       // TRANSACTIONS
       const trxRes = await fetch(TRANSACTIONS_CSV);
       const trxText = await trxRes.text();
-      const trxRows = trxText.split("\n").map((row) => row.split(","));
+      const trxRows = parseCSV(trxText);
  
       setHeaders(trxRows[0]);
       setData(trxRows.slice(1));
@@ -1125,7 +1398,7 @@ export default function Home() {
       // ASSETS
       const assetsRes = await fetch(ASSETS_CSV);
       const assetsText = await assetsRes.text();
-      const assetRows = assetsText.split("\n").map((row) => row.split(","));
+      const assetRows = parseCSV(assetsText);
       const assetHeaders = assetRows[0];
  
       const mappedAssets = assetRows
@@ -1157,9 +1430,7 @@ export default function Home() {
       const stationsRes = await fetch(STATIONS_CSV);
       const stationsText = await stationsRes.text();
  
-      const stationRows = stationsText
-        .split("\n")
-        .map((row) => row.split(","));
+      const stationRows = parseCSV(stationsText);
  
       const stationHeaders = stationRows[0];
  
@@ -1174,9 +1445,9 @@ export default function Home() {
           project: getValue(row, stationHeaders, ["project_id"]),
           status: getValue(row, stationHeaders, ["status"]),
           openingBalance: parseFloat(
-            getValue(row, stationHeaders, ["opening_balance"])
+            getValue(row, stationHeaders, ["opening_balance", "Opening Balance", "opening balance"])
           ),
-        }))
+}))
         .filter((station) => station.id);
  
       setStations(mappedStations);
@@ -1184,24 +1455,24 @@ export default function Home() {
 const fuelersRes = await fetch(FUELERS_CSV);
 const fuelersText = await fuelersRes.text();
  
-const fuelerRows = fuelersText
-  .split("\n")
-  .map((row) => row.split(","));
+const fuelerRows = parseCSV(fuelersText);
  
 const fuelerHeaders = fuelerRows[0];
  
 const mappedFuelers = fuelerRows
   .slice(1)
   .map((row) => ({
-    id: getValue(row, fuelerHeaders, ["fueler_id", "id"]),
-    name: getValue(row, fuelerHeaders, ["fueler_name", "name"]),
-    mobile: getValue(row, fuelerHeaders, ["mobile", "phone", "mobile_no"]),
+    id: getValue(row, fuelerHeaders, ["team_id", "Team_id", "team id", "fueler_id", "id"]),
+    name: getValue(row, fuelerHeaders, ["team_name", "Team_name", "team name", "fueler_name", "name"]),
+    email: getValue(row, fuelerHeaders, ["email", "Email", "user_email", "operator_email"]),
+    mobile: getValue(row, fuelerHeaders, ["mobile", "Mobile", "phone", "mobile_no"]),
     projectName: getValue(row, fuelerHeaders, [
       "project_name",
+      "Project Name",
       "project",
       "project name",
     ]),
-    status: getValue(row, fuelerHeaders, ["status"]) || "On Duty",
+    status: getValue(row, fuelerHeaders, ["status", "Status"]) || "On Duty",
   }))
   .filter((fueler) => fueler.id);
  
@@ -1211,9 +1482,7 @@ setFuelers(mappedFuelers);
 const projectsRes = await fetch(PROJECTS_CSV);
 const projectsText = await projectsRes.text();
  
-const projectRows = projectsText
-  .split("\n")
-  .map((row) => row.split(","));
+const projectRows = parseCSV(projectsText);
  
 const projectHeaders = projectRows[0];
  
@@ -1227,6 +1496,15 @@ const mappedProjects = projectRows
   .filter((project) => project.id);
  
 setProjects(mappedProjects);
+
+// USERS & ROLES
+const usersRolesRes = await fetch(USERS_ROLES_CSV);
+const usersRolesText = await usersRolesRes.text();
+const userRows = parseCSV(usersRolesText);
+const userHeaders = userRows[0] || [];
+const mappedUsers = buildUsersFromRolesRows(userRows, userHeaders, mappedFuelers);
+
+setUsers(mappedUsers);
     }
  
     fetchData();
@@ -1238,7 +1516,7 @@ setProjects(mappedProjects);
         "operations",
         "assets",
         "stations",
-        "fuelers",
+        "team",
         "projects",
         "reports",
         "notifications",
@@ -1280,19 +1558,27 @@ setProjects(mappedProjects);
 
   const literPrice = getLiterPriceByDate(new Date().toISOString());
 
-  const scopedProjects = userCanAccessAllProjects(currentUser)
+  const scopedProjects = (userCanAccessAllProjects(currentUser)
     ? projects
     : projects.filter((project) =>
         isProjectAllowedForUser(currentUser, project.id, projects) ||
         isProjectAllowedForUser(currentUser, project.name, projects)
-      );
+      )
+  ).filter((project) => {
+    const isHeadOffice = normalizeScopeValue(project.name) === "head office";
+    if (!isHeadOffice) return true;
+    return currentUser?.role === "Admin";
+  });
+
+  const activeScopedProjects = filterActiveProjects(scopedProjects);
+  const activeProjectsForTransfer = filterActiveProjects(projects);
 
   // Enterprise transfer rule:
-  // The user sees only his scoped project data in tables,
-  // but Officer must be able to request transfer to any project.
-  // This affects only project-change dropdowns, not page visibility or data scope.
+  // The user sees his scoped project data in tables, including historical/inactive records.
+  // Project-change dropdowns must show Active projects only, so inactive projects remain visible
+  // in history/reports but cannot be selected for new transfers or assignments.
   const transferDestinationProjects =
-    currentUser?.role === "Officer" ? projects : scopedProjects;
+    currentUser?.role === "Officer" ? activeProjectsForTransfer : activeScopedProjects;
 
   const scopedAssets = filterMasterDataByUserProjectScope({
     user: currentUser,
@@ -1313,6 +1599,20 @@ setProjects(mappedProjects);
     : fuelers.filter((fueler) =>
         isProjectAllowedForUser(currentUser, fueler.projectName, projects)
       );
+
+  const scopedTeamMembers = scopedFuelers.map((member) => {
+    const linkedUser = users.find(
+      (user) => normalizeScopeValue(user.id) === normalizeScopeValue(member.id)
+    );
+
+    return {
+      ...member,
+      role: linkedUser?.role || "Not Linked",
+      userStatus: linkedUser?.status || "Not Linked",
+      linkedUserId: linkedUser?.id || "",
+      linkedUserName: linkedUser?.fullName || "",
+    };
+  });
 
   const scopedData = filterDataByUserProjectScope({
     user: currentUser,
@@ -1355,10 +1655,11 @@ setProjects(mappedProjects);
         <OperationsPage
           data={scopedData}
           headers={headers}
+          setData={setData}
           assets={scopedAssets}
           stations={scopedStations}
           allStations={stations}
-          fuelers={scopedFuelers}
+          fuelers={scopedTeamMembers}
           literPrice={literPrice}
           getLiterPriceByDate={getLiterPriceByDate}
           currency={currency}
@@ -1368,6 +1669,7 @@ setProjects(mappedProjects);
           trackActivity={trackActivity}
           submitApprovalRequest={submitApprovalRequest}
           projects={projects}
+          showToast={showToast}
         />
       );
     }
@@ -1414,10 +1716,11 @@ setProjects(mappedProjects);
 />
       );
     }
-    if (page === "fuelers") {
+    if (page === "team") {
   return (
-    <FuelersPage
-      fuelers={scopedFuelers}
+    <TeamPage
+      fuelers={scopedTeamMembers}
+      users={users}
       projects={scopedProjects}
       transferProjects={transferDestinationProjects}
       data={scopedData}
@@ -1496,7 +1799,7 @@ if (page === "users") {
     <UsersPage
       users={users}
       setUsers={setUsers}
-      projects={projects}
+      projects={filterActiveProjects(projects)}
       currentUser={currentUser}
       currentUserId={currentUserId}
       setCurrentUserId={setCurrentUserId}
@@ -1528,7 +1831,7 @@ const sidebarItems = [
   { key: "operations", label: "Operations", Icon: LayoutDashboard },
   { key: "assets", label: "Assets", Icon: Truck },
   { key: "stations", label: "Stations", Icon: Fuel },
-  { key: "fuelers", label: "Fuelers", Icon: Users },
+  { key: "team", label: "Team", Icon: Users },
   { key: "projects", label: "Projects / Sites", Icon: Building2 },
   { key: "reports", label: "Reports", Icon: FileBarChart2 },
   { key: "notifications", label: "Notifications", Icon: Bell },
@@ -1536,6 +1839,42 @@ const sidebarItems = [
   { key: "approvals", label: "Approvals", Icon: FileBarChart2 },
   { key: "users", label: "Users & Roles", Icon: Users },
 ].filter((item) => canAccessPage(item.key));
+
+const currentUserProjectLabel =
+  currentUser?.role === "Admin"
+    ? "Global Access"
+    : currentUser?.teamProject ||
+      (currentUser?.role === "TopManagement"
+        ? "Head Office"
+        : Array.isArray(currentUser?.assignedProjects) && currentUser.assignedProjects.length
+        ? currentUser.assignedProjects.join(", ")
+        : "No Project Assigned");
+
+if (users.length === 0 || !authLoaded) {
+  return (
+    <div className="min-h-screen bg-[#070b14] flex items-center justify-center text-slate-100">
+      <div className="rounded-2xl border border-slate-800 bg-slate-900/80 p-6 shadow-2xl">
+        <p className="text-sm text-slate-400">Loading Users & Roles...</p>
+      </div>
+    </div>
+  );
+}
+
+if (!currentUser) {
+  return (
+    <LoginPage
+      users={users}
+      loginIdentifier={loginIdentifier}
+      setLoginIdentifier={setLoginIdentifier}
+      rememberSession={rememberSession}
+      setRememberSession={setRememberSession}
+      loginError={loginError}
+      handleLogin={handleLogin}
+      theme={theme}
+      setTheme={setTheme}
+    />
+  );
+}
 
   return (
     <>
@@ -1754,7 +2093,6 @@ const sidebarItems = [
         }
 
 
-
         /* Responsive step 3 safeguards */
         .theme-main-bg {
           min-width: 0;
@@ -1783,8 +2121,7 @@ const sidebarItems = [
         .fleet-sticky-layer {
           z-index: 5 !important;
         }
-
-      `}</style>
+`}</style>
 
       <div data-theme={theme} className="min-h-screen bg-[#070b14] flex overflow-hidden text-slate-100">
       <div className={`${sidebarCollapsed ? "w-20" : "w-64"} shrink-0 bg-[#050814] text-white border-r border-slate-800/80 shadow-2xl p-4 hidden lg:flex lg:flex-col transition-all duration-300`}>
@@ -1844,8 +2181,14 @@ const sidebarItems = [
         {!sidebarCollapsed && currentUser && (
           <div className="mt-4 rounded-2xl border border-slate-800/80 bg-slate-900/60 p-3">
             <p className="text-[10px] uppercase tracking-[0.2em] text-slate-500 mb-1">Signed in as</p>
-            <p className="text-sm font-bold text-slate-100 truncate">{currentUser.fullName}</p>
+            <p className="login-text text-sm font-bold text-slate-100 truncate">{currentUser.fullName}</p>
             <p className="text-xs text-amber-300 mt-0.5">{currentUser.role}</p>
+            <div className="mt-2 rounded-xl border border-slate-800/80 bg-slate-950/40 px-3 py-2">
+              <p className="text-[9px] uppercase tracking-[0.16em] text-slate-500 mb-1">Project</p>
+              <p className="text-xs font-semibold text-slate-200 truncate">
+                {currentUserProjectLabel}
+              </p>
+            </div>
 
             <div className="mt-3 pt-3 border-t border-slate-800/80">
               <p className="text-[10px] uppercase tracking-[0.16em] text-slate-500 mb-2">
@@ -1853,7 +2196,7 @@ const sidebarItems = [
               </p>
               <select
                 value={currentUserId}
-                onChange={(e) => setCurrentUserId(e.target.value)}
+                onChange={(e) => handleDevUserSwitch(e.target.value)}
                 className="w-full bg-slate-800 border border-slate-700 rounded-lg px-2 py-2 text-xs text-white outline-none focus:border-amber-400 focus:ring-2 focus:ring-amber-400/20"
               >
                 {users
@@ -1864,6 +2207,13 @@ const sidebarItems = [
                     </option>
                   ))}
               </select>
+              <button
+                type="button"
+                onClick={handleLogout}
+                className="mt-3 w-full rounded-lg border border-red-500/30 bg-red-500/10 px-3 py-2 text-xs font-bold text-red-300 hover:bg-red-500/20 transition"
+              >
+                Logout
+              </button>
             </div>
           </div>
         )}
@@ -1942,6 +2292,7 @@ const sidebarItems = [
 function OperationsPage({
   data,
   headers,
+  setData,
   assets,
   stations,
   allStations = [],
@@ -1955,6 +2306,7 @@ function OperationsPage({
   trackActivity = () => {},
   submitApprovalRequest = () => {},
   projects = [],
+  showToast,
 }) {
   const [showForm, setShowForm] = useState(false);
   const [transactionType, setTransactionType] = useState("");
@@ -2064,7 +2416,7 @@ function OperationsPage({
 
   const fuelerIndex = getHeaderIndex(headers, [
     "fueler_id",
-    "Fueler ID",
+    "Operator ID",
     "fueler id",
     "fueler",
   ]);
@@ -2170,14 +2522,19 @@ function OperationsPage({
           approvalRouteReason: "External Supply approval is routed to the destination station project manager.",
         },
       });
-      alert("External Supply saved as Pending Manager Approval.");
+      showToast?.("warning", "External Supply saved as Pending Manager Approval.");
       closeForm();
       return;
     }
 
-    setLocalAddedRows((prev) => [...prev, newRow]);
+    if (typeof setData === "function") {
+      setData((prev) => [...prev, newRow]);
+    } else {
+      setLocalAddedRows((prev) => [...prev, newRow]);
+    }
+
     trackActivity("Add Operation", "operations", `${operation.transactionType} ${operation.operationId} added.`);
-    alert("Operation added successfully (local mode).");
+    showToast?.("success", "Operation added successfully.");
 
     closeForm();
   };
@@ -2880,6 +3237,30 @@ function OperationsPage({
     return Math.max(...readings);
   };
 
+  const getLastStationCounter = (stationId) => {
+    if (!stationId || odometerIndex === -1 || dateIndex === -1) return 0;
+
+    const readings = workingData
+      .filter((item) => {
+        const row = item.row;
+        const sourceStation = sourceIndex !== -1 ? row[sourceIndex] : "";
+        const destination = destinationIndex !== -1 ? row[destinationIndex] : "";
+
+        return (
+          isSameText(sourceStation, stationId) ||
+          isSameText(destination, stationId)
+        );
+      })
+      .map((item) => ({
+        date: parseOperationDate(item.row[dateIndex]),
+        reading: parseFloat(item.row[odometerIndex]) || 0,
+      }))
+      .filter((item) => item.date && item.reading > 0)
+      .sort((a, b) => b.date - a.date);
+
+    return readings[0]?.reading || 0;
+  };
+
   const openCellEdit = (item, field) => {
     if (!hasPermission("operations", "edit")) return;
 
@@ -2904,7 +3285,6 @@ function OperationsPage({
       oldValue: currentValue || "",
       newValue: currentValue || "",
       reason: "",
-      password: "",
     });
   };
 
@@ -2916,17 +3296,13 @@ function OperationsPage({
     if (!editCell) return;
 
     if (!editCell.reason.trim()) {
-      alert("Please enter edit reason.");
+      notifyUser(typeof showToast !== "undefined" ? showToast : null, inferToastTypeFromMessage("Please enter edit reason."), "Please enter edit reason.");
       return;
     }
 
-    if (!editCell.password.trim()) {
-      alert("Please enter admin password.");
-      return;
-    }
 
     if (!String(editCell.newValue).trim()) {
-      alert("Please enter a new value.");
+      notifyUser(typeof showToast !== "undefined" ? showToast : null, inferToastTypeFromMessage("Please enter a new value."), "Please enter a new value.");
       return;
     }
 
@@ -2941,7 +3317,7 @@ function OperationsPage({
       const asset = getAsset(newEquipment);
 
       if (!asset) {
-        alert("Please select a valid equipment.");
+        notifyUser(typeof showToast !== "undefined" ? showToast : null, inferToastTypeFromMessage("Please select a valid equipment."), "Please select a valid equipment.");
         return;
       }
 
@@ -2953,7 +3329,7 @@ function OperationsPage({
       const qty = Number(editCell.newValue);
 
       if (!qty || qty <= 0) {
-        alert("Diesel quantity must be greater than 0.");
+        notifyUser(typeof showToast !== "undefined" ? showToast : null, inferToastTypeFromMessage("Diesel quantity must be greater than 0."), "Diesel quantity must be greater than 0.");
         return;
       }
 
@@ -2966,7 +3342,7 @@ function OperationsPage({
       const equipmentNo = row[destinationIndex];
 
       if (!newOdometer || newOdometer <= 0) {
-        alert("Please enter a valid odometer.");
+        notifyUser(typeof showToast !== "undefined" ? showToast : null, inferToastTypeFromMessage("Please enter a valid odometer."), "Please enter a valid odometer.");
         return;
       }
 
@@ -2976,11 +3352,11 @@ function OperationsPage({
       );
 
       if (lastOdometer > 0 && newOdometer < lastOdometer) {
-        alert(
-          `Odometer cannot be less than last recorded odometer (${formatNumber(
+        notifyUser(typeof showToast !== "undefined" ? showToast : null, inferToastTypeFromMessage(`Odometer cannot be less than last recorded odometer (${formatNumber(
             lastOdometer
-          )}).`
-        );
+          )}).`), `Odometer cannot be less than last recorded odometer (${formatNumber(
+            lastOdometer
+          )}).`);
         return;
       }
 
@@ -2993,12 +3369,12 @@ function OperationsPage({
       const station = getStation(newStation);
 
       if (!station) {
-        alert("Please select a valid station.");
+        notifyUser(typeof showToast !== "undefined" ? showToast : null, inferToastTypeFromMessage("Please select a valid station."), "Please select a valid station.");
         return;
       }
 
       if (station.status?.trim().toLowerCase() !== "active") {
-        alert("Selected station must be active.");
+        notifyUser(typeof showToast !== "undefined" ? showToast : null, inferToastTypeFromMessage("Selected station must be active."), "Selected station must be active.");
         return;
       }
 
@@ -3011,18 +3387,40 @@ function OperationsPage({
       const fueler = getFueler(newFueler);
 
       if (!fueler) {
-        alert("Please select a valid fueler.");
+        notifyUser(typeof showToast !== "undefined" ? showToast : null, inferToastTypeFromMessage("Please select a valid fueler."), "Please select a valid fueler.");
         return;
       }
 
       const fuelerStatus = fueler.status?.trim().toLowerCase();
       if (fuelerStatus !== "on duty" && fuelerStatus !== "active") {
-        alert("Selected fueler must be On Duty.");
+        notifyUser(typeof showToast !== "undefined" ? showToast : null, inferToastTypeFromMessage("Selected fueler must be On Duty."), "Selected fueler must be On Duty.");
         return;
       }
 
       updates.fuelerId = newFueler;
-      fieldLabel = "Fueler";
+      fieldLabel = "Operator";
+    }
+
+    if (actionRequiresManagerApproval(currentUser)) {
+      submitApprovalRequest?.({
+        type: "operation_correction",
+        module: "operations",
+        title: `Operation correction - ${operationIdIndex !== -1 ? row[operationIdIndex] : editCell.originalIndex + 1}`,
+        details: editCell.reason,
+        payload: {
+          entity: "operation",
+          id: operationIdIndex !== -1 ? row[operationIdIndex] : editCell.originalIndex + 1,
+          field,
+          oldValue: editCell.oldValue,
+          newValue: editCell.newValue,
+          changedFields: [
+            { field, label: fieldLabel, oldValue: editCell.oldValue, newValue: editCell.newValue, sensitive: true },
+          ],
+        },
+      });
+      closeEditCell();
+      showToast?.("warning", "Operation correction sent for manager approval.");
+      return;
     }
 
     setEditedRows((prev) => ({
@@ -3179,7 +3577,7 @@ function OperationsPage({
                   Clear Equipment Selection
                 </button>
 
-                <div className="max-h-56 overflow-auto">
+                <div className="max-h-[380px] overflow-auto">
                   {visibleEquipmentOptions.map((equipment) => (
                     <button
                       key={equipment}
@@ -3244,7 +3642,7 @@ function OperationsPage({
                   Clear Type Selection
                 </button>
 
-                <div className="max-h-56 overflow-auto">
+                <div className="max-h-[380px] overflow-auto">
                   {visibleEquipmentTypeOptions.map((type) => (
                     <button
                       key={type}
@@ -3306,7 +3704,7 @@ function OperationsPage({
                   Clear Project Selection
                 </button>
 
-                <div className="max-h-56 overflow-auto">
+                <div className="max-h-[380px] overflow-auto">
                   {visibleProjectOptions.map((project) => (
                     <button
                       key={project}
@@ -3688,75 +4086,78 @@ function OperationsPage({
             Consumed Quantity Ratio per Asset Type
           </h2>
 
-          <div className="grid grid-cols-1 xl:grid-cols-[1fr_230px] gap-4 items-center">
-            <div className="h-[300px] sm:h-[340px] xl:h-[360px]">
-              <ChartFrame height={260}>
+          <div className="grid grid-cols-1 gap-3">
+            <div className="h-[220px] sm:h-[240px] xl:h-[260px] flex items-center justify-center">
+              <ChartFrame height={240}>
                 <PieChart>
-                <Pie
-  data={equipmentTypeRatioChartData}
-  dataKey="value"
-  nameKey="name"
-  cx="50%"
-  cy="50%"
-  innerRadius={55}
-  outerRadius={85}
-  paddingAngle={2}
-  labelLine={false}
-  label={false}
->
-                  {equipmentTypeRatioChartData.map((entry, index) => (
-                    <Cell
-                      key={`cell-${entry.name}`}
-                      fill={chartColors[index % chartColors.length]}
-                    />
-                  ))}
-                </Pie>
+                  <Pie
+                    data={equipmentTypeRatioChartData}
+                    dataKey="value"
+                    nameKey="name"
+                    cx="50%"
+                    cy="50%"
+                    innerRadius={54}
+                    outerRadius={88}
+                    paddingAngle={2}
+                    labelLine={false}
+                    label={false}
+                  >
+                    {equipmentTypeRatioChartData.map((entry, index) => (
+                      <Cell
+                        key={`cell-${entry.name}`}
+                        fill={chartColors[index % chartColors.length]}
+                      />
+                    ))}
+                  </Pie>
 
-                <Tooltip
-                  formatter={(value, name) => {
-                    const percentage =
-                      equipmentTypeRatioTotal > 0
-                        ? ((Number(value) / equipmentTypeRatioTotal) * 100).toFixed(1)
-                        : "0.0";
+                  <Tooltip
+                    formatter={(value, name) => {
+                      const percentage =
+                        equipmentTypeRatioTotal > 0
+                          ? ((Number(value) / equipmentTypeRatioTotal) * 100).toFixed(1)
+                          : "0.0";
 
-                    return [`${percentage}%`, name];
-                  }}
-                />
-              </PieChart>
+                      return [`${percentage}%`, name];
+                    }}
+                  />
+                </PieChart>
               </ChartFrame>
             </div>
 
-            <div className="max-h-[310px] overflow-y-auto pr-2 xl:border-l border-gray-700 xl:pl-3">
-              {equipmentTypeRatioChartData.map((item, index) => {
-                const percentage =
-                  equipmentTypeRatioTotal > 0
-                    ? ((Number(item.value) / equipmentTypeRatioTotal) * 100).toFixed(1)
-                    : "0.0";
+            <div className="border-t border-slate-700/80 pt-3">
+              <div className="max-h-[120px] overflow-y-auto pr-1 grid grid-cols-1 sm:grid-cols-2 xl:grid-cols-2 2xl:grid-cols-3 gap-x-4 gap-y-1">
+                {equipmentTypeRatioChartData.map((item, index) => {
+                  const percentage =
+                    equipmentTypeRatioTotal > 0
+                      ? ((Number(item.value) / equipmentTypeRatioTotal) * 100).toFixed(1)
+                      : "0.0";
 
-                return (
-                  <div
-                    key={item.name}
-                    className="flex items-center justify-between gap-2 text-xs py-1 border-b border-gray-700/40"
-                  >
-                    <div className="flex items-center gap-2 min-w-0">
-                      <span
-                        className="w-3 h-3 rounded-sm shrink-0"
-                        style={{
-                          backgroundColor: chartColors[index % chartColors.length],
-                        }}
-                      />
+                  return (
+                    <div
+                      key={item.name}
+                      className="flex items-center justify-between gap-2 text-[11px] py-1 border-b border-slate-700/30 min-w-0"
+                      title={`${item.name} - ${percentage}%`}
+                    >
+                      <div className="flex items-center gap-2 min-w-0">
+                        <span
+                          className="w-2.5 h-2.5 rounded-sm shrink-0"
+                          style={{
+                            backgroundColor: chartColors[index % chartColors.length],
+                          }}
+                        />
 
-                      <span className="truncate text-gray-200">
-                        {item.name}
+                        <span className="truncate text-gray-200">
+                          {item.name}
+                        </span>
+                      </div>
+
+                      <span className="text-yellow-300 shrink-0 font-semibold">
+                        {percentage}%
                       </span>
                     </div>
-
-                    <span className="text-yellow-300 shrink-0">
-                      {percentage}%
-                    </span>
-                  </div>
-                );
-              })}
+                  );
+                })}
+              </div>
             </div>
           </div>
         </div>
@@ -3926,7 +4327,7 @@ function OperationsPage({
                   ? "Odometer"
                   : editCell.field === "station"
                   ? "Source Station"
-                  : "Fueler"}
+                  : "Operator"}
               </h2>
 
               <button
@@ -3987,7 +4388,7 @@ function OperationsPage({
                   }
                   className="border rounded-lg p-3 w-full mt-2"
                 >
-                  <option value="">Select Fueler</option>
+                  <option value="">Select Operator</option>
                   {fuelers
                     .filter((fueler) => {
                       const status = String(fueler.status || "On Duty").trim().toLowerCase();
@@ -3995,7 +4396,7 @@ function OperationsPage({
                     })
                     .map((fueler) => (
                       <option key={fueler.id} value={fueler.id}>
-                        {fueler.id} - {fueler.name || "-"} - {fueler.status || "On Duty"}
+                        {fueler.id} - {fueler.name || "-"} - {fueler.role || "Operator"} - {fueler.status || "On Duty"}
                       </option>
                     ))}
                 </select>
@@ -4024,18 +4425,6 @@ function OperationsPage({
               />
             </div>
 
-            <div className="mb-5">
-              <label className="font-medium text-gray-700">Admin Password</label>
-              <input
-                type="password"
-                value={editCell.password}
-                onChange={(e) =>
-                  setEditCell({ ...editCell, password: e.target.value })
-                }
-                className="border rounded-lg p-3 w-full mt-2"
-                placeholder="Enter admin password"
-              />
-            </div>
 
             <div className="flex justify-end gap-3 border-t pt-4">
               <button
@@ -4054,9 +4443,7 @@ function OperationsPage({
             </div>
           </div>
         </div>
-      )}
-
-      {showForm && (
+      )}{showForm && (
         <AddOperationModal
           closeForm={closeForm}
           fuelers={fuelers}
@@ -4074,7 +4461,9 @@ function OperationsPage({
           assetMeterPhoto={assetMeterPhoto}
           setAssetMeterPhoto={setAssetMeterPhoto}
           getLastOdometerForEquipment={getLastOdometerForEquipment}
+          getLastStationCounter={getLastStationCounter}
           onSaveOperation={saveNewOperation}
+          showToast={showToast}
         />
       )}
       </div>
@@ -4097,8 +4486,115 @@ function AssetsPage({
   trackActivity = () => {},
   submitApprovalRequest = () => {},
 }) {
-  const [showForm, setShowForm] = useState(false);
+
+
+  const assetCurrentOdometerMap = useMemo(() => {
+    const map = new Map();
+
+    const typeIndexLocal = getHeaderIndex(headers, [
+      "transaction_type",
+      "Transaction type",
+      "transaction type",
+      "operation_type",
+      "Operation type",
+    ]);
+
+    const destinationIndexLocal = getHeaderIndex(headers, [
+      "destination_id",
+      "Destination ID",
+      "destination id",
+      "destination",
+      "equipment_no",
+      "Equipment No",
+      "equipment no",
+      "asset_id",
+      "Asset ID",
+    ]);
+
+    const odometerIndexLocal = getHeaderIndex(headers, [
+      "odometer_at_fueling",
+      "Odometer at fueling",
+      "odometer at fueling",
+      "odometer",
+      "hour_meter",
+      "Hour Meter",
+      "hour meter",
+    ]);
+
+    const dateIndexLocal = getHeaderIndex(headers, [
+      "transaction_datetime",
+      "Transaction datetime",
+      "transaction datetime",
+      "date",
+    ]);
+
+    if (
+      typeIndexLocal === -1 ||
+      destinationIndexLocal === -1 ||
+      odometerIndexLocal === -1
+    ) {
+      return map;
+    }
+
+    data.forEach((row, originalIndex) => {
+      const type = row[typeIndexLocal];
+      const assetId = row[destinationIndexLocal];
+      const odometerValue = parseFloat(row[odometerIndexLocal]);
+
+      if (
+        !assetId ||
+        Number.isNaN(odometerValue) ||
+        !isSameText(type, "Direct_Refuel")
+      ) {
+        return;
+      }
+
+      const operationTime =
+        dateIndexLocal !== -1
+          ? new Date(row[dateIndexLocal]).getTime() || 0
+          : originalIndex;
+
+      const key = normalizeScopeValue(assetId);
+      const previous = map.get(key);
+
+      if (
+        !previous ||
+        operationTime > previous.operationTime ||
+        (operationTime === previous.operationTime &&
+          originalIndex > previous.originalIndex)
+      ) {
+        map.set(key, {
+          value: odometerValue,
+          operationTime,
+          originalIndex,
+        });
+      }
+    });
+
+    return map;
+  }, [data, headers]);
+
+  const getLatestAssetOdometer = (assetId, fallbackValue = 0) => {
+    const latest = assetCurrentOdometerMap.get(normalizeScopeValue(assetId));
+    return latest?.value ?? fallbackValue ?? 0;
+  };
+
+const [showForm, setShowForm] = useState(false);
   const [searchTerm, setSearchTerm] = useState("");
+  const [localAssets, setLocalAssets] = useState([]);
+  const [newAsset, setNewAsset] = useState({
+    id: "",
+    project: "",
+    type: "",
+    category: "",
+    odometer: "",
+    fuelTank: "",
+    status: "Active",
+  });
+  const [useCustomAssetType, setUseCustomAssetType] = useState(false);
+  const [customAssetType, setCustomAssetType] = useState("");
+  const [useCustomCategory, setUseCustomCategory] = useState(false);
+  const [customCategory, setCustomCategory] = useState("");
 
 const [showAssetSettings, setShowAssetSettings] = useState(false);
 const [showExportMenu, setShowExportMenu] = useState(false);
@@ -4112,6 +4608,7 @@ useOutsideClick(assetSettingsRef, () => {
   const [selectedAsset, setSelectedAsset] = useState(null);
 
   const [localAssetUpdates, setLocalAssetUpdates] = useState({});
+  const [assetStatusConfirm, setAssetStatusConfirm] = useState(null);
 
   const [projectTargetAsset, setProjectTargetAsset] = useState(null);
   const [selectedProjectValue, setSelectedProjectValue] = useState("");
@@ -4135,7 +4632,94 @@ useOutsideClick(assetSettingsRef, () => {
   const [showOdometerPassword, setShowOdometerPassword] = useState(false);
   const [odometerPassword, setOdometerPassword] = useState("");
 
-  const displayAssets = assets.map((asset) => ({
+  const assetIdDuplicateError = getDuplicateIdError(
+    newAsset.id,
+    [...assets, ...localAssets],
+    "Asset ID"
+  );
+
+  const resetNewAsset = () => {
+    setNewAsset({
+      id: "",
+      project: "",
+      type: "",
+      category: "",
+      odometer: "",
+      fuelTank: "",
+      status: "Active",
+    });
+    setUseCustomAssetType(false);
+    setCustomAssetType("");
+    setUseCustomCategory(false);
+    setCustomCategory("");
+  };
+
+  const closeAddAsset = () => {
+    setShowForm(false);
+    resetNewAsset();
+  };
+
+  const saveNewAsset = () => {
+    if (!hasPermission("assets", "add")) {
+      showToast?.("warning", "Read-only access: you cannot add assets.");
+      return;
+    }
+
+    if (!newAsset.id.trim()) {
+      showToast?.("warning", "Please enter Asset ID.");
+      return;
+    }
+
+    if (assetIdDuplicateError) {
+      showToast?.("warning", assetIdDuplicateError);
+      return;
+    }
+
+    if (!newAsset.project) {
+      showToast?.("warning", "Please select project.");
+      return;
+    }
+
+    if (!newAsset.type.trim()) {
+      showToast?.("warning", "Please select or add Asset Type.");
+      return;
+    }
+
+    if (!newAsset.category.trim()) {
+      showToast?.("warning", "Please select or add Category.");
+      return;
+    }
+
+    const cleanAsset = {
+      id: newAsset.id.trim(),
+      project: newAsset.project || "-",
+      type: newAsset.type || "-",
+      category: newAsset.category || "-",
+      odometer: newAsset.odometer || "0",
+      fuelTank: newAsset.fuelTank || "0",
+      status: newAsset.status || "Active",
+      createdLocally: true,
+    };
+
+    if (isOfficerUser(currentUser)) {
+      submitApprovalRequest?.({
+        type: "master_data_change",
+        module: "assets",
+        title: `New asset ${cleanAsset.id}`,
+        details: `Officer requested new asset ${cleanAsset.id}`,
+        payload: { entity: "asset", action: "add", values: cleanAsset },
+      });
+      closeAddAsset();
+      return;
+    }
+
+    setLocalAssets((prev) => [...prev, cleanAsset]);
+    trackActivity?.("Add Asset", "assets", `${cleanAsset.id} added locally.`);
+    showToast?.("success", "Asset added locally.");
+    closeAddAsset();
+  };
+
+  const displayAssets = [...assets, ...localAssets].map((asset) => ({
     ...asset,
     status: localAssetUpdates[asset.id]?.status || asset.status,
     project: localAssetUpdates[asset.id]?.project || asset.project,
@@ -4160,8 +4744,38 @@ useOutsideClick(assetSettingsRef, () => {
 
   const projectOptions =
     transferProjects.length > 0
-      ? transferProjects.map((p) => p.name || p.id).filter(Boolean)
-      : [...new Set(visibleAssets.map((a) => a.project).filter(Boolean))];
+      ? filterActiveProjects(transferProjects).map((p) => p.name || p.id).filter(Boolean)
+      : [];
+
+  const assetTypeOptions = [
+    ...new Set(
+      displayAssets
+        .map((asset) => String(asset.type || "").trim())
+        .filter((value) => value && value !== "-")
+    ),
+  ].sort((a, b) => a.localeCompare(b));
+
+  const defaultCategoryOptions = [
+    "Heavy Equipment",
+    "Trucks",
+    "Generator",
+    "Pickup",
+    "Sedan",
+    "Bus",
+    "Crane",
+    "Light Vehicle",
+    "Service Vehicle",
+    "Other",
+  ];
+
+  const categoryOptions = [
+    ...new Set([
+      ...defaultCategoryOptions,
+      ...displayAssets
+        .map((asset) => String(asset.category || "").trim())
+        .filter((value) => value && value !== "-"),
+    ]),
+  ];
 
   const filteredAssets = visibleAssets.filter((asset) => {
     const search = searchTerm.trim().toLowerCase();
@@ -4236,14 +4850,25 @@ useOutsideClick(assetSettingsRef, () => {
   );
 
   const changeAssetStatus = (asset) => {
+    if (!hasPermission("assets", "edit")) {
+      showToast?.("warning", "Read-only access: you cannot change asset status.");
+      return;
+    }
+
     const currentStatus = asset.status?.trim().toLowerCase();
     const newStatus = currentStatus === "active" ? "Inactive" : "Active";
 
-    const confirmed = confirm(
-      `Are you sure you want to change ${asset.id} status to ${newStatus}?`
-    );
+    setAssetStatusConfirm({
+      asset,
+      oldStatus: asset.status || "Inactive",
+      newStatus,
+    });
+  };
 
-    if (!confirmed) return;
+  const confirmAssetStatusChange = () => {
+    if (!assetStatusConfirm?.asset) return;
+
+    const { asset, newStatus } = assetStatusConfirm;
 
     setLocalAssetUpdates((prev) => ({
       ...prev,
@@ -4256,10 +4881,17 @@ useOutsideClick(assetSettingsRef, () => {
     trackActivity?.("Change Asset Status", "assets", `${asset.id} status changed to ${newStatus}.`);
     showToast
       ? showToast("success", `Asset status changed to ${newStatus}.`)
-      : alert(`Asset status changed to ${newStatus}.`);
+      : notifyUser(typeof showToast !== "undefined" ? showToast : null, inferToastTypeFromMessage(`Asset status changed to ${newStatus}.`), `Asset status changed to ${newStatus}.`);
+
+    setAssetStatusConfirm(null);
   };
 
   const openProjectChange = (asset) => {
+    if (!hasPermission("assets", "edit")) {
+      showToast?.("warning", "Read-only access: you cannot change asset project.");
+      return;
+    }
+
     setProjectTargetAsset(asset);
     setSelectedProjectValue(asset.project || "");
     setProjectEffectiveDate("");
@@ -4270,21 +4902,20 @@ useOutsideClick(assetSettingsRef, () => {
     setSelectedProjectValue("");
     setShowProjectConfirm(false);
     setShowProjectPassword(false);
-    setProjectPassword("");
   };
 
   const proceedProjectConfirm = () => {
     if (!selectedProjectValue) {
       showToast
         ? showToast("warning", "Please select a project.")
-        : alert("Please select a project.");
+        : notifyUser(typeof showToast !== "undefined" ? showToast : null, inferToastTypeFromMessage("Please select a project."), "Please select a project.");
       return;
     }
 
     if (!projectEffectiveDate) {
       showToast
         ? showToast("warning", "Please select project effective date.")
-        : alert("Please select project effective date.");
+        : notifyUser(typeof showToast !== "undefined" ? showToast : null, inferToastTypeFromMessage("Please select project effective date."), "Please select project effective date.");
       return;
     }
 
@@ -4293,16 +4924,16 @@ useOutsideClick(assetSettingsRef, () => {
 
   const proceedProjectPassword = () => {
     setShowProjectConfirm(false);
-    setShowProjectPassword(true);
+    confirmProjectUpdate();
   };
 
   const confirmProjectUpdate = () => {
-    if (!projectPassword) {
-      showToast
-        ? showToast("error", "Please enter your password.")
-        : alert("Please enter your password.");
+    if (!hasPermission("assets", "edit")) {
+      showToast?.("warning", "Read-only access: you cannot update asset project.");
+      resetProjectWorkflow();
       return;
     }
+
 
     const projectHistoryRecord = {
       assetId: projectTargetAsset.id,
@@ -4343,18 +4974,17 @@ useOutsideClick(assetSettingsRef, () => {
     setProjectEffectiveDate("");
     setShowProjectConfirm(false);
     setShowProjectPassword(false);
-    setProjectPassword("");
 
     showToast
       ? showToast("success", "Asset project updated successfully.")
-      : alert("Asset project updated successfully.");
+      : notifyUser(typeof showToast !== "undefined" ? showToast : null, inferToastTypeFromMessage("Asset project updated successfully."), "Asset project updated successfully.");
   };
 
   const proceedDeleteConfirm = () => {
     if (!deleteReason) {
       showToast
         ? showToast("warning", "Please enter deletion reason.")
-        : alert("Please enter deletion reason.");
+        : notifyUser(typeof showToast !== "undefined" ? showToast : null, inferToastTypeFromMessage("Please enter deletion reason."), "Please enter deletion reason.");
       return;
     }
 
@@ -4363,16 +4993,15 @@ useOutsideClick(assetSettingsRef, () => {
 
   const proceedDeletePassword = () => {
     setShowDeleteConfirm(false);
-    setShowDeletePassword(true);
+    confirmDeleteRequest();
   };
 
   const confirmDeleteRequest = () => {
-    if (!deletePassword) {
-      showToast
-        ? showToast("error", "Please enter your password.")
-        : alert("Please enter your password.");
+    if (!hasPermission("assets", "delete")) {
+      showToast?.("warning", "Read-only access: you cannot request asset deletion.");
       return;
     }
+
 
     submitApprovalRequest({
       type: "master_data_change",
@@ -4384,7 +5013,6 @@ useOutsideClick(assetSettingsRef, () => {
 
     setDeleteTargetAsset(null);
     setDeleteReason("");
-    setDeletePassword("");
     setShowDeleteConfirm(false);
     setShowDeletePassword(false);
 
@@ -4393,7 +5021,7 @@ useOutsideClick(assetSettingsRef, () => {
           "success",
           "Asset deletion request submitted for manager approval."
         )
-      : alert("Asset deletion request submitted for manager approval.");
+      : notifyUser(typeof showToast !== "undefined" ? showToast : null, inferToastTypeFromMessage("Asset deletion request submitted for manager approval."), "Asset deletion request submitted for manager approval.");
   };
 
   const proceedOdometerConfirm = () => {
@@ -4403,28 +5031,28 @@ useOutsideClick(assetSettingsRef, () => {
     if (oldOdometerBeforeReset === "" || Number.isNaN(oldReading) || oldReading < 0) {
       showToast
         ? showToast("warning", "Please enter valid old odometer before reset.")
-        : alert("Please enter valid old odometer before reset.");
+        : notifyUser(typeof showToast !== "undefined" ? showToast : null, inferToastTypeFromMessage("Please enter valid old odometer before reset."), "Please enter valid old odometer before reset.");
       return;
     }
 
     if (newOdometer === "" || Number.isNaN(newReading) || newReading < 0) {
       showToast
         ? showToast("warning", "Please enter valid new odometer after reset.")
-        : alert("Please enter valid new odometer after reset.");
+        : notifyUser(typeof showToast !== "undefined" ? showToast : null, inferToastTypeFromMessage("Please enter valid new odometer after reset."), "Please enter valid new odometer after reset.");
       return;
     }
 
     if (!odometerEffectiveDate) {
       showToast
         ? showToast("warning", "Please select odometer reset effective date.")
-        : alert("Please select odometer reset effective date.");
+        : notifyUser(typeof showToast !== "undefined" ? showToast : null, inferToastTypeFromMessage("Please select odometer reset effective date."), "Please select odometer reset effective date.");
       return;
     }
 
     if (!odometerReason) {
       showToast
         ? showToast("warning", "Please enter reset reason.")
-        : alert("Please enter reset reason.");
+        : notifyUser(typeof showToast !== "undefined" ? showToast : null, inferToastTypeFromMessage("Please enter reset reason."), "Please enter reset reason.");
       return;
     }
 
@@ -4433,16 +5061,15 @@ useOutsideClick(assetSettingsRef, () => {
 
   const proceedOdometerPassword = () => {
     setShowOdometerConfirm(false);
-    setShowOdometerPassword(true);
+    confirmOdometerRequest();
   };
 
   const confirmOdometerRequest = () => {
-    if (!odometerPassword) {
-      showToast
-        ? showToast("error", "Please enter your password.")
-        : alert("Please enter your password.");
+    if (!hasPermission("assets", "edit")) {
+      showToast?.("warning", "Read-only access: you cannot request odometer reset.");
       return;
     }
+
 
     const oldReading = Number(oldOdometerBeforeReset) || 0;
     const newReading = Number(newOdometer) || 0;
@@ -4477,7 +5104,6 @@ useOutsideClick(assetSettingsRef, () => {
     setNewOdometer("");
     setOdometerEffectiveDate("");
     setOdometerReason("");
-    setOdometerPassword("");
     setShowOdometerConfirm(false);
     setShowOdometerPassword(false);
 
@@ -4486,7 +5112,7 @@ useOutsideClick(assetSettingsRef, () => {
           "success",
           "Odometer reset request submitted for manager approval."
         )
-      : alert("Odometer reset request submitted for manager approval.");
+      : notifyUser(typeof showToast !== "undefined" ? showToast : null, inferToastTypeFromMessage("Odometer reset request submitted for manager approval."), "Odometer reset request submitted for manager approval.");
   };
 
 const exportAssetsToCSV = () => {
@@ -4531,13 +5157,13 @@ const exportAssetsToCSV = () => {
 
   showToast
     ? showToast("success", "Assets data exported successfully.")
-    : alert("Assets data exported successfully.");
+    : notifyUser(typeof showToast !== "undefined" ? showToast : null, inferToastTypeFromMessage("Assets data exported successfully."), "Assets data exported successfully.");
 };
 
 const exportAssetsToPDF = () => {
   showToast
     ? showToast("warning", "PDF export will be added in the next step.")
-    : alert("PDF export will be added in the next step.");
+    : notifyUser(typeof showToast !== "undefined" ? showToast : null, inferToastTypeFromMessage("PDF export will be added in the next step."), "PDF export will be added in the next step.");
 };
 
 const escapePrintValue = (value) => {
@@ -4561,7 +5187,7 @@ const printAssetsReport = () => {
           <td>${escapePrintValue(asset.project)}</td>
           <td>${escapePrintValue(asset.type)}</td>
           <td>${escapePrintValue(asset.category)}</td>
-          <td>${escapePrintValue(formatNumber(asset.odometer))}</td>
+          <td>${escapePrintValue(formatNumber(getLatestAssetOdometer(asset.id, asset.odometer)))}</td>
           <td>${escapePrintValue(formatNumber(asset.fuelTank))} L</td>
           <td>${escapePrintValue(asset.status)}</td>
         </tr>
@@ -4693,17 +5319,19 @@ const printAssetsReport = () => {
       </button>
 
       {showAssetSettings && (
-        <div className="absolute right-0 mt-3 w-56 bg-gray-900 border border-gray-700 rounded-2xl shadow-2xl overflow-hidden z-40">
-          <button
-            onClick={() => {
-              setShowAssetSettings(false);
-              setShowForm(true);
-            }}
-            className="flex items-center gap-3 w-full text-left px-5 py-4 hover:bg-slate-800 transition text-white"
-          >
-            <span className="text-green-400 text-lg">＋</span>
-            Add Asset
-          </button>
+        <div className="absolute right-0 mt-3 w-56 bg-gray-900 border border-gray-700 rounded-2xl shadow-2xl overflow-hidden z-[10020]">
+          {hasPermission("assets", "add") && (
+            <button
+              onClick={() => {
+                setShowAssetSettings(false);
+                setShowForm(true);
+              }}
+              className="flex items-center gap-3 w-full text-left px-5 py-4 hover:bg-slate-800 transition text-white"
+            >
+              <span className="text-green-400 text-lg">＋</span>
+              Add Asset
+            </button>
+          )}
 
           <button
             onClick={() => {
@@ -4815,26 +5443,34 @@ const printAssetsReport = () => {
                   </Td>
 
                   <Td>
-                    <button
-                      onClick={() => openProjectChange(asset)}
-                      className="hover:text-yellow-400 transition cursor-pointer"
-                    >
-                      {asset.project || "-"}
-                    </button>
+                    {hasPermission("assets", "edit") ? (
+                      <button
+                        onClick={() => openProjectChange(asset)}
+                        className="hover:text-yellow-400 transition cursor-pointer"
+                      >
+                        {asset.project || "-"}
+                      </button>
+                    ) : (
+                      <span>{asset.project || "-"}</span>
+                    )}
                   </Td>
 
                   <Td>{asset.type || "-"}</Td>
                   <Td>{asset.category || "-"}</Td>
-                  <Td>{formatNumber(asset.odometer)}</Td>
+                  <Td>{formatNumber(getLatestAssetOdometer(asset.id, asset.odometer))}</Td>
                   <Td>{formatNumber(asset.fuelTank)} L</Td>
 
                   <Td>
-                    <button
-                      onClick={() => changeAssetStatus(asset)}
-                      className="cursor-pointer"
-                    >
+                    {hasPermission("assets", "edit") ? (
+                      <button
+                        onClick={() => changeAssetStatus(asset)}
+                        className="cursor-pointer"
+                      >
+                        <StatusBadge status={asset.status} />
+                      </button>
+                    ) : (
                       <StatusBadge status={asset.status} />
-                    </button>
+                    )}
                   </Td>
                 </tr>
               ))}
@@ -4863,22 +5499,198 @@ const printAssetsReport = () => {
         </div>
       </div>
 
+      {assetStatusConfirm && (
+        <div className="fixed inset-0 bg-black/75 backdrop-blur-sm flex items-center justify-center z-[10020] p-3">
+          <div className="bg-white text-black w-[min(520px,calc(100vw-2rem))] rounded-2xl shadow-2xl p-6">
+            <div className="flex justify-between items-center mb-5 border-b pb-3">
+              <h2 className="text-xl sm:text-2xl font-bold">Confirm Asset Status Change</h2>
+              <button
+                onClick={() => setAssetStatusConfirm(null)}
+                className="text-gray-500 hover:text-black text-xl"
+              >
+                ×
+              </button>
+            </div>
+
+            <div className="bg-gray-100 rounded-xl p-4 mb-5">
+              <p className="text-sm text-gray-600">Asset ID</p>
+              <p className="text-base sm:text-lg font-bold">{assetStatusConfirm.asset?.id}</p>
+              <p className="text-sm text-gray-600 mt-2">
+                {assetStatusConfirm.oldStatus} → <span className="font-bold">{assetStatusConfirm.newStatus}</span>
+              </p>
+            </div>
+
+            <p className="text-sm text-gray-600 mb-5">
+              This status change will be saved directly without reason or password.
+            </p>
+
+            <div className="flex justify-end gap-3 border-t pt-4">
+              <button
+                onClick={() => setAssetStatusConfirm(null)}
+                className="bg-gray-200 px-4 py-2 rounded-lg"
+              >
+                Cancel
+              </button>
+
+              <button
+                onClick={confirmAssetStatusChange}
+                className="bg-amber-500 hover:bg-amber-400 text-black px-4 py-2 rounded-lg font-bold"
+              >
+                Save Status
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
+
       {showForm && (
         <GenericModal
           title="Add Asset"
-          closeForm={() => setShowForm(false)}
+          closeForm={closeAddAsset}
           saveText="Save Asset"
+          onSave={saveNewAsset}
+          saveDisabled={
+            Boolean(assetIdDuplicateError) ||
+            !newAsset.id.trim() ||
+            !newAsset.project ||
+            !newAsset.type.trim() ||
+            !newAsset.category.trim()
+          }
         >
-          <Field label="Asset ID" placeholder="1-316" />
-          <Field label="Project" placeholder="Project name / ID" />
-          <Field label="Asset Type" placeholder="Excavator / Truck / Loader" />
-          <Field label="Category" placeholder="Heavy Equipment" />
-          <Field label="Current Odometer" placeholder="Current reading" />
-          <Field label="Fuel Tank Capacity" placeholder="Liters" />
+          <Field
+            label="Asset ID"
+            placeholder="1-316"
+            value={newAsset.id}
+            onChange={(e) => setNewAsset({ ...newAsset, id: e.target.value })}
+            error={assetIdDuplicateError}
+          />
+          <div className="grid grid-cols-1 sm:grid-cols-3 items-start sm:items-center gap-2 sm:gap-4">
+            <label className="font-medium text-gray-700">Project</label>
+            <select
+              value={newAsset.project}
+              onChange={(e) => setNewAsset({ ...newAsset, project: e.target.value })}
+              className="col-span-2 border rounded-lg p-2"
+            >
+              <option value="">Select Project</option>
+              {projectOptions.map((project) => (
+                <option key={project} value={project}>
+                  {project}
+                </option>
+              ))}
+            </select>
+          </div>
+
+          <div className="grid grid-cols-1 sm:grid-cols-3 items-start sm:items-center gap-2 sm:gap-4">
+            <label className="font-medium text-gray-700">Asset Type</label>
+            <div className="col-span-2 space-y-2">
+              <select
+                value={useCustomAssetType ? "__add_new__" : newAsset.type}
+                onChange={(e) => {
+                  const value = e.target.value;
+
+                  if (value === "__add_new__") {
+                    setUseCustomAssetType(true);
+                    setCustomAssetType("");
+                    setNewAsset({ ...newAsset, type: "" });
+                    return;
+                  }
+
+                  setUseCustomAssetType(false);
+                  setCustomAssetType("");
+                  setNewAsset({ ...newAsset, type: value });
+                }}
+                className="w-full border rounded-lg p-2"
+              >
+                <option value="">Select Asset Type</option>
+                {assetTypeOptions.map((type) => (
+                  <option key={type} value={type}>
+                    {type}
+                  </option>
+                ))}
+                <option value="__add_new__">＋ Add new Asset Type</option>
+              </select>
+
+              {useCustomAssetType && (
+                <input
+                  value={customAssetType}
+                  onChange={(e) => {
+                    const value = e.target.value;
+                    setCustomAssetType(value);
+                    setNewAsset({ ...newAsset, type: value });
+                  }}
+                  placeholder="Enter new asset type"
+                  className="w-full border rounded-lg p-2"
+                />
+              )}
+            </div>
+          </div>
+
+          <div className="grid grid-cols-1 sm:grid-cols-3 items-start sm:items-center gap-2 sm:gap-4">
+            <label className="font-medium text-gray-700">Category</label>
+            <div className="col-span-2 space-y-2">
+              <select
+                value={useCustomCategory ? "__add_new__" : newAsset.category}
+                onChange={(e) => {
+                  const value = e.target.value;
+
+                  if (value === "__add_new__") {
+                    setUseCustomCategory(true);
+                    setCustomCategory("");
+                    setNewAsset({ ...newAsset, category: "" });
+                    return;
+                  }
+
+                  setUseCustomCategory(false);
+                  setCustomCategory("");
+                  setNewAsset({ ...newAsset, category: value });
+                }}
+                className="w-full border rounded-lg p-2"
+              >
+                <option value="">Select Category</option>
+                {categoryOptions.map((category) => (
+                  <option key={category} value={category}>
+                    {category}
+                  </option>
+                ))}
+                <option value="__add_new__">＋ Add new Category</option>
+              </select>
+
+              {useCustomCategory && (
+                <input
+                  value={customCategory}
+                  onChange={(e) => {
+                    const value = e.target.value;
+                    setCustomCategory(value);
+                    setNewAsset({ ...newAsset, category: value });
+                  }}
+                  placeholder="Enter new category"
+                  className="w-full border rounded-lg p-2"
+                />
+              )}
+            </div>
+          </div>
+          <Field
+            label="Current Odometer"
+            placeholder="Current reading"
+            type="number"
+            value={newAsset.odometer}
+            onChange={(e) => setNewAsset({ ...newAsset, odometer: e.target.value })}
+          />
+          <Field
+            label="Fuel Tank Capacity"
+            placeholder="Liters"
+            type="number"
+            value={newAsset.fuelTank}
+            onChange={(e) => setNewAsset({ ...newAsset, fuelTank: e.target.value })}
+          />
 
           <div className="grid grid-cols-1 sm:grid-cols-3 items-start sm:items-center gap-2 sm:gap-4">
             <label className="font-medium text-gray-700">Status</label>
-            <select className="col-span-2 border rounded-lg p-2">
+            <select
+              value={newAsset.status}
+              onChange={(e) => setNewAsset({ ...newAsset, status: e.target.value })}
+              className="col-span-2 border rounded-lg p-2"
+            >
               <option>Active</option>
               <option>Inactive</option>
             </select>
@@ -5086,42 +5898,6 @@ const printAssetsReport = () => {
         </div>
       )}
 
-      {showProjectPassword && (
-        <div className="fleet-modal-backdrop fixed inset-0 z-[9998] bg-black/60 flex items-center justify-center z-50">
-          <div className="bg-white text-black w-[520px] rounded-xl shadow-xl p-6">
-            <h2 className="text-xl font-bold mb-4">
-              Admin Password Required
-            </h2>
-
-            <input
-              type="password"
-              value={projectPassword}
-              onChange={(e) => setProjectPassword(e.target.value)}
-              className="border rounded-lg p-2 w-full mb-6"
-              placeholder="Enter admin password"
-            />
-
-            <div className="flex justify-end gap-3">
-              <button
-                onClick={() => {
-                  setShowProjectPassword(false);
-                  setProjectPassword("");
-                }}
-                className="bg-gray-200 px-4 py-2 rounded"
-              >
-                Cancel
-              </button>
-
-              <button
-                onClick={confirmProjectUpdate}
-                className="bg-red-600 text-white px-4 py-2 rounded"
-              >
-                Confirm Update
-              </button>
-            </div>
-          </div>
-        </div>
-      )}
 
       {deleteTargetAsset && (
         <div className="fixed inset-0 bg-black/75 backdrop-blur-sm flex items-center justify-center z-[10000] p-3">
@@ -5194,39 +5970,6 @@ const printAssetsReport = () => {
         </div>
       )}
 
-      {showDeletePassword && (
-        <div className="fixed inset-0 bg-black/75 backdrop-blur-sm flex items-center justify-center z-[10000] p-3">
-          <div className="bg-white text-black w-[500px] rounded-2xl p-6">
-            <h2 className="text-xl font-bold mb-4">
-              Admin Password Required
-            </h2>
-
-            <input
-              type="password"
-              value={deletePassword}
-              onChange={(e) => setDeletePassword(e.target.value)}
-              placeholder="Enter admin password"
-              className="border rounded-lg p-3 w-full mb-6"
-            />
-
-            <div className="flex justify-end gap-3">
-              <button
-                onClick={() => setShowDeletePassword(false)}
-                className="bg-gray-200 px-3 lg:px-4 py-2 rounded-lg"
-              >
-                Cancel
-              </button>
-
-              <button
-                onClick={confirmDeleteRequest}
-                className="bg-red-600 text-white px-3 lg:px-4 py-2 rounded-lg"
-              >
-                Confirm Request
-              </button>
-            </div>
-          </div>
-        </div>
-      )}
 
       {odometerTargetAsset && (
         <div className="fixed inset-0 bg-black/75 backdrop-blur-sm flex items-center justify-center z-[10000] p-3">
@@ -5347,39 +6090,6 @@ const printAssetsReport = () => {
         </div>
       )}
 
-      {showOdometerPassword && (
-        <div className="fixed inset-0 bg-black/75 backdrop-blur-sm flex items-center justify-center z-[10000] p-3">
-          <div className="bg-white text-black w-[500px] rounded-2xl p-6">
-            <h2 className="text-xl font-bold mb-4">
-              Admin Password Required
-            </h2>
-
-            <input
-              type="password"
-              value={odometerPassword}
-              onChange={(e) => setOdometerPassword(e.target.value)}
-              placeholder="Enter admin password"
-              className="border rounded-lg p-3 w-full mb-6"
-            />
-
-            <div className="flex justify-end gap-3">
-              <button
-                onClick={() => setShowOdometerPassword(false)}
-                className="bg-gray-200 px-3 lg:px-4 py-2 rounded-lg"
-              >
-                Cancel
-              </button>
-
-              <button
-                onClick={confirmOdometerRequest}
-                className="bg-yellow-500 text-black px-3 lg:px-4 py-2 rounded-lg"
-              >
-                Confirm Request
-              </button>
-            </div>
-          </div>
-        </div>
-      )}
       </div>
     </div>
   );
@@ -5402,7 +6112,6 @@ function StationsPage({
   submitApprovalRequest = () => {},
 }) {
   const [showForm, setShowForm] = useState(false);
-  const [showEdit, setShowEdit] = useState(false);
   const [showSettings, setShowSettings] = useState(false);
   const [showExportMenu, setShowExportMenu] = useState(false);
   const [selectedProject, setSelectedProject] = useState("All");
@@ -5415,18 +6124,123 @@ function StationsPage({
 
   const [selectedStation, setSelectedStation] = useState(null);
   const [selectedStationHistory, setSelectedStationHistory] = useState(null);
-  const [showConfirm, setShowConfirm] = useState(false);
+    const [editingProjectStation, setEditingProjectStation] = useState(null);
+  const [newStationProject, setNewStationProject] = useState("");
+  const [stationProjectEffectiveDate, setStationProjectEffectiveDate] = useState("");
+  const [stationProjectReason, setStationProjectReason] = useState("");
+const [showConfirm, setShowConfirm] = useState(false);
   const [showPassword, setShowPassword] = useState(false);
-  const [adminPassword, setAdminPassword] = useState("");
   const [localAdjustments, setLocalAdjustments] = useState([]);
+  const [stationProjectHistory, setStationProjectHistory] = useState([]);
+  const [localStationStatusUpdates, setLocalStationStatusUpdates] = useState({});
+  const [localStations, setLocalStations] = useState([]);
+  const [newStation, setNewStation] = useState({
+    id: "",
+    type: "Main",
+    project: "",
+    capacity: "",
+    openingBalance: "",
+    status: "Active",
+  });
+
+  const [projectEditStation, setProjectEditStation] = useState(null);
+
+
+  const [statusEditStation, setStatusEditStation] = useState(null);
+  const [newStationStatus, setNewStationStatus] = useState("");
+
+  const [showStockCountAdjustment, setShowStockCountAdjustment] = useState(false);
+  const [stockCountStation, setStockCountStation] = useState(null);
+  const [actualStockQty, setActualStockQty] = useState("");
+
+  const [deleteTargetStation, setDeleteTargetStation] = useState(null);
+  const [stationDeleteReason, setStationDeleteReason] = useState("");
+  const [showStationDeleteConfirm, setShowStationDeleteConfirm] = useState(false);
+  const [showStationDeletePassword, setShowStationDeletePassword] = useState(false);
+  const [stationDeletePassword, setStationDeletePassword] = useState("");
+
+  const [counterTargetStation, setCounterTargetStation] = useState(null);
+  const [oldCounterBeforeReset, setOldCounterBeforeReset] = useState("");
+  const [newStationCounter, setNewStationCounter] = useState("");
+  const [stationCounterEffectiveDate, setStationCounterEffectiveDate] = useState("");
+  const [stationCounterReason, setStationCounterReason] = useState("");
+  const [showStationCounterConfirm, setShowStationCounterConfirm] = useState(false);
+  const [showStationCounterPassword, setShowStationCounterPassword] = useState(false);
+  const [stationCounterPassword, setStationCounterPassword] = useState("");
+  const [stationCounterHistory, setStationCounterHistory] = useState([]);
 
   const [showLiterPrice, setShowLiterPrice] = useState(false);
   const [newLiterPrice, setNewLiterPrice] = useState("");
   const [effectiveDatetime, setEffectiveDatetime] = useState("");
   const [showPriceConfirm, setShowPriceConfirm] = useState(false);
   const [showPricePassword, setShowPricePassword] = useState(false);
-  const [pricePassword, setPricePassword] = useState("");
 
+
+  const stationIdDuplicateError = getDuplicateIdError(
+    newStation.id,
+    [...stations, ...localStations],
+    "Station ID"
+  );
+
+  const resetNewStation = () => {
+    setNewStation({
+      id: "",
+      type: "Main",
+      project: "",
+      capacity: "",
+      openingBalance: "",
+      status: "Active",
+    });
+  };
+
+  const closeAddStation = () => {
+    setShowForm(false);
+    resetNewStation();
+  };
+
+  const saveNewStation = () => {
+    if (!hasPermission("stations", "add")) {
+      showToast?.("warning", "Read-only access: you cannot add stations.");
+      return;
+    }
+
+    if (!newStation.id.trim()) {
+      showToast?.("warning", "Please enter Station ID.");
+      return;
+    }
+
+    if (stationIdDuplicateError) {
+      showToast?.("warning", stationIdDuplicateError);
+      return;
+    }
+
+    const cleanStation = {
+      id: newStation.id.trim(),
+      type: newStation.type || "Main",
+      project: newStation.project || "-",
+      capacity: Number(newStation.capacity) || 0,
+      openingBalance: Number(newStation.openingBalance) || 0,
+      status: newStation.status || "Active",
+      createdLocally: true,
+    };
+
+    if (isOfficerUser(currentUser)) {
+      submitApprovalRequest?.({
+        type: "master_data_change",
+        module: "stations",
+        title: `New station ${cleanStation.id}`,
+        details: `Officer requested new station ${cleanStation.id}`,
+        payload: { entity: "station", action: "add", values: cleanStation },
+      });
+      closeAddStation();
+      return;
+    }
+
+    setLocalStations((prev) => [...prev, cleanStation]);
+    trackActivity?.("Add Station", "stations", `${cleanStation.id} added locally.`);
+    showToast?.("success", "Station added locally.");
+    closeAddStation();
+  };
 
   const countryFlag = "🇸🇦";
 
@@ -5464,9 +6278,30 @@ function StationsPage({
     "date",
   ]);
 
+  const stationCounterIndex = getHeaderIndex(headers, [
+    "odometer_at_fueling",
+    "Odometer at fueling",
+    "odometer at fueling",
+    "station_counter",
+    "Station Counter",
+    "station counter",
+    "source_station_counter",
+    "Source Station Counter",
+    "source station counter",
+    "station_meter",
+    "Station Meter",
+    "station meter",
+    "source_station_meter",
+    "Source Station Meter",
+    "source station meter",
+    "meter_counter",
+    "Meter Counter",
+    "counter",
+  ]);
+
   const fuelerIndex = getHeaderIndex(headers, [
     "fueler_id",
-    "Fueler ID",
+    "Operator ID",
     "fueler id",
     "fueler",
   ]);
@@ -5550,7 +6385,409 @@ function StationsPage({
     return "-";
   };
 
+  const getStationProjectAtDate = (station, rawDate) => {
+    const operationDate = rawDate ? new Date(rawDate) : new Date();
+
+    const stationHistory = stationProjectHistory
+      .filter((item) => isSameText(item.stationId, station.id))
+      .filter((item) => {
+        const effectiveDate = new Date(item.effectiveFrom);
+        return (
+          !Number.isNaN(effectiveDate.getTime()) &&
+          !Number.isNaN(operationDate.getTime()) &&
+          effectiveDate <= operationDate
+        );
+      })
+      .sort((a, b) => new Date(b.effectiveFrom) - new Date(a.effectiveFrom));
+
+    return stationHistory[0]?.newProject || station.project || "-";
+  };
+
+  const getCurrentStationProject = (station) => {
+    return getStationProjectAtDate(station, new Date().toISOString());
+  };
+
+  const getCurrentStationStatus = (station) => {
+    return localStationStatusUpdates[station.id]?.status || station.status || "Active";
+  };
+
+  const openProjectChange = (station) => {
+    if (!hasPermission("stations", "edit")) {
+      showToast?.("warning", "Read-only access: you cannot change station project.");
+      return;
+    }
+
+    setProjectEditStation(station);
+    setNewStationProject(getCurrentStationProject(station));
+    setStationProjectEffectiveDate("");
+  };
+
+  const confirmStationProjectChange = () => {
+    if (!projectEditStation) return;
+
+    if (!newStationProject) {
+      showToast?.("warning", "Please select a new project.");
+      return;
+    }
+
+    if (!stationProjectEffectiveDate) {
+      showToast?.("warning", "Please select effective date and time.");
+      return;
+    }
+
+
+    const oldProject = getCurrentStationProject(projectEditStation);
+
+    if (isOfficerUser(currentUser)) {
+      submitApprovalRequest?.({
+        type: "master_data_change",
+        module: "stations",
+        title: `Station ${projectEditStation.id} project change`,
+        details: `Project change from ${oldProject || "-"} to ${newStationProject}`,
+        payload: {
+          entity: "station",
+          id: projectEditStation.id,
+          field: "project",
+          oldValue: oldProject,
+          newValue: newStationProject,
+          project: oldProject,
+          changedFields: [
+            { field: "project", oldValue: oldProject, newValue: newStationProject, sensitive: true },
+          ],
+        },
+      });
+
+      setProjectEditStation(null);
+      setNewStationProject("");
+      setStationProjectEffectiveDate("");
+      showToast?.("warning", "Station project change sent for manager approval.");
+      return;
+    }
+
+    setStationProjectHistory((prev) => [
+      ...prev,
+      {
+        stationId: projectEditStation.id,
+        oldProject,
+        newProject: newStationProject,
+        effectiveFrom: stationProjectEffectiveDate,
+        changedBy: currentUser?.fullName || currentUser?.name || "System",
+        changedAt: new Date().toISOString(),
+        type: "station_project_change",
+      },
+    ]);
+
+    trackActivity?.(
+      "Station Project Change",
+      "stations",
+      `${projectEditStation.id} project changed from ${oldProject || "-"} to ${newStationProject} effective ${stationProjectEffectiveDate}.`
+    );
+
+    setProjectEditStation(null);
+    setNewStationProject("");
+    setStationProjectEffectiveDate("");
+
+    showToast?.("success", "Station project change saved with effective date.");
+  };
+
+  const openStatusChange = (station) => {
+    if (!hasPermission("stations", "edit")) {
+      showToast?.("warning", "Read-only access: you cannot change station status.");
+      return;
+    }
+
+    setStatusEditStation(station);
+    setNewStationStatus(getCurrentStationStatus(station));
+  };
+
+  const confirmStationStatusChange = () => {
+    if (!statusEditStation) return;
+
+    if (!newStationStatus) {
+      showToast?.("warning", "Please select station status.");
+      return;
+    }
+
+    const oldStatus = getCurrentStationStatus(statusEditStation);
+
+    setLocalStationStatusUpdates((prev) => ({
+      ...prev,
+      [statusEditStation.id]: {
+        oldStatus,
+        status: newStationStatus,
+        changedBy: currentUser?.fullName || currentUser?.name || "System",
+        changedAt: new Date().toISOString(),
+      },
+    }));
+
+    trackActivity?.(
+      "Station Status Change",
+      "stations",
+      `${statusEditStation.id} status changed from ${oldStatus || "-"} to ${newStationStatus}.`
+    );
+
+    setStatusEditStation(null);
+    setNewStationStatus("");
+
+    showToast?.("success", "Station status updated successfully.");
+  };
+
+  const getCurrentStationCounter = (station) => {
+    const latestCounterRecord = stationCounterHistory
+      .filter((item) => isSameText(item.stationId, station.id))
+      .sort((a, b) => new Date(b.requestedAt) - new Date(a.requestedAt))[0];
+
+    if (latestCounterRecord) {
+      return latestCounterRecord.newCounterAfterReset;
+    }
+
+    return Number(station.counter) || 0;
+  };
+
+  const proceedStationDeleteConfirm = () => {
+    if (!stationDeleteReason) {
+      showToast
+        ? showToast("warning", "Please enter deletion reason.")
+        : notifyUser(
+            typeof showToast !== "undefined" ? showToast : null,
+            inferToastTypeFromMessage("Please enter deletion reason."),
+            "Please enter deletion reason."
+          );
+      return;
+    }
+
+    setShowStationDeleteConfirm(true);
+  };
+
+  const proceedStationDeletePassword = () => {
+    setShowStationDeleteConfirm(false);
+    confirmStationDeleteRequest();
+  };
+
+  const confirmStationDeleteRequest = () => {
+    if (!hasPermission("stations", "delete")) {
+      showToast?.("warning", "Read-only access: you cannot request station deletion.");
+      return;
+    }
+
+    submitApprovalRequest({
+      type: "master_data_change",
+      module: "stations",
+      title: `Station ${deleteTargetStation?.id} deletion request`,
+      details: stationDeleteReason,
+      payload: {
+        entity: "station",
+        action: "delete",
+        id: deleteTargetStation?.id,
+        reason: stationDeleteReason,
+        project: deleteTargetStation?.project,
+      },
+    });
+
+    setDeleteTargetStation(null);
+    setStationDeleteReason("");
+    setShowStationDeleteConfirm(false);
+    setShowStationDeletePassword(false);
+    setStationDeletePassword("");
+
+    showToast
+      ? showToast(
+          "success",
+          "Station deletion request submitted for manager approval."
+        )
+      : notifyUser(
+          typeof showToast !== "undefined" ? showToast : null,
+          inferToastTypeFromMessage("Station deletion request submitted for manager approval."),
+          "Station deletion request submitted for manager approval."
+        );
+  };
+
+  const proceedStationCounterConfirm = () => {
+    const oldReading = Number(oldCounterBeforeReset);
+    const newReading = Number(newStationCounter);
+
+    if (oldCounterBeforeReset === "" || Number.isNaN(oldReading) || oldReading < 0) {
+      showToast
+        ? showToast("warning", "Please enter valid old station counter before reset.")
+        : notifyUser(
+            typeof showToast !== "undefined" ? showToast : null,
+            inferToastTypeFromMessage("Please enter valid old station counter before reset."),
+            "Please enter valid old station counter before reset."
+          );
+      return;
+    }
+
+    if (newStationCounter === "" || Number.isNaN(newReading) || newReading < 0) {
+      showToast
+        ? showToast("warning", "Please enter valid new station counter after reset.")
+        : notifyUser(
+            typeof showToast !== "undefined" ? showToast : null,
+            inferToastTypeFromMessage("Please enter valid new station counter after reset."),
+            "Please enter valid new station counter after reset."
+          );
+      return;
+    }
+
+    if (!stationCounterEffectiveDate) {
+      showToast
+        ? showToast("warning", "Please select station counter reset effective date.")
+        : notifyUser(
+            typeof showToast !== "undefined" ? showToast : null,
+            inferToastTypeFromMessage("Please select station counter reset effective date."),
+            "Please select station counter reset effective date."
+          );
+      return;
+    }
+
+    if (!stationCounterReason) {
+      showToast
+        ? showToast("warning", "Please enter reset reason.")
+        : notifyUser(
+            typeof showToast !== "undefined" ? showToast : null,
+            inferToastTypeFromMessage("Please enter reset reason."),
+            "Please enter reset reason."
+          );
+      return;
+    }
+
+    setShowStationCounterConfirm(true);
+  };
+
+  const proceedStationCounterPassword = () => {
+    setShowStationCounterConfirm(false);
+    confirmStationCounterRequest();
+  };
+
+  const confirmStationCounterRequest = () => {
+    if (!hasPermission("stations", "edit")) {
+      showToast?.("warning", "Read-only access: you cannot request station counter reset.");
+      return;
+    }
+
+    const oldReading = Number(oldCounterBeforeReset) || 0;
+    const newReading = Number(newStationCounter) || 0;
+
+    const stationCounterHistoryRecord = {
+      stationId: counterTargetStation.id,
+      oldCounterBeforeReset: oldReading,
+      newCounterAfterReset: newReading,
+      effectiveDate: stationCounterEffectiveDate,
+      counterOffset: oldReading,
+      actualCounterAfterReset: oldReading + newReading,
+      reason: stationCounterReason,
+      requestedBy: currentUser?.fullName || currentUser?.name || "System",
+      requestedAt: new Date().toISOString(),
+      status: "Pending Approval",
+    };
+
+    setStationCounterHistory((prev) => [...prev, stationCounterHistoryRecord]);
+
+    submitApprovalRequest({
+      type: "master_data_change",
+      module: "stations",
+      title: `Station ${counterTargetStation?.id} counter reset`,
+      details: stationCounterReason,
+      payload: {
+        entity: "station",
+        action: "station_counter_reset",
+        values: stationCounterHistoryRecord,
+      },
+    });
+
+    setCounterTargetStation(null);
+    setOldCounterBeforeReset("");
+    setNewStationCounter("");
+    setStationCounterEffectiveDate("");
+    setStationCounterReason("");
+    setShowStationCounterConfirm(false);
+    setShowStationCounterPassword(false);
+    setStationCounterPassword("");
+
+    showToast
+      ? showToast(
+          "success",
+          "Station counter reset request submitted for manager approval."
+        )
+      : notifyUser(
+          typeof showToast !== "undefined" ? showToast : null,
+          inferToastTypeFromMessage("Station counter reset request submitted for manager approval."),
+          "Station counter reset request submitted for manager approval."
+        );
+  };
+
+  const stationCurrentCounterMap = useMemo(() => {
+    const map = new Map();
+
+    if (stationCounterIndex === -1) return map;
+
+    data.forEach((row, originalIndex) => {
+      const type = row[typeIndex];
+      const source = row[sourceIndex];
+      const destination = row[destinationIndex];
+      const counterValue = parseFloat(row[stationCounterIndex]);
+
+      if (Number.isNaN(counterValue)) return;
+
+      const operationTime =
+        dateIndex !== -1 ? new Date(row[dateIndex]).getTime() || 0 : originalIndex;
+
+      const relatedStationIds = [];
+
+      // Direct_Refuel uses odometer_at_fueling for the equipment.
+      // Station Counter is updated only by station movements/supply.
+      if (
+        (isSameText(type, "Internal_Transfer") ||
+          isSameText(type, "External_Transfer")) &&
+        source
+      ) {
+        relatedStationIds.push(source);
+      }
+
+      if (
+        (isSameText(type, "Internal_Transfer") ||
+          isSameText(type, "External_Transfer") ||
+          isSameText(type, "External_Supply")) &&
+        destination
+      ) {
+        relatedStationIds.push(destination);
+      }
+
+      relatedStationIds.forEach((stationId) => {
+        const key = normalizeScopeValue(stationId);
+        const previous = map.get(key);
+
+        if (
+          !previous ||
+          operationTime > previous.operationTime ||
+          (operationTime === previous.operationTime &&
+            originalIndex > previous.originalIndex)
+        ) {
+          map.set(key, {
+            value: counterValue,
+            operationTime,
+            originalIndex,
+          });
+        }
+      });
+    });
+
+    return map;
+  }, [
+    data,
+    typeIndex,
+    sourceIndex,
+    destinationIndex,
+    dateIndex,
+    stationCounterIndex,
+  ]);
+
+  const getLatestStationCounter = (stationId, fallbackValue = 0) => {
+    const latest = stationCurrentCounterMap.get(normalizeScopeValue(stationId));
+    return latest?.value ?? fallbackValue ?? 0;
+  };
+
   const calculateStationBalance = (station) => {
+    // Current stock always starts from the station Opening Balance, then adds/subtracts all related operations.
     let currentStock = station.openingBalance || 0;
 
     data.forEach((row) => {
@@ -5562,6 +6799,8 @@ function StationsPage({
       if (isSameText(type, "Direct_Refuel") && isSameText(source, station.id)) currentStock -= qty;
       if (isSameText(type, "Internal_Transfer") && isSameText(source, station.id)) currentStock -= qty;
       if (isSameText(type, "Internal_Transfer") && isSameText(destination, station.id)) currentStock += qty;
+      if (isSameText(type, "External_Transfer") && isSameText(source, station.id)) currentStock -= qty;
+      if (isSameText(type, "External_Transfer") && isSameText(destination, station.id)) currentStock += qty;
       if (isSameText(type, "External_Supply") && isSameText(destination, station.id)) currentStock += qty;
     });
 
@@ -5574,13 +6813,16 @@ function StationsPage({
     return currentStock;
   };
 
-  const realStations = stations.filter(
+  const realStations = [...stations, ...localStations].filter(
     (station) => !isSameText(station.id, "External_Supply")
   );
 
   const stationsWithBalance = realStations.map((station) => {
     const currentStock = calculateStationBalance(station);
-
+    const currentCounter = getLatestStationCounter(
+      station.id,
+      getCurrentStationCounter(station)
+    );
     const percentage =
       station.capacity > 0
         ? Math.max(0, Math.min(100, (currentStock / station.capacity) * 100))
@@ -5588,6 +6830,10 @@ function StationsPage({
 
     return {
       ...station,
+      project: getCurrentStationProject(station),
+      originalProject: station.project,
+      status: getCurrentStationStatus(station),
+      currentCounter,
       currentStock,
       percentage,
     };
@@ -5595,13 +6841,13 @@ function StationsPage({
 
   const projectOptions = [
     "All",
-    ...new Set(realStations.map((station) => station.project).filter(Boolean)),
+    ...new Set(stationsWithBalance.map((station) => station.project).filter(Boolean)),
   ];
 
   const transferProjectOptions =
     transferProjects.length > 0
-      ? transferProjects.map((project) => project.name || project.id).filter(Boolean)
-      : [...new Set(realStations.map((station) => station.project).filter(Boolean))];
+      ? filterActiveProjects(transferProjects).map((project) => project.name || project.id).filter(Boolean)
+      : [];
 
   const filteredStations =
     selectedProject === "All"
@@ -5630,66 +6876,181 @@ function StationsPage({
     .sort((a, b) => b.qtyLiters - a.qtyLiters);
 
   const openInventoryAdjustment = () => {
+    if (!hasPermission("stations", "adjustInventory")) {
+      showToast?.("warning", "Read-only access: you cannot adjust station inventory.");
+      return;
+    }
+
     setShowSettings(false);
     setShowExportMenu(false);
     setSelectedStation(null);
     setShowConfirm(true);
   };
 
+  const openStockCountAdjustment = () => {
+    if (!hasPermission("stations", "adjustInventory")) {
+      showToast?.("warning", "Read-only access: you cannot adjust station inventory.");
+      return;
+    }
+
+    setShowSettings(false);
+    setShowExportMenu(false);
+    setStockCountStation(null);
+    setActualStockQty("");
+    setShowStockCountAdjustment(true);
+  };
+
+  const confirmStockCountAdjustment = () => {
+    if (!stockCountStation) {
+      showToast?.("warning", "Please select a station first.");
+      return;
+    }
+
+    const actualQty = Number(actualStockQty);
+
+    if (actualStockQty === "" || Number.isNaN(actualQty) || actualQty < 0) {
+      showToast?.("warning", "Please enter a valid actual stock quantity.");
+      return;
+    }
+
+
+    const systemQty = Number(stockCountStation.currentStock) || 0;
+    const adjustmentQty = actualQty - systemQty;
+
+    if (isOfficerUser(currentUser)) {
+      submitApprovalRequest?.({
+        type: "station_stock_count_adjustment",
+        module: "stations",
+        title: `Stock Count Adjustment - ${stockCountStation.id}`,
+        details: `${currentUser?.fullName || currentUser?.name || "Officer"} requested stock count adjustment for station ${stockCountStation.id}.`,
+        payload: {
+          entity: "station",
+          id: stockCountStation.id,
+          action: "stock_count_adjustment",
+          stationId: stockCountStation.id,
+          field: "currentStock",
+          oldValue: systemQty,
+          newValue: actualQty,
+          project: stockCountStation.project,
+          changedFields: [
+            { field: "currentStock", label: "Stock Count", oldValue: `${systemQty} L`, newValue: `${actualQty} L`, sensitive: true },
+          ],
+        },
+      });
+
+      setShowStockCountAdjustment(false);
+      setStockCountStation(null);
+      setActualStockQty("");
+      showToast?.("warning", "Stock count adjustment sent for manager approval.");
+      return;
+    }
+
+    setLocalAdjustments((prev) => [
+      ...prev,
+      {
+        stationId: stockCountStation.id,
+        adjustmentQty,
+        systemQty,
+        actualQty,
+        reason: "Stock Count Adjustment",
+        adjustmentType: "STOCK_COUNT_ADJUSTMENT",
+        createdBy: currentUser?.fullName || currentUser?.name || "System",
+        createdAt: new Date().toISOString(),
+      },
+    ]);
+
+    trackActivity?.(
+      "Stock Count Adjustment",
+      "stations",
+      `${stockCountStation.id} adjusted from ${formatNumber(systemQty)} L to actual ${formatNumber(actualQty)} L. Difference: ${formatNumber(adjustmentQty)} L.`
+    );
+
+    setShowStockCountAdjustment(false);
+    setStockCountStation(null);
+    setActualStockQty("");
+
+    showToast?.("success", "Stock count adjustment completed successfully.");
+  };
+
   const proceedToPassword = () => {
     if (!selectedStation) {
       showToast
         ? showToast("warning", "Please select a station first.")
-        : alert("Please select a station first.");
+        : notifyUser(typeof showToast !== "undefined" ? showToast : null, inferToastTypeFromMessage("Please select a station first."), "Please select a station first.");
       return;
     }
 
     setShowConfirm(false);
-    setShowPassword(true);
+    confirmZeroBalance();
   };
 
   const confirmZeroBalance = () => {
-    if (!adminPassword) {
-      showToast
-        ? showToast("error", "Please enter your password.")
-        : alert("Please enter your password.");
-      return;
-    }
 
     const adjustmentQty = -selectedStation.currentStock;
+
+    if (isOfficerUser(currentUser)) {
+      submitApprovalRequest?.({
+        type: "station_zero_balance_adjustment",
+        module: "stations",
+        title: `Zero Balance Adjustment - ${selectedStation.id}`,
+        details: `${currentUser?.fullName || currentUser?.name || "Officer"} requested zero balance adjustment for station ${selectedStation.id}.`,
+        payload: {
+          entity: "station",
+          id: selectedStation.id,
+          action: "zero_balance_adjustment",
+          stationId: selectedStation.id,
+          field: "currentStock",
+          oldValue: selectedStation.currentStock,
+          newValue: 0,
+          project: selectedStation.project,
+          changedFields: [
+            { field: "currentStock", label: "Zero Balance", oldValue: `${selectedStation.currentStock} L`, newValue: "0 L", sensitive: true },
+          ],
+        },
+      });
+
+            setSelectedStation(null);
+      showToast?.("warning", "Zero balance adjustment sent for manager approval.");
+      return;
+    }
 
     setLocalAdjustments([
       ...localAdjustments,
       {
         stationId: selectedStation.id,
         adjustmentQty,
-        reason: "Inventory Adjustment",
+        reason: "Zero Balance Adjustment",
+        adjustmentType: "ZERO_BALANCE_ADJUSTMENT",
         createdBy: currentUser?.fullName || currentUser?.name || "System",
         createdAt: new Date().toISOString(),
       },
     ]);
 
-    setShowPassword(false);
-    setSelectedStation(null);
-    setAdminPassword("");
+        setSelectedStation(null);
+
+    trackActivity?.(
+      "Zero Balance Adjustment",
+      "stations",
+      `${selectedStation.id} balance zeroed. Adjustment: ${formatNumber(adjustmentQty)} L.`
+    );
 
     showToast
-      ? showToast("success", "Inventory Adjustment completed successfully.")
-      : alert("Inventory Adjustment completed successfully.");
+      ? showToast("success", "Zero balance adjustment completed successfully.")
+      : notifyUser(typeof showToast !== "undefined" ? showToast : null, inferToastTypeFromMessage("Zero balance adjustment completed successfully."), "Zero balance adjustment completed successfully.");
   };
 
   const proceedLiterPriceConfirm = () => {
     if (!newLiterPrice || Number(newLiterPrice) <= 0) {
       showToast
         ? showToast("warning", "Please enter a valid liter price.")
-        : alert("Please enter a valid liter price.");
+        : notifyUser(typeof showToast !== "undefined" ? showToast : null, inferToastTypeFromMessage("Please enter a valid liter price."), "Please enter a valid liter price.");
       return;
     }
 
     if (!effectiveDatetime) {
       showToast
         ? showToast("warning", "Please select effective date and time.")
-        : alert("Please select effective date and time.");
+        : notifyUser(typeof showToast !== "undefined" ? showToast : null, inferToastTypeFromMessage("Please select effective date and time."), "Please select effective date and time.");
       return;
     }
 
@@ -5699,16 +7060,15 @@ function StationsPage({
 
   const proceedLiterPricePassword = () => {
     setShowPriceConfirm(false);
-    setShowPricePassword(true);
+    confirmLiterPriceUpdate();
   };
 
   const confirmLiterPriceUpdate = () => {
-    if (!pricePassword) {
-      showToast
-        ? showToast("error", "Please enter your password.")
-        : alert("Please enter your password.");
+    if (!hasPermission("stations", "updatePrice")) {
+      showToast?.("warning", "Read-only access: you cannot update liter price.");
       return;
     }
+
 
     if (setPriceHistory) {
       setPriceHistory((prev) =>
@@ -5724,14 +7084,12 @@ function StationsPage({
       );
     }
 
-    setShowPricePassword(false);
-    setPricePassword("");
-    setNewLiterPrice("");
+        setNewLiterPrice("");
     setEffectiveDatetime("");
 
     showToast
       ? showToast("success", "Liter price updated successfully.")
-      : alert("Liter price updated successfully.");
+      : notifyUser(typeof showToast !== "undefined" ? showToast : null, inferToastTypeFromMessage("Liter price updated successfully."), "Liter price updated successfully.");
   };
 
   const exportStationsToCSV = () => {
@@ -5779,13 +7137,13 @@ function StationsPage({
 
     showToast
       ? showToast("success", "Stations data exported successfully.")
-      : alert("Stations data exported successfully.");
+      : notifyUser(typeof showToast !== "undefined" ? showToast : null, inferToastTypeFromMessage("Stations data exported successfully."), "Stations data exported successfully.");
   };
 
   const exportStationsToPDF = () => {
     showToast
       ? showToast("warning", "PDF export will be added later.")
-      : alert("PDF export will be added later.");
+      : notifyUser(typeof showToast !== "undefined" ? showToast : null, inferToastTypeFromMessage("PDF export will be added later."), "PDF export will be added later.");
   };
 
   return (
@@ -5815,50 +7173,51 @@ function StationsPage({
           {showSettings && (
             <div
               onClick={(e) => e.stopPropagation()}
-              className="absolute right-0 mt-3 w-64 bg-gray-900 border border-gray-700 rounded-2xl shadow-2xl overflow-hidden z-40 backdrop-blur-xl"
+              className="absolute right-0 mt-3 w-64 bg-gray-900 border border-gray-700 rounded-2xl shadow-2xl overflow-hidden z-[10020] backdrop-blur-xl"
             >
-              <button
-                onClick={() => {
-                  setShowSettings(false);
-                  setShowExportMenu(false);
-                  setShowForm(true);
-                }}
-                className="flex items-center gap-3 w-full text-left px-5 py-4 hover:bg-slate-800 transition text-white"
-              >
-                <span className="text-green-400 text-lg">＋</span>
-                Add Station
-              </button>
-
-              <button
-                onClick={() => {
-                  setShowSettings(false);
-                  setShowExportMenu(false);
-                  setShowEdit(true);
-                }}
-                className="flex items-center gap-3 w-full text-left px-5 py-4 hover:bg-slate-800 transition text-white"
-              >
-                <span className="text-blue-400 text-lg">✎</span>
-                Edit Station
-              </button>
-
-              {hasPermission("stations", "adjustInventory") && (
+              {hasPermission("stations", "add") && (
                 <button
-                  onClick={openInventoryAdjustment}
-                  className="flex items-center gap-3 w-full text-left px-5 py-4 hover:bg-red-900/30 transition text-red-400"
+                  onClick={() => {
+                    setShowSettings(false);
+                    setShowExportMenu(false);
+                    setShowForm(true);
+                  }}
+                  className="flex items-center gap-3 w-full text-left px-5 py-4 hover:bg-slate-800 transition text-white"
                 >
-                  <span className="text-lg">⚠</span>
-                  Inventory Adjustment
+                  <span className="text-green-400 text-lg">＋</span>
+                  Add Station
                 </button>
               )}
 
-              <button
-                onClick={() => {
-                  setShowSettings(false);
-                  setShowExportMenu(false);
-                  setShowLiterPrice(true);
-                }}
-                className="flex items-center justify-between w-full px-5 py-4 hover:bg-yellow-500/10 transition text-white border-t border-gray-700"
-              >
+              {hasPermission("stations", "adjustInventory") && (
+                <>
+                  <button
+                    onClick={openInventoryAdjustment}
+                    className="flex items-center gap-3 w-full text-left px-5 py-4 hover:bg-red-900/30 transition text-red-400"
+                  >
+                    <span className="text-lg">⚠</span>
+                    Zero Balance
+                  </button>
+
+                  <button
+                    onClick={openStockCountAdjustment}
+                    className="flex items-center gap-3 w-full text-left px-5 py-4 hover:bg-amber-500/10 transition text-amber-300 border-t border-gray-700"
+                  >
+                    <span className="text-lg">≋</span>
+                    Stock Count Adjustment
+                  </button>
+                </>
+              )}
+
+              {hasPermission("stations", "updatePrice") && (
+                <button
+                  onClick={() => {
+                    setShowSettings(false);
+                    setShowExportMenu(false);
+                    setShowLiterPrice(true);
+                  }}
+                  className="flex items-center justify-between w-full px-5 py-4 hover:bg-yellow-500/10 transition text-white border-t border-gray-700"
+                >
                 <span className="flex flex-wrap items-center gap-3">
                   <span className="text-lg">{countryFlag}</span>
                   Liter Price
@@ -5868,6 +7227,7 @@ function StationsPage({
                   {literPrice} {currency}/L
                 </span>
               </button>
+              )}
 
               <div className="border-t border-gray-700">
                 <button
@@ -5989,21 +7349,65 @@ function StationsPage({
             >
               <div className="flex justify-between items-start mb-4">
                 <div>
+                  <div className="flex flex-col items-start">
+                  <div className="flex items-center gap-3">
+                    <button
+                      onClick={() => setSelectedStationHistory(station)}
+                      className="text-xl font-bold text-blue-200 hover:text-yellow-400 transition cursor-pointer"
+                    >
+                      {station.id}
+                    </button>
+
+                    {hasPermission("stations", "delete") && (
+                      <button
+                        onClick={(e) => {
+                          e.stopPropagation();
+                          setDeleteTargetStation(station);
+                          setStationDeleteReason("");
+                        }}
+                        className="text-gray-400 hover:text-red-400 transition text-lg cursor-pointer"
+                        title="Delete Station"
+                      >
+                        🗑️
+                      </button>
+                    )}
+                  </div>
+
                   <button
-                    onClick={() => setSelectedStationHistory(station)}
-                    className="text-xl font-bold text-blue-200 hover:text-yellow-400 transition cursor-pointer"
+                    onClick={(e) => {
+                      e.stopPropagation();
+                      setEditingProjectStation(station);
+                      setNewStationProject(station.project || "");
+                      setStationProjectEffectiveDate("");
+                      setStationProjectReason("");
+                    }}
+                    className="mt-3 border border-slate-700/80 rounded-2xl bg-slate-950/50 px-4 py-3 min-w-[170px] shadow-lg hover:border-yellow-400 hover:bg-slate-900 transition-all duration-300 text-left cursor-pointer"
                   >
-                    {station.id}
+                    <p className="text-[9px] uppercase tracking-[0.22em] text-slate-500">
+                      Project
+                    </p>
+
+                    <p className="text-sm font-semibold text-slate-100 mt-1">
+                      {station.project || "-"}
+                    </p>
                   </button>
-                  <p className="text-sm text-slate-400">
-                    Project: {station.project || "-"}
-                  </p>
+                </div>
+                  <button
+                    onClick={() => openProjectChange(station)}
+                    className="text-sm text-slate-400 hover:text-amber-300 transition cursor-pointer"
+                  >
+                  </button>
                 </div>
 
-                <StatusBadge status={station.status} />
+                <button
+                  onClick={() => openStatusChange(station)}
+                  className="cursor-pointer"
+                >
+                  <StatusBadge status={station.status} />
+                </button>
               </div>
 
-              <div className="flex flex-col sm:flex-row justify-between sm:items-start xl:items-center gap-3 mb-5">
+              <div className="grid grid-cols-1 sm:grid-cols-3 gap-3 mb-5">
                 <div>
                   <p className="text-xs text-gray-400">Capacity</p>
                   <p className="text-lg font-semibold">
@@ -6011,7 +7415,33 @@ function StationsPage({
                   </p>
                 </div>
 
-                <div className="text-right">
+                <div>
+                  <div className="flex items-center gap-2">
+                    <p className="text-xs text-gray-400">Station Counter</p>
+
+                    {hasPermission("stations", "edit") && (
+                      <button
+                        onClick={() => {
+                          setCounterTargetStation(station);
+                          setOldCounterBeforeReset(station.currentCounter || "");
+                          setNewStationCounter("0");
+                          setStationCounterEffectiveDate("");
+                          setStationCounterReason("");
+                        }}
+                        className="text-gray-400 hover:text-yellow-400 transition text-sm cursor-pointer"
+                        title="Reset Station Counter"
+                      >
+                        ✏️
+                      </button>
+                    )}
+                  </div>
+
+                  <p className="text-lg font-semibold text-yellow-300">
+                    {formatNumber(station.currentCounter)}
+                  </p>
+                </div>
+
+                <div className="sm:text-right">
                   <p className="text-xs text-gray-400">Current Stock</p>
                   <p className="text-lg font-semibold text-yellow-300">
                     {formatNumber(station.currentStock)} L
@@ -6180,20 +7610,119 @@ function StationsPage({
         </div>
       )}
 
+
+      {editingProjectStation && (
+        <div className="fixed inset-0 bg-black/70 flex items-center justify-center z-50">
+          <div className="bg-white text-black w-[560px] rounded-2xl shadow-2xl p-6">
+            <div className="flex justify-between items-center mb-5 border-b pb-3">
+              <div>
+                <h2 className="text-2xl font-bold">Change Station Project</h2>
+                <p className="text-sm text-gray-500 mt-1">
+                  Station: {editingProjectStation.id}
+                </p>
+              </div>
+
+              <button
+                onClick={() => setEditingProjectStation(null)}
+                className="text-gray-500 hover:text-black text-xl"
+              >
+                ×
+              </button>
+            </div>
+
+            <div className="bg-gray-100 rounded-xl p-4 mb-4">
+              <p className="text-sm text-gray-600">Current Project</p>
+              <p className="text-xl font-bold">
+                {editingProjectStation.project || "-"}
+              </p>
+            </div>
+
+            <div className="mb-4">
+              <label className="font-medium text-gray-700">New Project</label>
+
+              <select
+                value={newStationProject}
+                onChange={(e) => setNewStationProject(e.target.value)}
+                className="border rounded-lg p-3 w-full mt-2"
+              >
+                <option value="">Select Project</option>
+
+                {filterActiveProjects(transferProjects || projects || []).map((project) => (
+                  <option
+                    key={project.id || project.name}
+                    value={project.name || project.id}
+                  >
+                    {project.name || project.id}
+                  </option>
+                ))}
+              </select>
+            </div>
+
+            <div className="mb-4">
+              <label className="font-medium text-gray-700">
+                Effective Date & Time
+              </label>
+
+              <input
+                type="datetime-local"
+                value={stationProjectEffectiveDate}
+                onChange={(e) =>
+                  setStationProjectEffectiveDate(e.target.value)
+                }
+                className="border rounded-lg p-3 w-full mt-2"
+              />
+            </div>
+
+            <div className="flex justify-end gap-3 border-t pt-4">
+              <button
+                onClick={() => setEditingProjectStation(null)}
+                className="bg-gray-200 px-4 py-2 rounded-lg"
+              >
+                Cancel
+              </button>
+
+              <button
+                onClick={() => {
+                  showToast?.(
+                    "success",
+                    "Station project change saved locally."
+                  );
+
+                  setEditingProjectStation(null);
+                }}
+                className="bg-yellow-500 text-black px-4 py-2 rounded-lg font-semibold"
+              >
+                Save Change
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
+
       {showForm && (
         <div className="fleet-modal-backdrop fixed inset-0 z-[9998] bg-black/60 flex items-center justify-center z-50">
           <div className="bg-white text-black w-[650px] rounded-xl shadow-xl p-6">
             <div className="flex justify-between items-center mb-6 border-b pb-3">
               <h2 className="text-xl sm:text-2xl font-bold">Add Station</h2>
-              <button onClick={() => setShowForm(false)}>×</button>
+              <button onClick={closeAddStation}>×</button>
             </div>
 
             <div className="grid grid-cols-1 gap-4">
-              <Field label="Station ID" placeholder="Main_Station" />
+              <Field
+                label="Station ID"
+                placeholder="Main_Station"
+                value={newStation.id}
+                onChange={(e) => setNewStation({ ...newStation, id: e.target.value })}
+                error={stationIdDuplicateError}
+              />
 
               <div className="grid grid-cols-1 sm:grid-cols-3 items-start sm:items-center gap-2 sm:gap-4">
                 <label className="font-medium text-gray-700">Station Type</label>
-                <select className="col-span-2 border rounded-lg p-2">
+                <select
+                  value={newStation.type}
+                  onChange={(e) => setNewStation({ ...newStation, type: e.target.value })}
+                  className="col-span-2 border rounded-lg p-2"
+                >
                   <option>Main</option>
                   <option>Sub</option>
                 </select>
@@ -6201,7 +7730,11 @@ function StationsPage({
 
               <div className="grid grid-cols-1 sm:grid-cols-3 items-start sm:items-center gap-2 sm:gap-4">
                 <label className="font-medium text-gray-700">Project</label>
-                <select className="col-span-2 border rounded-lg p-2">
+                <select
+                  value={newStation.project}
+                  onChange={(e) => setNewStation({ ...newStation, project: e.target.value })}
+                  className="col-span-2 border rounded-lg p-2"
+                >
                   <option value="">Select Project</option>
                   {transferProjectOptions.map((project) => (
                     <option key={project} value={project}>
@@ -6210,12 +7743,28 @@ function StationsPage({
                   ))}
                 </select>
               </div>
-              <Field label="Capacity" placeholder="Liters" />
-              <Field label="Opening Balance" placeholder="Liters" />
+              <Field
+                label="Capacity"
+                placeholder="Liters"
+                type="number"
+                value={newStation.capacity}
+                onChange={(e) => setNewStation({ ...newStation, capacity: e.target.value })}
+              />
+              <Field
+                label="Opening Balance"
+                placeholder="Liters"
+                type="number"
+                value={newStation.openingBalance}
+                onChange={(e) => setNewStation({ ...newStation, openingBalance: e.target.value })}
+              />
 
               <div className="grid grid-cols-1 sm:grid-cols-3 items-start sm:items-center gap-2 sm:gap-4">
                 <label className="font-medium text-gray-700">Status</label>
-                <select className="col-span-2 border rounded-lg p-2">
+                <select
+                  value={newStation.status}
+                  onChange={(e) => setNewStation({ ...newStation, status: e.target.value })}
+                  className="col-span-2 border rounded-lg p-2"
+                >
                   <option>Active</option>
                   <option>Inactive</option>
                 </select>
@@ -6224,13 +7773,21 @@ function StationsPage({
 
             <div className="flex justify-end gap-3 mt-6 border-t pt-4">
               <button
-                onClick={() => setShowForm(false)}
+                onClick={closeAddStation}
                 className="bg-gray-200 px-3 lg:px-4 py-2 rounded-lg"
               >
                 Cancel
               </button>
 
-              <button className="bg-green-600 text-white px-3 lg:px-4 py-2 rounded-lg">
+              <button
+                onClick={saveNewStation}
+                disabled={Boolean(stationIdDuplicateError) || !newStation.id.trim()}
+                className={`px-3 lg:px-4 py-2 rounded-lg ${
+                  stationIdDuplicateError || !newStation.id.trim()
+                    ? "bg-gray-300 text-gray-500 cursor-not-allowed"
+                    : "bg-green-600 text-white hover:bg-green-700"
+                }`}
+              >
                 Save Station
               </button>
             </div>
@@ -6238,29 +7795,33 @@ function StationsPage({
         </div>
       )}
 
-      {showEdit && (
+      {projectEditStation && (
         <div className="fleet-modal-backdrop fixed inset-0 z-[9998] bg-black/60 flex items-center justify-center z-50">
-          <div className="bg-white text-black w-[650px] rounded-xl shadow-xl p-6">
+          <div className="bg-white text-black w-[560px] rounded-xl shadow-xl p-6">
             <div className="flex justify-between items-center mb-6 border-b pb-3">
-              <h2 className="text-xl sm:text-2xl font-bold">Edit Station</h2>
-              <button onClick={() => setShowEdit(false)}>×</button>
+              <h2 className="text-xl sm:text-2xl font-bold">Change Station Project</h2>
+              <button onClick={() => setProjectEditStation(null)}>×</button>
             </div>
 
             <div className="grid grid-cols-1 gap-4">
-              <div className="grid grid-cols-1 sm:grid-cols-3 items-start sm:items-center gap-2 sm:gap-4">
-                <label className="font-medium text-gray-700">Select Station</label>
-                <select className="col-span-2 border rounded-lg p-2">
-                  <option>Select Station</option>
-                  {realStations.map((s) => (
-                    <option key={s.id}>{s.id}</option>
-                  ))}
-                </select>
+              <div className="bg-gray-100 p-4 rounded-lg">
+                <p>
+                  <strong>Station:</strong> {projectEditStation.id}
+                </p>
+                <p>
+                  <strong>Current Project:</strong>{" "}
+                  {getCurrentStationProject(projectEditStation) || "-"}
+                </p>
               </div>
 
               <div className="grid grid-cols-1 sm:grid-cols-3 items-start sm:items-center gap-2 sm:gap-4">
-                <label className="font-medium text-gray-700">Project</label>
-                <select className="col-span-2 border rounded-lg p-2">
-                  <option value="">Select New Project</option>
+                <label className="font-medium text-gray-700">New Project</label>
+                <select
+                  value={newStationProject}
+                  onChange={(e) => setNewStationProject(e.target.value)}
+                  className="col-span-2 border rounded-lg p-2"
+                >
+                  <option value="">Select Project</option>
                   {transferProjectOptions.map((project) => (
                     <option key={project} value={project}>
                       {project}
@@ -6270,24 +7831,379 @@ function StationsPage({
               </div>
 
               <div className="grid grid-cols-1 sm:grid-cols-3 items-start sm:items-center gap-2 sm:gap-4">
-                <label className="font-medium text-gray-700">Status</label>
-                <select className="col-span-2 border rounded-lg p-2">
-                  <option>Active</option>
-                  <option>Inactive</option>
-                </select>
+                <label className="font-medium text-gray-700">
+                  Effective Date & Time
+                </label>
+                <input
+                  type="datetime-local"
+                  value={stationProjectEffectiveDate}
+                  onChange={(e) => setStationProjectEffectiveDate(e.target.value)}
+                  className="col-span-2 border rounded-lg p-2"
+                />
+              </div>
+
+              <div className="grid grid-cols-1 sm:grid-cols-3 items-start sm:items-center gap-2 sm:gap-4">
+
               </div>
             </div>
 
             <div className="flex justify-end gap-3 mt-6 border-t pt-4">
               <button
-                onClick={() => setShowEdit(false)}
+                onClick={() => setProjectEditStation(null)}
+                className="bg-gray-200 px-4 py-2 rounded-lg"
+              >
+                Cancel
+              </button>
+
+              <button
+                onClick={confirmStationProjectChange}
+                className="bg-red-600 text-white px-4 py-2 rounded-lg"
+              >
+                Save Project Change
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
+
+      {statusEditStation && (
+        <div className="fleet-modal-backdrop fixed inset-0 z-[9998] bg-black/60 flex items-center justify-center z-50">
+          <div className="bg-white text-black w-[520px] rounded-xl shadow-xl p-6">
+            <div className="flex justify-between items-center mb-6 border-b pb-3">
+              <h2 className="text-xl sm:text-2xl font-bold">Change Station Status</h2>
+              <button onClick={() => setStatusEditStation(null)}>×</button>
+            </div>
+
+            <div className="grid grid-cols-1 gap-4">
+              <div className="bg-gray-100 p-4 rounded-lg">
+                <p>
+                  <strong>Station:</strong> {statusEditStation.id}
+                </p>
+                <p>
+                  <strong>Current Status:</strong>{" "}
+                  {getCurrentStationStatus(statusEditStation) || "-"}
+                </p>
+              </div>
+
+              <div className="grid grid-cols-1 sm:grid-cols-3 items-start sm:items-center gap-2 sm:gap-4">
+                <label className="font-medium text-gray-700">New Status</label>
+                <select
+                  value={newStationStatus}
+                  onChange={(e) => setNewStationStatus(e.target.value)}
+                  className="col-span-2 border rounded-lg p-2"
+                >
+                  <option value="">Select Status</option>
+                  <option>Active</option>
+                  <option>Inactive</option>
+                </select>
+              </div>
+
+            </div>
+
+            <div className="flex justify-end gap-3 mt-6 border-t pt-4">
+              <button
+                onClick={() => setStatusEditStation(null)}
+                className="bg-gray-200 px-4 py-2 rounded-lg"
+              >
+                Cancel
+              </button>
+
+              <button
+                onClick={confirmStationStatusChange}
+                className="bg-amber-500 hover:bg-amber-400 text-black px-4 py-2 rounded-lg font-bold"
+              >
+                Save Status
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
+
+      {deleteTargetStation && (
+        <div className="fixed inset-0 bg-black/75 backdrop-blur-sm flex items-center justify-center z-[10000] p-3">
+          <div className="bg-white text-black w-[520px] rounded-2xl p-6 shadow-2xl">
+            <h2 className="text-xl sm:text-2xl font-bold mb-2 text-red-600">
+              Delete Station
+            </h2>
+
+            <p className="text-gray-600 mb-5">
+              Station: <strong>{deleteTargetStation.id}</strong>
+            </p>
+
+            <textarea
+              value={stationDeleteReason}
+              onChange={(e) => setStationDeleteReason(e.target.value)}
+              placeholder="Enter deletion reason..."
+              className="border rounded-xl p-3 w-full h-28 mb-5"
+            />
+
+            <div className="flex justify-end gap-3">
+              <button
+                onClick={() => {
+                  setDeleteTargetStation(null);
+                  setStationDeleteReason("");
+                }}
                 className="bg-gray-200 px-3 lg:px-4 py-2 rounded-lg"
               >
                 Cancel
               </button>
 
-              <button className="bg-green-600 text-white px-3 lg:px-4 py-2 rounded-lg">
-                Save Changes
+              <button
+                onClick={proceedStationDeleteConfirm}
+                className="bg-red-600 text-white px-3 lg:px-4 py-2 rounded-lg"
+              >
+                Continue
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
+
+      {showStationDeleteConfirm && (
+        <div className="fixed inset-0 bg-black/75 backdrop-blur-sm flex items-center justify-center z-[10000] p-3">
+          <div className="bg-white text-black w-[500px] rounded-2xl p-6 shadow-2xl">
+            <h2 className="text-xl sm:text-2xl font-bold mb-4 text-red-600">
+              Confirm Delete Request
+            </h2>
+
+            <p className="text-gray-700 mb-5">
+              Are you sure you want to submit a deletion request for station{" "}
+              <strong>{deleteTargetStation?.id}</strong>?
+            </p>
+
+            <div className="bg-gray-100 rounded-xl p-4 mb-5 text-sm">
+              <p>
+                <strong>Reason:</strong> {stationDeleteReason}
+              </p>
+            </div>
+
+            <div className="flex justify-end gap-3">
+              <button
+                onClick={() => setShowStationDeleteConfirm(false)}
+                className="bg-gray-200 px-3 lg:px-4 py-2 rounded-lg"
+              >
+                Back
+              </button>
+
+              <button
+                onClick={proceedStationDeletePassword}
+                className="bg-red-600 text-white px-3 lg:px-4 py-2 rounded-lg"
+              >
+                Yes, Continue
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
+
+      {counterTargetStation && (
+        <div className="fixed inset-0 bg-black/75 backdrop-blur-sm flex items-center justify-center z-[10000] p-3">
+          <div className="bg-white text-black w-[520px] rounded-2xl p-6 shadow-2xl">
+            <h2 className="text-xl sm:text-2xl font-bold mb-2 text-yellow-600">
+              Station Counter Reset
+            </h2>
+
+            <p className="text-gray-600 mb-5">
+              Station: <strong>{counterTargetStation.id}</strong>
+            </p>
+
+            <label className="block text-sm font-medium text-gray-700 mb-2">
+              Old Counter Before Reset
+            </label>
+            <input
+              type="number"
+              value={oldCounterBeforeReset}
+              onChange={(e) => setOldCounterBeforeReset(e.target.value)}
+              placeholder="Reading before reset"
+              className="border rounded-xl p-3 w-full mb-4"
+            />
+
+            <label className="block text-sm font-medium text-gray-700 mb-2">
+              New Counter After Reset
+            </label>
+            <input
+              type="number"
+              value={newStationCounter}
+              onChange={(e) => setNewStationCounter(e.target.value)}
+              placeholder="New reading after reset"
+              className="border rounded-xl p-3 w-full mb-4"
+            />
+
+            <label className="block text-sm font-medium text-gray-700 mb-2">
+              Effective Date & Time
+            </label>
+            <input
+              type="datetime-local"
+              value={stationCounterEffectiveDate}
+              onChange={(e) => setStationCounterEffectiveDate(e.target.value)}
+              className="border rounded-xl p-3 w-full mb-4"
+            />
+
+            <textarea
+              value={stationCounterReason}
+              onChange={(e) => setStationCounterReason(e.target.value)}
+              placeholder="Enter reset reason, e.g. station meter replaced..."
+              className="border rounded-xl p-3 w-full h-28 mb-5"
+            />
+
+            <div className="flex justify-end gap-3">
+              <button
+                onClick={() => {
+                  setCounterTargetStation(null);
+                  setOldCounterBeforeReset("");
+                  setNewStationCounter("");
+                  setStationCounterEffectiveDate("");
+                  setStationCounterReason("");
+                }}
+                className="bg-gray-200 px-3 lg:px-4 py-2 rounded-lg"
+              >
+                Cancel
+              </button>
+
+              <button
+                onClick={proceedStationCounterConfirm}
+                className="bg-yellow-500 text-black px-3 lg:px-4 py-2 rounded-lg"
+              >
+                Continue
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
+
+      {showStationCounterConfirm && (
+        <div className="fixed inset-0 bg-black/75 backdrop-blur-sm flex items-center justify-center z-[10000] p-3">
+          <div className="bg-white text-black w-[500px] rounded-2xl p-6 shadow-2xl">
+            <h2 className="text-xl sm:text-2xl font-bold mb-4 text-yellow-600">
+              Confirm Station Counter Reset
+            </h2>
+
+            <div className="bg-gray-100 rounded-xl p-4 mb-5 text-sm">
+              <p>
+                <strong>Station:</strong> {counterTargetStation?.id}
+              </p>
+              <p>
+                <strong>Old Counter:</strong> {formatNumber(oldCounterBeforeReset)}
+              </p>
+              <p>
+                <strong>New Counter:</strong> {formatNumber(newStationCounter)}
+              </p>
+              <p>
+                <strong>Effective Date:</strong> {stationCounterEffectiveDate}
+              </p>
+              <p>
+                <strong>Reason:</strong> {stationCounterReason}
+              </p>
+            </div>
+
+            <div className="flex justify-end gap-3">
+              <button
+                onClick={() => setShowStationCounterConfirm(false)}
+                className="bg-gray-200 px-3 lg:px-4 py-2 rounded-lg"
+              >
+                Back
+              </button>
+
+              <button
+                onClick={proceedStationCounterPassword}
+                className="bg-yellow-500 text-black px-3 lg:px-4 py-2 rounded-lg"
+              >
+                Yes, Continue
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
+
+      {showStockCountAdjustment && (
+        <div className="fleet-modal-backdrop fixed inset-0 z-[9998] bg-black/60 flex items-center justify-center z-50">
+          <div className="bg-white text-black w-[580px] rounded-xl shadow-xl p-6">
+            <h2 className="text-xl font-bold mb-4 text-amber-600">
+              Stock Count Adjustment
+            </h2>
+
+            <div className="grid grid-cols-1 gap-4">
+              <div>
+                <label className="font-medium">Select Station</label>
+                <select
+                  className="border rounded-lg p-2 w-full mt-2"
+                  value={stockCountStation?.id || ""}
+                  onChange={(e) => {
+                    const station = stationsWithBalance.find(
+                      (s) => s.id === e.target.value
+                    );
+                    setStockCountStation(station || null);
+                    setActualStockQty("");
+                  }}
+                >
+                  <option value="">Select Station</option>
+                  {stationsWithBalance.map((s) => (
+                    <option key={s.id} value={s.id}>
+                      {s.id}
+                    </option>
+                  ))}
+                </select>
+              </div>
+
+              {stockCountStation && (
+                <div className="bg-gray-100 p-4 rounded">
+                  <p>
+                    <strong>System Balance:</strong>{" "}
+                    {formatNumber(stockCountStation.currentStock)} L
+                  </p>
+                </div>
+              )}
+
+              <div>
+                <label className="font-medium">Actual Quantity After Count</label>
+                <input
+                  type="number"
+                  value={actualStockQty}
+                  onChange={(e) => setActualStockQty(e.target.value)}
+                  className="border rounded-lg p-2 w-full mt-2"
+                  placeholder="Enter actual quantity in liters"
+                />
+              </div>
+
+              {stockCountStation && actualStockQty !== "" && (
+                <div className="bg-gray-100 p-4 rounded">
+                  <p>
+                    <strong>Actual Balance:</strong>{" "}
+                    {formatNumber(Number(actualStockQty) || 0)} L
+                  </p>
+                  <p>
+                    <strong>Adjustment Qty:</strong>{" "}
+                    {formatNumber((Number(actualStockQty) || 0) - (Number(stockCountStation.currentStock) || 0))} L
+                  </p>
+                  <p>
+                    <strong>Final Balance:</strong>{" "}
+                    {formatNumber(Number(actualStockQty) || 0)} L
+                  </p>
+                </div>
+              )}
+
+              <div>
+
+              </div>
+            </div>
+
+            <div className="flex justify-end gap-3 mt-6 border-t pt-4">
+              <button
+                onClick={() => {
+                  setShowStockCountAdjustment(false);
+                  setStockCountStation(null);
+                  setActualStockQty("");
+                              }}
+                className="bg-gray-200 px-4 py-2 rounded"
+              >
+                Cancel
+              </button>
+
+              <button
+                onClick={confirmStockCountAdjustment}
+                className="bg-red-600 text-white px-4 py-2 rounded"
+              >
+                Confirm Adjustment
               </button>
             </div>
           </div>
@@ -6298,7 +8214,7 @@ function StationsPage({
         <div className="fleet-modal-backdrop fixed inset-0 z-[9998] bg-black/60 flex items-center justify-center z-50">
           <div className="bg-white text-black w-[560px] rounded-xl shadow-xl p-6">
             <h2 className="text-xl font-bold mb-4 text-red-600">
-              Inventory Adjustment
+              Zero Balance Adjustment
             </h2>
 
             <div className="mb-4">
@@ -6360,194 +8276,7 @@ function StationsPage({
         </div>
       )}
 
-      {showPassword && selectedStation && (
-        <div className="fleet-modal-backdrop fixed inset-0 z-[9998] bg-black/60 flex items-center justify-center z-50">
-          <div className="bg-white text-black w-[520px] rounded-xl shadow-xl p-6">
-            <h2 className="text-xl font-bold mb-4">
-              Admin Password Required
-            </h2>
 
-            <input
-              type="password"
-              value={adminPassword}
-              onChange={(e) => setAdminPassword(e.target.value)}
-              className="border rounded-lg p-2 w-full mb-6"
-              placeholder="Enter admin password"
-            />
-
-            <div className="flex justify-end gap-3">
-              <button
-                onClick={() => {
-                  setShowPassword(false);
-                  setSelectedStation(null);
-                  setAdminPassword("");
-                }}
-                className="bg-gray-200 px-4 py-2 rounded"
-              >
-                Cancel
-              </button>
-
-              <button
-                onClick={confirmZeroBalance}
-                className="bg-red-600 text-white px-4 py-2 rounded"
-              >
-                Confirm Adjustment
-              </button>
-            </div>
-          </div>
-        </div>
-      )}
-
-      {showLiterPrice && (
-        <div className="fleet-modal-backdrop fixed inset-0 z-[9998] bg-black/60 flex items-center justify-center z-50">
-          <div className="bg-white text-black w-[520px] rounded-xl shadow-xl p-6">
-            <div className="flex justify-between items-center mb-6 border-b pb-3">
-              <h2 className="text-xl sm:text-2xl font-bold">Liter Price</h2>
-
-              <button onClick={() => setShowLiterPrice(false)}>
-                ×
-              </button>
-            </div>
-
-            <div className="grid grid-cols-1 gap-4">
-              <div className="bg-gray-100 p-4 rounded-lg flex justify-between">
-                <span>{countryFlag} Current Liter Price</span>
-                <strong>
-                  {literPrice} {currency}/L
-                </strong>
-              </div>
-
-              <div className="grid grid-cols-1 sm:grid-cols-3 items-start sm:items-center gap-2 sm:gap-4">
-                <label className="font-medium text-gray-700">
-                  New Liter Price
-                </label>
-
-                <input
-                  type="number"
-                  value={newLiterPrice}
-                  onChange={(e) => setNewLiterPrice(e.target.value)}
-                  className="col-span-2 border rounded-lg p-2"
-                  placeholder="Enter new price"
-                />
-              </div>
-
-              <div className="grid grid-cols-1 sm:grid-cols-3 items-start sm:items-center gap-2 sm:gap-4">
-                <label className="font-medium text-gray-700">
-                  Effective Date & Time
-                </label>
-
-                <input
-                  type="datetime-local"
-                  value={effectiveDatetime}
-                  onChange={(e) => setEffectiveDatetime(e.target.value)}
-                  className="col-span-2 border rounded-lg p-2"
-                />
-              </div>
-            </div>
-
-            <div className="flex justify-end gap-3 mt-6 border-t pt-4">
-              <button
-                onClick={() => setShowLiterPrice(false)}
-                className="bg-gray-200 px-3 lg:px-4 py-2 rounded-lg"
-              >
-                Cancel
-              </button>
-
-              <button
-                onClick={proceedLiterPriceConfirm}
-                className="bg-red-600 text-white px-3 lg:px-4 py-2 rounded-lg"
-              >
-                Continue
-              </button>
-            </div>
-          </div>
-        </div>
-      )}
-
-      {showPriceConfirm && (
-        <div className="fleet-modal-backdrop fixed inset-0 z-[9998] bg-black/60 flex items-center justify-center z-50">
-          <div className="bg-white text-black w-[520px] rounded-xl shadow-xl p-6">
-            <h2 className="text-xl font-bold mb-4 text-red-600">
-              Confirm Liter Price Update
-            </h2>
-
-            <div className="bg-gray-100 p-4 rounded mb-4">
-              <p>
-                <strong>Current Price:</strong> {literPrice} {currency}/L
-              </p>
-              <p>
-                <strong>New Price:</strong> {newLiterPrice} {currency}/L
-              </p>
-              <p>
-                <strong>Effective From:</strong> {effectiveDatetime}
-              </p>
-            </div>
-
-            <div className="flex justify-end gap-3">
-              <button
-                onClick={() => {
-                  setShowPriceConfirm(false);
-                  setNewLiterPrice("");
-                  setEffectiveDatetime("");
-                }}
-                className="bg-gray-200 px-4 py-2 rounded"
-              >
-                Cancel
-              </button>
-
-              <button
-                onClick={proceedLiterPricePassword}
-                className="bg-red-600 text-white px-4 py-2 rounded"
-              >
-                Yes, Continue
-              </button>
-            </div>
-          </div>
-        </div>
-      )}
-
-      {showPricePassword && (
-        <div className="fleet-modal-backdrop fixed inset-0 z-[9998] bg-black/60 flex items-center justify-center z-50">
-          <div className="bg-white text-black w-[520px] rounded-xl shadow-xl p-6">
-            <h2 className="text-xl font-bold mb-4">
-              Admin Password Required
-            </h2>
-
-            <p className="text-gray-600 mb-4">
-              Please enter your password to confirm liter price update.
-            </p>
-
-            <input
-              type="password"
-              value={pricePassword}
-              onChange={(e) => setPricePassword(e.target.value)}
-              className="border rounded-lg p-2 w-full mb-6"
-              placeholder="Enter admin password"
-            />
-
-            <div className="flex justify-end gap-3">
-              <button
-                onClick={() => {
-                  setShowPricePassword(false);
-                  setPricePassword("");
-                  setNewLiterPrice("");
-                  setEffectiveDatetime("");
-                }}
-                className="bg-gray-200 px-4 py-2 rounded"
-              >
-                Cancel
-              </button>
-
-              <button
-                onClick={confirmLiterPriceUpdate}
-                className="bg-red-600 text-white px-4 py-2 rounded"
-              >
-                Confirm Update
-              </button>
-            </div>
-          </div>
-        </div>
-      )}
       </div>
     </div>
   );
@@ -6608,8 +8337,9 @@ function FuelLevelIcon({ percentage }) {
 }
  
 
-function FuelersPage({
+function TeamPage({
   fuelers = [],
+  users = [],
   projects = [],
   transferProjects = projects,
   data = [],
@@ -6640,6 +8370,7 @@ function FuelersPage({
     id: "",
     name: "",
     mobile: "",
+    email: "",
     projectName: "",
     status: "On Duty",
   });
@@ -6654,7 +8385,7 @@ function FuelersPage({
 
   const fuelerIndex = getHeaderIndex(headers, [
     "fueler_id",
-    "Fueler ID",
+    "Team Member ID",
     "fueler id",
     "fueler",
   ]);
@@ -6723,18 +8454,33 @@ function FuelersPage({
   };
 
   const masterFuelers = [...fuelers, ...localFuelers];
+  const teamMemberIdDuplicateError = getDuplicateIdError(
+    newFueler.id,
+    masterFuelers,
+    "Team Member ID"
+  );
 
-  const displayFuelers = masterFuelers.map((fueler) => ({
-    ...fueler,
-    ...localFuelerUpdates[fueler.id],
-    mobile: localFuelerUpdates[fueler.id]?.mobile || fueler.mobile || "-",
-    projectName:
-      localFuelerUpdates[fueler.id]?.projectName ||
-      fueler.projectName ||
-      fueler.project ||
-      "-",
-    status: localFuelerUpdates[fueler.id]?.status || fueler.status || "On Duty",
-  }));
+  const displayFuelers = masterFuelers.map((fueler) => {
+    const linkedUser = users.find(
+      (user) => normalizeText(user.id) === normalizeText(fueler.id)
+    );
+
+    return {
+      ...fueler,
+      ...localFuelerUpdates[fueler.id],
+      mobile: localFuelerUpdates[fueler.id]?.mobile || fueler.mobile || "-",
+      email: localFuelerUpdates[fueler.id]?.email || fueler.email || "-",
+      projectName:
+        localFuelerUpdates[fueler.id]?.projectName ||
+        fueler.projectName ||
+        fueler.project ||
+        "-",
+      status: localFuelerUpdates[fueler.id]?.status || fueler.status || "On Duty",
+      role: linkedUser?.role || fueler.role || "Not Linked",
+      userStatus: linkedUser?.status || fueler.userStatus || "Not Linked",
+      linkedUserName: linkedUser?.fullName || fueler.linkedUserName || "-",
+    };
+  });
 
   const directRefuelOperations =
     typeIndex === -1
@@ -6801,7 +8547,7 @@ function FuelersPage({
   ).size;
 
   const getStatusBadgeClass = (status) => {
-    const value = String(status || "").toLowerCase();
+    const value = cleanCsvCell(status).toLowerCase();
 
     if (value === "on duty" || value === "active") {
       return "bg-green-500/20 text-green-300 border border-green-500/30";
@@ -6823,7 +8569,7 @@ function FuelersPage({
     return "bg-gray-500/20 text-gray-300 border border-gray-500/30";
   };
 
-  const printTable = (tableId, title = "Fuelers Report") => {
+  const printTable = (tableId, title = "Team Report") => {
     const tableElement = document.getElementById(tableId);
 
     if (!tableElement) return;
@@ -6937,14 +8683,17 @@ function FuelersPage({
 
   const exportFuelersCSV = () => {
     exportRowsToCSV(
-      "fuelers_report",
+      "team_report",
       [
         "#",
-        "Fueler ID",
+        "Team Member ID",
         "Name",
         "Mobile",
+        "Email",
+        "Role",
+        "User Status",
         "Project Name",
-        "Status",
+        "Work Status",
         "Direct Refuel Operations",
         "Diesel Qty (L)",
       ],
@@ -6953,6 +8702,9 @@ function FuelersPage({
         fueler.id,
         fueler.name || "-",
         fueler.mobile || "-",
+        fueler.email || "-",
+        fueler.role || "Operator",
+        fueler.userStatus || "Active",
         fueler.projectName || "-",
         fueler.status || "On Duty",
         fueler.operationsCount,
@@ -6966,6 +8718,7 @@ function FuelersPage({
       id: "",
       name: "",
       mobile: "",
+      email: "",
       projectName: "",
       status: "On Duty",
     });
@@ -6977,22 +8730,28 @@ function FuelersPage({
   };
 
   const saveNewFueler = () => {
+    if (!hasPermission("team", "add")) {
+      showToast?.("warning", "Read-only access: you cannot add team members.");
+      return;
+    }
+
     const fuelerId = newFueler.id.trim();
     const fuelerName = newFueler.name.trim();
     const mobile = newFueler.mobile.trim();
+    const email = newFueler.email.trim();
 
     if (!fuelerId) {
-      alert("Please enter Fueler ID.");
+      notifyUser(typeof showToast !== "undefined" ? showToast : null, inferToastTypeFromMessage("Please enter Team Member ID."), "Please enter Team Member ID.");
       return;
     }
 
     if (!fuelerName) {
-      alert("Please enter Fueler Name.");
+      notifyUser(typeof showToast !== "undefined" ? showToast : null, inferToastTypeFromMessage("Please enter Team Member Name."), "Please enter Team Member Name.");
       return;
     }
 
     if (!mobile) {
-      alert("Please enter Mobile Number.");
+      notifyUser(typeof showToast !== "undefined" ? showToast : null, inferToastTypeFromMessage("Please enter Mobile Number."), "Please enter Mobile Number.");
       return;
     }
 
@@ -7001,17 +8760,17 @@ function FuelersPage({
     );
 
     if (idExists) {
-      alert("Fueler ID already exists.");
+      showToast?.("warning", "Team Member ID already exists. Please use a unique ID.");
       return;
     }
 
     if (isOfficerUser(currentUser)) {
       submitApprovalRequest({
         type: "master_data_change",
-        module: "fuelers",
-        title: `New fueler ${fuelerId}`,
+        module: "team",
+        title: `New team member ${fuelerId}`,
         details: `Officer requested new fueler ${fuelerName}`,
-        payload: { entity: "fueler", action: "add", values: { ...newFueler, id: fuelerId, name: fuelerName, mobile } },
+        payload: { entity: "team_member", action: "add", values: { ...newFueler, id: fuelerId, name: fuelerName, mobile, email } },
       });
       closeAddFueler();
       return;
@@ -7023,6 +8782,7 @@ function FuelersPage({
         id: fuelerId,
         name: fuelerName,
         mobile,
+        email,
         projectName: newFueler.projectName || "-",
         status: newFueler.status || "On Duty",
         createdLocally: true,
@@ -7030,13 +8790,18 @@ function FuelersPage({
     ]);
 
     if (showToast) {
-      showToast("success", "Fueler added locally.");
+      showToast("success", "Team member added locally.");
     }
 
     closeAddFueler();
   };
 
   const openFuelerEdit = (fueler, field) => {
+    if (!hasPermission("team", "edit")) {
+      showToast?.("warning", "Read-only access: you cannot edit team members.");
+      return;
+    }
+
     const oldValue =
       field === "mobile"
         ? fueler.mobile || ""
@@ -7051,7 +8816,6 @@ function FuelersPage({
       oldValue,
       newValue: oldValue,
       reason: "",
-      password: "",
     });
   };
 
@@ -7060,26 +8824,30 @@ function FuelersPage({
   };
 
   const saveFuelerEdit = () => {
+    if (!hasPermission("team", "edit")) {
+      showToast?.("warning", "Read-only access: you cannot save team changes.");
+      closeFuelerEdit();
+      return;
+    }
+
     if (!editFueler) return;
 
     if (!String(editFueler.newValue).trim()) {
-      alert("Please enter a new value.");
+      notifyUser(typeof showToast !== "undefined" ? showToast : null, inferToastTypeFromMessage("Please enter a new value."), "Please enter a new value.");
       return;
     }
 
     if (editFueler.field !== "status" && !editFueler.reason.trim()) {
-      alert("Please enter edit reason.");
+      notifyUser(typeof showToast !== "undefined" ? showToast : null, inferToastTypeFromMessage("Please enter edit reason."), "Please enter edit reason.");
       return;
     }
 
-    if (!editFueler.password.trim()) {
-      alert("Please enter admin password.");
-      return;
-    }
 
     const updateKey =
       editFueler.field === "mobile"
         ? "mobile"
+        : editFueler.field === "email"
+        ? "email"
         : editFueler.field === "status"
         ? "status"
         : "projectName";
@@ -7087,9 +8855,34 @@ function FuelersPage({
     const fieldLabel =
       editFueler.field === "mobile"
         ? "Mobile"
+        : editFueler.field === "email"
+        ? "Email"
         : editFueler.field === "status"
         ? "Status"
         : "Project";
+
+    if (isOfficerUser(currentUser) && editFueler.field !== "status") {
+      submitApprovalRequest?.({
+        type: "master_data_change",
+        module: "team",
+        title: `Team member ${editFueler.fuelerId} ${fieldLabel} change`,
+        details: editFueler.reason || `${fieldLabel} change requested.`,
+        payload: {
+          entity: "team_member",
+          id: editFueler.fuelerId,
+          field: editFueler.field,
+          oldValue: editFueler.oldValue,
+          newValue: editFueler.newValue,
+          project: editFueler.field === "project" ? editFueler.newValue : undefined,
+          changedFields: [
+            { field: editFueler.field, label: fieldLabel, oldValue: editFueler.oldValue, newValue: editFueler.newValue, sensitive: editFueler.field !== "status" },
+          ],
+        },
+      });
+      closeFuelerEdit();
+      showToast?.("warning", "Team change sent for manager approval.");
+      return;
+    }
 
     setLocalFuelerUpdates((prev) => ({
       ...prev,
@@ -7125,22 +8918,24 @@ function FuelersPage({
       <div className="fleet-page-shell w-full max-w-[1920px] mx-auto px-2 sm:px-3 lg:px-4 xl:px-5 2xl:px-8 py-3 sm:py-4 lg:py-5 text-[12px] lg:text-[13px]">
         <div className="flex flex-col sm:flex-row justify-between sm:items-start xl:items-center gap-3 mb-5">
           <div>
-            <h1 className="text-xl sm:text-2xl font-bold">Fuelers Management</h1>
+            <h1 className="text-xl sm:text-2xl font-bold">Team Management</h1>
             <p className="text-gray-400">
-              Fuelers monitoring, Direct Refuel KPI and performance tracking
+              Team monitoring, operator Direct Refuel KPI and performance tracking
             </p>
           </div>
 
-          <button
-            onClick={() => setShowAddFueler(true)}
-            className="bg-yellow-500 hover:bg-yellow-400 text-black px-3 lg:px-4 py-2 rounded-lg font-semibold transition"
-          >
-            + Add Fueler
-          </button>
+          {hasPermission("team", "add") && (
+            <button
+              onClick={() => setShowAddFueler(true)}
+              className="bg-yellow-500 hover:bg-yellow-400 text-black px-3 lg:px-4 py-2 rounded-lg font-semibold transition"
+            >
+              + Add Team Member
+            </button>
+          )}
         </div>
 
         <div className="grid grid-cols-1 sm:grid-cols-2 2xl:grid-cols-4 gap-3 mb-4">
-          <Card title="Total Fuelers" value={formatNumber(fuelersWithKpi.length)} />
+          <Card title="Total Team Members" value={formatNumber(fuelersWithKpi.length)} />
           <Card
             title="On Duty"
             value={formatNumber(
@@ -7159,7 +8954,7 @@ function FuelersPage({
           <div className="p-4 border-b border-slate-700/80 flex justify-between items-center bg-slate-900/70">
             <div>
               <h2 className="text-base sm:text-lg font-extrabold text-amber-300">
-                Fuelers List
+                Team Members List
               </h2>
               <p className="text-xs text-gray-400 mt-1">
                 Mobile, project, and status changes are saved locally and ready for backend integration
@@ -7168,7 +8963,7 @@ function FuelersPage({
 
             <div className="flex flex-wrap items-center gap-3">
               <span className="text-sm text-slate-400">
-                {fuelersWithKpi.length} fuelers
+                {fuelersWithKpi.length} team members
               </span>
 
               <div ref={fuelersSettingsRef} className="relative">
@@ -7193,7 +8988,7 @@ function FuelersPage({
 
                     <button
                       onClick={() => {
-                        printTable("fuelers-table", "Fuelers Report");
+                        printTable("fuelers-table", "Team Report");
                         setShowFuelersSettings(false);
                       }}
                       className="block w-full text-left px-4 py-3 hover:bg-slate-800 transition text-white border-t border-gray-700"
@@ -7214,11 +9009,14 @@ function FuelersPage({
               <thead className="bg-slate-800 sticky top-0 z-[1] shadow-[0_8px_18px_rgba(0,0,0,0.22)]">
                 <tr>
                   <Th>#</Th>
-                  <Th>Fueler ID</Th>
+                  <Th>Team Member ID</Th>
                   <Th>Name</Th>
                   <Th>Mobile</Th>
+                  <Th>Email</Th>
+                  <Th>Role</Th>
+                  <Th>User Status</Th>
                   <Th>Project Name</Th>
-                  <Th>Status</Th>
+                  <Th>Work Status</Th>
                   <Th>KPI Operations</Th>
                   <Th>Diesel Qty</Th>
                 </tr>
@@ -7233,7 +9031,7 @@ function FuelersPage({
                       <button
                         onClick={() => setSelectedFuelerHistory(fueler)}
                         className="text-blue-300 hover:text-yellow-400 font-semibold transition cursor-pointer"
-                        title="Open fueler operations history"
+                        title="Open team member operations history"
                       >
                         {fueler.id}
                       </button>
@@ -7242,32 +9040,62 @@ function FuelersPage({
                     <Td strong>{fueler.name || "-"}</Td>
 
                     <Td>
-                      <button
-                        onClick={() => openFuelerEdit(fueler, "mobile")}
-                        className="text-blue-300 hover:text-yellow-400 transition cursor-pointer"
-                      >
-                        {fueler.mobile || "-"}
-                      </button>
+                      {hasPermission("team", "edit") ? (
+                        <button
+                          onClick={() => openFuelerEdit(fueler, "mobile")}
+                          className="text-blue-300 hover:text-yellow-400 transition cursor-pointer"
+                        >
+                          {fueler.mobile || "-"}
+                        </button>
+                      ) : (
+                        <span>{fueler.mobile || "-"}</span>
+                      )}
                     </Td>
 
                     <Td>
-                      <button
-                        onClick={() => openFuelerEdit(fueler, "project")}
-                        className="text-blue-300 hover:text-yellow-400 transition cursor-pointer"
-                      >
-                        {fueler.projectName || "-"}
-                      </button>
+                      {hasPermission("team", "edit") ? (
+                        <button
+                          onClick={() => openFuelerEdit(fueler, "email")}
+                          className="text-blue-300 hover:text-yellow-400 transition cursor-pointer"
+                        >
+                          {fueler.email || "-"}
+                        </button>
+                      ) : (
+                        <span>{fueler.email || "-"}</span>
+                      )}
+                    </Td>
+
+                    <Td>{fueler.role || "Operator"}</Td>
+                    <Td>{fueler.userStatus || "Active"}</Td>
+
+                    <Td>
+                      {hasPermission("team", "edit") ? (
+                        <button
+                          onClick={() => openFuelerEdit(fueler, "project")}
+                          className="text-blue-300 hover:text-yellow-400 transition cursor-pointer"
+                        >
+                          {fueler.projectName || "-"}
+                        </button>
+                      ) : (
+                        <span>{fueler.projectName || "-"}</span>
+                      )}
                     </Td>
 
                     <Td>
-                      <button
-                        onClick={() => openFuelerEdit(fueler, "status")}
-                        className={`px-2 py-1 rounded-full text-xs font-semibold transition cursor-pointer ${getStatusBadgeClass(
-                          fueler.status
-                        )}`}
-                      >
-                        {fueler.status || "On Duty"}
-                      </button>
+                      {hasPermission("team", "edit") ? (
+                        <button
+                          onClick={() => openFuelerEdit(fueler, "status")}
+                          className={`px-2 py-1 rounded-full text-xs font-semibold transition cursor-pointer ${getStatusBadgeClass(
+                            fueler.status
+                          )}`}
+                        >
+                          {fueler.status || "On Duty"}
+                        </button>
+                      ) : (
+                        <span className={`px-2 py-1 rounded-full text-xs font-semibold ${getStatusBadgeClass(fueler.status)}`}>
+                          {fueler.status || "On Duty"}
+                        </span>
+                      )}
                     </Td>
 
                     <Td>{formatNumber(fueler.operationsCount)}</Td>
@@ -7277,7 +9105,7 @@ function FuelersPage({
 
                 {fuelersWithKpi.length === 0 && (
                   <tr>
-                    <Td colSpan={8}>No fuelers found.</Td>
+                    <Td colSpan={11}>No team members found.</Td>
                   </tr>
                 )}
               </tbody>
@@ -7289,10 +9117,10 @@ function FuelersPage({
           <div className="flex justify-between items-start mb-3">
             <div>
               <h2 className="text-base sm:text-lg font-extrabold text-amber-300">
-                Diesel Quantity Per Fueler
+                Diesel Quantity Per Operator
               </h2>
               <p className="text-xs text-gray-400 mt-1">
-                Total diesel quantity handled by each fueler based on Direct Refuel operations only
+                Total diesel quantity handled by each operator based on Direct Refuel operations only
               </p>
             </div>
 
@@ -7317,7 +9145,7 @@ function FuelersPage({
         {fuelerAuditLog.length > 0 && (
           <div className="bg-gray-950 border border-gray-700 rounded-2xl p-4 mb-5">
             <h3 className="text-yellow-400 font-semibold mb-3">
-              Local Fuelers Audit Log
+              Local Team Audit Log
             </h3>
 
             <div className="max-h-44 overflow-auto">
@@ -7348,10 +9176,10 @@ function FuelersPage({
               <div className="p-3 sm:p-5 border-b border-gray-700 flex justify-between items-start gap-3">
                 <div>
                   <h2 className="text-xl sm:text-2xl font-bold text-yellow-400 italic underline">
-                    Fueler Operations History
+                    Operator Operations History
                   </h2>
                   <p className="text-gray-400 mt-1">
-                    Fueler: {" "}
+                    Team Member: {" "}
                     <span className="text-blue-300 font-semibold">
                       {selectedFuelerHistory.id} - {selectedFuelerHistory.name}
                     </span>
@@ -7371,7 +9199,7 @@ function FuelersPage({
 
               <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-3 p-3 sm:p-4 lg:p-5 border-b border-gray-700 bg-gray-950/40">
                 <Card
-                  title="Fueler Operations"
+                  title="Operator Operations"
                   value={formatNumber(selectedFuelerHistory.operationsCount)}
                 />
                 <Card
@@ -7444,7 +9272,7 @@ function FuelersPage({
             <div className="bg-white text-black w-[620px] rounded-2xl shadow-2xl p-6">
               <div className="flex justify-between items-center mb-5 border-b pb-3">
                 <div>
-                  <h2 className="text-xl sm:text-2xl font-bold">Add Fueler</h2>
+                  <h2 className="text-xl sm:text-2xl font-bold">Add Team Member</h2>
                   <p className="text-sm text-gray-500 mt-1">
                     Local entry now, backend-ready structure later
                   </p>
@@ -7460,24 +9288,33 @@ function FuelersPage({
 
               <div className="grid grid-cols-1 md:grid-cols-2 gap-4 mb-4">
                 <div>
-                  <label className="font-medium text-gray-700">Fueler ID</label>
+                  <label className="font-medium text-gray-700">Operator ID</label>
                   <input
                     type="text"
                     value={newFueler.id}
                     onChange={(e) => setNewFueler({ ...newFueler, id: e.target.value })}
-                    className="border rounded-lg p-3 w-full mt-2"
+                    className={`border rounded-lg p-3 w-full mt-2 ${
+                      teamMemberIdDuplicateError
+                        ? "border-red-500 bg-red-50 focus:outline-none focus:ring-2 focus:ring-red-200"
+                        : "border-gray-300"
+                    }`}
                     placeholder="Example: FL-001"
                   />
+                  {teamMemberIdDuplicateError && (
+                    <p className="mt-1 text-xs font-semibold text-red-600">
+                      {teamMemberIdDuplicateError}
+                    </p>
+                  )}
                 </div>
 
                 <div>
-                  <label className="font-medium text-gray-700">Fueler Name</label>
+                  <label className="font-medium text-gray-700">Team Member Name</label>
                   <input
                     type="text"
                     value={newFueler.name}
                     onChange={(e) => setNewFueler({ ...newFueler, name: e.target.value })}
                     className="border rounded-lg p-3 w-full mt-2"
-                    placeholder="Enter fueler name"
+                    placeholder="Enter team member name"
                   />
                 </div>
 
@@ -7489,6 +9326,17 @@ function FuelersPage({
                     onChange={(e) => setNewFueler({ ...newFueler, mobile: e.target.value })}
                     className="border rounded-lg p-3 w-full mt-2"
                     placeholder="Enter mobile number"
+                  />
+                </div>
+
+                <div>
+                  <label className="font-medium text-gray-700">Email</label>
+                  <input
+                    type="email"
+                    value={newFueler.email}
+                    onChange={(e) => setNewFueler({ ...newFueler, email: e.target.value })}
+                    className="border rounded-lg p-3 w-full mt-2"
+                    placeholder="Link with Users page email"
                   />
                 </div>
 
@@ -7514,7 +9362,7 @@ function FuelersPage({
                   className="border rounded-lg p-3 w-full mt-2"
                 >
                   <option value="">Select Project</option>
-                  {transferProjects.map((project) => (
+                  {filterActiveProjects(transferProjects).map((project) => (
                     <option key={project.id || project.name} value={project.name || project.id}>
                       {project.name || project.id}
                     </option>
@@ -7532,9 +9380,14 @@ function FuelersPage({
 
                 <button
                   onClick={saveNewFueler}
-                  className="bg-yellow-500 hover:bg-yellow-400 text-black px-3 lg:px-4 py-2 rounded-lg font-semibold"
+                  disabled={Boolean(teamMemberIdDuplicateError) || !newFueler.id.trim()}
+                  className={`px-3 lg:px-4 py-2 rounded-lg font-semibold ${
+                    teamMemberIdDuplicateError || !newFueler.id.trim()
+                      ? "bg-gray-300 text-gray-500 cursor-not-allowed"
+                      : "bg-yellow-500 hover:bg-yellow-400 text-black"
+                  }`}
                 >
-                  Save Fueler
+                  Save Team Member
                 </button>
               </div>
             </div>
@@ -7549,12 +9402,14 @@ function FuelersPage({
                   <h2 className="text-xl sm:text-2xl font-bold">
                     Edit {editFueler.field === "mobile"
                       ? "Mobile"
+                      : editFueler.field === "email"
+                      ? "Email"
                       : editFueler.field === "status"
                       ? "Status"
                       : "Project"}
                   </h2>
                   <p className="text-sm text-gray-500 mt-1">
-                    Fueler: {editFueler.fuelerId} - {editFueler.fuelerName}
+                    Team Member: {editFueler.fuelerId} - {editFueler.fuelerName}
                   </p>
                 </div>
 
@@ -7583,7 +9438,7 @@ function FuelersPage({
                     className="border rounded-lg p-3 w-full mt-2"
                   >
                     <option value="">Select Project</option>
-                    {transferProjects.map((project) => (
+                    {filterActiveProjects(transferProjects).map((project) => (
                       <option key={project.id || project.name} value={project.name || project.id}>
                         {project.name || project.id}
                       </option>
@@ -7628,18 +9483,6 @@ function FuelersPage({
                 </div>
               )}
 
-              <div className="mb-5">
-                <label className="font-medium text-gray-700">Admin Password</label>
-                <input
-                  type="password"
-                  value={editFueler.password}
-                  onChange={(e) =>
-                    setEditFueler({ ...editFueler, password: e.target.value })
-                  }
-                  className="border rounded-lg p-3 w-full mt-2"
-                  placeholder="Enter admin password"
-                />
-              </div>
 
               <div className="flex justify-end gap-3 border-t pt-4">
                 <button
@@ -7748,7 +9591,7 @@ function ProjectsPage({
 
   const fuelerIndex = getHeaderIndex(headers, [
     "fueler_id",
-    "Fueler ID",
+    "Operator ID",
     "fueler id",
     "fueler",
   ]);
@@ -7964,19 +9807,24 @@ function ProjectsPage({
   };
 
   const saveProject = () => {
+    if (!hasPermission("projects", "add")) {
+      showToast?.("warning", "Read-only access: you cannot add projects.");
+      return;
+    }
+
     if (!newProject.id.trim()) {
-      alert("Please enter Project ID.");
+      notifyUser(typeof showToast !== "undefined" ? showToast : null, inferToastTypeFromMessage("Please enter Project ID."), "Please enter Project ID.");
       return;
     }
 
     if (!newProject.name.trim()) {
-      alert("Please enter Project Name.");
+      notifyUser(typeof showToast !== "undefined" ? showToast : null, inferToastTypeFromMessage("Please enter Project Name."), "Please enter Project Name.");
       return;
     }
 
     const duplicated = allProjects.some((project) => isSameText(project.id, newProject.id));
     if (duplicated) {
-      alert("Project ID already exists.");
+      notifyUser(typeof showToast !== "undefined" ? showToast : null, inferToastTypeFromMessage("Project ID already exists."), "Project ID already exists.");
       return;
     }
 
@@ -7994,28 +9842,28 @@ function ProjectsPage({
   };
 
   const openStatusEdit = (project) => {
+    if (!hasPermission("projects", "edit")) {
+      showToast?.("warning", "Read-only access: you cannot change project status.");
+      return;
+    }
+
     setStatusEdit({
       id: project.id,
       name: project.name,
       oldStatus: project.status || "Inactive",
       newStatus: isSameText(project.status, "Active") ? "Inactive" : "Active",
       reason: "",
-      password: "",
     });
   };
 
   const saveStatusEdit = () => {
+    if (!hasPermission("projects", "edit")) {
+      showToast?.("warning", "Read-only access: you cannot save project status changes.");
+      setStatusEdit(null);
+      return;
+    }
+
     if (!statusEdit) return;
-
-    if (!statusEdit.reason.trim()) {
-      alert("Please enter status change reason.");
-      return;
-    }
-
-    if (!statusEdit.password.trim()) {
-      alert("Please enter admin password.");
-      return;
-    }
 
     setLocalProjects((prev) => {
       const exists = prev.some((project) => isSameText(project.id, statusEdit.id));
@@ -8027,7 +9875,7 @@ function ProjectsPage({
                 ...project,
                 status: statusEdit.newStatus,
                 approvalStatus: "Approved",
-                statusChangeReason: statusEdit.reason,
+                statusChangeReason: "Status changed by confirmation",
                 statusChangedAt: new Date().toISOString(),
               }
             : project
@@ -8043,7 +9891,7 @@ function ProjectsPage({
           status: statusEdit.newStatus,
           approvalStatus: "Approved",
           source: "Local Status Update",
-          statusChangeReason: statusEdit.reason,
+          statusChangeReason: "Status changed by confirmation",
           statusChangedAt: new Date().toISOString(),
         },
       ];
@@ -8182,16 +10030,18 @@ function ProjectsPage({
               </button>
 
               {showSettings && (
-                <div className="absolute right-0 mt-2 w-48 bg-gray-900 border border-gray-700 rounded-xl shadow-2xl z-40 overflow-hidden">
-                  <button
-                    onClick={() => {
-                      setShowForm(true);
-                      setShowSettings(false);
-                    }}
-                    className="block w-full text-left px-4 py-3 hover:bg-slate-800 transition text-white"
-                  >
-                    + Add Project
-                  </button>
+                <div className="absolute right-0 mt-2 w-48 bg-gray-900 border border-gray-700 rounded-xl shadow-2xl z-[10020] overflow-hidden">
+                  {hasPermission("projects", "add") && (
+                    <button
+                      onClick={() => {
+                        setShowForm(true);
+                        setShowSettings(false);
+                      }}
+                      className="block w-full text-left px-4 py-3 hover:bg-slate-800 transition text-white"
+                    >
+                      + Add Project
+                    </button>
+                  )}
 
                   <button
                     onClick={exportProjectsCSV}
@@ -8250,13 +10100,17 @@ function ProjectsPage({
                     <p className="project-id text-xs text-gray-400 mt-1">Project ID: {project.id}</p>
                   </div>
 
-                  <button
-                    onClick={() => openStatusEdit(project)}
-                    title="Click to change status"
-                    className="rounded-full transition hover:scale-105"
-                  >
+                  {hasPermission("projects", "edit") ? (
+                    <button
+                      onClick={() => openStatusEdit(project)}
+                      title="Click to change status"
+                      className="rounded-full transition hover:scale-105"
+                    >
+                      <StatusBadge status={project.status || "Inactive"} />
+                    </button>
+                  ) : (
                     <StatusBadge status={project.status || "Inactive"} />
-                  </button>
+                  )}
                 </div>
 
                 <div className="grid grid-cols-1 sm:grid-cols-3 gap-2 mb-3">
@@ -8422,26 +10276,9 @@ function ProjectsPage({
                 </p>
               </div>
 
-              <div className="mb-4">
-                <label className="font-medium text-gray-700">Status Change Reason</label>
-                <textarea
-                  value={statusEdit.reason}
-                  onChange={(e) => setStatusEdit({ ...statusEdit, reason: e.target.value })}
-                  className="border rounded-lg p-3 w-full mt-2 h-24"
-                  placeholder="Enter reason for changing project status..."
-                />
-              </div>
-
-              <div className="mb-5">
-                <label className="font-medium text-gray-700">Admin Password</label>
-                <input
-                  type="password"
-                  value={statusEdit.password}
-                  onChange={(e) => setStatusEdit({ ...statusEdit, password: e.target.value })}
-                  className="border rounded-lg p-3 w-full mt-2"
-                  placeholder="Enter admin password"
-                />
-              </div>
+              <p className="text-sm text-gray-600 mb-5">
+                This status change will be saved directly after confirmation without reason or password.
+              </p>
 
               <div className="flex justify-end gap-3 border-t pt-4">
                 <button
@@ -8453,7 +10290,7 @@ function ProjectsPage({
 
                 <button
                   onClick={saveStatusEdit}
-                  className="bg-red-600 text-white px-3 lg:px-4 py-2 rounded-lg"
+                  className="bg-amber-500 hover:bg-amber-400 text-black px-3 lg:px-4 py-2 rounded-lg font-bold"
                 >
                   Save Status Change
                 </button>
@@ -8486,11 +10323,12 @@ function ProjectsPage({
               placeholder="Select status"
             />
 
-            <Field
+            <SelectField
               label="Location"
               value={newProject.location}
               onChange={(e) => setNewProject({ ...newProject, location: e.target.value })}
-              placeholder="Optional"
+              options={SAUDI_PROJECT_LOCATIONS}
+              placeholder="Select Saudi location"
             />
           </GenericModal>
         )}
@@ -8516,7 +10354,9 @@ function AddOperationModal({
   assetMeterPhoto,
   setAssetMeterPhoto,
   getLastOdometerForEquipment,
+  getLastStationCounter,
   onSaveOperation,
+  showToast,
 }) {
   const [sourceStation, setSourceStation] = useState("");
   const [fuelerId, setFuelerId] = useState("");
@@ -8573,10 +10413,14 @@ function AddOperationModal({
 
   const currentProjectFuelers = fuelers.filter((fueler) => {
     const status = String(fueler.status || "On Duty").trim().toLowerCase();
+    const role = String(fueler.role || "Operator").trim().toLowerCase();
+    const userStatus = String(fueler.userStatus || "Active").trim().toLowerCase();
 
     return (
       fueler.id &&
       isItemInUserProject(fueler.projectName) &&
+      role === "operator" &&
+      userStatus === "active" &&
       (status === "on duty" || status === "active")
     );
   });
@@ -8628,6 +10472,11 @@ function AddOperationModal({
       ? getLastOdometerForEquipment?.(destinationId) || 0
       : 0;
 
+  const lastStationCounter =
+    transactionType !== "Direct_Refuel" && destinationId
+      ? getLastStationCounter?.(destinationId) || 0
+      : 0;
+
   const resetAfterTransactionTypeChange = (nextType) => {
     setSourceStation("");
     setDestinationId("");
@@ -8660,40 +10509,41 @@ function AddOperationModal({
       const lastReading = getLastOdometerForEquipment?.(value) || 0;
       setOdometer(lastReading ? String(lastReading) : "");
     } else {
-      setOdometer("");
+      const lastCounter = getLastStationCounter?.(value) || 0;
+      setOdometer(lastCounter ? String(lastCounter) : "");
     }
   };
 
   const handleSave = () => {
     if (!transactionType) {
-      alert("Please select transaction type.");
+      notifyUser(typeof showToast !== "undefined" ? showToast : null, inferToastTypeFromMessage("Please select transaction type."), "Please select transaction type.");
       return;
     }
 
     if (!transactionTypesForAdd.includes(transactionType)) {
-      alert("You are not allowed to add this transaction type.");
+      notifyUser(typeof showToast !== "undefined" ? showToast : null, inferToastTypeFromMessage("You are not allowed to add this transaction type."), "You are not allowed to add this transaction type.");
       return;
     }
 
     if (transactionType !== "External_Supply" && !sourceStation) {
-      alert("Please select source station.");
+      notifyUser(typeof showToast !== "undefined" ? showToast : null, inferToastTypeFromMessage("Please select source station."), "Please select source station.");
       return;
     }
 
     if (!fuelerId) {
-      alert("Please select fueler.");
+      notifyUser(typeof showToast !== "undefined" ? showToast : null, inferToastTypeFromMessage("Please select operator."), "Please select operator.");
       return;
     }
 
     if (!destinationId) {
-      alert("Please select destination.");
+      notifyUser(typeof showToast !== "undefined" ? showToast : null, inferToastTypeFromMessage("Please select destination."), "Please select destination.");
       return;
     }
 
     const qty = Number(dieselQuantity);
 
     if (!qty || qty <= 0) {
-      alert("Diesel quantity must be greater than 0.");
+      notifyUser(typeof showToast !== "undefined" ? showToast : null, inferToastTypeFromMessage("Diesel quantity must be greater than 0."), "Diesel quantity must be greater than 0.");
       return;
     }
 
@@ -8702,30 +10552,45 @@ function AddOperationModal({
       tankCapacity > 0 &&
       qty > tankCapacity
     ) {
-      alert(
-        `Diesel quantity cannot exceed tank capacity (${formatNumber(tankCapacity)} L).`
-      );
+      notifyUser(typeof showToast !== "undefined" ? showToast : null, inferToastTypeFromMessage(`Diesel quantity cannot exceed tank capacity (${formatNumber(tankCapacity)} L).`), `Diesel quantity cannot exceed tank capacity (${formatNumber(tankCapacity)} L).`);
       return;
     }
 
-    if (transactionType === "Direct_Refuel") {
-      const newOdometer = Number(odometer);
+    const newOdometer = Number(odometer);
 
-      if (!newOdometer || newOdometer <= 0) {
-        alert("Please enter valid odometer / hour meter.");
-        return;
-      }
+    if (!newOdometer || newOdometer <= 0) {
+      notifyUser(typeof showToast !== "undefined" ? showToast : null, inferToastTypeFromMessage(transactionType === "Direct_Refuel"
+          ? "Please enter valid odometer / hour meter."
+          : "Please enter valid station counter."), transactionType === "Direct_Refuel"
+          ? "Please enter valid odometer / hour meter."
+          : "Please enter valid station counter.");
+      return;
+    }
 
-      if (lastOdometer > 0 && newOdometer < lastOdometer) {
-        alert(
-          `Odometer / hour meter cannot be less than last reading (${formatNumber(lastOdometer)}).`
-        );
-        return;
-      }
+    if (
+      transactionType === "Direct_Refuel" &&
+      lastOdometer > 0 &&
+      newOdometer < lastOdometer
+    ) {
+      notifyUser(typeof showToast !== "undefined" ? showToast : null, inferToastTypeFromMessage(`Odometer / hour meter cannot be less than last reading (${formatNumber(lastOdometer)}).`), `Odometer / hour meter cannot be less than last reading (${formatNumber(lastOdometer)}).`);
+      return;
+    }
+
+    if (
+      transactionType !== "Direct_Refuel" &&
+      lastStationCounter > 0 &&
+      newOdometer < lastStationCounter
+    ) {
+      notifyUser(typeof showToast !== "undefined" ? showToast : null, inferToastTypeFromMessage(`Station meter / counter cannot be less than last reading (${formatNumber(
+          lastStationCounter
+        )}).`), `Station meter / counter cannot be less than last reading (${formatNumber(
+          lastStationCounter
+        )}).`);
+      return;
     }
 
     if (!stationMeterPhoto || !assetPhoto || !assetMeterPhoto) {
-      alert("All 3 photos are required.");
+      notifyUser(typeof showToast !== "undefined" ? showToast : null, inferToastTypeFromMessage("All 3 photos are required."), "All 3 photos are required.");
       return;
     }
 
@@ -8737,7 +10602,7 @@ function AddOperationModal({
       fuelerId,
       destinationId,
       dieselQuantity: qty,
-      odometer: transactionType === "Direct_Refuel" ? Number(odometer) : "",
+      odometer: Number(odometer),
       photos: {
         stationMeterPhoto,
         assetPhoto,
@@ -8746,8 +10611,40 @@ function AddOperationModal({
     });
   };
 
+  const sourceStationStepComplete =
+    transactionType === "External_Supply" || Boolean(sourceStation);
+
+  const fuelerStepComplete = Boolean(fuelerId);
+  const destinationStepComplete = Boolean(destinationId);
+  const quantityStepComplete = Boolean(dieselQuantity) && Number(dieselQuantity) > 0;
+
+  const odometerStepRequired = Boolean(transactionType);
+  const odometerStepComplete =
+    !odometerStepRequired || (Boolean(odometer) && Number(odometer) > 0);
+
+  const showSourceStationStep =
+    Boolean(transactionType) && transactionType !== "External_Supply";
+
+  const showFuelerStep = Boolean(transactionType) && sourceStationStepComplete;
+  const showDestinationStep = showFuelerStep && fuelerStepComplete;
+  const showQuantityStep = showDestinationStep && destinationStepComplete;
+  const showOdometerStep = showQuantityStep && odometerStepRequired;
+  const showPhotosStep =
+    showQuantityStep && quantityStepComplete && odometerStepComplete;
+
+  const canSaveProgressiveOperation =
+    Boolean(transactionType) &&
+    sourceStationStepComplete &&
+    fuelerStepComplete &&
+    destinationStepComplete &&
+    quantityStepComplete &&
+    odometerStepComplete &&
+    Boolean(stationMeterPhoto) &&
+    Boolean(assetPhoto) &&
+    Boolean(assetMeterPhoto);
+
   return (
-    <div className="fleet-modal-backdrop fixed inset-0 z-[9998] bg-black/70 flex items-center justify-center z-50 p-4">
+    <div className="fleet-modal-backdrop fixed inset-0 z-[9998] bg-black/70 flex items-center justify-center p-4">
       <div className="bg-white text-black w-full max-w-3xl rounded-2xl shadow-2xl overflow-hidden">
         <div className="flex justify-between items-center p-5 border-b">
           <div>
@@ -8786,71 +10683,79 @@ function AddOperationModal({
             setSearchValue={setTransactionTypeSearch}
           />
 
-          <SearchableSelectField
-            label="Source Station"
-            value={transactionType === "External_Supply" ? "" : sourceStation}
-            onChange={(value) => {
-              setSourceStation(value);
-              resetAfterSourceStationChange();
-            }}
-            options={sourceStationOptions}
-            placeholder={
-              transactionType === "External_Supply"
-                ? "External Supply - No source station"
-                : transactionType
-                ? "Select Source Station"
-                : "Select Transaction Type First"
-            }
-            searchValue={sourceStationSearch}
-            setSearchValue={setSourceStationSearch}
-            disabled={!transactionType || sourceStationDisabled}
-          />
+          {showSourceStationStep && (
+            <>
+              <SearchableSelectField
+                label="Source Station"
+                value={transactionType === "External_Supply" ? "" : sourceStation}
+                onChange={(value) => {
+                  setSourceStation(value);
+                  resetAfterSourceStationChange();
+                }}
+                options={sourceStationOptions}
+                placeholder={
+                  transactionType === "External_Supply"
+                    ? "External Supply - No source station"
+                    : transactionType
+                    ? "Select Source Station"
+                    : "Select Transaction Type First"
+                }
+                searchValue={sourceStationSearch}
+                setSearchValue={setSourceStationSearch}
+                disabled={!transactionType || sourceStationDisabled}
+              />
 
-          {transactionType !== "External_Supply" && sourceStation && (
-            <div className="grid grid-cols-1 sm:grid-cols-3 items-start sm:items-center gap-2 sm:gap-4">
-              <label className="font-medium text-gray-700">Source Project</label>
-              <div className="col-span-2 bg-yellow-100 border border-yellow-300 rounded-lg p-2 text-gray-800 font-semibold">
-                {selectedSourceStation?.project || "-"}
-              </div>
-            </div>
+              {transactionType !== "External_Supply" && sourceStation && (
+                <div className="grid grid-cols-1 sm:grid-cols-3 items-start sm:items-center gap-2 sm:gap-4">
+                  <label className="font-medium text-gray-700">Source Project</label>
+                  <div className="col-span-2 bg-yellow-100 border border-yellow-300 rounded-lg p-2 text-gray-800 font-semibold">
+                    {selectedSourceStation?.project || "-"}
+                  </div>
+                </div>
+              )}
+            </>
           )}
 
-          <SearchableSelectField
-            label="Fueler"
-            value={fuelerId}
-            onChange={(value) => setFuelerId(value)}
-            options={currentProjectFuelers.map((fueler) => fueler.id)}
-            placeholder={
-              isOperator
-                ? operatorFueler?.id || "Operator fueler is not linked"
-                : "Select Fueler"
-            }
-            searchValue={fuelerSearch}
-            setSearchValue={setFuelerSearch}
-            disabled={isOperator}
-          />
+          {showFuelerStep && (
+            <SearchableSelectField
+              label="Operator"
+              value={fuelerId}
+              onChange={(value) => setFuelerId(value)}
+              options={currentProjectFuelers.map((fueler) => fueler.id)}
+              placeholder={
+                isOperator
+                  ? operatorFueler?.id || "Operator is not linked"
+                  : "Select Operator"
+              }
+              searchValue={fuelerSearch}
+              setSearchValue={setFuelerSearch}
+              disabled={isOperator}
+            />
+          )}
 
-          <SearchableSelectField
-            label="Destination"
-            value={destinationId}
-            onChange={(value) => handleDestinationChange(value)}
-            options={destinationOptions}
-            placeholder={
-              !transactionType
-                ? "Select Transaction Type First"
-                : transactionType === "Direct_Refuel"
-                ? "Search / Select Active Asset in Your Project"
-                : transactionType === "External_Transfer"
-                ? "Search / Select Station from Other Projects"
-                : "Search / Select Destination Station"
-            }
-            searchValue={destinationSearch}
-            setSearchValue={setDestinationSearch}
-            disabled={
-              !transactionType ||
-              (transactionType !== "External_Supply" && !sourceStation)
-            }
-          />
+          {showDestinationStep && (
+            <SearchableSelectField
+              label="Destination"
+              value={destinationId}
+              onChange={(value) => handleDestinationChange(value)}
+              options={destinationOptions}
+              placeholder={
+                !transactionType
+                  ? "Select Transaction Type First"
+                  : transactionType === "Direct_Refuel"
+                  ? "Search / Select Active Asset in Your Project"
+                  : transactionType === "External_Transfer"
+                  ? "Search / Select Station from Other Projects"
+                  : "Search / Select Destination Station"
+              }
+              searchValue={destinationSearch}
+              setSearchValue={setDestinationSearch}
+              disabled={
+                !transactionType ||
+                (transactionType !== "External_Supply" && !sourceStation)
+              }
+            />
+          )}
 
           {transactionType === "External_Transfer" && destinationId && (
             <div className="grid grid-cols-1 sm:grid-cols-3 items-start sm:items-center gap-2 sm:gap-4">
@@ -8881,49 +10786,80 @@ function AddOperationModal({
             </>
           )}
 
-          <Field
-            label="Diesel Quantity"
-            value={dieselQuantity}
-            onChange={(e) => setDieselQuantity(e.target.value)}
-            type="number"
-            placeholder="Enter quantity in liters"
-          />
-
-          <Field
-            label="Odometer / Hour Meter"
-            value={odometer}
-            onChange={(e) => setOdometer(e.target.value)}
-            type="number"
-            placeholder={
-              transactionType === "Direct_Refuel"
-                ? "New reading must be >= last reading"
-                : "Not required for this transaction type"
-            }
-          />
-
-          <div className="border-t pt-4">
-            <h3 className="text-lg font-bold italic underline mb-3">
-              Required Photos
-            </h3>
-
-            <ImageField
-              label="Station Meter Photo *"
-              preview={stationMeterPhoto}
-              setPreview={setStationMeterPhoto}
+          {showQuantityStep && (
+            <Field
+              label="Diesel Quantity"
+              value={dieselQuantity}
+              onChange={(e) => setDieselQuantity(e.target.value)}
+              type="number"
+              placeholder="Enter quantity in liters"
             />
+          )}
 
-            <ImageField
-              label="Equipment / Destination Photo *"
-              preview={assetPhoto}
-              setPreview={setAssetPhoto}
-            />
+          {showOdometerStep && destinationId && (
+  <div className="grid grid-cols-1 sm:grid-cols-3 items-start sm:items-center gap-2 sm:gap-4">
+    <label className="font-medium text-gray-700">
+      {transactionType === "Direct_Refuel"
+        ? "Last Odometer / Hour Meter"
+        : "Last Station Meter / Counter"}
+    </label>
 
-            <ImageField
-              label="Equipment Meter Photo *"
-              preview={assetMeterPhoto}
-              setPreview={setAssetMeterPhoto}
-            />
-          </div>
+    <div className="col-span-2 bg-gray-100 border rounded-lg p-2 text-gray-700">
+      {transactionType === "Direct_Refuel"
+        ? lastOdometer > 0
+          ? formatNumber(lastOdometer)
+          : "-"
+        : lastStationCounter > 0
+        ? formatNumber(lastStationCounter)
+        : "-"}
+    </div>
+  </div>
+)}
+
+{showOdometerStep && (
+  <Field
+    label={
+      transactionType === "Direct_Refuel"
+        ? "Odometer / Hour Meter"
+        : "Station Meter / Counter"
+    }
+    value={odometer}
+    onChange={(e) => setOdometer(e.target.value)}
+    type="number"
+    placeholder={
+      transactionType === "Direct_Refuel"
+        ? "New reading must be >= last reading"
+        : "Enter station meter / counter reading"
+    }
+  />
+)}
+          
+
+          {showPhotosStep && (
+            <div className="border-t pt-4">
+              <h3 className="text-lg font-bold italic underline mb-3">
+                Required Photos
+              </h3>
+
+              <ImageField
+                label="Station Meter Photo *"
+                preview={stationMeterPhoto}
+                setPreview={setStationMeterPhoto}
+              />
+
+              <ImageField
+                label="Equipment / Destination Photo *"
+                preview={assetPhoto}
+                setPreview={setAssetPhoto}
+              />
+
+              <ImageField
+                label="Equipment Meter Photo *"
+                preview={assetMeterPhoto}
+                setPreview={setAssetMeterPhoto}
+              />
+            </div>
+          )}
         </div>
 
         <div className="flex justify-end gap-3 p-5 border-t">
@@ -8936,7 +10872,12 @@ function AddOperationModal({
 
           <button
             onClick={handleSave}
-            className="bg-green-600 hover:bg-green-700 text-white px-5 py-2 rounded-xl font-semibold cursor-pointer"
+            disabled={!canSaveProgressiveOperation}
+            className={`px-5 py-2 rounded-xl font-semibold transition-all ${
+              canSaveProgressiveOperation
+                ? "bg-green-600 hover:bg-green-700 text-white cursor-pointer"
+                : "bg-gray-300 text-gray-500 cursor-not-allowed"
+            }`}
           >
             Save Operation
           </button>
@@ -8958,9 +10899,50 @@ function SearchableSelectField({
   disabled = false,
 }) {
   const [open, setOpen] = useState(false);
+  const [dropdownStyle, setDropdownStyle] = useState({});
   const dropdownRef = useRef(null);
+  const triggerRef = useRef(null);
+
+  const updateDropdownPosition = () => {
+    if (!triggerRef.current) return;
+
+    const rect = triggerRef.current.getBoundingClientRect();
+    const spaceBelow = window.innerHeight - rect.bottom;
+    const spaceAbove = rect.top;
+    const shouldOpenUp = spaceBelow < 260 && spaceAbove > spaceBelow;
+
+    const availableHeight = shouldOpenUp
+      ? Math.max(180, Math.min(420, spaceAbove - 16))
+      : Math.max(180, Math.min(420, spaceBelow - 16));
+
+    setDropdownStyle({
+      position: "fixed",
+      left: `${rect.left}px`,
+      width: `${rect.width}px`,
+      top: shouldOpenUp ? "auto" : `${rect.bottom + 8}px`,
+      bottom: shouldOpenUp ? `${window.innerHeight - rect.top + 8}px` : "auto",
+      maxHeight: `${availableHeight}px`,
+      zIndex: 10050,
+    });
+  };
 
   useOutsideClick(dropdownRef, () => setOpen(false));
+
+  useEffect(() => {
+    if (!open) return;
+
+    updateDropdownPosition();
+
+    const handleReposition = () => updateDropdownPosition();
+
+    window.addEventListener("resize", handleReposition);
+    window.addEventListener("scroll", handleReposition, true);
+
+    return () => {
+      window.removeEventListener("resize", handleReposition);
+      window.removeEventListener("scroll", handleReposition, true);
+    };
+  }, [open]);
 
   const filteredOptions = (options || []).filter((item) =>
     String(item || "")
@@ -8974,10 +10956,14 @@ function SearchableSelectField({
 
       <div ref={dropdownRef} className="col-span-2 relative">
         <button
+          ref={triggerRef}
           type="button"
           disabled={disabled}
           onClick={() => {
-            if (!disabled) setOpen(!open);
+            if (!disabled) {
+              setOpen((prev) => !prev);
+              requestAnimationFrame(updateDropdownPosition);
+            }
           }}
           className={`w-full border rounded-lg p-3 text-left flex justify-between items-center ${
             disabled
@@ -8993,7 +10979,10 @@ function SearchableSelectField({
         </button>
 
         {open && !disabled && (
-          <div className="absolute left-0 right-0 mt-2 bg-white border border-gray-300 rounded-xl shadow-2xl z-[80] p-3">
+          <div
+            style={dropdownStyle}
+            className="bg-white border border-gray-300 rounded-xl shadow-2xl p-3 overflow-hidden"
+          >
             <input
               value={searchValue}
               onChange={(e) => setSearchValue(e.target.value)}
@@ -9002,7 +10991,7 @@ function SearchableSelectField({
               autoFocus
             />
 
-            <div className="max-h-56 overflow-auto">
+            <div className="overflow-auto" style={{ maxHeight: "calc(100% - 48px)" }}>
               {filteredOptions.length > 0 ? (
                 filteredOptions.map((item, i) => (
                   <button
@@ -9033,8 +11022,7 @@ function SearchableSelectField({
   );
 }
 
-
-function GenericModal({ title, closeForm, saveText, onSave, children }) {
+function GenericModal({ title, closeForm, saveText, onSave, saveDisabled = false, children }) {
   return (
     <div className="fleet-modal-backdrop fixed inset-0 z-[9998] bg-black/60 flex items-center justify-center z-50">
       <div className="bg-white text-black w-[650px] rounded-xl shadow-xl p-6">
@@ -9049,7 +11037,17 @@ function GenericModal({ title, closeForm, saveText, onSave, children }) {
  
         <div className="flex justify-end gap-3 mt-6 border-t pt-4">
           <button onClick={closeForm} className="bg-gray-200 px-3 lg:px-4 py-2 rounded-lg">Cancel</button>
-          <button onClick={onSave} className="bg-green-600 text-white px-3 lg:px-4 py-2 rounded-lg">{saveText}</button>
+          <button
+            onClick={onSave}
+            disabled={saveDisabled}
+            className={`px-3 lg:px-4 py-2 rounded-lg ${
+              saveDisabled
+                ? "bg-gray-300 text-gray-500 cursor-not-allowed"
+                : "bg-green-600 text-white hover:bg-green-700"
+            }`}
+          >
+            {saveText}
+          </button>
         </div>
       </div>
     </div>
@@ -9115,17 +11113,27 @@ function ImageField({ label, preview, setPreview }) {
 }
  
 function normalizeHeader(value) {
-  return String(value || "")
-    .trim()
+  return cleanCsvCell(value)
     .toLowerCase()
     .replace(/\s+/g, "_");
 }
 
 function normalizeText(value) {
-  return String(value || "")
-    .trim()
+  return cleanCsvCell(value)
     .toLowerCase()
     .replace(/\s+/g, "_");
+}
+
+function getDuplicateIdError(inputId, existingItems = [], label = "ID") {
+  const normalizedInputId = normalizeText(inputId);
+
+  if (!normalizedInputId) return "";
+
+  const alreadyExists = existingItems.some((item) =>
+    normalizeText(item?.id) === normalizedInputId
+  );
+
+  return alreadyExists ? `${label} already exists. Please use a unique ID.` : "";
 }
 
 function isSameText(a, b) {
@@ -9147,7 +11155,7 @@ function getHeaderIndex(headers, possibleNames) {
 function getValue(row, headers, possibleNames) {
   const index = getHeaderIndex(headers, possibleNames);
 
-  return index !== -1 ? row[index] : "";
+  return index !== -1 ? cleanCsvCell(row[index]) : "";
 }
  
 function formatNumber(value) {
@@ -9190,20 +11198,34 @@ function Field({
   type = "text",
   value,
   onChange,
+  error = "",
+  disabled = false,
 }) {
   return (
-    <div className="grid grid-cols-1 sm:grid-cols-3 items-start sm:items-center gap-2 sm:gap-4">
-      <label className="font-medium text-gray-700">
+    <div className="grid grid-cols-1 sm:grid-cols-3 items-start gap-2 sm:gap-4">
+      <label className="font-medium text-gray-700 pt-2">
         {label}
       </label>
  
-      <input
-        type={type}
-        value={value}
-        onChange={onChange}
-        className="col-span-2 border rounded-lg p-2"
-        placeholder={placeholder}
-      />
+      <div className="col-span-2">
+        <input
+          type={type}
+          value={value}
+          onChange={onChange}
+          disabled={disabled}
+          className={`w-full border rounded-lg p-2 ${
+            error
+              ? "border-red-500 bg-red-50 focus:outline-none focus:ring-2 focus:ring-red-200"
+              : "border-gray-300"
+          } ${disabled ? "bg-gray-100 text-gray-400 cursor-not-allowed" : ""}`}
+          placeholder={placeholder}
+        />
+        {error && (
+          <p className="mt-1 text-xs font-semibold text-red-600">
+            {error}
+          </p>
+        )}
+      </div>
     </div>
   );
 }
@@ -9220,8 +11242,6 @@ function Card({ title, value }) {
     </div>
   );
 }
-
-
 
 
 function AuditTimelinePage({
@@ -9503,7 +11523,7 @@ function NotificationCenterPage({
       setPage("approvals");
       return;
     }
-    if (["operations", "assets", "stations", "fuelers", "projects", "reports"].includes(item.route)) {
+    if (["operations", "assets", "stations", "team", "projects", "reports"].includes(item.route)) {
       setPage(item.route);
     }
   };
@@ -9994,7 +12014,7 @@ function ApprovalsPage({
                       Requested by: {request.requestedByName} ({request.requestedByRole}) • {formatApprovalDate(request.requestedAt)}
                     </p>
                     {request.reviewedBy && (
-                      <p className="text-xs text-slate-500 mt-1">
+                      <p className="login-muted text-xs text-slate-500 mt-1">
                         Reviewed by: {request.reviewedBy} • {formatApprovalDate(request.reviewedAt)} • {request.reviewNote}
                       </p>
                     )}
@@ -10174,7 +12194,7 @@ function UsersPage({
   const [form, setForm] = useState(emptyForm);
 
   const roleOptions = Object.keys(ROLE_PERMISSIONS);
-  const activeProjects = projects.filter((project) => project.id);
+  const activeProjects = filterActiveProjects(projects);
   const isRestrictedScopeRole = ["Operator", "Supervisor"].includes(form.role);
 
   const filteredUsers = users.filter((user) => {
@@ -10692,6 +12712,204 @@ function UsersPage({
         </div>
       )}
     </div>
+  );
+}
+
+
+function LoginPage({
+  users = [],
+  loginIdentifier,
+  setLoginIdentifier,
+  rememberSession,
+  setRememberSession,
+  loginError,
+  handleLogin,
+  theme,
+  setTheme,
+}) {
+  const activeUsers = users.filter((user) => user.status === "Active");
+
+  return (
+    <>
+      <style jsx global>{`
+        [data-theme="light"] {
+          color-scheme: light;
+        }
+
+        [data-theme="light"] .theme-main-bg {
+          background:
+            radial-gradient(circle at top left, rgba(245, 158, 11, 0.10), transparent 34%),
+            #f4f7fb !important;
+        }
+
+        [data-theme="light"] .login-surface,
+        [data-theme="light"] .login-card {
+          background-color: #ffffff !important;
+          color: #0f172a !important;
+          border-color: rgba(203, 213, 225, 0.95) !important;
+        }
+
+        [data-theme="light"] .login-muted {
+          color: #64748b !important;
+        }
+
+        [data-theme="light"] .login-title,
+        [data-theme="light"] .login-text {
+          color: #0f172a !important;
+        }
+
+        [data-theme="light"] .login-input {
+          background-color: #ffffff !important;
+          color: #0f172a !important;
+          border-color: #cbd5e1 !important;
+        }
+
+        [data-theme="light"] .login-soft {
+          background-color: #f8fafc !important;
+          border-color: #cbd5e1 !important;
+        }
+
+        [data-theme="light"] .login-theme-button {
+          color: #0f172a !important;
+          border-color: #cbd5e1 !important;
+          background-color: #ffffff !important;
+        }
+
+        [data-theme="light"] .login-theme-button:hover {
+          border-color: #f59e0b !important;
+          color: #b45309 !important;
+        }
+      `}</style>
+
+      <div
+        data-theme={theme}
+        className="theme-main-bg min-h-screen bg-[#070b14] text-slate-100 flex items-center justify-center p-6"
+      >
+      <div className="w-full max-w-5xl grid lg:grid-cols-[1.05fr_0.95fr] gap-6 items-stretch">
+        <div className="login-surface rounded-3xl border border-slate-800 bg-slate-900/70 shadow-2xl p-8 flex flex-col justify-between overflow-hidden relative">
+          <div className="absolute -top-20 -left-20 h-64 w-64 rounded-full bg-amber-400/10 blur-3xl" />
+          <div className="absolute -bottom-24 -right-20 h-72 w-72 rounded-full bg-blue-500/10 blur-3xl" />
+
+          <div className="relative">
+            <div className="flex items-center gap-4 mb-8">
+              <img
+                src={theme === "dark" ? "/icons/fleet-fuel-pro-dark.png" : "/icons/fleet-fuel-pro-light.png"}
+                alt="Fleet Fuel PRO"
+                className="w-20 h-auto object-contain"
+                draggable={false}
+              />
+              <div>
+                <p className="text-[11px] uppercase tracking-[0.25em] text-amber-300 font-bold">
+                  Enterprise Access
+                </p>
+                <h1 className="login-title text-3xl font-black text-white mt-1">Fleet Fuel PRO</h1>
+              </div>
+            </div>
+
+            <h2 className="login-text text-xl font-bold text-slate-100 mb-3">
+              Sign in to Diesel Management System
+            </h2>
+            <p className="login-muted text-sm text-slate-400 leading-6 max-w-xl">
+              Frontend session layer connected to UsersRoles CSV and Team data. Password authentication will be replaced later by Backend / JWT.
+            </p>
+          </div>
+
+          <div className="relative mt-8 grid sm:grid-cols-3 gap-3">
+            <div className="login-soft rounded-2xl border border-slate-800 bg-slate-950/40 p-4">
+              <p className="text-2xl font-black text-amber-300">{activeUsers.length}</p>
+              <p className="login-muted text-xs text-slate-500 mt-1">Active Users</p>
+            </div>
+            <div className="login-soft rounded-2xl border border-slate-800 bg-slate-950/40 p-4">
+              <p className="text-2xl font-black text-emerald-300">
+                {activeUsers.filter((user) => user.role === "Manager").length}
+              </p>
+              <p className="login-muted text-xs text-slate-500 mt-1">Managers</p>
+            </div>
+            <div className="login-soft rounded-2xl border border-slate-800 bg-slate-950/40 p-4">
+              <p className="text-2xl font-black text-blue-300">
+                {activeUsers.filter((user) => user.role === "Operator").length}
+              </p>
+              <p className="login-muted text-xs text-slate-500 mt-1">Operators</p>
+            </div>
+          </div>
+        </div>
+
+        <form
+          onSubmit={handleLogin}
+          className="login-card rounded-3xl border border-slate-800 bg-slate-900/90 shadow-2xl p-6 sm:p-8"
+        >
+          <div className="flex items-center justify-between gap-4 mb-7">
+            <div>
+              <p className="login-muted text-[10px] uppercase tracking-[0.22em] text-slate-500 font-bold">Local Session</p>
+              <h3 className="login-title text-2xl font-black text-white mt-1">Login</h3>
+            </div>
+            <button
+              type="button"
+              onClick={() => setTheme(theme === "dark" ? "light" : "dark")}
+              className="login-theme-button rounded-xl border border-slate-700 px-3 py-2 text-xs font-bold text-slate-300 hover:border-amber-400 hover:text-amber-300 transition"
+            >
+              {theme === "dark" ? "Switch to Light" : "Switch to Dark"}
+            </button>
+          </div>
+
+          <label className="block mb-4">
+            <span className="login-muted text-xs font-bold text-slate-400">User ID / Email / Username / Full Name</span>
+            <input
+              value={loginIdentifier}
+              onChange={(e) => setLoginIdentifier(e.target.value)}
+              placeholder="Example: 788 or a.eldokany86@gmail.com"
+              className="login-input mt-2 w-full rounded-2xl border border-slate-700 bg-slate-950 px-4 py-3 text-sm text-white outline-none focus:border-amber-400 focus:ring-2 focus:ring-amber-400/20"
+              autoFocus
+            />
+          </label>
+
+          <label className="login-soft login-muted mb-5 flex items-center gap-3 rounded-2xl border border-slate-800 bg-slate-950/40 p-3 text-sm text-slate-300">
+            <input
+              type="checkbox"
+              checked={rememberSession}
+              onChange={(e) => setRememberSession(e.target.checked)}
+            />
+            Remember me on this device
+          </label>
+
+          {loginError && (
+            <div className="mb-5 rounded-2xl border border-red-500/30 bg-red-500/10 px-4 py-3 text-sm text-red-300">
+              {loginError}
+            </div>
+          )}
+
+          <button
+            type="submit"
+            className="w-full rounded-2xl bg-amber-400 px-4 py-3 text-sm font-black text-slate-950 hover:bg-amber-300 transition shadow-lg shadow-amber-500/20"
+          >
+            Sign In
+          </button>
+
+          <div className="login-soft mt-6 rounded-2xl border border-slate-800 bg-slate-950/40 p-4">
+            <p className="login-muted text-xs font-bold text-slate-400 mb-3">Available test users</p>
+            <div className="max-h-52 overflow-y-auto space-y-2 pr-1">
+              {activeUsers.map((user) => (
+                <button
+                  key={user.id}
+                  type="button"
+                  onClick={() => setLoginIdentifier(user.id)}
+                  className="login-card w-full text-left rounded-xl border border-slate-800 bg-slate-900 px-3 py-2 hover:border-amber-400 transition"
+                >
+                  <div className="flex items-center justify-between gap-3">
+                    <span className="login-text text-sm font-bold text-slate-100 truncate">{user.fullName}</span>
+                    <span className="text-[10px] rounded-full bg-amber-400/10 text-amber-300 px-2 py-0.5 border border-amber-400/20">
+                      {user.role}
+                    </span>
+                  </div>
+                  <div className="login-muted text-xs text-slate-500 mt-1">{user.id} · {user.teamProject || "Global"}</div>
+                </button>
+              ))}
+            </div>
+          </div>
+        </form>
+      </div>
+      </div>
+    </>
   );
 }
 
