@@ -1,6 +1,7 @@
 "use client";
  
 import React, { useEffect, useMemo, useRef, useState } from "react";
+import { createPortal } from "react-dom";
 import {
   LineChart,
   Line,
@@ -1251,6 +1252,18 @@ function useOutsideClick(ref, callback) {
     };
   }, [ref, callback]);
 }
+
+function ModalPortal({ children }) {
+  const [mounted, setMounted] = useState(false);
+
+  useEffect(() => {
+    setMounted(true);
+  }, []);
+
+  if (!mounted || typeof document === "undefined") return null;
+
+  return createPortal(children, document.body);
+}
  
 export default function Home() {
   const [page, setPage] = useState("operations");
@@ -2185,6 +2198,19 @@ if (!currentUser) {
         /* Settings menu direction safety */
         .settings-layer-safe [class*="absolute left-0"] {
           max-width: calc(100vw - 1.5rem);
+        }
+
+
+        /* Portal modal top layer fix */
+        .fleet-portal-modal-backdrop {
+          position: fixed !important;
+          inset: 0 !important;
+          z-index: 100000 !important;
+        }
+
+        .fleet-portal-modal-panel {
+          position: relative !important;
+          z-index: 100001 !important;
         }
 
 `}</style>
@@ -11182,33 +11208,35 @@ function SearchableSelectField({
 
 function GenericModal({ title, closeForm, saveText, onSave, saveDisabled = false, children }) {
   return (
-    <div className="fleet-modal-backdrop fixed inset-0 z-[9998] bg-black/60 flex items-center justify-center z-50">
-      <div className="bg-white text-black w-[650px] rounded-xl shadow-xl p-6">
-        <div className="flex justify-between items-center mb-6 border-b pb-3">
-          <h2 className="text-xl sm:text-2xl font-bold">{title}</h2>
-          <button onClick={closeForm} className="text-gray-500 hover:text-black text-xl">×</button>
-        </div>
- 
-        <div className="grid grid-cols-1 gap-4">
-          {children}
-        </div>
- 
-        <div className="flex justify-end gap-3 mt-6 border-t pt-4">
-          <button onClick={closeForm} className="bg-gray-200 px-3 lg:px-4 py-2 rounded-lg">Cancel</button>
-          <button
-            onClick={onSave}
-            disabled={saveDisabled}
-            className={`px-3 lg:px-4 py-2 rounded-lg ${
-              saveDisabled
-                ? "bg-gray-300 text-gray-500 cursor-not-allowed"
-                : "bg-green-600 text-white hover:bg-green-700"
-            }`}
-          >
-            {saveText}
-          </button>
+    <ModalPortal>
+      <div className="fleet-portal-modal-backdrop fixed inset-0 bg-black/60 flex items-center justify-center p-4">
+        <div className="fleet-portal-modal-panel bg-white text-black w-[min(650px,calc(100vw-2rem))] max-h-[92vh] overflow-y-auto rounded-xl shadow-2xl p-6">
+          <div className="flex justify-between items-center mb-6 border-b pb-3">
+            <h2 className="text-xl sm:text-2xl font-bold">{title}</h2>
+            <button onClick={closeForm} className="text-gray-500 hover:text-black text-xl">×</button>
+          </div>
+
+          <div className="grid grid-cols-1 gap-4">
+            {children}
+          </div>
+
+          <div className="flex justify-end gap-3 mt-6 border-t pt-4">
+            <button onClick={closeForm} className="bg-gray-200 px-3 lg:px-4 py-2 rounded-lg">Cancel</button>
+            <button
+              onClick={onSave}
+              disabled={saveDisabled}
+              className={`px-3 lg:px-4 py-2 rounded-lg ${
+                saveDisabled
+                  ? "bg-gray-300 text-gray-500 cursor-not-allowed"
+                  : "bg-green-600 text-white hover:bg-green-700"
+              }`}
+            >
+              {saveText}
+            </button>
+          </div>
         </div>
       </div>
-    </div>
+    </ModalPortal>
   );
 }
  
