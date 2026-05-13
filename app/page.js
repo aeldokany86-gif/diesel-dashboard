@@ -2181,6 +2181,12 @@ if (!currentUser) {
           }
         }
 
+
+        /* Settings menu direction safety */
+        .settings-layer-safe [class*="absolute left-0"] {
+          max-width: calc(100vw - 1.5rem);
+        }
+
 `}</style>
 
       <div data-theme={theme} className="min-h-screen bg-[#070b14] flex overflow-hidden text-slate-100">
@@ -3952,7 +3958,7 @@ function OperationsPage({
               </button>
 
               {showEquipmentSummarySettings && (
-                <div className="absolute right-0 mt-2 w-44 bg-slate-950 border border-slate-700 rounded-xl shadow-2xl z-[9999] overflow-hidden">
+                <div className="absolute left-0 mt-2 w-44 bg-slate-950 border border-slate-700 rounded-xl shadow-2xl z-[9999] overflow-hidden">
                   <button
                     onClick={exportEquipmentSummaryCSV}
                     className="block w-full text-left px-4 py-3 hover:bg-slate-800 transition text-white"
@@ -4055,7 +4061,7 @@ function OperationsPage({
                 </button>
 
                 {showEquipmentTypeSettings && (
-                  <div className="absolute right-0 mt-2 w-44 bg-slate-950 border border-slate-700 rounded-xl shadow-2xl z-[9999] overflow-hidden">
+                  <div className="absolute left-0 mt-2 w-44 bg-slate-950 border border-slate-700 rounded-xl shadow-2xl z-[9999] overflow-hidden">
                     <button
                       onClick={exportEquipmentTypeSummaryCSV}
                       className="block w-full text-left px-4 py-3 hover:bg-slate-800 transition text-white"
@@ -4140,7 +4146,7 @@ function OperationsPage({
                 </button>
 
                 {showDailyConsumptionSettings && (
-                  <div className="absolute right-0 mt-2 w-44 bg-slate-950 border border-slate-700 rounded-xl shadow-2xl z-[9999] overflow-hidden">
+                  <div className="absolute left-0 mt-2 w-44 bg-slate-950 border border-slate-700 rounded-xl shadow-2xl z-[9999] overflow-hidden">
                     <button
                       onClick={exportDailyConsumptionCSV}
                       className="block w-full text-left px-4 py-3 hover:bg-slate-800 transition text-white"
@@ -5471,7 +5477,7 @@ const printAssetsReport = () => {
       </button>
 
       {showAssetSettings && (
-        <div className="absolute right-0 mt-3 w-56 bg-gray-900 border border-gray-700 rounded-2xl shadow-2xl overflow-visible z-[10020]">
+        <div className="absolute left-0 mt-3 w-56 bg-gray-900 border border-gray-700 rounded-2xl shadow-2xl overflow-visible z-[10020]">
           {hasPermission("assets", "add") && (
             <button
               onClick={() => {
@@ -7325,7 +7331,7 @@ const [showConfirm, setShowConfirm] = useState(false);
           {showSettings && (
             <div
               onClick={(e) => e.stopPropagation()}
-              className="absolute right-0 mt-3 w-64 bg-gray-900 border border-gray-700 rounded-2xl shadow-2xl overflow-visible z-[10020] backdrop-blur-xl"
+              className="absolute left-0 mt-3 w-64 bg-gray-900 border border-gray-700 rounded-2xl shadow-2xl overflow-visible z-[10020] backdrop-blur-xl"
             >
               {hasPermission("stations", "add") && (
                 <button
@@ -9127,7 +9133,7 @@ function TeamPage({
                 </button>
 
                 {showFuelersSettings && (
-                  <div className="absolute right-0 mt-2 w-44 bg-slate-950 border border-slate-700 rounded-xl shadow-2xl z-[9999] overflow-hidden">
+                  <div className="absolute left-0 mt-2 w-44 bg-slate-950 border border-slate-700 rounded-xl shadow-2xl z-[9999] overflow-hidden">
                     <button
                       onClick={() => {
                         exportFuelersCSV();
@@ -10182,7 +10188,7 @@ function ProjectsPage({
               </button>
 
               {showSettings && (
-                <div className="absolute right-0 mt-2 w-48 bg-gray-900 border border-gray-700 rounded-xl shadow-2xl z-[10020] overflow-visible">
+                <div className="absolute left-0 mt-2 w-48 bg-gray-900 border border-gray-700 rounded-xl shadow-2xl z-[10020] overflow-visible">
                   {hasPermission("projects", "add") && (
                     <button
                       onClick={() => {
