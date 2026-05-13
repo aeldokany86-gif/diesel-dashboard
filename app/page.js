@@ -1402,126 +1402,135 @@ export default function Home() {
  
   useEffect(() => {
     async function fetchData() {
-      // TRANSACTIONS
-      const trxRes = await fetch(TRANSACTIONS_CSV);
-      const trxText = await trxRes.text();
-      const trxRows = parseCSV(trxText);
- 
-      setHeaders(trxRows[0]);
-      setData(trxRows.slice(1));
- 
-      // ASSETS
-      const assetsRes = await fetch(ASSETS_CSV);
-      const assetsText = await assetsRes.text();
-      const assetRows = parseCSV(assetsText);
-      const assetHeaders = assetRows[0];
- 
-      const mappedAssets = assetRows
-        .slice(1)
-        .map((row) => ({
-          id: getValue(row, assetHeaders, ["asset_id", "id"]),
-          type: getValue(row, assetHeaders, ["asset_type", "type"]),
-          category: getValue(row, assetHeaders, ["asset_category", "category"]),
-          odometer: getValue(row, assetHeaders, [
-            "current_odometer",
-            "odometer",
-          ]),
-          fuelTank: getValue(row, assetHeaders, [
-            "fuel_tank_capacity",
-            "tank_capacity",
-          ]),
-          project: getValue(row, assetHeaders, [
-            "project_id",
-            "project",
-            "project_name",
-          ]),
-          status: getValue(row, assetHeaders, ["status"]),
-        }))
-        .filter((asset) => asset.id);
- 
-      setAssets(mappedAssets);
- 
-      // STATIONS
-      const stationsRes = await fetch(STATIONS_CSV);
-      const stationsText = await stationsRes.text();
- 
-      const stationRows = parseCSV(stationsText);
- 
-      const stationHeaders = stationRows[0];
- 
-      const mappedStations = stationRows
-        .slice(1)
-        .map((row) => ({
-          id: getValue(row, stationHeaders, ["station_id"]),
-          type: getValue(row, stationHeaders, ["station_type"]),
-          capacity: parseFloat(
-            getValue(row, stationHeaders, ["station_capacity"])
-          ),
-          project: getValue(row, stationHeaders, ["project_id"]),
-          status: getValue(row, stationHeaders, ["status"]),
-          openingBalance: parseFloat(
-            getValue(row, stationHeaders, ["opening_balance", "Opening Balance", "opening balance"])
-          ),
-}))
-        .filter((station) => station.id);
- 
-      setStations(mappedStations);
-	// FUELERS
-const fuelersRes = await fetch(FUELERS_CSV);
-const fuelersText = await fuelersRes.text();
- 
-const fuelerRows = parseCSV(fuelersText);
- 
-const fuelerHeaders = fuelerRows[0];
- 
-const mappedFuelers = fuelerRows
-  .slice(1)
-  .map((row) => ({
-    id: getValue(row, fuelerHeaders, ["team_id", "Team_id", "team id", "fueler_id", "id"]),
-    name: getValue(row, fuelerHeaders, ["team_name", "Team_name", "team name", "fueler_name", "name"]),
-    email: getValue(row, fuelerHeaders, ["email", "Email", "user_email", "operator_email"]),
-    mobile: getValue(row, fuelerHeaders, ["mobile", "Mobile", "phone", "mobile_no"]),
-    projectName: getValue(row, fuelerHeaders, [
-      "project_name",
-      "Project Name",
-      "project",
-      "project name",
-    ]),
-    status: getValue(row, fuelerHeaders, ["status", "Status"]) || "On Duty",
-  }))
-  .filter((fueler) => fueler.id);
- 
-setFuelers(mappedFuelers);
- 
-// PROJECTS
-const projectsRes = await fetch(PROJECTS_CSV);
-const projectsText = await projectsRes.text();
- 
-const projectRows = parseCSV(projectsText);
- 
-const projectHeaders = projectRows[0];
- 
-const mappedProjects = projectRows
-  .slice(1)
-  .map((row) => ({
-    id: getValue(row, projectHeaders, ["project_id", "id"]),
-    name: getValue(row, projectHeaders, ["project_name", "name"]),
-    status: getValue(row, projectHeaders, ["status"]),
-  }))
-  .filter((project) => project.id);
- 
-setProjects(mappedProjects);
+      try {
+        const [
+          trxText,
+          assetsText,
+          stationsText,
+          fuelersText,
+          projectsText,
+          usersRolesText,
+        ] = await Promise.all([
+          fetch(TRANSACTIONS_CSV).then((res) => res.text()),
+          fetch(ASSETS_CSV).then((res) => res.text()),
+          fetch(STATIONS_CSV).then((res) => res.text()),
+          fetch(FUELERS_CSV).then((res) => res.text()),
+          fetch(PROJECTS_CSV).then((res) => res.text()),
+          fetch(USERS_ROLES_CSV).then((res) => res.text()),
+        ]);
 
-// USERS & ROLES
-const usersRolesRes = await fetch(USERS_ROLES_CSV);
-const usersRolesText = await usersRolesRes.text();
-const userRows = parseCSV(usersRolesText);
-const userHeaders = userRows[0] || [];
-const mappedUsers = buildUsersFromRolesRows(userRows, userHeaders, mappedFuelers);
+        // TRANSACTIONS
+        const trxRows = parseCSV(trxText);
+        setHeaders(trxRows[0] || []);
+        setData(trxRows.slice(1));
 
-setUsers(mappedUsers);
+        // ASSETS
+        const assetRows = parseCSV(assetsText);
+        const assetHeaders = assetRows[0] || [];
+
+        const mappedAssets = assetRows
+          .slice(1)
+          .map((row) => ({
+            id: getValue(row, assetHeaders, ["asset_id", "id"]),
+            type: getValue(row, assetHeaders, ["asset_type", "type"]),
+            category: getValue(row, assetHeaders, ["asset_category", "category"]),
+            odometer: getValue(row, assetHeaders, [
+              "current_odometer",
+              "odometer",
+            ]),
+            fuelTank: getValue(row, assetHeaders, [
+              "fuel_tank_capacity",
+              "tank_capacity",
+            ]),
+            project: getValue(row, assetHeaders, [
+              "project_id",
+              "project",
+              "project_name",
+            ]),
+            status: getValue(row, assetHeaders, ["status"]),
+          }))
+          .filter((asset) => asset.id);
+
+        setAssets(mappedAssets);
+
+        // STATIONS
+        const stationRows = parseCSV(stationsText);
+        const stationHeaders = stationRows[0] || [];
+
+        const mappedStations = stationRows
+          .slice(1)
+          .map((row) => ({
+            id: getValue(row, stationHeaders, ["station_id"]),
+            type: getValue(row, stationHeaders, ["station_type"]),
+            capacity: parseFloat(
+              getValue(row, stationHeaders, ["station_capacity"])
+            ),
+            project: getValue(row, stationHeaders, ["project_id"]),
+            status: getValue(row, stationHeaders, ["status"]),
+            openingBalance: parseFloat(
+              getValue(row, stationHeaders, ["opening_balance", "Opening Balance", "opening balance"])
+            ),
+          }))
+          .filter((station) => station.id);
+
+        setStations(mappedStations);
+
+        // FUELERS
+        const fuelerRows = parseCSV(fuelersText);
+        const fuelerHeaders = fuelerRows[0] || [];
+
+        const mappedFuelers = fuelerRows
+          .slice(1)
+          .map((row) => ({
+            id: getValue(row, fuelerHeaders, ["team_id", "Team_id", "team id", "fueler_id", "id"]),
+            name: getValue(row, fuelerHeaders, ["team_name", "Team_name", "team name", "fueler_name", "name"]),
+            email: getValue(row, fuelerHeaders, ["email", "Email", "user_email", "operator_email"]),
+            mobile: getValue(row, fuelerHeaders, ["mobile", "Mobile", "phone", "mobile_no"]),
+            projectName: getValue(row, fuelerHeaders, [
+              "project_name",
+              "Project Name",
+              "project",
+              "project name",
+            ]),
+            status: getValue(row, fuelerHeaders, ["status", "Status"]) || "On Duty",
+          }))
+          .filter((fueler) => fueler.id);
+
+        setFuelers(mappedFuelers);
+
+        // PROJECTS
+        const projectRows = parseCSV(projectsText);
+        const projectHeaders = projectRows[0] || [];
+
+        const mappedProjects = projectRows
+          .slice(1)
+          .map((row) => ({
+            id: getValue(row, projectHeaders, ["project_id", "id"]),
+            name: getValue(row, projectHeaders, ["project_name", "name"]),
+            status: getValue(row, projectHeaders, ["status"]),
+          }))
+          .filter((project) => project.id);
+
+        setProjects(mappedProjects);
+
+        // USERS & ROLES
+        const userRows = parseCSV(usersRolesText);
+        const userHeaders = userRows[0] || [];
+        const mappedUsers = buildUsersFromRolesRows(userRows, userHeaders, mappedFuelers);
+
+        setUsers(mappedUsers);
+      } catch (error) {
+        console.error("Failed to load Fleet Fuel PRO CSV data:", error);
+        setHeaders([]);
+        setData([]);
+        setAssets([]);
+        setStations([]);
+        setFuelers([]);
+        setProjects([]);
+        setUsers([]);
+      }
     }
- 
+
     fetchData();
   }, []);
 
@@ -1870,8 +1879,28 @@ const sidebarContentCollapsed = sidebarCollapsed && !mobileSidebarOpen;
 if (users.length === 0 || !authLoaded) {
   return (
     <div className="min-h-screen bg-[#070b14] flex items-center justify-center text-slate-100">
-      <div className="rounded-2xl border border-slate-800 bg-slate-900/80 p-6 shadow-2xl">
-        <p className="text-sm text-slate-400">Loading Users & Roles...</p>
+      <div className="rounded-2xl border border-slate-800 bg-slate-900/80 px-8 py-7 shadow-2xl text-center">
+        <div className="flex items-center justify-center gap-3 mb-4">
+          <img
+            src={theme === "dark" ? "/icons/fleet-fuel-pro-dark.png" : "/icons/fleet-fuel-pro-light.png"}
+            alt="Fleet Fuel PRO"
+            className="h-12 w-auto object-contain"
+            draggable={false}
+          />
+
+          <div className="text-left">
+            <h1 className="text-xl sm:text-2xl font-black text-amber-300 tracking-wide">
+              Fleet Fuel PRO
+            </h1>
+            <p className="text-[10px] uppercase tracking-[0.22em] text-slate-500">
+              Fleet Fuel Management System
+            </p>
+          </div>
+        </div>
+
+        <p className="text-sm text-slate-400 animate-pulse">
+          Loading System...
+        </p>
       </div>
     </div>
   );
@@ -7884,8 +7913,9 @@ const [showConfirm, setShowConfirm] = useState(false);
       )}
 
       {showForm && (
-        <div className="fleet-modal-backdrop fixed inset-0 z-[9998] bg-black/60 flex items-center justify-center z-50">
-          <div className="bg-white text-black w-[650px] rounded-xl shadow-xl p-6">
+        <ModalPortal>
+          <div className="fleet-portal-modal-backdrop fixed inset-0 bg-black/60 flex items-center justify-center p-4">
+            <div className="fleet-portal-modal-panel bg-white text-black w-[min(650px,calc(100vw-2rem))] max-h-[92vh] overflow-y-auto rounded-xl shadow-2xl p-6">
             <div className="flex justify-between items-center mb-6 border-b pb-3">
               <h2 className="text-xl sm:text-2xl font-bold">Add Station</h2>
               <button onClick={closeAddStation}>×</button>
@@ -7977,6 +8007,7 @@ const [showConfirm, setShowConfirm] = useState(false);
             </div>
           </div>
         </div>
+        </ModalPortal>
       )}
 
       {projectEditStation && (
