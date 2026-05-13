@@ -3980,7 +3980,7 @@ function OperationsPage({
                 }
                 className="bg-slate-950 hover:bg-slate-800 border border-slate-700 hover:border-amber-400 text-amber-300 px-3 py-2 rounded-lg transition cursor-pointer"
               >
-                ⋮
+                ☰
               </button>
 
               {showEquipmentSummarySettings && (
@@ -4083,7 +4083,7 @@ function OperationsPage({
                   }
                   className="bg-slate-950 hover:bg-slate-800 border border-slate-700 hover:border-amber-400 text-amber-300 px-3 py-2 rounded-lg transition cursor-pointer"
                 >
-                  ⋮
+                  ☰
                 </button>
 
                 {showEquipmentTypeSettings && (
@@ -4168,7 +4168,7 @@ function OperationsPage({
                   }
                   className="bg-slate-950 hover:bg-slate-800 border border-slate-700 hover:border-amber-400 text-amber-300 px-3 py-2 rounded-lg transition cursor-pointer"
                 >
-                  ⋮
+                  ☰
                 </button>
 
                 {showDailyConsumptionSettings && (
@@ -5499,7 +5499,7 @@ const printAssetsReport = () => {
         onClick={() => setShowAssetSettings(!showAssetSettings)}
         className="bg-gray-800 hover:bg-gray-700 border border-gray-700 hover:border-yellow-400 text-yellow-400 px-3 lg:px-4 py-2 lg:py-3 rounded-xl shadow-lg transition-all duration-300 hover:scale-105"
       >
-        ⋮
+        ☰
       </button>
 
       {showAssetSettings && (
@@ -7351,7 +7351,7 @@ const [showConfirm, setShowConfirm] = useState(false);
   }}
   className="bg-slate-950 hover:bg-slate-800 border border-slate-700 hover:border-amber-400 text-amber-300 px-3 py-2 rounded-lg transition cursor-pointer"
 >
-  ⋮
+  ☰
 </button>
 
           {showSettings && (
@@ -9155,7 +9155,7 @@ function TeamPage({
                   onClick={() => setShowFuelersSettings(!showFuelersSettings)}
                   className="bg-slate-950 hover:bg-slate-800 border border-slate-700 hover:border-amber-400 text-amber-300 px-3 py-2 rounded-lg transition cursor-pointer"
                 >
-                  ⋮
+                  ☰
                 </button>
 
                 {showFuelersSettings && (
@@ -10210,11 +10210,11 @@ function ProjectsPage({
                 className="h-[48px] w-[48px] flex items-center justify-center bg-gray-800 hover:bg-gray-700 border border-gray-700 hover:border-yellow-400 text-yellow-400 rounded-xl transition"
                 title="Projects settings"
               >
-                ⋮
+                ☰
               </button>
 
               {showSettings && (
-                <div className="absolute left-0 mt-2 w-48 bg-gray-900 border border-gray-700 rounded-xl shadow-2xl z-[10020] overflow-visible">
+                <div className="absolute Right-0 mt-2 w-48 bg-gray-900 border border-gray-700 rounded-xl shadow-2xl z-[10020] overflow-visible">
                   {hasPermission("projects", "add") && (
                     <button
                       onClick={() => {
