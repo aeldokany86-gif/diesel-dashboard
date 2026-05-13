@@ -167,6 +167,9 @@ const PROJECTS_CSV =
 const USERS_ROLES_CSV =
   "https://docs.google.com/spreadsheets/d/e/2PACX-1vRX0JNF_J9UzMQ5lyr7pxPrdL0GeLD8TkCf4MPNGdyOPT9rATlsmUnBQjx0MVoNy4nPHiRKc7jtmeku/pub?gid=877848969&single=true&output=csv";
 
+const COMPANIES_CSV =
+  "https://docs.google.com/spreadsheets/d/e/2PACX-1vRX0JNF_J9UzMQ5lyr7pxPrdL0GeLD8TkCf4MPNGdyOPT9rATlsmUnBQjx0MVoNy4nPHiRKc7jtmeku/pub?gid=616554643&single=true&output=csv";
+
 const SAUDI_PROJECT_LOCATIONS = [
   "Riyadh Region",
   "Makkah Region",
@@ -187,11 +190,12 @@ const AUTH_SESSION_KEY = "fleet_fuel_pro_auth_session_v1";
 const DEFAULT_SESSION_MS = 8 * 60 * 60 * 1000;
 const REMEMBER_SESSION_MS = 7 * 24 * 60 * 60 * 1000;
 
-function buildAuthSession(userId, remember = false) {
+function buildAuthSession(userId, companyId = "", remember = false) {
   const now = Date.now();
 
   return {
     userId,
+    companyId,
     loginAt: new Date(now).toISOString(),
     lastActivityAt: new Date(now).toISOString(),
     expiresAt: new Date(now + (remember ? REMEMBER_SESSION_MS : DEFAULT_SESSION_MS)).toISOString(),
@@ -338,6 +342,7 @@ function normalizeSystemRole(value) {
   if (normalized === "officer") return "Officer";
   if (normalized === "supervisor") return "Supervisor";
   if (compact === "topmanagement") return "TopManagement";
+  if (compact === "platformadmin") return "PlatformAdmin";
   return "Operator";
 }
 
@@ -353,10 +358,13 @@ function makeUsernameFromUser({ id, fullName, email }) {
     .replace(/^\.|\.$/g, "") || String(id || "user");
 }
 
-function getTeamMemberForUserId(userId, teamMembers = []) {
-  return teamMembers.find(
-    (member) => normalizeScopeValue(member.id) === normalizeScopeValue(userId)
-  );
+function getTeamMemberForUserId(userId, teamMembers = [], companyId = "") {
+  return teamMembers.find((member) => {
+    const sameId = normalizeScopeValue(member.id) === normalizeScopeValue(userId);
+    if (!sameId) return false;
+    if (!companyId) return true;
+    return companyMatches(member.companyId, companyId);
+  });
 }
 
 function buildUsersFromRolesRows(userRows = [], userHeaders = [], teamMembers = []) {
@@ -364,11 +372,13 @@ function buildUsersFromRolesRows(userRows = [], userHeaders = [], teamMembers = 
     .slice(1)
     .map((row) => {
       const id = getValue(row, userHeaders, ["user_id", "User_id", "user id", "team_id", "Team_id", "id"]);
-      const linkedTeam = getTeamMemberForUserId(id, teamMembers);
+      const explicitCompanyId = getValue(row, userHeaders, ["company_id", "Company ID", "company id", "company"]);
+      const linkedTeam = getTeamMemberForUserId(id, teamMembers, explicitCompanyId);
       const fullName = getValue(row, userHeaders, ["full_name", "Full Name", "full name", "name", "Team_name"]) || linkedTeam?.name || id;
       const email = getValue(row, userHeaders, ["email", "Email", "user_email"]) || linkedTeam?.email || "";
       const role = normalizeSystemRole(getValue(row, userHeaders, ["role", "Role"]));
       const status = normalizeSystemUserStatus(getValue(row, userHeaders, ["user_status", "User Status", "status", "Status"]));
+      const companyId = explicitCompanyId || linkedTeam?.companyId || "";
       const projectName = linkedTeam?.projectName || "";
       const projectScope = role === "Admin" ? ["All"] : projectName ? [projectName] : [];
       const managedProjectScope = role === "Admin" ? ["All"] : role === "Manager" ? projectScope : [];
@@ -381,6 +391,8 @@ function buildUsersFromRolesRows(userRows = [], userHeaders = [], teamMembers = 
         username: makeUsernameFromUser({ id, fullName, email }),
         email,
         role,
+        companyId,
+        tenantKey: `${normalizeScopeValue(companyId) || "global"}::${normalizeScopeValue(id) || "no-id"}`,
         status: loginEnabled ? status : "Inactive",
         fuelerId: id,
         teamId: id,
@@ -403,6 +415,21 @@ function buildUsersFromRolesRows(userRows = [], userHeaders = [], teamMembers = 
 // USERS, ROLES & PERMISSIONS - ENTERPRISE READY LAYER
 // ======================================================
 const ROLE_PERMISSIONS = {
+  PlatformAdmin: {
+    operations: { view: true, add: false, edit: false, delete: false, approve: false, export: true, print: true },
+    assets: { view: true, add: false, edit: false, delete: false, approve: false, export: true, print: true },
+    stations: { view: true, add: false, edit: false, delete: false, approve: false, adjustInventory: false, updatePrice: false, export: true, print: true },
+    team: { view: true, add: false, edit: false, delete: false, approve: false, export: true, print: true },
+    projects: { view: true, add: false, edit: false, delete: false, approve: false, export: true, print: true },
+    reports: { view: true, export: true, print: true },
+    users: { view: true, add: true, edit: true, deactivate: true, resetPassword: true, assignRoles: true },
+    approvals: { view: true, approve: false, reject: false },
+    notifications: { view: true, markRead: true },
+    auditTimeline: { view: true, export: true },
+    auditLog: { view: true, export: true },
+    companies: { view: true, add: true, edit: true, delete: false, export: true, print: true },
+  },
+
   Admin: {
     operations: { view: true, add: true, edit: true, delete: true, approve: true, export: true, print: true },
     assets: { view: true, add: true, edit: true, delete: true, approve: true, export: true, print: true },
@@ -830,7 +857,7 @@ function isApprovalFullyApproved(request) {
 
 function canUserViewApproval(user, request) {
   if (!user || !request) return false;
-  if (user.role === "Admin") return true;
+  if (["PlatformAdmin", "Admin"].includes(user.role)) return true;
   if (request.requestedById === user.id) return true;
 
   const approvers = request.approvalRoute?.requiredApprovers || [];
@@ -972,13 +999,13 @@ function buildNotificationItems({ approvals = [], activityLog = [], currentUser,
 }
 
 function buildAuditTimelineItems({ approvals = [], activityLog = [], currentUser }) {
-  const canViewCompanyWide = ["Admin", "Manager", "Officer"].includes(currentUser?.role);
+  const canViewCompanyWide = ["PlatformAdmin", "Admin", "Manager", "Officer"].includes(currentUser?.role);
   if (!canViewCompanyWide) return [];
 
   const visibleApprovals = approvals.filter((item) => canUserViewApproval(currentUser, item));
 
   const activityEvents = activityLog
-    .filter((item) => currentUser?.role === "Admin" || item.userId === currentUser?.id || ["Manager", "Officer"].includes(currentUser?.role))
+    .filter((item) => ["PlatformAdmin", "Admin"].includes(currentUser?.role) || item.userId === currentUser?.id || ["Manager", "Officer"].includes(currentUser?.role))
     .map((item) => ({
     id: `TML-ACT-${item.id}`,
     source: "Activity",
@@ -1139,7 +1166,7 @@ function userCanAccessAllProjects(user) {
   // Admin remains company-wide.
   // Managers are project-scoped unless they are explicitly assigned to All.
   // This makes approval-routing tests easier and closer to real project ownership.
-  if (["Admin", "TopManagement"].includes(user.role)) return true;
+  if (["PlatformAdmin", "Admin", "TopManagement"].includes(user.role)) return true;
 
   const scope = getUserProjectScope(user);
   return scope.includes("All") && !["Operator", "Supervisor"].includes(user.role);
@@ -1236,6 +1263,126 @@ function filterMasterDataByUserProjectScope({ user, items, projects, projectKey 
   );
 }
 
+function isPlatformAdminUser(user) {
+  return user?.role === "PlatformAdmin";
+}
+
+function getItemCompanyId(item) {
+  return item?.companyId || item?.company_id || item?.company || "";
+}
+
+function companyMatches(itemCompanyId, companyId) {
+  return normalizeScopeValue(itemCompanyId) === normalizeScopeValue(companyId);
+}
+
+function makeTenantEntityKey(item, fallbackId = "") {
+  const entityId = item?.id || fallbackId || "NO-ID";
+  const companyId = getItemCompanyId(item) || item?.companyId || item?.company_id || "GLOBAL";
+  return `${normalizeScopeValue(companyId) || "global"}::${normalizeScopeValue(entityId) || "no-id"}`;
+}
+
+function tenantEntityMatches(item, id, companyId = "") {
+  if (!item) return false;
+  const sameId = normalizeScopeValue(item.id) === normalizeScopeValue(id);
+  if (!sameId) return false;
+  if (!companyId) return true;
+  return companyMatches(getItemCompanyId(item), companyId);
+}
+
+function isDuplicateEntityIdWithinCompany(items = [], id, companyId, excludeKey = "") {
+  const nextKey = `${normalizeScopeValue(companyId)}::${normalizeScopeValue(id)}`;
+  return items.some((item) => {
+    const itemKey = makeTenantEntityKey(item);
+    return itemKey === nextKey && itemKey !== excludeKey;
+  });
+}
+
+function filterDuplicateTenantEntities(items = []) {
+  const seen = new Set();
+  return items.filter((item) => {
+    const key = makeTenantEntityKey(item);
+    if (seen.has(key)) return false;
+    seen.add(key);
+    return true;
+  });
+}
+
+function filterByCompany(items = [], companyId, user) {
+  if (isPlatformAdminUser(user)) return items;
+  if (!companyId) return [];
+  return items.filter((item) => companyMatches(getItemCompanyId(item), companyId));
+}
+
+function getCompanyIdFromProjectValue(projectValue, projects = []) {
+  if (!projectValue) return "";
+  const matchedProject = projects.find((project) =>
+    normalizeScopeValue(project.id) === normalizeScopeValue(projectValue) ||
+    normalizeScopeValue(project.name) === normalizeScopeValue(projectValue)
+  );
+  return matchedProject?.companyId || "";
+}
+
+function getItemCompanyIdWithProjectFallback(item, projects = [], projectKey = "project") {
+  return getItemCompanyId(item) || getCompanyIdFromProjectValue(item?.[projectKey], projects);
+}
+
+function filterByCompanyWithProjectFallback(items = [], companyId, user, projects = [], projectKey = "project") {
+  if (isPlatformAdminUser(user)) return items;
+  if (!companyId) return [];
+  return items.filter((item) =>
+    companyMatches(getItemCompanyIdWithProjectFallback(item, projects, projectKey), companyId)
+  );
+}
+
+function inferRowCompanyId(row, headers, assets = [], stations = [], projects = []) {
+  const explicitCompanyId = getValue(row, headers, ["company_id", "Company ID", "company id", "company"]);
+  if (explicitCompanyId) return explicitCompanyId;
+
+  const rowProject = getRowProjectValue(row, headers, assets, stations);
+  const matchedProject = projects.find((project) =>
+    normalizeScopeValue(project.id) === normalizeScopeValue(rowProject) ||
+    normalizeScopeValue(project.name) === normalizeScopeValue(rowProject)
+  );
+
+  return matchedProject?.companyId || "";
+}
+
+function filterTransactionRowsByCompany({ rows = [], headers = [], companyId, user, assets = [], stations = [], projects = [] }) {
+  if (isPlatformAdminUser(user)) return rows;
+  if (!companyId) return [];
+
+  return rows.filter((row) =>
+    companyMatches(inferRowCompanyId(row, headers, assets, stations, projects), companyId)
+  );
+}
+
+function buildCompaniesFromSources({ companies = [], users = [], fuelers = [], projects = [], assets = [], stations = [] }) {
+  const map = new Map();
+
+  companies.forEach((company) => {
+    if (!company?.id) return;
+    map.set(company.id, company);
+  });
+
+  [...users, ...fuelers, ...projects, ...assets, ...stations].forEach((item) => {
+    const companyId = getItemCompanyId(item);
+    if (!companyId || normalizeScopeValue(companyId) === "platform") return;
+    if (!map.has(companyId)) {
+      map.set(companyId, {
+        id: companyId,
+        name: companyId,
+        country: "",
+        currency: "SAR",
+        timezone: "Asia/Riyadh",
+        language: "EN-AR",
+        status: "Active",
+      });
+    }
+  });
+
+  return Array.from(map.values());
+}
+
 
 function useOutsideClick(ref, callback) {
   useEffect(() => {
@@ -1279,6 +1426,7 @@ export default function Home() {
   const [stations, setStations] = useState([]);
   const [fuelers, setFuelers] = useState([]);
   const [projects, setProjects] = useState([]);
+  const [companies, setCompanies] = useState([]);
 
   const [assetProjectHistory, setAssetProjectHistory] = useState([]);
   const [assetOdometerHistory, setAssetOdometerHistory] = useState([]);
@@ -1287,6 +1435,7 @@ export default function Home() {
   const [currentUserId, setCurrentUserId] = useState("");
   const [authLoaded, setAuthLoaded] = useState(false);
   const [loginIdentifier, setLoginIdentifier] = useState("");
+  const [selectedCompanyId, setSelectedCompanyId] = useState("");
   const [rememberSession, setRememberSession] = useState(true);
   const [loginError, setLoginError] = useState("");
   const [activityLog, setActivityLog] = useState([]);
@@ -1294,7 +1443,13 @@ export default function Home() {
   const [notificationReadMap, setNotificationReadMap] = useState({});
 
   const currentUser =
-    users.find((user) => user.id === currentUserId && user.status === "Active") ||
+    users.find((user) => {
+      if (user.id !== currentUserId || user.status !== "Active") return false;
+      if (user.role === "PlatformAdmin") {
+        return normalizeScopeValue(selectedCompanyId) === "platform" || normalizeScopeValue(user.companyId) === "platform";
+      }
+      return companyMatches(user.companyId, selectedCompanyId || user.companyId);
+    }) ||
     null;
 
   useEffect(() => {
@@ -1303,6 +1458,7 @@ export default function Home() {
 
       if (isAuthSessionValid(storedSession)) {
         setCurrentUserId(storedSession.userId);
+        setSelectedCompanyId(storedSession.companyId || "");
       } else {
         localStorage.removeItem(AUTH_SESSION_KEY);
       }
@@ -1316,32 +1472,62 @@ export default function Home() {
   useEffect(() => {
     if (!authLoaded || !users.length || !currentUserId) return;
 
-    const matchedUser = users.find((user) => user.id === currentUserId && user.status === "Active");
+    const matchedUser = users.find((user) => {
+      if (user.id !== currentUserId || user.status !== "Active") return false;
+      if (user.role === "PlatformAdmin") {
+        return normalizeScopeValue(selectedCompanyId) === "platform" || normalizeScopeValue(user.companyId) === "platform";
+      }
+      return companyMatches(user.companyId, selectedCompanyId || user.companyId);
+    });
 
-    if (!matchedUser) {
+    const sessionCompanyMismatch =
+      matchedUser &&
+      !isPlatformAdminUser(matchedUser) &&
+      selectedCompanyId &&
+      matchedUser.companyId &&
+      !companyMatches(matchedUser.companyId, selectedCompanyId);
+
+    if (!matchedUser || sessionCompanyMismatch) {
       localStorage.removeItem(AUTH_SESSION_KEY);
       setCurrentUserId("");
     }
   }, [authLoaded, users, currentUserId]);
 
-  const startLocalSession = (userId, remember = rememberSession) => {
-    const nextSession = buildAuthSession(userId, remember);
+  const startLocalSession = (userId, companyId = "", remember = rememberSession) => {
+    const nextSession = buildAuthSession(userId, companyId, remember);
     localStorage.setItem(AUTH_SESSION_KEY, JSON.stringify(nextSession));
     setCurrentUserId(userId);
+    setSelectedCompanyId(companyId);
   };
 
   const handleLogin = (event) => {
     event?.preventDefault?.();
 
     const loginValue = normalizeScopeValue(loginIdentifier);
+    const selectedCompany = normalizeScopeValue(selectedCompanyId);
+
+    if (!selectedCompany) {
+      setLoginError("Please select your company first.");
+      return;
+    }
+
     const matchedUser = users.find((user) => {
-      return [user.id, user.username, user.email, user.fullName]
+      const userCompany = normalizeScopeValue(user.companyId);
+      const isPlatformLogin = selectedCompany === "platform";
+
+      const companyMatch = isPlatformLogin
+        ? user.role === "PlatformAdmin"
+        : userCompany === selectedCompany;
+
+      const identityMatch = [user.id, user.username, user.email, user.fullName]
         .filter(Boolean)
         .some((value) => normalizeScopeValue(value) === loginValue);
+
+      return companyMatch && identityMatch;
     });
 
     if (!matchedUser) {
-      setLoginError("User not found. Use User ID, email, username, or full name from UsersRoles.");
+      setLoginError("Invalid company or user. Check the selected company and login ID.");
       return;
     }
 
@@ -1350,7 +1536,7 @@ export default function Home() {
       return;
     }
 
-    startLocalSession(matchedUser.id, rememberSession);
+    startLocalSession(matchedUser.id, selectedCompanyId, rememberSession);
     setLoginError("");
     setLoginIdentifier("");
     trackActivity("Login", "auth", `${matchedUser.fullName} signed in using frontend session.`);
@@ -1367,8 +1553,17 @@ export default function Home() {
     setMobileSidebarOpen(false);
   };
 
-  const handleDevUserSwitch = (userId) => {
-    startLocalSession(userId, true);
+  const handleDevUserSwitch = (tenantUserKey) => {
+    const devUser = users.find((user) => makeTenantEntityKey(user) === tenantUserKey) ||
+      users.find((user) => user.id === tenantUserKey);
+
+    if (!devUser) return;
+
+    startLocalSession(
+      devUser.id,
+      devUser.role === "PlatformAdmin" ? "PLATFORM" : devUser.companyId || selectedCompanyId,
+      true
+    );
   };
 
   const hasPermission = (module, action = "view") =>
@@ -1403,6 +1598,12 @@ export default function Home() {
   useEffect(() => {
     async function fetchData() {
       try {
+        const fetchCsvText = async (url) => {
+          if (!url || String(url).includes("YOUR_COMPANIES_SHEET")) return "";
+          const response = await fetch(url);
+          return response.text();
+        };
+
         const [
           trxText,
           assetsText,
@@ -1410,13 +1611,15 @@ export default function Home() {
           fuelersText,
           projectsText,
           usersRolesText,
+          companiesText,
         ] = await Promise.all([
-          fetch(TRANSACTIONS_CSV).then((res) => res.text()),
-          fetch(ASSETS_CSV).then((res) => res.text()),
-          fetch(STATIONS_CSV).then((res) => res.text()),
-          fetch(FUELERS_CSV).then((res) => res.text()),
-          fetch(PROJECTS_CSV).then((res) => res.text()),
-          fetch(USERS_ROLES_CSV).then((res) => res.text()),
+          fetchCsvText(TRANSACTIONS_CSV),
+          fetchCsvText(ASSETS_CSV),
+          fetchCsvText(STATIONS_CSV),
+          fetchCsvText(FUELERS_CSV),
+          fetchCsvText(PROJECTS_CSV),
+          fetchCsvText(USERS_ROLES_CSV),
+          fetchCsvText(COMPANIES_CSV),
         ]);
 
         // TRANSACTIONS
@@ -1448,6 +1651,7 @@ export default function Home() {
               "project_name",
             ]),
             status: getValue(row, assetHeaders, ["status"]),
+            companyId: getValue(row, assetHeaders, ["company_id", "Company ID", "company id", "company"]),
           }))
           .filter((asset) => asset.id);
 
@@ -1470,6 +1674,7 @@ export default function Home() {
             openingBalance: parseFloat(
               getValue(row, stationHeaders, ["opening_balance", "Opening Balance", "opening balance"])
             ),
+            companyId: getValue(row, stationHeaders, ["company_id", "Company ID", "company id", "company"]),
           }))
           .filter((station) => station.id);
 
@@ -1493,6 +1698,7 @@ export default function Home() {
               "project name",
             ]),
             status: getValue(row, fuelerHeaders, ["status", "Status"]) || "On Duty",
+            companyId: getValue(row, fuelerHeaders, ["company_id", "Company ID", "company id", "company"]),
           }))
           .filter((fueler) => fueler.id);
 
@@ -1508,6 +1714,7 @@ export default function Home() {
             id: getValue(row, projectHeaders, ["project_id", "id"]),
             name: getValue(row, projectHeaders, ["project_name", "name"]),
             status: getValue(row, projectHeaders, ["status"]),
+            companyId: getValue(row, projectHeaders, ["company_id", "Company ID", "company id", "company"]),
           }))
           .filter((project) => project.id);
 
@@ -1519,6 +1726,33 @@ export default function Home() {
         const mappedUsers = buildUsersFromRolesRows(userRows, userHeaders, mappedFuelers);
 
         setUsers(mappedUsers);
+
+        // COMPANIES
+        const companyRows = parseCSV(companiesText);
+        const companyHeaders = companyRows[0] || [];
+        const mappedCompanies = companyRows
+          .slice(1)
+          .map((row) => ({
+            id: getValue(row, companyHeaders, ["company_id", "Company ID", "company id", "id"]),
+            name: getValue(row, companyHeaders, ["company_name", "Company Name", "company name", "name"]),
+            country: getValue(row, companyHeaders, ["country", "Country"]),
+            currency: getValue(row, companyHeaders, ["currency", "Currency"]),
+            timezone: getValue(row, companyHeaders, ["timezone", "Time Zone", "time zone"]),
+            language: getValue(row, companyHeaders, ["language", "Language"]),
+            status: getValue(row, companyHeaders, ["status", "Status"]) || "Active",
+          }))
+          .filter((company) => company.id);
+
+        setCompanies(
+          buildCompaniesFromSources({
+            companies: mappedCompanies,
+            users: mappedUsers,
+            fuelers: mappedFuelers,
+            projects: mappedProjects,
+            assets: mappedAssets,
+            stations: mappedStations,
+          })
+        );
       } catch (error) {
         console.error("Failed to load Fleet Fuel PRO CSV data:", error);
         setHeaders([]);
@@ -1527,6 +1761,7 @@ export default function Home() {
         setStations([]);
         setFuelers([]);
         setProjects([]);
+        setCompanies([]);
         setUsers([]);
       }
     }
@@ -1543,6 +1778,7 @@ export default function Home() {
         "team",
         "projects",
         "reports",
+        "companies",
         "notifications",
         "auditTimeline",
         "approvals",
@@ -1582,11 +1818,32 @@ export default function Home() {
 
   const literPrice = getLiterPriceByDate(new Date().toISOString());
 
+  const currentCompanyId = currentUser?.role === "PlatformAdmin" ? selectedCompanyId : currentUser?.companyId || selectedCompanyId;
+  const currentCompany = companies.find((company) => companyMatches(company.id, currentCompanyId));
+
+  const companyUsers = isPlatformAdminUser(currentUser)
+    ? users
+    : users.filter((user) => companyMatches(user.companyId, currentCompanyId));
+
+  const companyProjects = filterByCompany(projects, currentCompanyId, currentUser);
+  const companyAssets = filterByCompanyWithProjectFallback(assets, currentCompanyId, currentUser, companyProjects, "project");
+  const companyStations = filterByCompanyWithProjectFallback(stations, currentCompanyId, currentUser, companyProjects, "project");
+  const companyFuelers = filterByCompanyWithProjectFallback(fuelers, currentCompanyId, currentUser, companyProjects, "projectName");
+  const companyData = filterTransactionRowsByCompany({
+    rows: data,
+    headers,
+    companyId: currentCompanyId,
+    user: currentUser,
+    assets,
+    stations,
+    projects,
+  });
+
   const scopedProjects = (userCanAccessAllProjects(currentUser)
-    ? projects
-    : projects.filter((project) =>
-        isProjectAllowedForUser(currentUser, project.id, projects) ||
-        isProjectAllowedForUser(currentUser, project.name, projects)
+    ? companyProjects
+    : companyProjects.filter((project) =>
+        isProjectAllowedForUser(currentUser, project.id, companyProjects) ||
+        isProjectAllowedForUser(currentUser, project.name, companyProjects)
       )
   ).filter((project) => {
     const isHeadOffice = normalizeScopeValue(project.name) === "head office";
@@ -1595,7 +1852,7 @@ export default function Home() {
   });
 
   const activeScopedProjects = filterActiveProjects(scopedProjects);
-  const activeProjectsForTransfer = filterActiveProjects(projects);
+  const activeProjectsForTransfer = filterActiveProjects(companyProjects);
 
   // Enterprise transfer rule:
   // The user sees his scoped project data in tables, including historical/inactive records.
@@ -1606,27 +1863,28 @@ export default function Home() {
 
   const scopedAssets = filterMasterDataByUserProjectScope({
     user: currentUser,
-    items: assets,
-    projects,
+    items: companyAssets,
+    projects: companyProjects,
     projectKey: "project",
   });
 
   const scopedStations = filterMasterDataByUserProjectScope({
     user: currentUser,
-    items: stations,
-    projects,
+    items: companyStations,
+    projects: companyProjects,
     projectKey: "project",
   });
 
   const scopedFuelers = userCanAccessAllProjects(currentUser)
-    ? fuelers
-    : fuelers.filter((fueler) =>
-        isProjectAllowedForUser(currentUser, fueler.projectName, projects)
+    ? companyFuelers
+    : companyFuelers.filter((fueler) =>
+        isProjectAllowedForUser(currentUser, fueler.projectName, companyProjects)
       );
 
   const scopedTeamMembers = scopedFuelers.map((member) => {
-    const linkedUser = users.find(
-      (user) => normalizeScopeValue(user.id) === normalizeScopeValue(member.id)
+    const linkedUser = companyUsers.find((user) =>
+      normalizeScopeValue(user.id) === normalizeScopeValue(member.id) &&
+      (isPlatformAdminUser(currentUser) ? companyMatches(user.companyId, member.companyId) : true)
     );
 
     return {
@@ -1640,11 +1898,11 @@ export default function Home() {
 
   const scopedData = filterDataByUserProjectScope({
     user: currentUser,
-    data,
+    data: companyData,
     headers,
-    assets,
-    stations,
-    projects,
+    assets: companyAssets,
+    stations: companyStations,
+    projects: companyProjects,
   });
 
   const notifications = buildNotificationItems({
@@ -1682,7 +1940,7 @@ export default function Home() {
           setData={setData}
           assets={scopedAssets}
           stations={scopedStations}
-          allStations={stations}
+          allStations={companyStations}
           fuelers={scopedTeamMembers}
           literPrice={literPrice}
           getLiterPriceByDate={getLiterPriceByDate}
@@ -1692,7 +1950,7 @@ export default function Home() {
           hasPermission={hasPermission}
           trackActivity={trackActivity}
           submitApprovalRequest={submitApprovalRequest}
-          projects={projects}
+          projects={companyProjects}
           showToast={showToast}
         />
       );
@@ -1744,7 +2002,7 @@ export default function Home() {
   return (
     <TeamPage
       fuelers={scopedTeamMembers}
-      users={users}
+      users={companyUsers}
       projects={scopedProjects}
       transferProjects={transferDestinationProjects}
       data={scopedData}
@@ -1818,15 +2076,27 @@ if (page === "approvals") {
   );
 }
 
+if (page === "companies") {
+  return (
+    <CompaniesPage
+      companies={companies}
+      setCompanies={setCompanies}
+      currentUser={currentUser}
+      showToast={showToast}
+    />
+  );
+}
+
 if (page === "users") {
   return (
     <UsersPage
-      users={users}
+      users={companyUsers}
       setUsers={setUsers}
-      projects={filterActiveProjects(projects)}
+      projects={filterActiveProjects(companyProjects)}
       currentUser={currentUser}
       currentUserId={currentUserId}
       setCurrentUserId={setCurrentUserId}
+      setSelectedCompanyId={setSelectedCompanyId}
       hasPermission={hasPermission}
       activityLog={activityLog}
       setActivityLog={setActivityLog}
@@ -1858,6 +2128,7 @@ const sidebarItems = [
   { key: "team", label: "Team", Icon: Users },
   { key: "projects", label: "Projects / Sites", Icon: Building2 },
   { key: "reports", label: "Reports", Icon: FileBarChart2 },
+  { key: "companies", label: "Companies", Icon: Building2 },
   { key: "notifications", label: "Notifications", Icon: Bell },
   { key: "auditTimeline", label: "Audit Timeline", Icon: FileBarChart2 },
   { key: "approvals", label: "Approvals", Icon: FileBarChart2 },
@@ -1865,14 +2136,16 @@ const sidebarItems = [
 ].filter((item) => canAccessPage(item.key));
 
 const currentUserProjectLabel =
-  currentUser?.role === "Admin"
-    ? "Global Access"
+  currentUser?.role === "PlatformAdmin"
+    ? "Platform Console"
+    : currentUser?.role === "Admin"
+    ? currentCompany?.name || "Company Admin"
     : currentUser?.teamProject ||
       (currentUser?.role === "TopManagement"
         ? "Head Office"
         : Array.isArray(currentUser?.assignedProjects) && currentUser.assignedProjects.length
         ? currentUser.assignedProjects.join(", ")
-        : "No Project Assigned");
+        : currentCompany?.name || "No Project Assigned");
 
 const sidebarContentCollapsed = sidebarCollapsed && !mobileSidebarOpen;
 
@@ -1910,6 +2183,9 @@ if (!currentUser) {
   return (
     <LoginPage
       users={users}
+      companies={companies}
+      selectedCompanyId={selectedCompanyId}
+      setSelectedCompanyId={setSelectedCompanyId}
       loginIdentifier={loginIdentifier}
       setLoginIdentifier={setLoginIdentifier}
       rememberSession={rememberSession}
@@ -2341,15 +2617,15 @@ if (!currentUser) {
                 Dev User Switcher
               </p>
               <select
-                value={currentUserId}
+                value={currentUser ? makeTenantEntityKey(currentUser) : ""}
                 onChange={(e) => handleDevUserSwitch(e.target.value)}
                 className="w-full bg-slate-800 border border-slate-700 rounded-lg px-2 py-2 text-xs text-white outline-none focus:border-amber-400 focus:ring-2 focus:ring-amber-400/20"
               >
                 {users
                   .filter((u) => u.status === "Active")
                   .map((u) => (
-                    <option key={u.id} value={u.id}>
-                      {u.fullName} ({u.role})
+                    <option key={makeTenantEntityKey(u)} value={makeTenantEntityKey(u)}>
+                      {u.fullName} ({u.role}) · {u.companyId || "GLOBAL"}
                     </option>
                   ))}
               </select>
@@ -4571,7 +4847,7 @@ function OperationsPage({
                   {assets
                     .filter((asset) => asset.status?.toLowerCase() !== "retired")
                     .map((asset) => (
-                      <option key={asset.id} value={asset.id}>
+                      <option key={makeTenantEntityKey(asset)} value={asset.id}>
                         {asset.id} - {asset.type || "-"}
                       </option>
                     ))}
@@ -4588,7 +4864,7 @@ function OperationsPage({
                   {stations
                     .filter((station) => !isSameText(station.id, "External_Supply"))
                     .map((station) => (
-                      <option key={station.id} value={station.id}>
+                      <option key={makeTenantEntityKey(station)} value={station.id}>
                         {station.id} - {station.status || "-"}
                       </option>
                     ))}
@@ -4608,7 +4884,7 @@ function OperationsPage({
                       return status === "on duty" || status === "active";
                     })
                     .map((fueler) => (
-                      <option key={fueler.id} value={fueler.id}>
+                      <option key={makeTenantEntityKey(fueler)} value={fueler.id}>
                         {fueler.id} - {fueler.name || "-"} - {fueler.role || "Operator"} - {fueler.status || "On Duty"}
                       </option>
                     ))}
@@ -5641,7 +5917,7 @@ const printAssetsReport = () => {
             <tbody>
               {filteredAssets.map((asset, i) => (
                 <tr
-                  key={asset.id}
+                  key={makeTenantEntityKey(asset)}
                   className="odd:bg-slate-900/20 even:bg-slate-800/20 hover:bg-amber-400/10 transition-colors duration-200"
                 >
                   <Td>{i + 1}</Td>
@@ -7557,7 +7833,7 @@ const [showConfirm, setShowConfirm] = useState(false);
         <div className="grid grid-cols-1 md:grid-cols-2 xl:grid-cols-3 gap-4">
           {filteredStations.map((station) => (
             <div
-              key={station.id}
+              key={makeTenantEntityKey(station)}
               className="bg-gray-900 border border-gray-700 rounded-2xl p-4 shadow-lg hover:border-yellow-400/60 hover:shadow-yellow-400/10 transition-all duration-300"
             >
               <div className="flex justify-between items-start mb-4">
@@ -7862,7 +8138,7 @@ const [showConfirm, setShowConfirm] = useState(false);
 
                 {filterActiveProjects(transferProjects || projects || []).map((project) => (
                   <option
-                    key={project.id || project.name}
+                    key={makeTenantEntityKey(project, project.name)}
                     value={project.name || project.id}
                   >
                     {project.name || project.id}
@@ -8353,7 +8629,7 @@ const [showConfirm, setShowConfirm] = useState(false);
                 >
                   <option value="">Select Station</option>
                   {stationsWithBalance.map((s) => (
-                    <option key={s.id} value={s.id}>
+                    <option key={makeTenantEntityKey(s)} value={s.id}>
                       {s.id}
                     </option>
                   ))}
@@ -8446,7 +8722,7 @@ const [showConfirm, setShowConfirm] = useState(false);
               >
                 <option value="">Select Station</option>
                 {stationsWithBalance.map((s) => (
-                  <option key={s.id} value={s.id}>
+                  <option key={makeTenantEntityKey(s)} value={s.id}>
                     {s.id}
                   </option>
                 ))}
@@ -9239,7 +9515,7 @@ function TeamPage({
 
               <tbody>
                 {fuelersWithKpi.map((fueler, i) => (
-                  <tr key={fueler.id} className="odd:bg-slate-900/20 even:bg-slate-800/20 hover:bg-amber-400/10 transition-colors duration-200">
+                  <tr key={makeTenantEntityKey(fueler)} className="odd:bg-slate-900/20 even:bg-slate-800/20 hover:bg-amber-400/10 transition-colors duration-200">
                     <Td>{i + 1}</Td>
 
                     <Td>
@@ -9578,7 +9854,7 @@ function TeamPage({
                 >
                   <option value="">Select Project</option>
                   {filterActiveProjects(transferProjects).map((project) => (
-                    <option key={project.id || project.name} value={project.name || project.id}>
+                    <option key={makeTenantEntityKey(project, project.name)} value={project.name || project.id}>
                       {project.name || project.id}
                     </option>
                   ))}
@@ -9654,7 +9930,7 @@ function TeamPage({
                   >
                     <option value="">Select Project</option>
                     {filterActiveProjects(transferProjects).map((project) => (
-                      <option key={project.id || project.name} value={project.name || project.id}>
+                      <option key={makeTenantEntityKey(project, project.name)} value={project.name || project.id}>
                         {project.name || project.id}
                       </option>
                     ))}
@@ -10298,7 +10574,7 @@ function ProjectsPage({
           <div id="projects-cards-print-area" className="print-grid grid grid-cols-1 md:grid-cols-2 xl:grid-cols-3 gap-4 p-4">
             {filteredProjects.map((project) => (
               <div
-                key={project.id}
+                key={makeTenantEntityKey(project)}
                 className="project-card-print bg-gray-900 border border-gray-700 hover:border-yellow-400 rounded-2xl p-4 shadow-xl transition"
               >
                 <div className="flex justify-between items-start gap-3 mb-4">
@@ -12393,6 +12669,7 @@ function UsersPage({
   currentUser,
   currentUserId,
   setCurrentUserId,
+  setSelectedCompanyId,
   hasPermission = () => false,
   activityLog = [],
   setActivityLog,
@@ -12510,10 +12787,13 @@ function UsersPage({
       }
     }
 
-    const duplicateUsername = users.some(
-      (user) =>
-        user.username?.toLowerCase() === form.username.trim().toLowerCase() &&
-        user.id !== editingUser?.id
+    const formCompanyId = form.companyId || currentUser?.companyId || "";
+    const editingKey = editingUser ? makeTenantEntityKey(editingUser) : "";
+
+    const duplicateUsername = users.some((user) =>
+      user.username?.toLowerCase() === form.username.trim().toLowerCase() &&
+      companyMatches(user.companyId, formCompanyId) &&
+      makeTenantEntityKey(user) !== editingKey
     );
 
     if (duplicateUsername) {
@@ -12524,10 +12804,11 @@ function UsersPage({
     if (editingUser) {
       setUsers((prev) =>
         prev.map((user) =>
-          user.id === editingUser.id
+          makeTenantEntityKey(user) === makeTenantEntityKey(editingUser)
             ? {
                 ...user,
                 ...form,
+                companyId: form.companyId || user.companyId || currentUser?.companyId || "",
                 updatedAt: new Date().toISOString(),
                 updatedBy: currentUser?.fullName || "System",
               }
@@ -12544,6 +12825,7 @@ function UsersPage({
     const newUser = {
       id: `USR-${String(users.length + 1).padStart(3, "0")}`,
       ...form,
+      companyId: form.companyId || currentUser?.companyId || "",
       createdAt: new Date().toISOString(),
       createdBy: currentUser?.fullName || "System",
       lastLogin: "",
@@ -12558,7 +12840,7 @@ function UsersPage({
   const toggleUserStatus = (user) => {
     if (!hasPermission("users", "deactivate")) return;
 
-    if (user.id === currentUser?.id) {
+    if (makeTenantEntityKey(user) === makeTenantEntityKey(currentUser)) {
       showToast?.("warning", "You cannot deactivate the currently signed-in user.");
       return;
     }
@@ -12567,7 +12849,7 @@ function UsersPage({
 
     setUsers((prev) =>
       prev.map((item) =>
-        item.id === user.id
+        makeTenantEntityKey(item) === makeTenantEntityKey(user)
           ? { ...item, status: newStatus, updatedAt: new Date().toISOString() }
           : item
       )
@@ -12582,7 +12864,7 @@ function UsersPage({
 
     setUsers((prev) =>
       prev.map((item) =>
-        item.id === user.id
+        makeTenantEntityKey(item) === makeTenantEntityKey(user)
           ? { ...item, passwordResetRequired: true, updatedAt: new Date().toISOString() }
           : item
       )
@@ -12599,9 +12881,10 @@ function UsersPage({
     }
 
     setCurrentUserId(user.id);
+    setSelectedCompanyId?.(user.role === "PlatformAdmin" ? "PLATFORM" : user.companyId || "");
     setUsers((prev) =>
       prev.map((item) =>
-        item.id === user.id ? { ...item, lastLogin: new Date().toISOString() } : item
+        makeTenantEntityKey(item) === makeTenantEntityKey(user) ? { ...item, lastLogin: new Date().toISOString() } : item
       )
     );
 
@@ -12765,7 +13048,7 @@ function UsersPage({
               </thead>
               <tbody>
                 {filteredUsers.map((user) => (
-                  <tr key={user.id} className="border-t border-slate-800 hover:bg-slate-800/50 transition">
+                  <tr key={makeTenantEntityKey(user)} className="border-t border-slate-800 hover:bg-slate-800/50 transition">
                     <td className="p-3">
                       <div className="font-bold text-slate-100">{user.fullName}</div>
                       <div className="text-xs text-slate-400">@{user.username} • {user.email}</div>
@@ -12908,7 +13191,7 @@ function UsersPage({
 
                   {activeProjects.map((project) => (
                     <button
-                      key={project.id}
+                      key={makeTenantEntityKey(project)}
                       type="button"
                       onClick={() => toggleProjectScope(project.id)}
                       className={`text-left rounded-xl border p-3 transition ${form.assignedProjects.includes(project.id) ? "bg-amber-400 text-slate-950 border-amber-400 font-bold" : "bg-slate-900 border-slate-700 hover:border-amber-400"}`}
@@ -12942,8 +13225,136 @@ function UsersPage({
 }
 
 
+function CompaniesPage({ companies = [], setCompanies, currentUser, showToast }) {
+  const [search, setSearch] = useState("");
+
+  const visibleCompanies = companies.filter((company) => {
+    const q = normalizeScopeValue(search);
+    if (!q) return true;
+    return [company.id, company.name, company.country, company.currency, company.status]
+      .filter(Boolean)
+      .some((value) => normalizeScopeValue(value).includes(q));
+  });
+
+  if (currentUser?.role !== "PlatformAdmin") {
+    return (
+      <div className="min-h-screen bg-[#070b14] text-slate-100 p-6">
+        <div className="rounded-2xl border border-red-500/30 bg-red-500/10 p-5 text-red-300 font-bold">
+          Companies console is available for Platform Admin only.
+        </div>
+      </div>
+    );
+  }
+
+  return (
+    <div className="min-h-screen bg-[#070b14] text-slate-100 p-4 sm:p-6 space-y-5">
+      <div className="rounded-3xl border border-slate-800 bg-slate-900/80 p-5 shadow-xl">
+        <div className="flex flex-col lg:flex-row lg:items-center justify-between gap-4">
+          <div>
+            <p className="text-[11px] uppercase tracking-[0.22em] text-amber-300 font-bold">
+              Platform Console
+            </p>
+            <h1 className="text-2xl sm:text-3xl font-black text-white mt-1">Companies</h1>
+            <p className="text-sm text-slate-400 mt-2 max-w-3xl">
+              Multi-company foundation for Fleet Fuel PRO. Company ID is a hidden system context used for data isolation; users do not enter it in operational screens.
+            </p>
+          </div>
+
+          <div className="grid grid-cols-2 sm:grid-cols-4 gap-3 min-w-[260px]">
+            <div className="rounded-2xl border border-slate-800 bg-slate-950/50 p-3">
+              <p className="text-xl font-black text-amber-300">{companies.length}</p>
+              <p className="text-xs text-slate-500">Companies</p>
+            </div>
+            <div className="rounded-2xl border border-slate-800 bg-slate-950/50 p-3">
+              <p className="text-xl font-black text-emerald-300">
+                {companies.filter((company) => normalizeSystemUserStatus(company.status) === "Active").length}
+              </p>
+              <p className="text-xs text-slate-500">Active</p>
+            </div>
+            <div className="rounded-2xl border border-slate-800 bg-slate-950/50 p-3">
+              <p className="text-xl font-black text-blue-300">
+                {new Set(companies.map((company) => company.country).filter(Boolean)).size}
+              </p>
+              <p className="text-xs text-slate-500">Countries</p>
+            </div>
+            <div className="rounded-2xl border border-slate-800 bg-slate-950/50 p-3">
+              <p className="text-xl font-black text-cyan-300">
+                {new Set(companies.map((company) => company.currency).filter(Boolean)).size}
+              </p>
+              <p className="text-xs text-slate-500">Currencies</p>
+            </div>
+          </div>
+        </div>
+      </div>
+
+      <div className="rounded-3xl border border-slate-800 bg-slate-900/70 p-4 shadow-xl">
+        <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-3 mb-4">
+          <input
+            value={search}
+            onChange={(e) => setSearch(e.target.value)}
+            placeholder="Search company, country, currency..."
+            className="w-full sm:max-w-md rounded-2xl border border-slate-700 bg-slate-950 px-4 py-3 text-sm text-white outline-none focus:border-amber-400"
+          />
+          <button
+            type="button"
+            onClick={() => notifyUser(showToast, "warning", "Company creation will be connected to Backend APIs later. For now, add companies in the Companies Google Sheet.")}
+            className="rounded-2xl border border-amber-400/40 bg-amber-400/10 px-4 py-3 text-sm font-black text-amber-300 hover:bg-amber-400/20"
+          >
+            Add in Sheet
+          </button>
+        </div>
+
+        <div className="overflow-auto rounded-2xl border border-slate-800">
+          <table className="min-w-full text-sm">
+            <thead className="bg-slate-950 text-slate-300 sticky top-0">
+              <tr>
+                <th className="text-left p-3">Company ID</th>
+                <th className="text-left p-3">Company Name</th>
+                <th className="text-left p-3">Country</th>
+                <th className="text-left p-3">Currency</th>
+                <th className="text-left p-3">Timezone</th>
+                <th className="text-left p-3">Language</th>
+                <th className="text-left p-3">Status</th>
+              </tr>
+            </thead>
+            <tbody>
+              {visibleCompanies.map((company) => (
+                <tr key={company.id} className="border-t border-slate-800 hover:bg-slate-800/40">
+                  <td className="p-3 font-black text-amber-300">{company.id}</td>
+                  <td className="p-3 font-bold text-slate-100">{company.name || company.id}</td>
+                  <td className="p-3 text-slate-300">{company.country || "-"}</td>
+                  <td className="p-3 text-slate-300">{company.currency || "-"}</td>
+                  <td className="p-3 text-slate-300">{company.timezone || "-"}</td>
+                  <td className="p-3 text-slate-300">{company.language || "-"}</td>
+                  <td className="p-3">
+                    <span className={`rounded-full px-3 py-1 text-xs font-black border ${normalizeSystemUserStatus(company.status) === "Active" ? "bg-emerald-500/10 text-emerald-300 border-emerald-500/30" : "bg-red-500/10 text-red-300 border-red-500/30"}`}>
+                      {company.status || "Active"}
+                    </span>
+                  </td>
+                </tr>
+              ))}
+
+              {!visibleCompanies.length && (
+                <tr>
+                  <td colSpan={7} className="p-8 text-center text-slate-500">
+                    No companies found. Add Companies CSV URL or company_id values in Users / Team / Projects.
+                  </td>
+                </tr>
+              )}
+            </tbody>
+          </table>
+        </div>
+      </div>
+    </div>
+  );
+}
+
+
 function LoginPage({
   users = [],
+  companies = [],
+  selectedCompanyId = "",
+  setSelectedCompanyId,
   loginIdentifier,
   setLoginIdentifier,
   rememberSession,
@@ -12953,7 +13364,25 @@ function LoginPage({
   theme,
   setTheme,
 }) {
-  const activeUsers = users.filter((user) => user.status === "Active");
+  const loginCompanies = [
+    { id: "PLATFORM", name: "Platform Console", status: "Active" },
+    ...companies,
+  ].filter((company, index, list) =>
+    company.id &&
+    normalizeSystemUserStatus(company.status || "Active") === "Active" &&
+    list.findIndex((item) => normalizeScopeValue(item.id) === normalizeScopeValue(company.id)) === index
+  );
+
+  const activeUsers = users.filter((user) => {
+    if (user.status !== "Active") return false;
+    if (!selectedCompanyId) return false;
+
+    if (normalizeScopeValue(selectedCompanyId) === "platform") {
+      return user.role === "PlatformAdmin";
+    }
+
+    return companyMatches(user.companyId, selectedCompanyId);
+  });
 
   return (
     <>
@@ -13079,11 +13508,31 @@ function LoginPage({
           </div>
 
           <label className="block mb-4">
+            <span className="login-muted text-xs font-bold text-slate-400">Company</span>
+            <select
+              value={selectedCompanyId}
+              onChange={(e) => {
+                setSelectedCompanyId?.(e.target.value);
+                setLoginIdentifier("");
+              }}
+              className="login-input mt-2 w-full rounded-2xl border border-slate-700 bg-slate-950 px-4 py-3 text-sm text-white outline-none focus:border-amber-400 focus:ring-2 focus:ring-amber-400/20"
+            >
+              <option value="">Select Company</option>
+              {loginCompanies.map((company) => (
+                <option key={company.id} value={company.id}>
+                  {company.name || company.id}
+                </option>
+              ))}
+            </select>
+          </label>
+
+          <label className="block mb-4">
             <span className="login-muted text-xs font-bold text-slate-400">User ID / Email / Username / Full Name</span>
             <input
               value={loginIdentifier}
               onChange={(e) => setLoginIdentifier(e.target.value)}
-              placeholder="Example: 788 or a.eldokany86@gmail.com"
+              placeholder={selectedCompanyId ? "Example: 788 or a.eldokany86@gmail.com" : "Select company first"}
+              disabled={!selectedCompanyId}
               className="login-input mt-2 w-full rounded-2xl border border-slate-700 bg-slate-950 px-4 py-3 text-sm text-white outline-none focus:border-amber-400 focus:ring-2 focus:ring-amber-400/20"
               autoFocus
             />
@@ -13116,7 +13565,7 @@ function LoginPage({
             <div className="max-h-52 overflow-y-auto space-y-2 pr-1">
               {activeUsers.map((user) => (
                 <button
-                  key={user.id}
+                  key={makeTenantEntityKey(user)}
                   type="button"
                   onClick={() => setLoginIdentifier(user.id)}
                   className="login-card w-full text-left rounded-xl border border-slate-800 bg-slate-900 px-3 py-2 hover:border-amber-400 transition"
