@@ -2154,6 +2154,33 @@ if (!currentUser) {
           }
         }
 
+
+        /* Sidebar internal scrolling */
+        .fleet-mobile-sidebar {
+          scrollbar-width: thin;
+          scrollbar-color: rgba(245, 158, 11, 0.55) rgba(15, 23, 42, 0.35);
+        }
+
+        .fleet-mobile-sidebar::-webkit-scrollbar {
+          width: 7px;
+        }
+
+        .fleet-mobile-sidebar::-webkit-scrollbar-track {
+          background: rgba(15, 23, 42, 0.35);
+          border-radius: 999px;
+        }
+
+        .fleet-mobile-sidebar::-webkit-scrollbar-thumb {
+          background: rgba(245, 158, 11, 0.55);
+          border-radius: 999px;
+        }
+
+        @media (max-width: 1023px) {
+          .fleet-mobile-sidebar {
+            padding-bottom: 1.5rem;
+          }
+        }
+
 `}</style>
 
       <div data-theme={theme} className="min-h-screen bg-[#070b14] flex overflow-hidden text-slate-100">
@@ -2167,7 +2194,7 @@ if (!currentUser) {
       )}
 
       <div
-        className={`fleet-mobile-sidebar ${sidebarContentCollapsed ? "lg:w-20" : "lg:w-64"} fixed lg:static inset-y-0 left-0 z-[10040] shrink-0 bg-[#050814] text-white border-r border-slate-800/80 shadow-2xl p-4 flex flex-col transition-all duration-300 ${
+        className={`fleet-mobile-sidebar ${sidebarContentCollapsed ? "lg:w-20" : "lg:w-64"} fixed lg:sticky lg:top-0 inset-y-0 left-0 z-[10040] h-screen max-h-screen overflow-y-auto overscroll-contain shrink-0 bg-[#050814] text-white border-r border-slate-800/80 shadow-2xl p-4 flex flex-col transition-all duration-300 ${
           mobileSidebarOpen ? "translate-x-0" : "-translate-x-full"
         } lg:translate-x-0`}
       >

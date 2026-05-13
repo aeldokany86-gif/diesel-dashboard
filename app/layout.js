@@ -13,7 +13,7 @@ const geistMono = Geist_Mono({
 
 export const metadata = {
   title: "Fleet Fuel pro",
-  description: "Fleet Fuel Management System",
+  description: "Fleet Fuel Management System developed by Engr.Amr Eldokany",
 };
 
 export default function RootLayout({ children }) {
