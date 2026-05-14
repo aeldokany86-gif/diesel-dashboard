@@ -3,6 +3,8 @@
 import React, { useEffect, useMemo, useRef, useState } from "react";
 import { createPortal } from "react-dom";
 import {
+  AreaChart,
+  Area,
   LineChart,
   Line,
   XAxis,
@@ -4541,13 +4543,38 @@ function OperationsPage({
 
         <div className="h-[260px] sm:h-[300px] xl:h-[340px]">
           <ChartFrame height={260}>
-          <LineChart data={dailyData}>
-            <XAxis dataKey="date" stroke="#ccc" tick={{ fontSize: 11 }} minTickGap={24} />
-            <YAxis stroke="#ccc" />
-            <Tooltip />
+          <AreaChart
+  data={dailyData}
+  margin={{ top: 10, right: 20, left: 0, bottom: 0 }}
+>
+  <defs>
+    <linearGradient id="colorQty" x1="0" y1="0" x2="0" y2="1">
+      <stop offset="0%" stopColor="#60a5fa" stopOpacity={0.45} />
+      <stop offset="100%" stopColor="#60a5fa" stopOpacity={0.03} />
+    </linearGradient>
+  </defs>
 
-            <Line type="monotone" dataKey="value" stroke="#60a5fa" />
-          </LineChart>
+  <XAxis
+    dataKey="date"
+    stroke="#ccc"
+    tick={{ fontSize: 11 }}
+    minTickGap={24}
+  />
+
+  <YAxis stroke="#ccc" />
+
+  <Tooltip />
+
+  <Area
+    type="monotone"
+    dataKey="value"
+    stroke="#60a5fa"
+    strokeWidth={2}
+    fill="url(#colorQty)"
+    dot={{ r: 3 }}
+    activeDot={{ r: 5 }}
+  />
+</AreaChart>
           </ChartFrame>
         </div>
       </div>
