@@ -6807,23 +6807,12 @@ function StationsPage({
 
   stationCounterResetHistory,
   setStationCounterResetHistory,}) {
-  const FlowmeterCounterDisplay = ({ value, stationId = "" }) => {
+  const FlowmeterCounterDisplay = ({ value }) => {
     const safeValue = Math.max(0, Math.floor(Number(value) || 0));
-    const rawValue = String(safeValue);
-
-    const normalizedStationId = normalizeScopeValue(stationId);
-    const forceSevenDigits =
-      normalizedStationId.includes("8-121") ||
-      normalizedStationId.includes("8-103");
-
-    const displayValue = forceSevenDigits
-      ? rawValue.padStart(7, "0").slice(-7)
-      : rawValue;
-
-    const digits = displayValue.split("");
+    const digits = String(safeValue).padStart(7, "0").slice(-7).split("");
 
     return (
-      <div className="flex items-center gap-2">
+      <div className="w-full flex items-center gap-2">
         {digits.map((digit, index) => (
           <span
             key={`${digit}-${index}`}
@@ -8109,7 +8098,7 @@ const getLatestStationCounter = (stationId, fallbackValue = 0) => {
                   Liter Price
                 </span>
 
-                <span className="text-xs text-gray-400">
+                <span className="text-[11px] text-slate-400 whitespace-nowrap">
                   {literPrice} {currency}/L
                 </span>
               </button>
@@ -8233,18 +8222,18 @@ const getLatestStationCounter = (stationId, fallbackValue = 0) => {
               key={makeTenantEntityKey(station)}
               className="bg-gray-900 border border-gray-700 rounded-2xl p-4 shadow-lg hover:border-yellow-400/60 hover:shadow-yellow-400/10 transition-all duration-300"
             >
-              <div className="flex justify-between items-start mb-4">
+              <div className="grid grid-cols-[minmax(0,1fr)_auto] items-start gap-3 mb-4 w-full min-w-0">
                 <div>
-                  <div className="flex flex-col items-start">
+                  <div className="flex flex-col items-start w-full min-w-0">
                   <div className="flex items-center gap-3">
                     <button
                       onClick={() => setSelectedStationHistory(station)}
-                      className="text-xl font-bold text-blue-200 hover:text-yellow-400 transition cursor-pointer"
+                      className="text-xl font-bold text-blue-200 truncate min-w-0 max-w-full"
                     >
                       {station.id}
                     </button>
 
-                  <div className="flex items-center gap-2">
+                  <div className="flex items-center gap-2 min-w-0 overflow-hidden">
 
                     <button
                       onClick={(e) => {
@@ -8292,7 +8281,7 @@ const getLatestStationCounter = (stationId, fallbackValue = 0) => {
                       {station.project || "-"}
                     </p>
                   </button>
-                  <div className="mt-3 border border-slate-700/80 rounded-2xl bg-slate-950/50 px-4 py-3 w-fit shadow-lg">
+                  <div className="mt-4 w-full">
                     <button
                       onClick={(e) => {
                         e.stopPropagation();
@@ -8301,15 +8290,13 @@ const getLatestStationCounter = (stationId, fallbackValue = 0) => {
                         setStationCounterResetDate("");
                         setStationCounterResetReason("");
                       }}
-                      className="text-[9px] uppercase tracking-[0.22em] text-slate-500 hover:text-yellow-400 transition cursor-pointer"
+                      className="block text-[10px] uppercase tracking-[0.24em] text-slate-400 hover:text-yellow-400 transition cursor-pointer mb-2"
                       title="Reset Station Counter"
                     >
                       Station Counter
                     </button>
 
-                    <div className="mt-2">
-                      <FlowmeterCounterDisplay value={station.currentCounter} stationId={station.id} />
-                    </div>
+                    <FlowmeterCounterDisplay value={station.currentCounter} />
                   </div>
                 </div>
                 </div>
@@ -8324,22 +8311,20 @@ const getLatestStationCounter = (stationId, fallbackValue = 0) => {
 
               <div className="grid grid-cols-1 sm:grid-cols-3 gap-3 mb-5">
                 <div>
-                  <p className="text-xs text-gray-400">Capacity</p>
+                  <p className="text-[11px] text-slate-400 whitespace-nowrap">Capacity</p>
                   <p className="text-lg font-semibold">
                     {formatNumber(station.capacity)} L
                   </p>
                 </div>
 
                 <div>
-                  <p className="text-xs text-gray-400">Total Pumped Liters</p>
-                  <p className="text-lg font-semibold text-emerald-300">
-                    {formatNumber(station.totalPumpedFromCounter)} L
-                  </p>
+                  <p className="text-[11px] text-gray-400 whitespace-nowrap">Total Pumped</p>
+                  <p className="text-base lg:text-lg font-semibold text-slate-100 whitespace-nowrap">{formatNumber(station.totalPumpedFromCounter)} L</p>
                 </div>
 
                 <div className="sm:text-right">
-                  <p className="text-xs text-gray-400">Current Stock</p>
-                  <p className="text-lg font-semibold text-yellow-300">
+                  <p className="text-[11px] text-slate-400 whitespace-nowrap">Current Stock</p>
+                  <p className="text-base lg:text-lg font-semibold text-slate-100 whitespace-nowrap">
                     {formatNumber(station.currentStock)} L
                   </p>
                 </div>
@@ -8401,7 +8386,7 @@ const getLatestStationCounter = (stationId, fallbackValue = 0) => {
 
       {selectedStationHistory && (
         <div className="fixed inset-0 bg-black/75 backdrop-blur-sm flex items-center justify-center z-[10000] p-3">
-          <div className="bg-slate-950 text-white w-full max-w-[min(1150px,calc(100vw-2rem))] max-h-[92vh] rounded-3xl shadow-2xl border border-slate-700 overflow-hidden">
+          <div className="bg-slate-950 text-white w-full max-w-[min(1150px,calc(100vw-2rem))] max-h-[92vh] rounded-3xl shadow-2xl border border-slate-700 overflow-hidden min-w-0">
             <div className="p-3 sm:p-5 border-b border-gray-700 flex justify-between items-start gap-3">
               <div>
                 <h2 className="text-xl sm:text-2xl font-bold text-yellow-400 italic underline">
@@ -8599,7 +8584,7 @@ const getLatestStationCounter = (stationId, fallbackValue = 0) => {
       {deletingStation && (
         <ModalPortal>
           <div className="fixed inset-0 bg-black/70 flex items-center justify-center z-[9999] p-4">
-            <div className="bg-slate-950 text-white w-full max-w-[520px] rounded-3xl shadow-2xl border border-red-500/40 overflow-hidden">
+            <div className="bg-slate-950 text-white w-full max-w-[520px] rounded-3xl shadow-2xl border border-red-500/40 overflow-hidden min-w-0">
               <div className="p-5 border-b border-slate-700">
                 <h2 className="text-2xl font-bold text-red-400">Delete Station</h2>
                 <p className="text-sm text-slate-400 mt-1">
@@ -8660,7 +8645,7 @@ const getLatestStationCounter = (stationId, fallbackValue = 0) => {
       {counterResetStation && (
         <ModalPortal>
           <div className="fixed inset-0 bg-black/70 flex items-center justify-center z-[9999] p-4">
-            <div className="bg-slate-950 text-white w-full max-w-[560px] rounded-3xl shadow-2xl border border-slate-700 overflow-hidden">
+            <div className="bg-slate-950 text-white w-full max-w-[560px] rounded-3xl shadow-2xl border border-slate-700 overflow-hidden min-w-0">
               <div className="p-5 border-b border-slate-700 flex items-start justify-between">
                 <div>
                   <h2 className="text-2xl font-bold text-yellow-400">
@@ -8684,7 +8669,7 @@ const getLatestStationCounter = (stationId, fallbackValue = 0) => {
 
               <div className="p-5 space-y-4">
                 <div className="rounded-2xl border border-slate-700 bg-slate-900/70 p-4">
-                  <p className="text-xs text-slate-400">Current Counter</p>
+                  <p className="text-[11px] text-slate-400 whitespace-nowrap">Current Counter</p>
                   <p className="text-2xl font-bold text-yellow-300 mt-1">
                     {formatNumber(counterResetStation.currentCounter)} L
                   </p>
