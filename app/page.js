@@ -1432,6 +1432,7 @@ export default function Home() {
 
   const [assetProjectHistory, setAssetProjectHistory] = useState([]);
   const [assetOdometerHistory, setAssetOdometerHistory] = useState([]);
+  const [stationCounterResetHistory, setStationCounterResetHistory] = useState([]);
 
   const [users, setUsers] = useState([]);
   const [currentUserId, setCurrentUserId] = useState("");
@@ -1675,7 +1676,17 @@ export default function Home() {
             status: getValue(row, stationHeaders, ["status"]),
             openingBalance: parseFloat(
               getValue(row, stationHeaders, ["opening_balance", "Opening Balance", "opening balance"])
-            ),
+            ) || 0,
+            openingCounter: parseFloat(
+              getValue(row, stationHeaders, [
+                "opening_counter",
+                "Opening Counter",
+                "opening counter",
+                "initial_counter",
+                "Initial Counter",
+                "station_opening_counter",
+              ])
+            ) || 0,
             companyId: getValue(row, stationHeaders, ["company_id", "Company ID", "company id", "company"]),
           }))
           .filter((station) => station.id);
@@ -1948,6 +1959,8 @@ export default function Home() {
           getLiterPriceByDate={getLiterPriceByDate}
           currency={currency}
           assetProjectHistory={assetProjectHistory}
+          assetOdometerHistory={assetOdometerHistory}
+          stationCounterResetHistory={stationCounterResetHistory}
           currentUser={currentUser}
           hasPermission={hasPermission}
           trackActivity={trackActivity}
@@ -1990,6 +2003,8 @@ export default function Home() {
   showToast={showToast}
   literPrice={literPrice}
   priceHistory={priceHistory}
+          stationCounterResetHistory={stationCounterResetHistory}
+          setStationCounterResetHistory={setStationCounterResetHistory}
   setPriceHistory={setPriceHistory}
   getLiterPriceByDate={getLiterPriceByDate}
   currency={currency}
@@ -2798,8 +2813,143 @@ function OperationsPage({
   submitApprovalRequest = () => {},
   projects = [],
   showToast,
-}) {
-  const [showForm, setShowForm] = useState(false);
+
+  assetOdometerHistory,
+  stationCounterResetHistory,}) {
+  
+  const getLatestResetRecordForEntity = (history = [], entityId, companyId = "") => {
+    return (history || [])
+      .filter((item) => {
+        const sameEntity = isSameText(item.assetId || item.stationId || item.entityId, entityId);
+        const sameCompany = !companyId || !item.companyId || companyMatches(item.companyId, companyId);
+        return sameEntity && sameCompany;
+      })
+      .sort((a, b) => {
+        const da = new Date(a.effectiveFrom || a.createdAt).getTime() || 0;
+        const db = new Date(b.effectiveFrom || b.createdAt).getTime() || 0;
+        return db - da;
+      })[0];
+  };
+
+  const getEffectiveLastAssetReading = (assetId) => {
+    const asset = assets.find((item) => isSameText(item.id, assetId));
+    const assetCompanyId = asset?.companyId || currentUser?.companyId || "";
+    const latestReset = getLatestResetRecordForEntity(assetOdometerHistory, assetId, assetCompanyId);
+    const resetTime = latestReset ? new Date(latestReset.effectiveFrom || latestReset.createdAt).getTime() || 0 : 0;
+
+    const typeIndexLocal = getHeaderIndex(headers, ["transaction_type", "Transaction type", "transaction type", "operation_type", "Operation type"]);
+    const destinationIndexLocal = getHeaderIndex(headers, ["destination_id", "Destination ID", "destination id", "destination", "equipment_no", "Equipment No", "asset_id", "Asset ID"]);
+    const odometerIndexLocal = getHeaderIndex(headers, ["odometer_at_fueling", "Odometer at fueling", "odometer at fueling", "odometer", "hour_meter", "Hour Meter"]);
+    const dateIndexLocal = getHeaderIndex(headers, ["transaction_datetime", "Transaction datetime", "transaction datetime", "date"]);
+
+    const latestOperation = data
+      .map((row, originalIndex) => ({ row, originalIndex }))
+      .filter(({ row }) => {
+        if (typeIndexLocal === -1 || destinationIndexLocal === -1 || odometerIndexLocal === -1) return false;
+        const rowTime = dateIndexLocal !== -1 ? new Date(row[dateIndexLocal]).getTime() || 0 : 0;
+        return rowTime >= resetTime && isSameText(row[typeIndexLocal], "Direct_Refuel") && isSameText(row[destinationIndexLocal], assetId) && !Number.isNaN(parseFloat(row[odometerIndexLocal]));
+      })
+      .sort((a, b) => {
+        const da = dateIndexLocal !== -1 ? new Date(a.row[dateIndexLocal]).getTime() || 0 : 0;
+        const db = dateIndexLocal !== -1 ? new Date(b.row[dateIndexLocal]).getTime() || 0 : 0;
+        return db - da || b.originalIndex - a.originalIndex;
+      })[0];
+
+    if (latestOperation) return parseFloat(latestOperation.row[odometerIndexLocal]) || 0;
+    if (latestReset) return parseFloat(latestReset.newReading ?? latestReset.resetReading ?? latestReset.reading) || 0;
+    return parseFloat(asset?.odometer) || 0;
+  };
+  const getEffectiveLastStationCounter = (stationId) => {
+    const station = stations.find((item) => isSameText(item.id, stationId));
+    const stationCompanyId = station?.companyId || currentUser?.companyId || "";
+    const latestReset = getLatestResetRecordForEntity(
+      stationCounterResetHistory,
+      stationId,
+      stationCompanyId
+    );
+    const resetTime = latestReset
+      ? new Date(latestReset.effectiveFrom || latestReset.createdAt).getTime() || 0
+      : 0;
+
+    const typeIndexLocal = getHeaderIndex(headers, [
+      "transaction_type",
+      "Transaction type",
+      "transaction type",
+      "operation_type",
+      "Operation type",
+    ]);
+
+    const destinationIndexLocal = getHeaderIndex(headers, [
+      "destination_id",
+      "Destination ID",
+      "destination id",
+      "destination",
+    ]);
+
+    const counterIndexLocal = getHeaderIndex(headers, [
+      "odometer_at_fueling",
+      "Odometer at fueling",
+      "odometer at fueling",
+    ]);
+
+    const dateIndexLocal = getHeaderIndex(headers, [
+      "transaction_datetime",
+      "Transaction datetime",
+      "transaction datetime",
+      "date",
+    ]);
+
+    const latestOperation = data
+      .map((row, originalIndex) => ({ row, originalIndex }))
+      .filter(({ row }) => {
+        if (
+          typeIndexLocal === -1 ||
+          destinationIndexLocal === -1 ||
+          counterIndexLocal === -1
+        ) {
+          return false;
+        }
+
+        const type = row[typeIndexLocal];
+        if (isSameText(type, "Direct_Refuel")) return false;
+
+        const rowTime =
+          dateIndexLocal !== -1
+            ? new Date(row[dateIndexLocal]).getTime() || 0
+            : 0;
+
+        const destination = row[destinationIndexLocal];
+
+        return (
+          rowTime >= resetTime &&
+          (isSameText(type, "Internal_Transfer") ||
+            isSameText(type, "External_Transfer") ||
+            isSameText(type, "External_Supply")) &&
+          isSameText(destination, stationId) &&
+          !Number.isNaN(parseFloat(row[counterIndexLocal]))
+        );
+      })
+      .sort((a, b) => {
+        const da =
+          dateIndexLocal !== -1
+            ? new Date(a.row[dateIndexLocal]).getTime() || 0
+            : 0;
+        const db =
+          dateIndexLocal !== -1
+            ? new Date(b.row[dateIndexLocal]).getTime() || 0
+            : 0;
+        return db - da || b.originalIndex - a.originalIndex;
+      })[0];
+
+    if (latestOperation) return parseFloat(latestOperation.row[counterIndexLocal]) || 0;
+    if (latestReset) {
+      return parseFloat(latestReset.newReading ?? latestReset.resetReading ?? latestReset.reading) || 0;
+    }
+
+    return parseFloat(station?.openingCounter) || parseFloat(station?.counter) || 0;
+  };
+
+const [showForm, setShowForm] = useState(false);
   const [transactionType, setTransactionType] = useState("");
   const [stationMeterPhoto, setStationMeterPhoto] = useState(null);
   const [assetPhoto, setAssetPhoto] = useState(null);
@@ -5004,7 +5154,35 @@ function AssetsPage({
 }) {
 
 
-  const assetCurrentOdometerMap = useMemo(() => {
+  
+  const getLatestAssetResetRecord = (assetId, companyId = "") => {
+    return (assetOdometerHistory || [])
+      .filter((item) => {
+        const sameAsset = isSameText(item.assetId || item.entityId, assetId);
+        const sameCompany = !companyId || !item.companyId || companyMatches(item.companyId, companyId);
+        return sameAsset && sameCompany;
+      })
+      .sort((a, b) => {
+        const da = new Date(a.effectiveFrom || a.createdAt).getTime() || 0;
+        const db = new Date(b.effectiveFrom || b.createdAt).getTime() || 0;
+        return db - da;
+      })[0];
+  };
+
+  const getEffectiveAssetOdometer = (asset) => {
+    const latestReset = getLatestAssetResetRecord(asset.id, asset.companyId || currentUser?.companyId || "");
+    const latestOperationEntry = assetCurrentOdometerMap?.get?.(normalizeScopeValue(asset.id));
+    const latestOperationTime = latestOperationEntry?.operationTime || 0;
+    const latestResetTime = latestReset ? new Date(latestReset.effectiveFrom || latestReset.createdAt).getTime() || 0 : 0;
+
+    if (latestReset && latestResetTime > latestOperationTime) {
+      return parseFloat(latestReset.newReading ?? latestReset.resetReading ?? latestReset.reading) || 0;
+    }
+
+    return latestOperationEntry?.value ?? parseFloat(asset.odometer) ?? 0;
+  };
+
+const assetCurrentOdometerMap = useMemo(() => {
     const map = new Map();
 
     const typeIndexLocal = getHeaderIndex(headers, [
@@ -5703,7 +5881,7 @@ const printAssetsReport = () => {
           <td>${escapePrintValue(asset.project)}</td>
           <td>${escapePrintValue(asset.type)}</td>
           <td>${escapePrintValue(asset.category)}</td>
-          <td>${escapePrintValue(formatNumber(getLatestAssetOdometer(asset.id, asset.odometer)))}</td>
+          <td>${escapePrintValue(formatNumber(getEffectiveAssetOdometer(asset)))}</td>
           <td>${escapePrintValue(formatNumber(asset.fuelTank))} L</td>
           <td>${escapePrintValue(asset.status)}</td>
         </tr>
@@ -5973,7 +6151,7 @@ const printAssetsReport = () => {
 
                   <Td>{asset.type || "-"}</Td>
                   <Td>{asset.category || "-"}</Td>
-                  <Td>{formatNumber(getLatestAssetOdometer(asset.id, asset.odometer))}</Td>
+                  <Td>{formatNumber(getEffectiveAssetOdometer(asset))}</Td>
                   <Td>{formatNumber(asset.fuelTank)} L</Td>
 
                   <Td>
@@ -6626,8 +6804,194 @@ function StationsPage({
   hasPermission = () => false,
   trackActivity = () => {},
   submitApprovalRequest = () => {},
-}) {
-  const [showForm, setShowForm] = useState(false);
+
+  stationCounterResetHistory,
+  setStationCounterResetHistory,}) {
+  const FlowmeterCounterDisplay = ({ value, stationId = "" }) => {
+    const safeValue = Math.max(0, Math.floor(Number(value) || 0));
+    const rawValue = String(safeValue);
+
+    const normalizedStationId = normalizeScopeValue(stationId);
+    const forceSevenDigits =
+      normalizedStationId.includes("8-121") ||
+      normalizedStationId.includes("8-103");
+
+    const displayValue = forceSevenDigits
+      ? rawValue.padStart(7, "0").slice(-7)
+      : rawValue;
+
+    const digits = displayValue.split("");
+
+    return (
+      <div className="flex items-center gap-2">
+        {digits.map((digit, index) => (
+          <span
+            key={`${digit}-${index}`}
+            className="w-7 h-9 flex items-center justify-center rounded-md border border-slate-600/80 bg-slate-950 text-amber-300 font-mono text-lg font-black shadow-inner shadow-black/80 tabular-nums"
+            style={{
+              textShadow:
+                "0 0 4px rgba(251,191,36,0.75), 0 0 8px rgba(245,158,11,0.35)",
+            }}
+          >
+            {digit}
+          </span>
+        ))}
+      </div>
+    );
+  };
+
+const [deletingStation, setDeletingStation] = useState(null);
+  const [counterResetStation, setCounterResetStation] = useState(null);
+  const [stationCounterResetValue, setStationCounterResetValue] = useState("");
+  const [stationCounterResetDate, setStationCounterResetDate] = useState("");
+  const [stationCounterResetReason, setStationCounterResetReason] = useState("");
+
+const getLatestStationResetRecord = (stationId, companyId = "") => {
+    return (stationCounterResetHistory || [])
+      .filter((item) => {
+        const sameStation = isSameText(item.stationId || item.entityId, stationId);
+        const sameCompany = !companyId || !item.companyId || companyMatches(item.companyId, companyId);
+        return sameStation && sameCompany;
+      })
+      .sort((a, b) => {
+        const da = new Date(a.effectiveFrom || a.createdAt).getTime() || 0;
+        const db = new Date(b.effectiveFrom || b.createdAt).getTime() || 0;
+        return db - da;
+      })[0];
+  };
+
+  const getEffectiveStationCounter = (station) => {
+    const latestReset = getLatestStationResetRecord(station.id, station.companyId || currentUser?.companyId || "");
+    const latestOperationEntry = stationCurrentCounterMap?.get?.(normalizeScopeValue(station.id));
+    const latestOperationTime = latestOperationEntry?.operationTime || 0;
+    const latestResetTime = latestReset ? new Date(latestReset.effectiveFrom || latestReset.createdAt).getTime() || 0 : 0;
+
+    if (latestReset && latestResetTime > latestOperationTime) {
+      return parseFloat(latestReset.newReading ?? latestReset.resetReading ?? latestReset.reading) || 0;
+    }
+
+    return latestOperationEntry?.value ?? parseFloat(station.openingCounter) ?? parseFloat(station.counter) ?? 0;
+  };
+
+
+  const getStationCounterRows = (stationId) => {
+    if (stationCounterIndex === -1) return [];
+
+    return data
+      .map((row, originalIndex) => {
+        const type = row[typeIndex];
+        const destination =
+          destinationIndex !== -1 ? row[destinationIndex] : "";
+        const reading = parseFloat(row[stationCounterIndex]);
+        const operationTime =
+          dateIndex !== -1
+            ? new Date(row[dateIndex]).getTime() || 0
+            : originalIndex;
+
+        return {
+          row,
+          originalIndex,
+          type,
+          destination,
+          reading,
+          operationTime,
+        };
+      })
+      .filter((item) => {
+        if (Number.isNaN(item.reading)) return false;
+        if (isSameText(item.type, "Direct_Refuel")) return false;
+
+        return (
+          (isSameText(item.type, "Internal_Transfer") ||
+            isSameText(item.type, "External_Transfer") ||
+            isSameText(item.type, "External_Supply")) &&
+          isSameText(item.destination, stationId)
+        );
+      })
+      .sort(
+        (a, b) =>
+          a.operationTime - b.operationTime ||
+          a.originalIndex - b.originalIndex
+      );
+  };
+
+  const getTotalPumpedLitersFromCounter = (station) => {
+    const companyId = station.companyId || currentUser?.companyId || "";
+    const openingCounter = parseFloat(station.openingCounter) || 0;
+
+    const resets = (stationCounterResetHistory || [])
+      .filter((item) => {
+        const sameStation = isSameText(item.stationId || item.entityId, station.id);
+        const sameCompany =
+          !companyId || !item.companyId || companyMatches(item.companyId, companyId);
+        return sameStation && sameCompany;
+      })
+      .map((item, index) => ({
+        kind: "reset",
+        reading: parseFloat(item.newReading ?? item.resetReading ?? item.reading) || 0,
+        operationTime: new Date(item.effectiveFrom || item.createdAt).getTime() || 0,
+        index,
+      }));
+
+    const operationReadings = getStationCounterRows(station.id).map((item) => ({
+      kind: "operation",
+      reading: item.reading,
+      operationTime: item.operationTime,
+      index: item.originalIndex,
+    }));
+
+    const timeline = [...operationReadings, ...resets].sort(
+      (a, b) => a.operationTime - b.operationTime || a.index - b.index
+    );
+
+    let total = 0;
+    let lastReading = openingCounter;
+
+    timeline.forEach((item) => {
+      if (item.kind === "reset") {
+        lastReading = item.reading;
+        return;
+      }
+
+      if (item.reading >= lastReading) {
+        total += item.reading - lastReading;
+      }
+
+      lastReading = item.reading;
+    });
+
+    return total;
+  };
+
+const saveStationCounterReset = ({ station, newReading, effectiveFrom, reason }) => {
+    if (!station) return;
+
+    const record = {
+      id: `SCR-${Date.now()}-${Math.floor(Math.random() * 1000)}`,
+      stationId: station.id,
+      entityId: station.id,
+      companyId: station.companyId || currentUser?.companyId || "",
+      oldReading: station.currentCounter ?? getEffectiveStationCounter(station),
+      newReading: parseFloat(newReading) || 0,
+      effectiveFrom: effectiveFrom || new Date().toISOString(),
+      reason: reason || "Station counter reset",
+      createdBy: currentUser?.fullName || currentUser?.name || "System",
+      createdAt: new Date().toISOString(),
+      source: "station_counter_reset",
+    };
+
+    if (typeof setStationCounterResetHistory === "function") {
+      setStationCounterResetHistory((prev) => [record, ...prev]);
+    }
+
+    if (trackActivity) {
+      trackActivity("Reset Station Counter", "stations", `${station.id} counter reset from ${record.oldReading} to ${record.newReading}.`);
+    }
+
+    notifyUser(showToast, "success", "Station counter reset saved locally.");
+  };
+
+const [showForm, setShowForm] = useState(false);
   const [showSettings, setShowSettings] = useState(false);
   const [showExportMenu, setShowExportMenu] = useState(false);
   const [selectedProject, setSelectedProject] = useState("All");
@@ -6642,7 +7006,8 @@ function StationsPage({
   const [selectedStationHistory, setSelectedStationHistory] = useState(null);
     const [editingProjectStation, setEditingProjectStation] = useState(null);
   const [newStationProject, setNewStationProject] = useState("");
-  const [stationProjectEffectiveDate, setStationProjectEffectiveDate] = useState("");
+    const [newStationOpeningCounter, setNewStationOpeningCounter] = useState("0");
+const [stationProjectEffectiveDate, setStationProjectEffectiveDate] = useState("");
   const [stationProjectReason, setStationProjectReason] = useState("");
 const [showConfirm, setShowConfirm] = useState(false);
   const [showPassword, setShowPassword] = useState(false);
@@ -7230,74 +7595,67 @@ const [showConfirm, setShowConfirm] = useState(false);
           "Station counter reset request submitted for manager approval."
         );
   };
-
   const stationCurrentCounterMap = useMemo(() => {
     const map = new Map();
 
     if (stationCounterIndex === -1) return map;
 
+    const putReading = (stationId, counterValue, operationTime, originalIndex) => {
+      if (!stationId || Number.isNaN(counterValue)) return;
+
+      const key = normalizeScopeValue(stationId);
+      const previous = map.get(key);
+
+      if (
+        !previous ||
+        operationTime > previous.operationTime ||
+        (operationTime === previous.operationTime &&
+          originalIndex > previous.originalIndex)
+      ) {
+        map.set(key, {
+          value: counterValue,
+          operationTime,
+          originalIndex,
+        });
+      }
+    };
+
     data.forEach((row, originalIndex) => {
       const type = row[typeIndex];
-      const source = row[sourceIndex];
-      const destination = row[destinationIndex];
+      const destination = destinationIndex !== -1 ? row[destinationIndex] : "";
       const counterValue = parseFloat(row[stationCounterIndex]);
 
       if (Number.isNaN(counterValue)) return;
 
+      // Direct_Refuel uses odometer_at_fueling for equipment odometer, not station counter.
+      if (isSameText(type, "Direct_Refuel")) return;
+
       const operationTime =
-        dateIndex !== -1 ? new Date(row[dateIndex]).getTime() || 0 : originalIndex;
+        dateIndex !== -1
+          ? new Date(row[dateIndex]).getTime() || 0
+          : originalIndex;
 
-      const relatedStationIds = [];
-
-      // Direct_Refuel uses odometer_at_fueling for the equipment.
-      // Station Counter is updated only by station movements/supply.
+      // Station counter reading in odometer_at_fueling belongs to destination_id
+      // for Internal_Transfer, External_Transfer, and External_Supply.
       if (
-        (isSameText(type, "Internal_Transfer") ||
-          isSameText(type, "External_Transfer")) &&
-        source
+        isSameText(type, "Internal_Transfer") ||
+        isSameText(type, "External_Transfer") ||
+        isSameText(type, "External_Supply")
       ) {
-        relatedStationIds.push(source);
+        putReading(destination, counterValue, operationTime, originalIndex);
       }
-
-      if (
-        (isSameText(type, "Internal_Transfer") ||
-          isSameText(type, "External_Transfer") ||
-          isSameText(type, "External_Supply")) &&
-        destination
-      ) {
-        relatedStationIds.push(destination);
-      }
-
-      relatedStationIds.forEach((stationId) => {
-        const key = normalizeScopeValue(stationId);
-        const previous = map.get(key);
-
-        if (
-          !previous ||
-          operationTime > previous.operationTime ||
-          (operationTime === previous.operationTime &&
-            originalIndex > previous.originalIndex)
-        ) {
-          map.set(key, {
-            value: counterValue,
-            operationTime,
-            originalIndex,
-          });
-        }
-      });
     });
 
     return map;
   }, [
     data,
     typeIndex,
-    sourceIndex,
     destinationIndex,
     dateIndex,
     stationCounterIndex,
   ]);
 
-  const getLatestStationCounter = (stationId, fallbackValue = 0) => {
+const getLatestStationCounter = (stationId, fallbackValue = 0) => {
     const latest = stationCurrentCounterMap.get(normalizeScopeValue(stationId));
     return latest?.value ?? fallbackValue ?? 0;
   };
@@ -7335,10 +7693,8 @@ const [showConfirm, setShowConfirm] = useState(false);
 
   const stationsWithBalance = realStations.map((station) => {
     const currentStock = calculateStationBalance(station);
-    const currentCounter = getLatestStationCounter(
-      station.id,
-      getCurrentStationCounter(station)
-    );
+        const currentCounter = getEffectiveStationCounter(station);
+    const totalPumpedFromCounter = getTotalPumpedLitersFromCounter(station);
     const percentage =
       station.capacity > 0
         ? Math.max(0, Math.min(100, (currentStock / station.capacity) * 100))
@@ -7350,6 +7706,7 @@ const [showConfirm, setShowConfirm] = useState(false);
       originalProject: station.project,
       status: getCurrentStationStatus(station),
       currentCounter,
+      totalPumpedFromCounter,
       currentStock,
       percentage,
     };
@@ -7671,6 +8028,19 @@ const [showConfirm, setShowConfirm] = useState(false);
           <p className="text-gray-400">Fuel stock management</p>
         </div>
 
+                <div>
+                  <label className="text-sm font-semibold text-slate-300">
+                    Opening Counter
+                  </label>
+                  <input
+                    type="number"
+                    value={newStationOpeningCounter}
+                    onChange={(e) => setNewStationOpeningCounter(e.target.value)}
+                    className="w-full mt-2 rounded-xl border border-slate-700 bg-slate-900 p-3 text-white"
+                    placeholder="Initial station meter reading"
+                  />
+                </div>
+
         <div ref={stationSettingsRef} className="relative settings-layer-safe">
          <button
   onClick={(e) => {
@@ -7874,6 +8244,21 @@ const [showConfirm, setShowConfirm] = useState(false);
                       {station.id}
                     </button>
 
+                  <div className="flex items-center gap-2">
+
+                    <button
+                      onClick={(e) => {
+                        e.stopPropagation();
+                        setDeletingStation(station);
+                      }}
+                      title="Delete Station"
+                      className="w-8 h-8 flex items-center justify-center rounded-full border border-slate-700 bg-slate-900/80 text-red-300 hover:border-red-400 hover:bg-red-500/10 transition cursor-pointer"
+                    >
+                      🗑️
+                    </button>
+                  </div>
+
+
                     {hasPermission("stations", "delete") && (
                       <button
                         onClick={(e) => {
@@ -7907,12 +8292,26 @@ const [showConfirm, setShowConfirm] = useState(false);
                       {station.project || "-"}
                     </p>
                   </button>
+                  <div className="mt-3 border border-slate-700/80 rounded-2xl bg-slate-950/50 px-4 py-3 w-fit shadow-lg">
+                    <button
+                      onClick={(e) => {
+                        e.stopPropagation();
+                        setCounterResetStation(station);
+                        setStationCounterResetValue(String(station.currentCounter ?? 0));
+                        setStationCounterResetDate("");
+                        setStationCounterResetReason("");
+                      }}
+                      className="text-[9px] uppercase tracking-[0.22em] text-slate-500 hover:text-yellow-400 transition cursor-pointer"
+                      title="Reset Station Counter"
+                    >
+                      Station Counter
+                    </button>
+
+                    <div className="mt-2">
+                      <FlowmeterCounterDisplay value={station.currentCounter} stationId={station.id} />
+                    </div>
+                  </div>
                 </div>
-                  <button
-                    onClick={() => openProjectChange(station)}
-                    className="text-sm text-slate-400 hover:text-amber-300 transition cursor-pointer"
-                  >
-                  </button>
                 </div>
 
                 <button
@@ -7932,28 +8331,9 @@ const [showConfirm, setShowConfirm] = useState(false);
                 </div>
 
                 <div>
-                  <div className="flex items-center gap-2">
-                    <p className="text-xs text-gray-400">Station Counter</p>
-
-                    {hasPermission("stations", "edit") && (
-                      <button
-                        onClick={() => {
-                          setCounterTargetStation(station);
-                          setOldCounterBeforeReset(station.currentCounter || "");
-                          setNewStationCounter("0");
-                          setStationCounterEffectiveDate("");
-                          setStationCounterReason("");
-                        }}
-                        className="text-gray-400 hover:text-yellow-400 transition text-sm cursor-pointer"
-                        title="Reset Station Counter"
-                      >
-                        ✏️
-                      </button>
-                    )}
-                  </div>
-
-                  <p className="text-lg font-semibold text-yellow-300">
-                    {formatNumber(station.currentCounter)}
+                  <p className="text-xs text-gray-400">Total Pumped Liters</p>
+                  <p className="text-lg font-semibold text-emerald-300">
+                    {formatNumber(station.totalPumpedFromCounter)} L
                   </p>
                 </div>
 
@@ -8213,6 +8593,176 @@ const [showConfirm, setShowConfirm] = useState(false);
             </div>
           </div>
         </div>
+      )}
+
+
+      {deletingStation && (
+        <ModalPortal>
+          <div className="fixed inset-0 bg-black/70 flex items-center justify-center z-[9999] p-4">
+            <div className="bg-slate-950 text-white w-full max-w-[520px] rounded-3xl shadow-2xl border border-red-500/40 overflow-hidden">
+              <div className="p-5 border-b border-slate-700">
+                <h2 className="text-2xl font-bold text-red-400">Delete Station</h2>
+                <p className="text-sm text-slate-400 mt-1">
+                  Submit a delete request for station{" "}
+                  <span className="text-blue-300 font-semibold">{deletingStation.id}</span>
+                </p>
+              </div>
+
+              <div className="p-5 space-y-4">
+                <div className="rounded-2xl bg-red-500/10 border border-red-500/30 p-4 text-sm text-red-200">
+                  This is approval-ready and does not remove historical operations.
+                </div>
+
+                <div className="flex justify-end gap-3 pt-3 border-t border-slate-700">
+                  <button
+                    onClick={() => setDeletingStation(null)}
+                    className="px-4 py-2 rounded-xl bg-slate-800 hover:bg-slate-700"
+                  >
+                    Cancel
+                  </button>
+
+                  <button
+                    onClick={() => {
+                      submitApprovalRequest?.({
+                        type: "station_delete",
+                        module: "stations",
+                        title: `Delete Station ${deletingStation.id}`,
+                        details: `Delete request submitted for station ${deletingStation.id}.`,
+                        payload: {
+                          action: "delete",
+                          entity: "Station",
+                          id: deletingStation.id,
+                          companyId: deletingStation.companyId || currentUser?.companyId || "",
+                          station: deletingStation,
+                        },
+                      });
+
+                      trackActivity?.(
+                        "Request Delete Station",
+                        "stations",
+                        `${deletingStation.id} delete request submitted.`
+                      );
+
+                      notifyUser(showToast, "warning", "Station delete request submitted.");
+                      setDeletingStation(null);
+                    }}
+                    className="px-4 py-2 rounded-xl bg-red-600 text-white font-bold hover:bg-red-500"
+                  >
+                    Submit Delete Request
+                  </button>
+                </div>
+              </div>
+            </div>
+          </div>
+        </ModalPortal>
+      )}
+
+      {counterResetStation && (
+        <ModalPortal>
+          <div className="fixed inset-0 bg-black/70 flex items-center justify-center z-[9999] p-4">
+            <div className="bg-slate-950 text-white w-full max-w-[560px] rounded-3xl shadow-2xl border border-slate-700 overflow-hidden">
+              <div className="p-5 border-b border-slate-700 flex items-start justify-between">
+                <div>
+                  <h2 className="text-2xl font-bold text-yellow-400">
+                    Reset Station Counter
+                  </h2>
+                  <p className="text-sm text-slate-400 mt-1">
+                    Station:{" "}
+                    <span className="text-blue-300 font-semibold">
+                      {counterResetStation.id}
+                    </span>
+                  </p>
+                </div>
+
+                <button
+                  onClick={() => setCounterResetStation(null)}
+                  className="text-slate-400 hover:text-red-400 text-2xl"
+                >
+                  ×
+                </button>
+              </div>
+
+              <div className="p-5 space-y-4">
+                <div className="rounded-2xl border border-slate-700 bg-slate-900/70 p-4">
+                  <p className="text-xs text-slate-400">Current Counter</p>
+                  <p className="text-2xl font-bold text-yellow-300 mt-1">
+                    {formatNumber(counterResetStation.currentCounter)} L
+                  </p>
+                </div>
+
+                <div>
+                  <label className="text-sm font-semibold text-slate-300">
+                    New Counter Reading
+                  </label>
+                  <input
+                    type="number"
+                    value={stationCounterResetValue}
+                    onChange={(e) => setStationCounterResetValue(e.target.value)}
+                    className="w-full mt-2 rounded-xl border border-slate-700 bg-slate-900 p-3 text-white"
+                    placeholder="Enter new counter reading"
+                  />
+                </div>
+
+                <div>
+                  <label className="text-sm font-semibold text-slate-300">
+                    Effective Date & Time
+                  </label>
+                  <input
+                    type="datetime-local"
+                    value={stationCounterResetDate}
+                    onChange={(e) => setStationCounterResetDate(e.target.value)}
+                    className="w-full mt-2 rounded-xl border border-slate-700 bg-slate-900 p-3 text-white"
+                  />
+                </div>
+
+                <div>
+                  <label className="text-sm font-semibold text-slate-300">
+                    Reason
+                  </label>
+                  <textarea
+                    value={stationCounterResetReason}
+                    onChange={(e) => setStationCounterResetReason(e.target.value)}
+                    className="w-full mt-2 rounded-xl border border-slate-700 bg-slate-900 p-3 text-white h-24"
+                    placeholder="Example: station meter changed / counter reset"
+                  />
+                </div>
+
+                <div className="flex justify-end gap-3 pt-3 border-t border-slate-700">
+                  <button
+                    onClick={() => setCounterResetStation(null)}
+                    className="px-4 py-2 rounded-xl bg-slate-800 hover:bg-slate-700"
+                  >
+                    Cancel
+                  </button>
+
+                  <button
+                    onClick={() => {
+                      if (!stationCounterResetValue) {
+                        notifyUser(showToast, "warning", "Please enter new counter reading.");
+                        return;
+                      }
+
+                      saveStationCounterReset({
+                        station: counterResetStation,
+                        newReading: stationCounterResetValue,
+                        effectiveFrom: stationCounterResetDate || new Date().toISOString(),
+                        reason: stationCounterResetReason,
+                      });
+
+                      setCounterResetStation(null);
+                      setStationCounterResetValue("");
+                      setStationCounterResetDate("");
+                      setStationCounterResetReason("");
+                    }}
+                    className="px-4 py-2 rounded-xl bg-yellow-500 text-black font-bold hover:bg-yellow-400"
+                  >
+                    Save Reset
+                  </button>
+                </div>
+              </div>
+            </div>
+          </div>
+        </ModalPortal>
       )}
 
       {showForm && (
@@ -8854,7 +9404,6 @@ function FuelLevelIcon({ percentage }) {
   );
 }
  
-
 function TeamPage({
   fuelers = [],
   users = [],
