@@ -702,8 +702,19 @@ function mapLegacyPermissionToBackendPermission(module, action = "view") {
   const backendModule = moduleMap[normalizedModule] || normalizedModule;
 
   if (normalizedAction === "view") return `${backendModule}.read`;
-  if (normalizedAction === "add") return backendModule === "operations" ? "operations.create" : `${backendModule}.manage`;
-  if (normalizedAction === "edit") return backendModule === "operations" ? "operations.correct" : `${backendModule}.manage`;
+
+  if (normalizedAction === "add") {
+    if (backendModule === "operations") return "operations.create";
+    if (backendModule === "users") return "users.create";
+    return `${backendModule}.manage`;
+  }
+
+  if (normalizedAction === "edit") {
+    if (backendModule === "operations") return "operations.correct";
+    if (backendModule === "users") return "users.update";
+    return `${backendModule}.manage`;
+  }
+
   if (normalizedAction === "delete") return `${backendModule}.manage`;
   if (normalizedAction === "approve") return backendModule === "operations" ? "approvals.manage" : `${backendModule}.manage`;
   if (normalizedAction === "export") return backendModule === "audit_logs" ? "audit_logs.read" : "reports.export";
@@ -1618,6 +1629,12 @@ export default function Home() {
   const [pendingApprovals, setPendingApprovals] = useState([]);
   const [notificationReadMap, setNotificationReadMap] = useState({});
   const [loginPassword, setLoginPassword] = useState("Admin@12345");
+  const [forcePasswordChangeOpen, setForcePasswordChangeOpen] = useState(false);
+  const [forceCurrentPassword, setForceCurrentPassword] = useState("");
+  const [forceNewPassword, setForceNewPassword] = useState("");
+  const [forceConfirmPassword, setForceConfirmPassword] = useState("");
+  const [forcePasswordError, setForcePasswordError] = useState("");
+  const [forcePasswordLoading, setForcePasswordLoading] = useState(false);
 
   const {
     currentUser: backendAuthUser,
@@ -1718,7 +1735,9 @@ useEffect(() => {
   const handleLogin = async (event) => {
     event?.preventDefault?.();
 
-    const rawLoginValue = String(loginIdentifier || "").trim();
+    const rawLoginValue = String(loginIdentifier || "")
+      .trim()
+      .toLowerCase();
 
     if (rawLoginValue.includes("@")) {
       try {
@@ -1764,14 +1783,30 @@ useEffect(() => {
           return;
         }
 
-        await reloadBackendUser();
-        setSelectedCompanyId(
-          isPlatformUser
-            ? selectedCompanyId || PLATFORM_CONTEXT_ID
-            : selectedCompanyId || loggedUser.companyId || ""
-        );
-        setLoginError("");
-        setLoginIdentifier("");
+       await reloadBackendUser();
+
+const finalCompanyId = isPlatformUser
+  ? selectedCompanyId || PLATFORM_CONTEXT_ID
+  : selectedCompanyId || loggedUser.companyId || "";
+
+startLocalSession(
+  loggedUser.id,
+  finalCompanyId,
+  rememberSession
+);
+
+setSelectedCompanyId(finalCompanyId);
+
+if (loggedUser.mustChangePassword) {
+  setForcePasswordChangeOpen(true);
+  setForceCurrentPassword(loginPassword || "");
+  setForceNewPassword("");
+  setForceConfirmPassword("");
+  setForcePasswordError("");
+}
+
+setLoginError("");
+setLoginIdentifier("");
         trackActivity("Login", "auth", `${loggedUser.fullName} signed in using backend JWT session.`);
         return;
       } catch (error) {
@@ -1818,6 +1853,63 @@ useEffect(() => {
     setLoginError("");
     setLoginIdentifier("");
     trackActivity("Login", "auth", `${matchedUser.fullName} signed in using frontend session.`);
+  };
+
+  const handleForcedPasswordChange = async (event) => {
+    event?.preventDefault?.();
+
+    setForcePasswordError("");
+
+    if (!forceCurrentPassword || !forceNewPassword || !forceConfirmPassword) {
+      setForcePasswordError("Current password, new password, and confirmation are required.");
+      return;
+    }
+
+    if (forceNewPassword.length < 8) {
+      setForcePasswordError("New password must be at least 8 characters.");
+      return;
+    }
+
+    if (forceNewPassword !== forceConfirmPassword) {
+      setForcePasswordError("New password and confirmation do not match.");
+      return;
+    }
+
+    if (forceCurrentPassword === forceNewPassword) {
+      setForcePasswordError("New password must be different from the temporary password.");
+      return;
+    }
+
+    try {
+      setForcePasswordLoading(true);
+
+      await api.patch("/auth/change-password", {
+        currentPassword: forceCurrentPassword,
+        newPassword: forceNewPassword,
+      });
+
+      await reloadBackendUser?.();
+
+      setForcePasswordChangeOpen(false);
+      setForceCurrentPassword("");
+      setForceNewPassword("");
+      setForceConfirmPassword("");
+      setForcePasswordError("");
+      setLoginPassword("");
+
+      showToast?.("success", "Password changed successfully. You can now continue.");
+      trackActivity("Change Password", "auth", `${currentUser?.fullName || "User"} changed temporary password.`);
+    } catch (error) {
+      const backendMessage =
+        error?.response?.data?.message ||
+        "Password change failed. Please check the temporary password and try again.";
+
+      setForcePasswordError(
+        Array.isArray(backendMessage) ? backendMessage.join(", ") : backendMessage
+      );
+    } finally {
+      setForcePasswordLoading(false);
+    }
   };
 
   const handleLogout = () => {
@@ -2144,14 +2236,15 @@ useEffect(() => {
 
   const companyUsers = isPlatformAdminUser(currentUser)
     ? isPlatformConsoleContext
-      ? platformUsers
+      ? users
       : users.filter((user) => companyMatches(user.companyId, currentCompanyId))
     : users.filter((user) => companyMatches(user.companyId, currentCompanyId));
 
   // Users & Roles page scope:
-  // Platform User must manage and view all users across all companies.
-  // Company Admin must view only users that belong to the selected/current company.
-  const usersPageUsers = isPlatformAdminUser(currentUser) ? users : companyUsers;
+  // Platform Console shows all users across all companies.
+  // Platform + selected company shows only that company's users.
+  // Company Admin shows only users that belong to his own company.
+  const usersPageUsers = companyUsers;
 
   const companyProjects = filterByCompany(projects, currentCompanyId, currentUser);
   const companyAssets = filterByCompanyWithProjectFallback(assets, currentCompanyId, currentUser, companyProjects, "project");
@@ -2414,6 +2507,7 @@ if (page === "companies") {
       companies={companies}
       setCompanies={setCompanies}
       currentUser={currentUser}
+      contextCompanyId={selectedCompanyId}
       showToast={showToast}
     />
   );
@@ -2424,8 +2518,10 @@ if (page === "users") {
     <UsersPage
       users={usersPageUsers}
       setUsers={setUsers}
+      companies={companies}
       projects={filterActiveProjects(companyProjects)}
       currentUser={currentUser}
+      contextCompanyId={selectedCompanyId}
       currentUserId={currentUserId}
       setCurrentUserId={setCurrentUserId}
       setSelectedCompanyId={setSelectedCompanyId}
@@ -2547,6 +2643,25 @@ if (!currentUser) {
       handleLogin={handleLogin}
       theme={theme}
       setTheme={setTheme}
+    />
+  );
+}
+
+if (currentUser?.passwordResetRequired || forcePasswordChangeOpen) {
+  return (
+    <ForcePasswordChangePage
+      theme={theme}
+      currentUser={currentUser}
+      currentPassword={forceCurrentPassword}
+      setCurrentPassword={setForceCurrentPassword}
+      newPassword={forceNewPassword}
+      setNewPassword={setForceNewPassword}
+      confirmPassword={forceConfirmPassword}
+      setConfirmPassword={setForceConfirmPassword}
+      error={forcePasswordError}
+      loading={forcePasswordLoading}
+      onSubmit={handleForcedPasswordChange}
+      onLogout={handleLogout}
     />
   );
 }
@@ -3128,6 +3243,7 @@ function OperationsPage({
   currency = "SAR",
   assetProjectHistory = [],
   currentUser,
+  contextCompanyId = "",
   hasPermission = () => false,
   trackActivity = () => {},
   submitApprovalRequest = () => {},
@@ -13546,8 +13662,10 @@ function formatApprovalDate(rawDate) {
 function UsersPage({
   users = [],
   setUsers,
+  companies = [],
   projects = [],
   currentUser,
+  contextCompanyId = "",
   hasPermission = () => false,
   trackActivity = () => {},
   showToast,
@@ -13578,6 +13696,7 @@ function UsersPage({
     email: "",
     phone: "",
     roleId: "",
+    companyId: "",
     password: "",
   };
 
@@ -13607,7 +13726,7 @@ function UsersPage({
         fullName: user.fullName,
         email: user.email,
       }),
-      email: user.email || "",
+      email: String(user.email || "").toLowerCase(),
       phone: user.phone || "",
       mobile: user.phone || user.mobile || "",
       role: normalizeBackendRoleName(roleName),
@@ -13626,17 +13745,28 @@ function UsersPage({
     };
   };
 
-  const manageableRoles = backendRoles.filter((role) => {
-    const normalized = normalizeScopeValue(role.name);
-    return normalized !== "platform user" && normalized !== "platformadmin" && normalized !== "platform admin";
-  });
+  const isPlatformUserContext = isPlatformAdminUser(currentUser);
+  const canUseBackendUsersApi = ["Admin", "PlatformAdmin"].includes(currentUser?.role);
 
-  const roleOptions = manageableRoles.length
-    ? manageableRoles.map((role) => ({
+  const buildRoleOptionsFromBackendRoles = (roles = []) => {
+    return roles
+      .filter((role) => {
+        const normalized = normalizeScopeValue(role.name);
+        return (
+          normalized !== "platform user" &&
+          normalized !== "platformadmin" &&
+          normalized !== "platform admin"
+        );
+      })
+      .map((role) => ({
         id: role.id,
         name: role.name,
         normalizedName: normalizeBackendRoleName(role.name),
-      }))
+      }));
+  };
+
+  const roleOptions = canUseBackendUsersApi
+    ? buildRoleOptionsFromBackendRoles(backendRoles)
     : Object.keys(ROLE_PERMISSIONS)
         .filter((role) => role !== "PlatformAdmin")
         .map((role) => ({
@@ -13645,10 +13775,74 @@ function UsersPage({
           normalizedName: role,
         }));
 
+
+  const companyOptions = companies
+    .filter((company) => company?.id && !isPlatformContextValue(company.id) && !isPlatformContextValue(company.name))
+    .filter((company) => normalizeScopeValue(company.status || "Active") === "active")
+    .map((company) => ({
+      id: company.id,
+      name: company.name || company.code || company.id,
+      code: company.code || "",
+    }));
+
+  const activeContextCompanyId =
+    isPlatformUserContext && contextCompanyId && !isPlatformContextValue(contextCompanyId)
+      ? contextCompanyId
+      : "";
+
+  const currentUserCompanyName =
+    companies.find((company) => companyMatches(company.id, currentUser?.companyId))?.name ||
+    currentUser?.companyName ||
+    currentUser?.companyId ||
+    "Current Company";
+
+  const selectedFormCompanyName =
+    companyOptions.find((company) => companyMatches(company.id, userForm.companyId))?.name ||
+    currentUserCompanyName;
+
   const selectedUser = users.find((user) => user.id === selectedUserId) || null;
   const canManageUsers = hasPermission("users", "add") || hasPermission("users", "edit");
 
-  const canUseBackendUsersApi = ["Admin", "PlatformAdmin"].includes(currentUser?.role);
+  const getDefaultRoleIdFromRoles = (roles = []) => {
+    const options = buildRoleOptionsFromBackendRoles(roles);
+    return (
+      options.find((role) => role.normalizedName === "Operator")?.id ||
+      options[0]?.id ||
+      ""
+    );
+  };
+
+  const loadRolesForCompany = async (companyId) => {
+    if (!canUseBackendUsersApi) {
+      setBackendRoles([]);
+      return [];
+    }
+
+    const targetCompanyId = isPlatformUserContext
+      ? companyId
+      : currentUser?.companyId || companyId;
+
+    if (!targetCompanyId) {
+      setBackendRoles([]);
+      return [];
+    }
+
+    try {
+      const response = await api.get(
+        isPlatformUserContext
+          ? `/roles?companyId=${encodeURIComponent(targetCompanyId)}`
+          : "/roles"
+      );
+      const roles = Array.isArray(response.data) ? response.data : [];
+      setBackendRoles(roles);
+      return roles;
+    } catch (error) {
+      console.error("Failed to load roles from backend:", error);
+      setBackendRoles([]);
+      notifyUser(showToast, "warning", "Failed to load roles for the selected company.");
+      return [];
+    }
+  };
 
   const refreshUsersAndRolesFromBackend = async () => {
     if (!canUseBackendUsersApi) {
@@ -13658,15 +13852,21 @@ function UsersPage({
     }
 
     try {
-      const [usersResponse, rolesResponse] = await Promise.all([
-        api.get("/users"),
-        api.get("/roles"),
-      ]);
+      const usersEndpoint =
+        isPlatformUserContext && activeContextCompanyId
+          ? `/users?companyId=${encodeURIComponent(activeContextCompanyId)}`
+          : "/users";
+
+      const usersResponse = await api.get(usersEndpoint);
 
       const backendUsers = Array.isArray(usersResponse.data) ? usersResponse.data : [];
-      const roles = Array.isArray(rolesResponse.data) ? rolesResponse.data : [];
 
-      setBackendRoles(roles);
+      if (!isPlatformUserContext) {
+        await loadRolesForCompany(currentUser?.companyId);
+      } else {
+        setBackendRoles([]);
+      }
+
       setUsers(
         backendUsers
           .map(normalizeBackendUserForState)
@@ -13680,11 +13880,19 @@ function UsersPage({
 
   useEffect(() => {
     refreshUsersAndRolesFromBackend();
-  }, [canUseBackendUsersApi, currentUser?.companyId]);
+  }, [canUseBackendUsersApi, currentUser?.companyId, contextCompanyId]);
 
   const filteredUsers = users.filter((user) => {
     const search = normalizeScopeValue(searchTerm);
     const userRoleName = user.roleName || user.role || "";
+
+    if (isPlatformUserContext && activeContextCompanyId && !companyMatches(user.companyId, activeContextCompanyId)) {
+      return false;
+    }
+
+    if (!isPlatformUserContext && currentUser?.companyId && !companyMatches(user.companyId, currentUser.companyId)) {
+      return false;
+    }
 
     const matchesSearch =
       !search ||
@@ -13715,28 +13923,36 @@ function UsersPage({
   const inactiveUsersCount = users.filter((user) => user.status !== "Active").length;
   const resetRequiredCount = users.filter((user) => user.passwordResetRequired || user.mustChangePassword).length;
 
-  const openAddUserModal = () => {
+  const openAddUserModal = async () => {
     if (!hasPermission("users", "add")) {
       notifyUser(showToast, "warning", "You do not have permission to add users.");
       return;
     }
 
-    const defaultRoleId =
-      roleOptions.find((role) => role.normalizedName === "Operator")?.id ||
-      roleOptions[0]?.id ||
-      "";
+    const defaultCompanyId = isPlatformUserContext
+      ? activeContextCompanyId || companyOptions[0]?.id || ""
+      : currentUser?.companyId || "";
 
     setUserForm({
       ...emptyUserForm,
-      roleId: defaultRoleId,
+      companyId: defaultCompanyId,
+      roleId: "",
       password: "User@12345",
     });
     setSelectedUserId("");
     setUserModalMode("add");
     setSettingsOpen(false);
+
+    const roles = await loadRolesForCompany(defaultCompanyId);
+    const defaultRoleId = getDefaultRoleIdFromRoles(roles);
+
+    setUserForm((prev) => ({
+      ...prev,
+      roleId: defaultRoleId,
+    }));
   };
 
-  const openEditUserModal = (user) => {
+  const openEditUserModal = async (user) => {
     if (!hasPermission("users", "edit")) {
       notifyUser(showToast, "warning", "You do not have permission to edit users.");
       return;
@@ -13747,20 +13963,32 @@ function UsersPage({
       return;
     }
 
+    const formCompanyId = user.companyId || currentUser?.companyId || "";
+
     setSelectedUserId(user.id);
     setUserForm({
       fullName: user.fullName || "",
-      email: user.email || "",
+      email: String(user.email || "").toLowerCase(),
       phone: user.phone || user.mobile || "",
-      roleId:
-        user.roleId ||
-        roleOptions.find((role) => role.normalizedName === normalizeBackendRoleName(user.roleName || user.role))?.id ||
-        roleOptions[0]?.id ||
-        "",
+      companyId: formCompanyId,
+      roleId: user.roleId || "",
       password: "",
     });
 
     setUserModalMode("edit");
+
+    const roles = await loadRolesForCompany(formCompanyId);
+    const options = buildRoleOptionsFromBackendRoles(roles);
+    const matchedRoleId =
+      user.roleId ||
+      options.find((role) => role.normalizedName === normalizeBackendRoleName(user.roleName || user.role))?.id ||
+      options[0]?.id ||
+      "";
+
+    setUserForm((prev) => ({
+      ...prev,
+      roleId: matchedRoleId,
+    }));
   };
 
   const closeUserModal = () => {
@@ -13771,6 +13999,24 @@ function UsersPage({
   };
 
   const handleUserFormChange = (field, value) => {
+    if (field === "companyId" && isPlatformUserContext) {
+      setUserForm((prev) => ({
+        ...prev,
+        companyId: value,
+        roleId: "",
+      }));
+
+      loadRolesForCompany(value).then((roles) => {
+        const defaultRoleId = getDefaultRoleIdFromRoles(roles);
+        setUserForm((prev) => ({
+          ...prev,
+          roleId: defaultRoleId,
+        }));
+      });
+
+      return;
+    }
+
     setUserForm((prev) => ({
       ...prev,
       [field]: value,
@@ -13780,15 +14026,28 @@ function UsersPage({
   const handleSaveUser = async (event) => {
     event?.preventDefault?.();
 
+    const resolvedCompanyId = isPlatformUserContext
+      ? userForm.companyId
+      : currentUser?.companyId || userForm.companyId;
+
     const payload = {
       fullName: userForm.fullName.trim(),
-      email: userForm.email.trim(),
+      email: userForm.email.trim().toLowerCase(),
       phone: userForm.phone.trim(),
       roleId: userForm.roleId,
     };
 
+    if (userModalMode === "add") {
+      payload.companyId = resolvedCompanyId;
+    }
+
     if (!payload.fullName || !payload.email || !payload.roleId) {
       notifyUser(showToast, "warning", "Full name, email, and role are required.");
+      return;
+    }
+
+    if (userModalMode === "add" && !payload.companyId) {
+      notifyUser(showToast, "warning", "Company is required before creating a user.");
       return;
     }
 
@@ -13940,11 +14199,25 @@ function UsersPage({
   const formatRoleLabel = (user) =>
     user.roleName || user.role || "Operator";
 
+  const getUserCompanyName = (user = {}) => {
+    if (user.companyName) return user.companyName;
+    if (user.company?.name) return user.company.name;
+
+    const matchedCompany = companies.find((company) =>
+      normalizeScopeValue(company.id) === normalizeScopeValue(user.companyId) ||
+      normalizeScopeValue(company.code) === normalizeScopeValue(user.companyId) ||
+      normalizeScopeValue(company.name) === normalizeScopeValue(user.companyId)
+    );
+
+    return matchedCompany?.name || user.companyId || "-";
+  };
+
   const exportUsersCSV = () => {
     const headers = [
       "Full Name",
       "Email",
       "Phone",
+      "Company",
       "Role",
       "Status",
       "Password Reset Required",
@@ -13955,6 +14228,7 @@ function UsersPage({
       user.fullName || "",
       user.email || "",
       user.phone || user.mobile || "",
+      getUserCompanyName(user),
       formatRoleLabel(user),
       user.status || "",
       user.passwordResetRequired || user.mustChangePassword ? "Yes" : "No",
@@ -13985,6 +14259,7 @@ function UsersPage({
             <td>${user.fullName || "-"}</td>
             <td>${user.email || "-"}</td>
             <td>${user.phone || user.mobile || "-"}</td>
+            <td>${getUserCompanyName(user)}</td>
             <td>${formatRoleLabel(user)}</td>
             <td>${user.status || "-"}</td>
             <td>${user.passwordResetRequired || user.mustChangePassword ? "Required" : "No"}</td>
@@ -14024,6 +14299,7 @@ function UsersPage({
                 <th>Full Name</th>
                 <th>Email</th>
                 <th>Phone</th>
+                <th>Company</th>
                 <th>Role</th>
                 <th>Status</th>
                 <th>Password Reset</th>
@@ -14117,14 +14393,6 @@ function UsersPage({
                   <span>⎙</span>
                   <span>Print Table</span>
                 </button>
-
-                <button
-                  onClick={refreshUsersAndRolesFromBackend}
-                  className="w-full px-4 py-3 text-left text-sm font-bold text-slate-200 hover:bg-slate-800/80 hover:text-amber-300 transition flex items-center gap-3"
-                >
-                  <span>⟳</span>
-                  <span>Refresh</span>
-                </button>
               </div>
             )}
           </div>
@@ -14194,12 +14462,13 @@ function UsersPage({
 
         <div className="bg-slate-900/80 border border-slate-700/80 rounded-2xl shadow-xl overflow-hidden">
           <div className="overflow-x-auto">
-            <table className="w-full text-left text-sm min-w-[980px]">
+            <table className="w-full text-left text-sm min-w-[1120px]">
               <thead className="bg-slate-950 sticky top-0 z-[5]">
                 <tr>
                   <th className="p-3">User Name</th>
                   <th className="p-3">Email</th>
                   <th className="p-3">Phone</th>
+                  <th className="p-3">Company</th>
                   <th className="p-3">Role</th>
                   <th className="p-3">Status</th>
                   <th className="p-3">Password Reset</th>
@@ -14222,8 +14491,13 @@ function UsersPage({
                     </td>
                     <td className="p-3 text-slate-300">{user.email || "-"}</td>
                     <td className="p-3 text-slate-300">{user.phone || user.mobile || "-"}</td>
+                    <td className="p-3 text-slate-300">
+                      <span className="block max-w-[190px] truncate whitespace-nowrap" title={getUserCompanyName(user)}>
+                        {getUserCompanyName(user)}
+                      </span>
+                    </td>
                     <td className="p-3">
-                      <span className="px-2.5 py-1 rounded-lg bg-amber-400/15 text-amber-300 border border-amber-400/20 font-bold">
+                      <span className="block max-w-[170px] truncate whitespace-nowrap text-sm font-semibold text-slate-100">
                         {formatRoleLabel(user)}
                       </span>
                     </td>
@@ -14261,7 +14535,7 @@ function UsersPage({
 
                 {!filteredUsers.length && (
                   <tr>
-                    <td colSpan={8} className="p-8 text-center text-slate-500">
+                    <td colSpan={9} className="p-8 text-center text-slate-500">
                       No users found.
                     </td>
                   </tr>
@@ -14275,14 +14549,16 @@ function UsersPage({
       {userModalMode && (
         <ModalPortal>
           <div className="fleet-modal-backdrop fixed inset-0 z-[9998] bg-black/70 backdrop-blur-sm flex items-center justify-center p-4">
-            <div className="bg-slate-950 border border-slate-700 rounded-2xl shadow-2xl w-full max-w-2xl max-h-[90vh] overflow-y-auto">
+            <div className="bg-slate-950 border border-slate-700 rounded-2xl shadow-2xl w-full max-w-2xl max-h-[90vh] overflow-y-auto text-slate-100">
               <div className="p-5 border-b border-slate-800 flex items-center justify-between">
                 <div>
-                  <h2 className="text-xl font-black">{userModalMode === "edit" ? "Edit User" : "Add User"}</h2>
+                  <h2 className="text-xl font-black text-slate-100">{userModalMode === "edit" ? "Edit User" : "Add User"}</h2>
                   <p className="text-sm text-slate-400">
                     {userModalMode === "edit"
                       ? "Update backend user profile and assigned role."
-                      : "Create a backend user account inside the current company."}
+                      : isPlatformUserContext
+                      ? "Create a backend user account inside the selected company."
+                      : "Create a backend user account inside your company."}
                   </p>
                 </div>
                 <button onClick={closeUserModal} className="text-slate-400 hover:text-white text-xl cursor-pointer">×</button>
@@ -14295,7 +14571,8 @@ function UsersPage({
                     <input
                       value={userForm.fullName}
                       onChange={(e) => handleUserFormChange("fullName", e.target.value)}
-                      className="w-full bg-slate-900 border border-slate-700 rounded-xl p-3 outline-none focus:border-amber-400"
+                      placeholder="Enter full name"
+                      className="w-full bg-slate-900 border border-slate-700 rounded-xl p-3 text-slate-100 placeholder:text-slate-500 outline-none focus:border-amber-400 focus:ring-2 focus:ring-amber-400/20 disabled:bg-slate-800 disabled:text-slate-500"
                     />
                   </div>
 
@@ -14303,9 +14580,43 @@ function UsersPage({
                     <label className="block text-xs text-slate-400 mb-1">Email</label>
                     <input
                       value={userForm.email}
-                      onChange={(e) => handleUserFormChange("email", e.target.value)}
-                      className="w-full bg-slate-900 border border-slate-700 rounded-xl p-3 outline-none focus:border-amber-400"
+                      onChange={(e) => handleUserFormChange("email", e.target.value.toLowerCase())}
+                      type="email"
+                      placeholder="name@company.com"
+                      className="w-full bg-slate-900 border border-slate-700 rounded-xl p-3 text-slate-100 placeholder:text-slate-500 outline-none focus:border-amber-400 focus:ring-2 focus:ring-amber-400/20 disabled:bg-slate-800 disabled:text-slate-500"
                     />
+                  </div>
+
+                  <div>
+                    <label className="block text-xs text-slate-400 mb-1">Company</label>
+                    {isPlatformUserContext ? (
+                      <select
+                        value={userForm.companyId}
+                        onChange={(e) => handleUserFormChange("companyId", e.target.value)}
+                        disabled={userModalMode === "edit" || savingUser}
+                        className="w-full bg-slate-900 border border-slate-700 rounded-xl p-3 text-slate-100 placeholder:text-slate-500 outline-none focus:border-amber-400 focus:ring-2 focus:ring-amber-400/20 disabled:bg-slate-800 disabled:text-slate-400 disabled:cursor-not-allowed"
+                      >
+                        <option value="" className="bg-slate-900 text-slate-100">Select company</option>
+                        {companyOptions.map((company) => (
+                          <option key={company.id} value={company.id} className="bg-slate-900 text-slate-100">
+                            {company.name}{company.code ? ` (${company.code})` : ""}
+                          </option>
+                        ))}
+                      </select>
+                    ) : (
+                      <input
+                        value={selectedFormCompanyName}
+                        disabled
+                        className="w-full bg-slate-800 border border-slate-700 rounded-xl p-3 text-slate-300 outline-none cursor-not-allowed"
+                      />
+                    )}
+                    <p className="text-xs text-slate-500 mt-2">
+                      {isPlatformUserContext
+                        ? userModalMode === "edit"
+                          ? "Company cannot be changed while editing this user."
+                          : "Platform users can create users inside any active company."
+                        : "Company is locked to the signed-in admin company."}
+                    </p>
                   </div>
 
                   <div>
@@ -14313,7 +14624,8 @@ function UsersPage({
                     <input
                       value={userForm.phone}
                       onChange={(e) => handleUserFormChange("phone", e.target.value)}
-                      className="w-full bg-slate-900 border border-slate-700 rounded-xl p-3 outline-none focus:border-amber-400"
+                      placeholder="Enter phone number"
+                      className="w-full bg-slate-900 border border-slate-700 rounded-xl p-3 text-slate-100 placeholder:text-slate-500 outline-none focus:border-amber-400 focus:ring-2 focus:ring-amber-400/20 disabled:bg-slate-800 disabled:text-slate-500"
                     />
                   </div>
 
@@ -14322,10 +14634,16 @@ function UsersPage({
                     <select
                       value={userForm.roleId}
                       onChange={(e) => handleUserFormChange("roleId", e.target.value)}
-                      className="w-full bg-slate-900 border border-slate-700 rounded-xl p-3 outline-none focus:border-amber-400"
+                      disabled={savingUser || !userForm.companyId || !roleOptions.length}
+                      className="w-full bg-slate-900 border border-slate-700 rounded-xl p-3 text-slate-100 placeholder:text-slate-500 outline-none focus:border-amber-400 focus:ring-2 focus:ring-amber-400/20 disabled:bg-slate-800 disabled:text-slate-500 disabled:cursor-not-allowed"
                     >
+                      {!roleOptions.length && (
+                        <option value="" className="bg-slate-900 text-slate-100">
+                          Select company first
+                        </option>
+                      )}
                       {roleOptions.map((role) => (
-                        <option key={role.id} value={role.id}>{role.name}</option>
+                        <option key={role.id} value={role.id} className="bg-slate-900 text-slate-100">{role.name}</option>
                       ))}
                     </select>
                   </div>
@@ -14336,7 +14654,9 @@ function UsersPage({
                       <input
                         value={userForm.password}
                         onChange={(e) => handleUserFormChange("password", e.target.value)}
-                        className="w-full bg-slate-900 border border-slate-700 rounded-xl p-3 outline-none focus:border-amber-400"
+                        type="text"
+                        placeholder="Temporary password"
+                        className="w-full bg-slate-900 border border-slate-700 rounded-xl p-3 text-slate-100 placeholder:text-slate-500 outline-none focus:border-amber-400 focus:ring-2 focus:ring-amber-400/20 disabled:bg-slate-800 disabled:text-slate-500"
                       />
                       <p className="text-xs text-slate-500 mt-2">
                         The user will be required to change this password after the first login.
@@ -14452,7 +14772,7 @@ function UsersPage({
 }
 
 
-function CompaniesPage({ companies = [], setCompanies, currentUser, showToast }) {
+function CompaniesPage({ companies = [], setCompanies, currentUser, contextCompanyId = "", showToast }) {
   const [search, setSearch] = useState("");
   const [settingsOpen, setSettingsOpen] = useState(false);
   const [selectedCompanyId, setSelectedCompanyId] = useState("");
@@ -14485,7 +14805,23 @@ function CompaniesPage({ companies = [], setCompanies, currentUser, showToast })
 
   useOutsideClick(settingsRef, () => setSettingsOpen(false));
 
-  const visibleCompanies = companies.filter((company) => {
+  const companyScopeList = (() => {
+    if (isPlatformAdminUser(currentUser)) {
+      if (!contextCompanyId || isPlatformContextValue(contextCompanyId)) {
+        return companies;
+      }
+
+      return companies.filter((company) => companyMatches(company.id, contextCompanyId));
+    }
+
+    if (currentUser?.companyId) {
+      return companies.filter((company) => companyMatches(company.id, currentUser.companyId));
+    }
+
+    return [];
+  })();
+
+  const visibleCompanies = companyScopeList.filter((company) => {
     const q = normalizeScopeValue(search);
     if (!q) return true;
 
@@ -14504,7 +14840,7 @@ function CompaniesPage({ companies = [], setCompanies, currentUser, showToast })
       .some((value) => normalizeScopeValue(value).includes(q));
   });
 
-  const activeCompaniesCount = companies.filter((company) => company.isActive !== false).length;
+  const activeCompaniesCount = companyScopeList.filter((company) => company.isActive !== false).length;
 
   const refreshCompaniesFromBackend = async () => {
     try {
@@ -15234,6 +15570,115 @@ function CompaniesPage({ companies = [], setCompanies, currentUser, showToast })
   );
 }
 
+
+function ForcePasswordChangePage({
+  theme = "dark",
+  currentUser,
+  currentPassword,
+  setCurrentPassword,
+  newPassword,
+  setNewPassword,
+  confirmPassword,
+  setConfirmPassword,
+  error,
+  loading,
+  onSubmit,
+  onLogout,
+}) {
+  return (
+    <div
+      data-theme={theme}
+      className="theme-main-bg min-h-screen bg-[#070b14] text-slate-100 flex items-center justify-center p-6"
+    >
+      <div className="w-full max-w-xl rounded-3xl border border-slate-800 bg-slate-900/95 shadow-2xl p-6 sm:p-8">
+        <div className="flex items-center gap-4 mb-6">
+          <img
+            src={theme === "dark" ? "/icons/fleet-fuel-pro-dark.png" : "/icons/fleet-fuel-pro-light.png"}
+            alt="Fleet Fuel PRO"
+            className="w-16 h-auto object-contain"
+            draggable={false}
+          />
+          <div>
+            <p className="text-[10px] uppercase tracking-[0.22em] text-amber-300 font-bold">
+              Password Security
+            </p>
+            <h1 className="text-2xl font-black text-white mt-1">Change Temporary Password</h1>
+          </div>
+        </div>
+
+        <p className="text-sm text-slate-400 leading-6 mb-6">
+          Your password was reset by an administrator. For security, you must create a new password before accessing Fleet Fuel PRO.
+        </p>
+
+        <div className="mb-5 rounded-2xl border border-amber-400/20 bg-amber-400/10 px-4 py-3">
+          <p className="text-xs text-slate-400">Signed in as</p>
+          <p className="mt-1 text-sm font-bold text-slate-100">{currentUser?.fullName || currentUser?.email || "User"}</p>
+        </div>
+
+        <form onSubmit={onSubmit} className="space-y-4">
+          <label className="block">
+            <span className="text-xs font-bold text-slate-400">Temporary Password</span>
+            <input
+              value={currentPassword}
+              onChange={(e) => setCurrentPassword?.(e.target.value)}
+              type="password"
+              placeholder="Enter temporary password"
+              className="mt-2 w-full rounded-2xl border border-slate-700 bg-slate-950 px-4 py-3 text-sm text-white outline-none focus:border-amber-400 focus:ring-2 focus:ring-amber-400/20"
+            />
+          </label>
+
+          <label className="block">
+            <span className="text-xs font-bold text-slate-400">New Password</span>
+            <input
+              value={newPassword}
+              onChange={(e) => setNewPassword?.(e.target.value)}
+              type="password"
+              placeholder="At least 8 characters"
+              className="mt-2 w-full rounded-2xl border border-slate-700 bg-slate-950 px-4 py-3 text-sm text-white outline-none focus:border-amber-400 focus:ring-2 focus:ring-amber-400/20"
+            />
+          </label>
+
+          <label className="block">
+            <span className="text-xs font-bold text-slate-400">Confirm New Password</span>
+            <input
+              value={confirmPassword}
+              onChange={(e) => setConfirmPassword?.(e.target.value)}
+              type="password"
+              placeholder="Re-enter new password"
+              className="mt-2 w-full rounded-2xl border border-slate-700 bg-slate-950 px-4 py-3 text-sm text-white outline-none focus:border-amber-400 focus:ring-2 focus:ring-amber-400/20"
+            />
+          </label>
+
+          {error && (
+            <div className="rounded-2xl border border-red-500/30 bg-red-500/10 px-4 py-3 text-sm text-red-300">
+              {error}
+            </div>
+          )}
+
+          <div className="flex flex-col sm:flex-row gap-3 pt-2">
+            <button
+              type="submit"
+              disabled={loading}
+              className="flex-1 rounded-2xl bg-amber-400 px-4 py-3 text-sm font-black text-slate-950 hover:bg-amber-300 transition disabled:cursor-not-allowed disabled:opacity-60"
+            >
+              {loading ? "Saving..." : "Save New Password"}
+            </button>
+
+            <button
+              type="button"
+              onClick={onLogout}
+              disabled={loading}
+              className="rounded-2xl border border-slate-700 px-4 py-3 text-sm font-bold text-slate-300 hover:border-red-400 hover:text-red-300 transition disabled:cursor-not-allowed disabled:opacity-60"
+            >
+              Logout
+            </button>
+          </div>
+        </form>
+      </div>
+    </div>
+  );
+}
+
 function LoginPage({
   users = [],
   companies = [],
@@ -15250,25 +15695,105 @@ function LoginPage({
   theme,
   setTheme,
 }) {
-  const loginCompanies = [
-    { id: "PLATFORM", name: "Platform Console", status: "Active" },
-    ...companies,
-  ].filter((company, index, list) =>
-    company.id &&
-    normalizeSystemUserStatus(company.status || "Active") === "Active" &&
-    list.findIndex((item) => normalizeScopeValue(item.id) === normalizeScopeValue(company.id)) === index
+  const [loginCompanyInfo, setLoginCompanyInfo] = useState(null);
+  const [loginCompanyLoading, setLoginCompanyLoading] = useState(false);
+  const [loginCompanyMessage, setLoginCompanyMessage] = useState("");
+
+  const loginCompanies = useMemo(
+    () =>
+      [
+        PLATFORM_COMPANY_OPTION,
+        ...companies,
+      ].filter((company, index, list) =>
+        company?.id &&
+        normalizeSystemUserStatus(company.status || "Active") === "Active" &&
+        list.findIndex((item) => normalizeScopeValue(item.id) === normalizeScopeValue(company.id)) === index
+      ),
+    [companies]
   );
 
   const activeUsers = users.filter((user) => {
     if (user.status !== "Active") return false;
     if (!selectedCompanyId) return false;
 
-    if (normalizeScopeValue(selectedCompanyId) === "platform") {
+    if (isPlatformContextValue(selectedCompanyId)) {
       return user.role === "PlatformAdmin";
     }
 
     return companyMatches(user.companyId, selectedCompanyId);
   });
+
+  const loginEmailValue = String(loginIdentifier || "")
+    .trim()
+    .toLowerCase();
+  const loginLooksLikeEmail = loginEmailValue.includes("@");
+  const isDetectedPlatformUser = Boolean(loginCompanyInfo?.isPlatformUser);
+  const detectedCompanyName =
+    loginCompanyInfo?.companyName ||
+    loginCompanies.find((company) => companyMatches(company.id, loginCompanyInfo?.companyId))?.name ||
+    "";
+
+  useEffect(() => {
+    const email = String(loginIdentifier || "")
+      .trim()
+      .toLowerCase();
+
+    setLoginCompanyMessage("");
+    setLoginCompanyInfo(null);
+
+    if (!email || !email.includes("@")) {
+      setSelectedCompanyId?.("");
+      return;
+    }
+
+    let cancelled = false;
+
+    const timer = window.setTimeout(async () => {
+      setLoginCompanyLoading(true);
+
+      try {
+        const response = await api.get(
+          `/auth/login-company?email=${encodeURIComponent(email)}`
+        );
+
+        if (cancelled) return;
+
+        const info = response?.data || {};
+        const isPlatformUser = Boolean(info.isPlatformUser);
+        const nextCompanyId = isPlatformUser
+          ? selectedCompanyId || PLATFORM_CONTEXT_ID
+          : info.companyId || "";
+
+        setLoginCompanyInfo(info);
+        setSelectedCompanyId?.(nextCompanyId);
+
+        if (!isPlatformUser && !info.companyId) {
+          setLoginCompanyMessage("Company could not be detected for this user.");
+        }
+      } catch (error) {
+        if (cancelled) return;
+
+        const backendMessage =
+          error?.response?.data?.message ||
+          "Enter a valid registered email to detect the company.";
+
+        setLoginCompanyInfo(null);
+        setSelectedCompanyId?.("");
+        setLoginCompanyMessage(
+          Array.isArray(backendMessage) ? backendMessage.join(", ") : backendMessage
+        );
+      } finally {
+        if (!cancelled) {
+          setLoginCompanyLoading(false);
+        }
+      }
+    }, 450);
+
+    return () => {
+      cancelled = true;
+      window.clearTimeout(timer);
+    };
+  }, [loginIdentifier]);
 
   return (
     <>
@@ -15351,7 +15876,7 @@ function LoginPage({
               Sign in to Diesel Management System
             </h2>
             <p className="login-muted text-sm text-slate-400 leading-6 max-w-xl">
-              Secure backend login connected to NestJS, JWT, PostgreSQL, Roles and Permissions. CSV data remains available temporarily during the migration phase.
+              Enter your email first. The system will detect your company automatically. Platform users can select Platform Console or a specific customer company.
             </p>
           </div>
 
@@ -15394,33 +15919,48 @@ function LoginPage({
           </div>
 
           <label className="block mb-4">
-            <span className="login-muted text-xs font-bold text-slate-400">Company</span>
-            <select
-              value={selectedCompanyId}
-              onChange={(e) => {
-                setSelectedCompanyId?.(e.target.value);
-                setLoginIdentifier("");
-              }}
-              className="login-input mt-2 w-full rounded-2xl border border-slate-700 bg-slate-950 px-4 py-3 text-sm text-white outline-none focus:border-amber-400 focus:ring-2 focus:ring-amber-400/20"
-            >
-              <option value="">Select Company</option>
-              {loginCompanies.map((company) => (
-                <option key={company.id} value={company.id}>
-                  {company.name || company.id}
-                </option>
-              ))}
-            </select>
-          </label>
-
-          <label className="block mb-4">
-            <span className="login-muted text-xs font-bold text-slate-400">Email / User ID / Username / Full Name</span>
+            <span className="login-muted text-xs font-bold text-slate-400">Email</span>
             <input
               value={loginIdentifier}
-              onChange={(e) => setLoginIdentifier(e.target.value)}
+              onChange={(e) => setLoginIdentifier(e.target.value.toLowerCase())}
               placeholder="admin@fleetfuelpro.com"
               className="login-input mt-2 w-full rounded-2xl border border-slate-700 bg-slate-950 px-4 py-3 text-sm text-white outline-none focus:border-amber-400 focus:ring-2 focus:ring-amber-400/20"
               autoFocus
             />
+          </label>
+
+          <label className="block mb-4">
+            <span className="login-muted text-xs font-bold text-slate-400">Company</span>
+
+            {isDetectedPlatformUser ? (
+              <select
+                value={selectedCompanyId || PLATFORM_CONTEXT_ID}
+                onChange={(e) => setSelectedCompanyId?.(e.target.value)}
+                className="login-input mt-2 w-full rounded-2xl border border-slate-700 bg-slate-950 px-4 py-3 text-sm text-white outline-none focus:border-amber-400 focus:ring-2 focus:ring-amber-400/20"
+              >
+                {loginCompanies.map((company) => (
+                  <option key={company.id} value={company.id}>
+                    {company.name || company.id}
+                  </option>
+                ))}
+              </select>
+            ) : (
+              <input
+                value={
+                  loginCompanyLoading
+                    ? "Detecting company..."
+                    : detectedCompanyName || (loginLooksLikeEmail ? "Company will appear here" : "Enter email first")
+                }
+                disabled
+                className="login-input mt-2 w-full cursor-not-allowed rounded-2xl border border-slate-700 bg-slate-950/70 px-4 py-3 text-sm text-slate-300 outline-none"
+              />
+            )}
+
+            <p className="login-muted mt-2 text-[11px] text-slate-500">
+              {isDetectedPlatformUser
+                ? "Platform user can choose Platform Console or a specific active company."
+                : "Company is detected from the registered email and cannot be changed."}
+            </p>
           </label>
 
           <label className="block mb-4">
@@ -15443,17 +15983,18 @@ function LoginPage({
             Remember me on this device
           </label>
 
-          {loginError && (
+          {(loginError || loginCompanyMessage) && (
             <div className="mb-5 rounded-2xl border border-red-500/30 bg-red-500/10 px-4 py-3 text-sm text-red-300">
-              {loginError}
+              {loginError || loginCompanyMessage}
             </div>
           )}
 
           <button
             type="submit"
-            className="w-full rounded-2xl bg-amber-400 px-4 py-3 text-sm font-black text-slate-950 hover:bg-amber-300 transition shadow-lg shadow-amber-500/20"
+            disabled={loginLooksLikeEmail && (loginCompanyLoading || (!selectedCompanyId && !isDetectedPlatformUser))}
+            className="w-full rounded-2xl bg-amber-400 px-4 py-3 text-sm font-black text-slate-950 hover:bg-amber-300 transition shadow-lg shadow-amber-500/20 disabled:cursor-not-allowed disabled:opacity-60"
           >
-            Sign In
+            {loginCompanyLoading ? "Detecting Company..." : "Sign In"}
           </button>
 
           <div className="login-soft mt-6 rounded-2xl border border-slate-800 bg-slate-950/40 p-4">
@@ -15463,7 +16004,7 @@ function LoginPage({
                 <button
                   key={makeTenantEntityKey(user)}
                   type="button"
-                  onClick={() => setLoginIdentifier(user.id)}
+                  onClick={() => setLoginIdentifier(String(user.email || user.id || "").toLowerCase())}
                   className="login-card w-full text-left rounded-xl border border-slate-800 bg-slate-900 px-3 py-2 hover:border-amber-400 transition"
                 >
                   <div className="flex items-center justify-between gap-3">
@@ -15472,7 +16013,7 @@ function LoginPage({
                       {user.role}
                     </span>
                   </div>
-                  <div className="login-muted text-xs text-slate-500 mt-1">{user.id} · {user.teamProject || "Global"}</div>
+                  <div className="login-muted text-xs text-slate-500 mt-1">{user.email || user.id} · {user.teamProject || "Global"}</div>
                 </button>
               ))}
             </div>
