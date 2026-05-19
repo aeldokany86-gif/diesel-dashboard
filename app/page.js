@@ -2,6 +2,9 @@
  
 import React, { useEffect, useMemo, useRef, useState } from "react";
 import { createPortal } from "react-dom";
+import { useAuth } from "./context/AuthContext";
+import { login as backendLogin } from "./services/authService";
+import api from "./services/api";
 import {
   AreaChart,
   Area,
@@ -166,11 +169,7 @@ const FUELERS_CSV =
 const PROJECTS_CSV =
   "https://docs.google.com/spreadsheets/d/e/2PACX-1vRX0JNF_J9UzMQ5lyr7pxPrdL0GeLD8TkCf4MPNGdyOPT9rATlsmUnBQjx0MVoNy4nPHiRKc7jtmeku/pub?gid=2050998594&single=true&output=csv";
 
-const USERS_ROLES_CSV =
-  "https://docs.google.com/spreadsheets/d/e/2PACX-1vRX0JNF_J9UzMQ5lyr7pxPrdL0GeLD8TkCf4MPNGdyOPT9rATlsmUnBQjx0MVoNy4nPHiRKc7jtmeku/pub?gid=877848969&single=true&output=csv";
 
-const COMPANIES_CSV =
-  "https://docs.google.com/spreadsheets/d/e/2PACX-1vRX0JNF_J9UzMQ5lyr7pxPrdL0GeLD8TkCf4MPNGdyOPT9rATlsmUnBQjx0MVoNy4nPHiRKc7jtmeku/pub?gid=616554643&single=true&output=csv";
 
 const SAUDI_PROJECT_LOCATIONS = [
   "Riyadh Region",
@@ -187,6 +186,134 @@ const SAUDI_PROJECT_LOCATIONS = [
   "Al Bahah Region",
   "Al Jouf Region",
 ];
+
+const PLATFORM_CONTEXT_ID = "PLATFORM";
+
+const PLATFORM_COMPANY_OPTION = {
+  id: PLATFORM_CONTEXT_ID,
+  code: PLATFORM_CONTEXT_ID,
+  name: "Platform Console",
+  country: "",
+  currency: "SAR",
+  timezone: "Asia/Riyadh",
+  language: "EN-AR",
+  status: "Active",
+  isPlatformContext: true,
+};
+
+function isPlatformContextValue(value) {
+  const normalized = normalizeScopeValue(value);
+  return normalized === "platform" || normalized === "platform console";
+}
+
+function mergePlatformConsoleWithCompanies(companies = []) {
+  const map = new Map();
+
+  map.set(normalizeScopeValue(PLATFORM_COMPANY_OPTION.id), PLATFORM_COMPANY_OPTION);
+
+  companies.forEach((company) => {
+    if (!company?.id) return;
+    const key = normalizeScopeValue(company.id);
+
+    if (isPlatformContextValue(company.id) || isPlatformContextValue(company.code) || isPlatformContextValue(company.name)) {
+      map.set(normalizeScopeValue(PLATFORM_COMPANY_OPTION.id), {
+        ...PLATFORM_COMPANY_OPTION,
+        ...company,
+        id: PLATFORM_CONTEXT_ID,
+        code: PLATFORM_CONTEXT_ID,
+        name: "Platform Console",
+        isPlatformContext: true,
+      });
+      return;
+    }
+
+    map.set(key, company);
+  });
+
+  return Array.from(map.values());
+}
+
+
+function normalizeCompanyForState(company = {}) {
+  const isActive =
+    company.isActive === false ||
+    normalizeScopeValue(company.status) === "inactive" ||
+    normalizeScopeValue(company.status) === "disabled"
+      ? false
+      : true;
+
+  return {
+    id: company.id,
+    name: company.name || company.id || "",
+    code: company.code || "",
+    country: company.country || "",
+    city: company.city || "",
+    currency: company.currency || "SAR",
+    timezone: company.timezone || "Asia/Riyadh",
+    language: company.language || "EN-AR",
+    subscriptionPlan: company.subscriptionPlan || "trial",
+    status: isActive ? "Active" : "Inactive",
+    isActive,
+    isPlatformContext: Boolean(company.isPlatformContext),
+    createdAt: company.createdAt || "",
+    updatedAt: company.updatedAt || "",
+  };
+}
+
+const COUNTRY_SETTINGS_OPTIONS = [
+  { country: "Saudi Arabia", currency: "SAR", timezone: "Asia/Riyadh" },
+  { country: "United Arab Emirates", currency: "AED", timezone: "Asia/Dubai" },
+  { country: "Qatar", currency: "QAR", timezone: "Asia/Qatar" },
+  { country: "Kuwait", currency: "KWD", timezone: "Asia/Kuwait" },
+  { country: "Bahrain", currency: "BHD", timezone: "Asia/Bahrain" },
+  { country: "Oman", currency: "OMR", timezone: "Asia/Muscat" },
+  { country: "Egypt", currency: "EGP", timezone: "Africa/Cairo" },
+  { country: "Jordan", currency: "JOD", timezone: "Asia/Amman" },
+  { country: "India", currency: "INR", timezone: "Asia/Kolkata" },
+  { country: "Pakistan", currency: "PKR", timezone: "Asia/Karachi" },
+  { country: "Turkey", currency: "TRY", timezone: "Europe/Istanbul" },
+  { country: "United States", currency: "USD", timezone: "America/New_York" },
+  { country: "United Kingdom", currency: "GBP", timezone: "Europe/London" },
+  { country: "Germany", currency: "EUR", timezone: "Europe/Berlin" },
+  { country: "France", currency: "EUR", timezone: "Europe/Paris" },
+];
+
+function getCompanyCountrySettings(country) {
+  return (
+    COUNTRY_SETTINGS_OPTIONS.find((item) => item.country === country) ||
+    COUNTRY_SETTINGS_OPTIONS[0]
+  );
+}
+
+function getCurrencyByCountry(country) {
+  return getCompanyCountrySettings(country)?.currency || "USD";
+}
+
+function getTimezoneByCountry(country) {
+  return getCompanyCountrySettings(country)?.timezone || "Asia/Riyadh";
+}
+
+function getCurrencyOptionsForCountry(country) {
+  const countryCurrency = getCurrencyByCountry(country);
+
+  return countryCurrency === "USD" ? ["USD"] : [countryCurrency, "USD"];
+}
+
+function normalizeCurrencyForCountry(country, currency) {
+  const allowedCurrencies = getCurrencyOptionsForCountry(country);
+  return allowedCurrencies.includes(currency) ? currency : allowedCurrencies[0];
+}
+
+function uniqueUsersById(users = []) {
+  const map = new Map();
+
+  users.forEach((user) => {
+    if (!user?.id) return;
+    map.set(normalizeScopeValue(user.id), user);
+  });
+
+  return Array.from(map.values());
+}
 
 const AUTH_SESSION_KEY = "fleet_fuel_pro_auth_session_v1";
 const DEFAULT_SESSION_MS = 8 * 60 * 60 * 1000;
@@ -360,57 +487,6 @@ function makeUsernameFromUser({ id, fullName, email }) {
     .replace(/^\.|\.$/g, "") || String(id || "user");
 }
 
-function getTeamMemberForUserId(userId, teamMembers = [], companyId = "") {
-  return teamMembers.find((member) => {
-    const sameId = normalizeScopeValue(member.id) === normalizeScopeValue(userId);
-    if (!sameId) return false;
-    if (!companyId) return true;
-    return companyMatches(member.companyId, companyId);
-  });
-}
-
-function buildUsersFromRolesRows(userRows = [], userHeaders = [], teamMembers = []) {
-  return userRows
-    .slice(1)
-    .map((row) => {
-      const id = getValue(row, userHeaders, ["user_id", "User_id", "user id", "team_id", "Team_id", "id"]);
-      const explicitCompanyId = getValue(row, userHeaders, ["company_id", "Company ID", "company id", "company"]);
-      const linkedTeam = getTeamMemberForUserId(id, teamMembers, explicitCompanyId);
-      const fullName = getValue(row, userHeaders, ["full_name", "Full Name", "full name", "name", "Team_name"]) || linkedTeam?.name || id;
-      const email = getValue(row, userHeaders, ["email", "Email", "user_email"]) || linkedTeam?.email || "";
-      const role = normalizeSystemRole(getValue(row, userHeaders, ["role", "Role"]));
-      const status = normalizeSystemUserStatus(getValue(row, userHeaders, ["user_status", "User Status", "status", "Status"]));
-      const companyId = explicitCompanyId || linkedTeam?.companyId || "";
-      const projectName = linkedTeam?.projectName || "";
-      const projectScope = role === "Admin" ? ["All"] : projectName ? [projectName] : [];
-      const managedProjectScope = role === "Admin" ? ["All"] : role === "Manager" ? projectScope : [];
-      const loginEnabledRaw = getValue(row, userHeaders, ["login_enabled", "Login Enabled", "login", "enabled"]);
-      const loginEnabled = loginEnabledRaw === "" ? true : !["false", "no", "0", "disabled"].includes(String(loginEnabledRaw).trim().toLowerCase());
-
-      return {
-        id,
-        fullName,
-        username: makeUsernameFromUser({ id, fullName, email }),
-        email,
-        role,
-        companyId,
-        tenantKey: `${normalizeScopeValue(companyId) || "global"}::${normalizeScopeValue(id) || "no-id"}`,
-        status: loginEnabled ? status : "Inactive",
-        fuelerId: id,
-        teamId: id,
-        assignedProjects: projectScope,
-        managedProjects: managedProjectScope,
-        reportingManagerId: getValue(row, userHeaders, ["reporting_manager", "reporting_manager_id", "reporting manager"]),
-        mobile: linkedTeam?.mobile || "",
-        teamProject: projectName,
-        teamStatus: linkedTeam?.status || "",
-        passwordResetRequired: false,
-        lastLogin: "",
-        createdAt: new Date().toISOString(),
-      };
-    })
-    .filter((user) => user.id);
-}
 
 
 // ======================================================
@@ -541,6 +617,103 @@ function hasPermissionForUser(user, module, action = "view") {
 
 function canAccessPageForUser(user, pageKey) {
   return hasPermissionForUser(user, pageKey, "view");
+}
+
+function normalizeBackendRoleName(roleName) {
+  const normalized = String(roleName || "").trim();
+  const compact = normalized.toLowerCase().replace(/[\s_-]+/g, "");
+
+  if (compact === "platformuser" || compact === "platformadmin") return "PlatformAdmin";
+  if (compact === "topmanagement") return "TopManagement";
+  if (compact === "admin") return "Admin";
+  if (compact === "manager") return "Manager";
+  if (compact === "supervisor") return "Supervisor";
+  if (compact === "officer") return "Officer";
+  if (compact === "operator") return "Operator";
+
+  return normalized || "Operator";
+}
+
+function buildLegacyUserFromAuthUser(authUser) {
+  if (!authUser) return null;
+
+  const role = normalizeBackendRoleName(authUser.roleName);
+  const companyId = authUser.companyId || "";
+  const assignedProjects = ["Admin", "PlatformAdmin", "TopManagement"].includes(role) ? ["All"] : [];
+  const managedProjects = ["Admin", "PlatformAdmin", "Manager"].includes(role) ? ["All"] : [];
+
+  return {
+    id: authUser.id,
+    fullName: authUser.fullName,
+    username: makeUsernameFromUser({ id: authUser.id, fullName: authUser.fullName, email: authUser.email }),
+    email: authUser.email,
+    role,
+    companyId,
+    tenantKey: `${normalizeScopeValue(companyId) || "global"}::${normalizeScopeValue(authUser.id) || "no-id"}`,
+    status: authUser.isActive === false ? "Inactive" : "Active",
+    fuelerId: authUser.id,
+    teamId: authUser.id,
+    assignedProjects,
+    managedProjects,
+    reportingManagerId: "",
+    mobile: authUser.phone || "",
+    teamProject: role === "PlatformAdmin" ? "Platform Console" : authUser.companyName || "",
+    teamStatus: "",
+    passwordResetRequired: Boolean(authUser.mustChangePassword),
+    lastLogin: "",
+    createdAt: new Date().toISOString(),
+    backendPermissions: authUser.permissions || [],
+  };
+}
+
+const BACKEND_PAGE_PERMISSION_MAP = {
+  operations: "operations.read",
+  assets: "assets.read",
+  stations: "stations.read",
+  team: "team.read",
+  projects: "projects.read",
+  reports: "reports.read",
+  companies: "companies.read",
+  notifications: null,
+  auditTimeline: "audit_logs.read",
+  approvals: "approvals.read",
+  users: "users.read",
+};
+
+function mapLegacyPermissionToBackendPermission(module, action = "view") {
+  const normalizedModule = String(module || "").trim();
+  const normalizedAction = String(action || "view").trim();
+
+  const moduleMap = {
+    auditTimeline: "audit_logs",
+    auditLog: "audit_logs",
+    companies: "companies",
+    users: "users",
+    projects: "projects",
+    assets: "assets",
+    stations: "stations",
+    team: "team",
+    operations: "operations",
+    approvals: "approvals",
+    reports: "reports",
+    settings: "settings",
+  };
+
+  const backendModule = moduleMap[normalizedModule] || normalizedModule;
+
+  if (normalizedAction === "view") return `${backendModule}.read`;
+  if (normalizedAction === "add") return backendModule === "operations" ? "operations.create" : `${backendModule}.manage`;
+  if (normalizedAction === "edit") return backendModule === "operations" ? "operations.correct" : `${backendModule}.manage`;
+  if (normalizedAction === "delete") return `${backendModule}.manage`;
+  if (normalizedAction === "approve") return backendModule === "operations" ? "approvals.manage" : `${backendModule}.manage`;
+  if (normalizedAction === "export") return backendModule === "audit_logs" ? "audit_logs.read" : "reports.export";
+  if (normalizedAction === "print") return `${backendModule}.read`;
+  if (normalizedAction === "deactivate") return "users.status.change";
+  if (normalizedAction === "resetPassword") return "users.update";
+  if (normalizedAction === "assignRoles") return "users.update";
+  if (normalizedAction === "markRead") return null;
+
+  return `${backendModule}.${normalizedAction}`;
 }
 
 
@@ -1310,8 +1483,8 @@ function filterDuplicateTenantEntities(items = []) {
 }
 
 function filterByCompany(items = [], companyId, user) {
-  if (isPlatformAdminUser(user)) return items;
-  if (!companyId) return [];
+  if (isPlatformAdminUser(user) && isPlatformContextValue(companyId)) return items;
+  if (!companyId || isPlatformContextValue(companyId)) return [];
   return items.filter((item) => companyMatches(getItemCompanyId(item), companyId));
 }
 
@@ -1329,8 +1502,8 @@ function getItemCompanyIdWithProjectFallback(item, projects = [], projectKey = "
 }
 
 function filterByCompanyWithProjectFallback(items = [], companyId, user, projects = [], projectKey = "project") {
-  if (isPlatformAdminUser(user)) return items;
-  if (!companyId) return [];
+  if (isPlatformAdminUser(user) && isPlatformContextValue(companyId)) return items;
+  if (!companyId || isPlatformContextValue(companyId)) return [];
   return items.filter((item) =>
     companyMatches(getItemCompanyIdWithProjectFallback(item, projects, projectKey), companyId)
   );
@@ -1350,8 +1523,8 @@ function inferRowCompanyId(row, headers, assets = [], stations = [], projects = 
 }
 
 function filterTransactionRowsByCompany({ rows = [], headers = [], companyId, user, assets = [], stations = [], projects = [] }) {
-  if (isPlatformAdminUser(user)) return rows;
-  if (!companyId) return [];
+  if (isPlatformAdminUser(user) && isPlatformContextValue(companyId)) return rows;
+  if (!companyId || isPlatformContextValue(companyId)) return [];
 
   return rows.filter((row) =>
     companyMatches(inferRowCompanyId(row, headers, assets, stations, projects), companyId)
@@ -1382,7 +1555,7 @@ function buildCompaniesFromSources({ companies = [], users = [], fuelers = [], p
     }
   });
 
-  return Array.from(map.values());
+  return mergePlatformConsoleWithCompanies(Array.from(map.values()));
 }
 
 
@@ -1415,7 +1588,7 @@ function ModalPortal({ children }) {
 }
  
 export default function Home() {
-  const [page, setPage] = useState("operations");
+  const [page, setPage] = useState("companies");
   const [theme, setTheme] = useState("dark");
   const [showThemeSettings, setShowThemeSettings] = useState(false);
   const [sidebarCollapsed, setSidebarCollapsed] = useState(false);
@@ -1444,8 +1617,23 @@ export default function Home() {
   const [activityLog, setActivityLog] = useState([]);
   const [pendingApprovals, setPendingApprovals] = useState([]);
   const [notificationReadMap, setNotificationReadMap] = useState({});
+  const [loginPassword, setLoginPassword] = useState("Admin@12345");
 
-  const currentUser =
+  const {
+    currentUser: backendAuthUser,
+    loading: backendAuthLoading,
+    isLoggedIn: backendIsLoggedIn,
+    logout: backendLogout,
+    reloadUser: reloadBackendUser,
+    hasPermission: hasBackendPermission,
+  } = useAuth();
+
+  const backendLegacyUser = useMemo(
+    () => buildLegacyUserFromAuthUser(backendAuthUser),
+    [backendAuthUser]
+  );
+
+  const localCurrentUser =
     users.find((user) => {
       if (user.id !== currentUserId || user.status !== "Active") return false;
       if (user.role === "PlatformAdmin") {
@@ -1455,7 +1643,31 @@ export default function Home() {
     }) ||
     null;
 
+  const currentUser = backendLegacyUser || localCurrentUser;
+
   useEffect(() => {
+  async function fetchProtectedCompanies() {
+    if (!backendIsLoggedIn) return;
+    if (!hasBackendPermission?.("companies.read")) return;
+
+    try {
+      const response = await api.get("/companies");
+      const backendCompanies = Array.isArray(response.data) ? response.data : [];
+
+      setCompanies(
+        mergePlatformConsoleWithCompanies(backendCompanies)
+          .map(normalizeCompanyForState)
+          .filter((company) => company.id)
+      );
+    } catch (error) {
+      console.warn("Protected companies API is not available.", error);
+    }
+  }
+
+  fetchProtectedCompanies();
+}, [backendIsLoggedIn, hasBackendPermission]);
+
+useEffect(() => {
     try {
       const storedSession = JSON.parse(localStorage.getItem(AUTH_SESSION_KEY) || "null");
 
@@ -1503,14 +1715,77 @@ export default function Home() {
     setSelectedCompanyId(companyId);
   };
 
-  const handleLogin = (event) => {
+  const handleLogin = async (event) => {
     event?.preventDefault?.();
+
+    const rawLoginValue = String(loginIdentifier || "").trim();
+
+    if (rawLoginValue.includes("@")) {
+      try {
+        const loggedUser = await backendLogin(rawLoginValue, loginPassword);
+
+        const normalizedSelectedCompany = normalizeScopeValue(selectedCompanyId);
+        const normalizedUserCompany = normalizeScopeValue(loggedUser.companyId);
+        const normalizedUserCompanyName = normalizeScopeValue(loggedUser.companyName);
+        const isPlatformUser =
+          normalizeBackendRoleName(loggedUser.roleName) === "PlatformAdmin";
+
+        const selectedCompanyRecord = companies.find((company) => {
+          const companyId = normalizeScopeValue(company.id);
+          const companyName = normalizeScopeValue(company.name);
+          const companyCode = normalizeScopeValue(company.code);
+
+          return (
+            companyId === normalizedSelectedCompany ||
+            companyName === normalizedSelectedCompany ||
+            companyCode === normalizedSelectedCompany
+          );
+        });
+
+        const normalizedSelectedCompanyName = normalizeScopeValue(
+          selectedCompanyRecord?.name
+        );
+        const normalizedSelectedCompanyCode = normalizeScopeValue(
+          selectedCompanyRecord?.code
+        );
+
+        const companyMatched =
+          !normalizedSelectedCompany ||
+          normalizedSelectedCompany === normalizedUserCompany ||
+          normalizedSelectedCompany === normalizedUserCompanyName ||
+          normalizedSelectedCompanyName === normalizedUserCompanyName ||
+          normalizedSelectedCompanyCode === normalizeScopeValue("FFP");
+
+        if (!isPlatformUser && !companyMatched) {
+          backendLogout?.();
+          localStorage.removeItem(AUTH_SESSION_KEY);
+          setCurrentUserId("");
+          setLoginError("This user does not belong to the selected company.");
+          return;
+        }
+
+        await reloadBackendUser();
+        setSelectedCompanyId(
+          isPlatformUser
+            ? selectedCompanyId || PLATFORM_CONTEXT_ID
+            : selectedCompanyId || loggedUser.companyId || ""
+        );
+        setLoginError("");
+        setLoginIdentifier("");
+        trackActivity("Login", "auth", `${loggedUser.fullName} signed in using backend JWT session.`);
+        return;
+      } catch (error) {
+        console.error("Backend login failed:", error);
+        setLoginError("Backend login failed. Check email and password.");
+        return;
+      }
+    }
 
     const loginValue = normalizeScopeValue(loginIdentifier);
     const selectedCompany = normalizeScopeValue(selectedCompanyId);
 
     if (!selectedCompany) {
-      setLoginError("Please select your company first.");
+      setLoginError("Please select your company first, or login by backend email.");
       return;
     }
 
@@ -1550,30 +1825,58 @@ export default function Home() {
       trackActivity("Logout", "auth", `${currentUser.fullName} signed out.`);
     }
 
+    backendLogout?.();
     localStorage.removeItem(AUTH_SESSION_KEY);
     setCurrentUserId("");
-    setPage("operations");
+    setPage("companies");
     setMobileSidebarOpen(false);
   };
 
-  const handleDevUserSwitch = (tenantUserKey) => {
-    const devUser = users.find((user) => makeTenantEntityKey(user) === tenantUserKey) ||
-      users.find((user) => user.id === tenantUserKey);
 
-    if (!devUser) return;
+  const hasPermission = (module, action = "view") => {
+    if (backendIsLoggedIn) {
+      const backendPermission = mapLegacyPermissionToBackendPermission(module, action);
+      if (!backendPermission) return true;
+      return hasBackendPermission(backendPermission);
+    }
 
-    startLocalSession(
-      devUser.id,
-      devUser.role === "PlatformAdmin" ? "PLATFORM" : devUser.companyId || selectedCompanyId,
-      true
-    );
+    return hasPermissionForUser(currentUser, module, action);
   };
 
-  const hasPermission = (module, action = "view") =>
-    hasPermissionForUser(currentUser, module, action);
+  const canAccessPage = (pageKey) => {
+    if (backendIsLoggedIn) {
+      const requiredPermission = BACKEND_PAGE_PERMISSION_MAP[pageKey];
+      if (!requiredPermission) return true;
+      return hasBackendPermission(requiredPermission);
+    }
 
-  const canAccessPage = (pageKey) =>
-    canAccessPageForUser(currentUser, pageKey);
+    return canAccessPageForUser(currentUser, pageKey);
+  };
+
+  const getPreferredPageOrder = () => {
+    if (isPlatformAdminUser(currentUser)) {
+      return [
+        "companies",
+        "users",
+        "notifications",
+        "auditTimeline",
+      ];
+    }
+
+    return [
+      "users",
+      "operations",
+      "assets",
+      "stations",
+      "team",
+      "projects",
+      "reports",
+      "notifications",
+      "auditTimeline",
+      "approvals",
+      "companies",
+    ];
+  };
 
   const trackActivity = (action, module, details) => {
     setActivityLog((prev) => [
@@ -1607,22 +1910,36 @@ export default function Home() {
           return response.text();
         };
 
+        const fetchBackendCompanies = async () => {
+          try {
+            const response = await api.get("/companies/public");
+            const backendCompanies = Array.isArray(response.data) ? response.data : [];
+
+            return mergePlatformConsoleWithCompanies(backendCompanies);
+          } catch (error) {
+            console.warn(
+              "Public companies API is not available. Using Platform Console fallback only.",
+              error
+            );
+
+            return mergePlatformConsoleWithCompanies([]);
+          }
+        };
+
         const [
           trxText,
           assetsText,
           stationsText,
           fuelersText,
           projectsText,
-          usersRolesText,
-          companiesText,
+          backendCompanies,
         ] = await Promise.all([
           fetchCsvText(TRANSACTIONS_CSV),
           fetchCsvText(ASSETS_CSV),
           fetchCsvText(STATIONS_CSV),
           fetchCsvText(FUELERS_CSV),
           fetchCsvText(PROJECTS_CSV),
-          fetchCsvText(USERS_ROLES_CSV),
-          fetchCsvText(COMPANIES_CSV),
+          fetchBackendCompanies(),
         ]);
 
         // TRANSACTIONS
@@ -1733,39 +2050,28 @@ export default function Home() {
 
         setProjects(mappedProjects);
 
-        // USERS & ROLES
-        const userRows = parseCSV(usersRolesText);
-        const userHeaders = userRows[0] || [];
-        const mappedUsers = buildUsersFromRolesRows(userRows, userHeaders, mappedFuelers);
-
-        setUsers(mappedUsers);
-
-        // COMPANIES
-        const companyRows = parseCSV(companiesText);
-        const companyHeaders = companyRows[0] || [];
-        const mappedCompanies = companyRows
-          .slice(1)
-          .map((row) => ({
-            id: getValue(row, companyHeaders, ["company_id", "Company ID", "company id", "id"]),
-            name: getValue(row, companyHeaders, ["company_name", "Company Name", "company name", "name"]),
-            country: getValue(row, companyHeaders, ["country", "Country"]),
-            currency: getValue(row, companyHeaders, ["currency", "Currency"]),
-            timezone: getValue(row, companyHeaders, ["timezone", "Time Zone", "time zone"]),
-            language: getValue(row, companyHeaders, ["language", "Language"]),
-            status: getValue(row, companyHeaders, ["status", "Status"]) || "Active",
+        // COMPANIES - now loaded from NestJS/PostgreSQL public endpoint only.
+        // Platform Console is a frontend tenant context option, not customer operational data.
+        const mappedCompanies = mergePlatformConsoleWithCompanies(backendCompanies)
+          .map((company) => ({
+            id: company.id,
+            name: company.name || company.id,
+            code: company.code || "",
+            country: company.country || "",
+            city: company.city || "",
+            currency: company.currency || "SAR",
+            timezone: company.timezone || "Asia/Riyadh",
+            language: company.language || "EN-AR",
+            subscriptionPlan: company.subscriptionPlan || "trial",
+            status: company.isActive === false ? "Inactive" : company.status || "Active",
+            isActive: company.isActive !== false,
+            isPlatformContext: Boolean(company.isPlatformContext),
+            createdAt: company.createdAt || "",
+            updatedAt: company.updatedAt || "",
           }))
           .filter((company) => company.id);
 
-        setCompanies(
-          buildCompaniesFromSources({
-            companies: mappedCompanies,
-            users: mappedUsers,
-            fuelers: mappedFuelers,
-            projects: mappedProjects,
-            assets: mappedAssets,
-            stations: mappedStations,
-          })
-        );
+        setCompanies(mappedCompanies);
       } catch (error) {
         console.error("Failed to load Fleet Fuel PRO CSV data:", error);
         setHeaders([]);
@@ -1783,26 +2089,14 @@ export default function Home() {
   }, []);
 
   useEffect(() => {
-    if (!canAccessPage(page)) {
-      const firstAllowedPage = [
-        "operations",
-        "assets",
-        "stations",
-        "team",
-        "projects",
-        "reports",
-        "companies",
-        "notifications",
-        "auditTimeline",
-        "approvals",
-        "users",
-      ].find((pageKey) => canAccessPage(pageKey));
+    const firstAllowedPage = getPreferredPageOrder().find((pageKey) =>
+      canAccessPage(pageKey)
+    );
 
-      if (firstAllowedPage) {
-        setPage(firstAllowedPage);
-      }
+    if (firstAllowedPage && !canAccessPage(page)) {
+      setPage(firstAllowedPage);
     }
-  }, [page, currentUserId, users]);
+  }, [page, currentUser?.id, currentUser?.role, backendIsLoggedIn, backendAuthUser?.id]);
  
   const [priceHistory, setPriceHistory] = useState([
     {
@@ -1831,12 +2125,33 @@ export default function Home() {
 
   const literPrice = getLiterPriceByDate(new Date().toISOString());
 
-  const currentCompanyId = currentUser?.role === "PlatformAdmin" ? selectedCompanyId : currentUser?.companyId || selectedCompanyId;
-  const currentCompany = companies.find((company) => companyMatches(company.id, currentCompanyId));
+  const currentCompanyId = currentUser?.role === "PlatformAdmin" ? selectedCompanyId || PLATFORM_CONTEXT_ID : currentUser?.companyId || selectedCompanyId;
+  const isPlatformConsoleContext = isPlatformContextValue(currentCompanyId);
+  const currentCompany = companies.find((company) =>
+    companyMatches(company.id, currentCompanyId) ||
+    companyMatches(company.code, currentCompanyId) ||
+    companyMatches(company.name, currentCompanyId)
+  );
+
+  const platformUsers = uniqueUsersById([
+    backendLegacyUser,
+    ...users.filter((user) =>
+      user?.role === "PlatformAdmin" ||
+      isPlatformContextValue(user?.companyId) ||
+      isPlatformContextValue(user?.companyName)
+    ),
+  ].filter(Boolean));
 
   const companyUsers = isPlatformAdminUser(currentUser)
-    ? users
+    ? isPlatformConsoleContext
+      ? platformUsers
+      : users.filter((user) => companyMatches(user.companyId, currentCompanyId))
     : users.filter((user) => companyMatches(user.companyId, currentCompanyId));
+
+  // Users & Roles page scope:
+  // Platform User must manage and view all users across all companies.
+  // Company Admin must view only users that belong to the selected/current company.
+  const usersPageUsers = isPlatformAdminUser(currentUser) ? users : companyUsers;
 
   const companyProjects = filterByCompany(projects, currentCompanyId, currentUser);
   const companyAssets = filterByCompanyWithProjectFallback(assets, currentCompanyId, currentUser, companyProjects, "project");
@@ -2107,7 +2422,7 @@ if (page === "companies") {
 if (page === "users") {
   return (
     <UsersPage
-      users={companyUsers}
+      users={usersPageUsers}
       setUsers={setUsers}
       projects={filterActiveProjects(companyProjects)}
       currentUser={currentUser}
@@ -2152,21 +2467,40 @@ const sidebarItems = [
   { key: "users", label: "Users & Roles", Icon: Users },
 ].filter((item) => canAccessPage(item.key));
 
+const currentUserProjectSectionLabel =
+  currentUser?.role === "PlatformAdmin" ? "Access" : "Project";
+
+const isRealProjectName = (value) => {
+  const normalizedValue = normalizeScopeValue(value);
+  if (!normalizedValue) return false;
+
+  const blockedValues = [
+    normalizeScopeValue(currentUser?.companyName),
+    normalizeScopeValue(currentCompany?.name),
+    normalizeScopeValue("Platform Console"),
+    normalizeScopeValue("Tenant Context"),
+    normalizeScopeValue("Global Access"),
+    normalizeScopeValue("All"),
+  ].filter(Boolean);
+
+  return !blockedValues.includes(normalizedValue);
+};
+
 const currentUserProjectLabel =
   currentUser?.role === "PlatformAdmin"
-    ? "Platform Console"
-    : currentUser?.role === "Admin"
-    ? currentCompany?.name || "Company Admin"
-    : currentUser?.teamProject ||
-      (currentUser?.role === "TopManagement"
-        ? "Head Office"
-        : Array.isArray(currentUser?.assignedProjects) && currentUser.assignedProjects.length
-        ? currentUser.assignedProjects.join(", ")
-        : currentCompany?.name || "No Project Assigned");
+    ? "Global Access"
+    : currentUser?.role === "TopManagement"
+    ? "Head Office"
+    : isRealProjectName(currentUser?.teamProject)
+    ? currentUser.teamProject
+    : Array.isArray(currentUser?.assignedProjects) &&
+      currentUser.assignedProjects.some(isRealProjectName)
+    ? currentUser.assignedProjects.filter(isRealProjectName).join(", ")
+    : "No Project Assigned";
 
 const sidebarContentCollapsed = sidebarCollapsed && !mobileSidebarOpen;
 
-if (users.length === 0 || !authLoaded) {
+if (!authLoaded || backendAuthLoading) {
   return (
     <div className="min-h-screen bg-[#070b14] flex items-center justify-center text-slate-100">
       <div className="rounded-2xl border border-slate-800 bg-slate-900/80 px-8 py-7 shadow-2xl text-center">
@@ -2205,6 +2539,8 @@ if (!currentUser) {
       setSelectedCompanyId={setSelectedCompanyId}
       loginIdentifier={loginIdentifier}
       setLoginIdentifier={setLoginIdentifier}
+      loginPassword={loginPassword}
+      setLoginPassword={setLoginPassword}
       rememberSession={rememberSession}
       setRememberSession={setRememberSession}
       loginError={loginError}
@@ -2623,33 +2959,17 @@ if (!currentUser) {
             <p className="login-text text-sm font-bold text-slate-100 truncate">{currentUser.fullName}</p>
             <p className="text-xs text-amber-300 mt-0.5">{currentUser.role}</p>
             <div className="mt-2 rounded-xl border border-slate-800/80 bg-slate-950/40 px-3 py-2">
-              <p className="text-[9px] uppercase tracking-[0.16em] text-slate-500 mb-1">Project</p>
+              <p className="text-[9px] uppercase tracking-[0.16em] text-slate-500 mb-1">{currentUserProjectSectionLabel}</p>
               <p className="text-xs font-semibold text-slate-200 truncate">
                 {currentUserProjectLabel}
               </p>
             </div>
 
             <div className="mt-3 pt-3 border-t border-slate-800/80">
-              <p className="text-[10px] uppercase tracking-[0.16em] text-slate-500 mb-2">
-                Dev User Switcher
-              </p>
-              <select
-                value={currentUser ? makeTenantEntityKey(currentUser) : ""}
-                onChange={(e) => handleDevUserSwitch(e.target.value)}
-                className="w-full bg-slate-800 border border-slate-700 rounded-lg px-2 py-2 text-xs text-white outline-none focus:border-amber-400 focus:ring-2 focus:ring-amber-400/20"
-              >
-                {users
-                  .filter((u) => u.status === "Active")
-                  .map((u) => (
-                    <option key={makeTenantEntityKey(u)} value={makeTenantEntityKey(u)}>
-                      {u.fullName} ({u.role}) · {u.companyId || "GLOBAL"}
-                    </option>
-                  ))}
-              </select>
               <button
                 type="button"
                 onClick={handleLogout}
-                className="mt-3 w-full rounded-lg border border-red-500/30 bg-red-500/10 px-3 py-2 text-xs font-bold text-red-300 hover:bg-red-500/20 transition"
+                className="w-full rounded-lg border border-red-500/30 bg-red-500/10 px-3 py-2 text-xs font-bold text-red-300 hover:bg-red-500/20 transition"
               >
                 Logout
               </button>
@@ -13224,273 +13544,588 @@ function formatApprovalDate(rawDate) {
 }
 
 function UsersPage({
-  users,
+  users = [],
   setUsers,
   projects = [],
   currentUser,
-  currentUserId,
-  setCurrentUserId,
-  setSelectedCompanyId,
   hasPermission = () => false,
-  activityLog = [],
-  setActivityLog,
   trackActivity = () => {},
   showToast,
 }) {
   const [searchTerm, setSearchTerm] = useState("");
   const [roleFilter, setRoleFilter] = useState("All");
   const [statusFilter, setStatusFilter] = useState("All");
-  const [showForm, setShowForm] = useState(false);
-  const [editingUser, setEditingUser] = useState(null);
-  const [showActivity, setShowActivity] = useState(false);
+  const [settingsOpen, setSettingsOpen] = useState(false);
+  const [userModalMode, setUserModalMode] = useState(null);
+  const [selectedUserId, setSelectedUserId] = useState("");
+  const [backendRoles, setBackendRoles] = useState([]);
+  const [savingUser, setSavingUser] = useState(false);
+  const [resettingPassword, setResettingPassword] = useState(false);
+  const [temporaryPasswordResult, setTemporaryPasswordResult] = useState(null);
+  const [userConfirmModal, setUserConfirmModal] = useState({
+    open: false,
+    title: "",
+    message: "",
+    confirmLabel: "Confirm",
+    confirmTone: "amber",
+    onConfirm: null,
+  });
 
-  const emptyForm = {
+  const settingsRef = useRef(null);
+
+  const emptyUserForm = {
     fullName: "",
-    username: "",
     email: "",
-    mobile: "",
-    role: "Operator",
-    status: "Active",
-    assignedProjects: ["All"],
-    passwordResetRequired: true,
+    phone: "",
+    roleId: "",
+    password: "",
   };
 
-  const [form, setForm] = useState(emptyForm);
+  const [userForm, setUserForm] = useState(emptyUserForm);
 
-  const roleOptions = Object.keys(ROLE_PERMISSIONS);
-  const activeProjects = filterActiveProjects(projects);
-  const isRestrictedScopeRole = ["Operator", "Supervisor"].includes(form.role);
+  useOutsideClick(settingsRef, () => setSettingsOpen(false));
+
+  const normalizeBackendUserForState = (user = {}) => {
+    const roleName =
+      user.role?.name ||
+      user.roleName ||
+      user.role ||
+      "Operator";
+
+    const isActive =
+      user.isActive === false ||
+      normalizeScopeValue(user.status) === "inactive" ||
+      normalizeScopeValue(user.status) === "disabled"
+        ? false
+        : true;
+
+    return {
+      id: user.id,
+      fullName: user.fullName || user.name || user.email || "",
+      username: makeUsernameFromUser({
+        id: user.id,
+        fullName: user.fullName,
+        email: user.email,
+      }),
+      email: user.email || "",
+      phone: user.phone || "",
+      mobile: user.phone || user.mobile || "",
+      role: normalizeBackendRoleName(roleName),
+      roleName,
+      roleId: user.roleId || user.role?.id || "",
+      companyId: user.companyId || user.company?.id || currentUser?.companyId || "",
+      companyName: user.company?.name || user.companyName || "",
+      status: isActive ? "Active" : "Inactive",
+      isActive,
+      passwordResetRequired: Boolean(user.mustChangePassword ?? user.passwordResetRequired),
+      mustChangePassword: Boolean(user.mustChangePassword ?? user.passwordResetRequired),
+      lastLogin: user.lastLogin || "",
+      createdAt: user.createdAt || "",
+      updatedAt: user.updatedAt || "",
+      backendUser: true,
+    };
+  };
+
+  const manageableRoles = backendRoles.filter((role) => {
+    const normalized = normalizeScopeValue(role.name);
+    return normalized !== "platform user" && normalized !== "platformadmin" && normalized !== "platform admin";
+  });
+
+  const roleOptions = manageableRoles.length
+    ? manageableRoles.map((role) => ({
+        id: role.id,
+        name: role.name,
+        normalizedName: normalizeBackendRoleName(role.name),
+      }))
+    : Object.keys(ROLE_PERMISSIONS)
+        .filter((role) => role !== "PlatformAdmin")
+        .map((role) => ({
+          id: role,
+          name: role,
+          normalizedName: role,
+        }));
+
+  const selectedUser = users.find((user) => user.id === selectedUserId) || null;
+  const canManageUsers = hasPermission("users", "add") || hasPermission("users", "edit");
+
+  const canUseBackendUsersApi = ["Admin", "PlatformAdmin"].includes(currentUser?.role);
+
+  const refreshUsersAndRolesFromBackend = async () => {
+    if (!canUseBackendUsersApi) {
+      setBackendRoles([]);
+      setUsers([]);
+      return;
+    }
+
+    try {
+      const [usersResponse, rolesResponse] = await Promise.all([
+        api.get("/users"),
+        api.get("/roles"),
+      ]);
+
+      const backendUsers = Array.isArray(usersResponse.data) ? usersResponse.data : [];
+      const roles = Array.isArray(rolesResponse.data) ? rolesResponse.data : [];
+
+      setBackendRoles(roles);
+      setUsers(
+        backendUsers
+          .map(normalizeBackendUserForState)
+          .filter((user) => user.id)
+      );
+    } catch (error) {
+      console.error("Failed to load users and roles from backend:", error);
+      notifyUser(showToast, "warning", "Failed to load users and roles from backend.");
+    }
+  };
+
+  useEffect(() => {
+    refreshUsersAndRolesFromBackend();
+  }, [canUseBackendUsersApi, currentUser?.companyId]);
 
   const filteredUsers = users.filter((user) => {
-    const search = searchTerm.toLowerCase();
-    const matchesSearch =
-      user.fullName?.toLowerCase().includes(search) ||
-      user.username?.toLowerCase().includes(search) ||
-      user.email?.toLowerCase().includes(search) ||
-      user.role?.toLowerCase().includes(search);
+    const search = normalizeScopeValue(searchTerm);
+    const userRoleName = user.roleName || user.role || "";
 
-    const matchesRole = roleFilter === "All" || user.role === roleFilter;
+    const matchesSearch =
+      !search ||
+      [
+        user.fullName,
+        user.username,
+        user.email,
+        user.phone,
+        user.mobile,
+        userRoleName,
+        user.status,
+      ]
+        .filter(Boolean)
+        .some((value) => normalizeScopeValue(value).includes(search));
+
+    const matchesRole =
+      roleFilter === "All" ||
+      user.role === roleFilter ||
+      userRoleName === roleFilter ||
+      normalizeBackendRoleName(userRoleName) === roleFilter;
+
     const matchesStatus = statusFilter === "All" || user.status === statusFilter;
 
     return matchesSearch && matchesRole && matchesStatus;
   });
 
-  const openAddUser = () => {
-    if (!hasPermission("users", "add")) return;
-    setEditingUser(null);
-    setForm(emptyForm);
-    setShowForm(true);
+  const activeUsersCount = users.filter((user) => user.status === "Active").length;
+  const inactiveUsersCount = users.filter((user) => user.status !== "Active").length;
+  const resetRequiredCount = users.filter((user) => user.passwordResetRequired || user.mustChangePassword).length;
+
+  const openAddUserModal = () => {
+    if (!hasPermission("users", "add")) {
+      notifyUser(showToast, "warning", "You do not have permission to add users.");
+      return;
+    }
+
+    const defaultRoleId =
+      roleOptions.find((role) => role.normalizedName === "Operator")?.id ||
+      roleOptions[0]?.id ||
+      "";
+
+    setUserForm({
+      ...emptyUserForm,
+      roleId: defaultRoleId,
+      password: "User@12345",
+    });
+    setSelectedUserId("");
+    setUserModalMode("add");
+    setSettingsOpen(false);
   };
 
-  const openEditUser = (user) => {
-    if (!hasPermission("users", "edit")) return;
-    setEditingUser(user);
-    setForm({
+  const openEditUserModal = (user) => {
+    if (!hasPermission("users", "edit")) {
+      notifyUser(showToast, "warning", "You do not have permission to edit users.");
+      return;
+    }
+
+    if (!user?.id) {
+      notifyUser(showToast, "warning", "Select a valid user first.");
+      return;
+    }
+
+    setSelectedUserId(user.id);
+    setUserForm({
       fullName: user.fullName || "",
-      username: user.username || "",
       email: user.email || "",
-      mobile: user.mobile || "",
-      role: user.role || "Operator",
-      status: user.status || "Active",
-      assignedProjects: user.assignedProjects?.length ? user.assignedProjects : ["All"],
-      passwordResetRequired: Boolean(user.passwordResetRequired),
+      phone: user.phone || user.mobile || "",
+      roleId:
+        user.roleId ||
+        roleOptions.find((role) => role.normalizedName === normalizeBackendRoleName(user.roleName || user.role))?.id ||
+        roleOptions[0]?.id ||
+        "",
+      password: "",
     });
-    setShowForm(true);
+
+    setUserModalMode("edit");
   };
 
-  const closeForm = () => {
-    setShowForm(false);
-    setEditingUser(null);
-    setForm(emptyForm);
+  const closeUserModal = () => {
+    if (savingUser) return;
+    setUserModalMode(null);
+    setSelectedUserId("");
+    setUserForm(emptyUserForm);
   };
 
-  const toggleProjectScope = (projectId) => {
-    setForm((prev) => {
-      if (projectId === "All") {
-        return { ...prev, assignedProjects: ["All"] };
-      }
-
-      const withoutAll = (prev.assignedProjects || []).filter((item) => item !== "All");
-      const exists = withoutAll.includes(projectId);
-      const nextProjects = exists
-        ? withoutAll.filter((item) => item !== projectId)
-        : [...withoutAll, projectId];
-
-      return {
-        ...prev,
-        assignedProjects: nextProjects.length ? nextProjects : ["All"],
-      };
-    });
+  const handleUserFormChange = (field, value) => {
+    setUserForm((prev) => ({
+      ...prev,
+      [field]: value,
+    }));
   };
 
-  const saveUser = () => {
-    if (!form.fullName.trim()) {
-      showToast?.("warning", "Please enter full name.");
+  const handleSaveUser = async (event) => {
+    event?.preventDefault?.();
+
+    const payload = {
+      fullName: userForm.fullName.trim(),
+      email: userForm.email.trim(),
+      phone: userForm.phone.trim(),
+      roleId: userForm.roleId,
+    };
+
+    if (!payload.fullName || !payload.email || !payload.roleId) {
+      notifyUser(showToast, "warning", "Full name, email, and role are required.");
       return;
     }
 
-    if (!form.username.trim()) {
-      showToast?.("warning", "Please enter username.");
-      return;
-    }
+    if (userModalMode === "add") {
+      payload.password = userForm.password.trim();
 
-    if (!form.email.trim()) {
-      showToast?.("warning", "Please enter email.");
-      return;
-    }
-
-    if (["Operator", "Supervisor"].includes(form.role)) {
-      const assignedProjects = (form.assignedProjects || []).filter((item) => item !== "All");
-
-      if (assignedProjects.length === 0) {
-        showToast?.("warning", "Operator and Supervisor users must be assigned to at least one specific project.");
+      if (!payload.password) {
+        notifyUser(showToast, "warning", "Temporary password is required for new users.");
         return;
       }
     }
 
-    const formCompanyId = form.companyId || currentUser?.companyId || "";
-    const editingKey = editingUser ? makeTenantEntityKey(editingUser) : "";
+    setSavingUser(true);
 
-    const duplicateUsername = users.some((user) =>
-      user.username?.toLowerCase() === form.username.trim().toLowerCase() &&
-      companyMatches(user.companyId, formCompanyId) &&
-      makeTenantEntityKey(user) !== editingKey
-    );
+    try {
+      if (userModalMode === "add") {
+        const response = await api.post("/users", payload);
+        const savedUser = normalizeBackendUserForState(response.data);
 
-    if (duplicateUsername) {
-      showToast?.("error", "Username already exists.");
-      return;
+        setUsers((prev) => [
+          savedUser,
+          ...prev.filter((user) => user.id !== savedUser.id),
+        ]);
+
+        setSelectedUserId(savedUser.id);
+        trackActivity("Add User", "users", `${savedUser.fullName} created.`);
+        notifyUser(showToast, "success", "User added successfully.");
+      }
+
+      if (userModalMode === "edit" && selectedUser?.id) {
+        const response = await api.patch(`/users/${selectedUser.id}`, payload);
+        const savedUser = normalizeBackendUserForState(response.data);
+
+        setUsers((prev) =>
+          prev.map((user) => (user.id === savedUser.id ? savedUser : user))
+        );
+
+        trackActivity("Update User", "users", `${savedUser.fullName} updated.`);
+        notifyUser(showToast, "success", "User updated successfully.");
+      }
+
+      closeUserModal();
+    } catch (error) {
+      console.error("Failed to save user:", error);
+      const message =
+        error?.response?.data?.message ||
+        error?.message ||
+        "Failed to save user.";
+      notifyUser(showToast, inferToastTypeFromMessage(message), message);
+    } finally {
+      setSavingUser(false);
     }
-
-    if (editingUser) {
-      setUsers((prev) =>
-        prev.map((user) =>
-          makeTenantEntityKey(user) === makeTenantEntityKey(editingUser)
-            ? {
-                ...user,
-                ...form,
-                companyId: form.companyId || user.companyId || currentUser?.companyId || "",
-                updatedAt: new Date().toISOString(),
-                updatedBy: currentUser?.fullName || "System",
-              }
-            : user
-        )
-      );
-
-      trackActivity("Update User", "users", `${form.fullName} updated.`);
-      showToast?.("success", "User updated successfully.");
-      closeForm();
-      return;
-    }
-
-    const newUser = {
-      id: `USR-${String(users.length + 1).padStart(3, "0")}`,
-      ...form,
-      companyId: form.companyId || currentUser?.companyId || "",
-      createdAt: new Date().toISOString(),
-      createdBy: currentUser?.fullName || "System",
-      lastLogin: "",
-    };
-
-    setUsers((prev) => [...prev, newUser]);
-    trackActivity("Add User", "users", `${newUser.fullName} created with ${newUser.role} role.`);
-    showToast?.("success", "User added successfully.");
-    closeForm();
   };
 
-  const toggleUserStatus = (user) => {
-    if (!hasPermission("users", "deactivate")) return;
-
-    if (makeTenantEntityKey(user) === makeTenantEntityKey(currentUser)) {
-      showToast?.("warning", "You cannot deactivate the currently signed-in user.");
+  const askChangeUserStatus = (user) => {
+    if (!hasPermission("users", "deactivate")) {
+      notifyUser(showToast, "warning", "You do not have permission to change user status.");
       return;
     }
 
-    const newStatus = user.status === "Active" ? "Inactive" : "Active";
+    if (!user?.id) return;
 
-    setUsers((prev) =>
-      prev.map((item) =>
-        makeTenantEntityKey(item) === makeTenantEntityKey(user)
-          ? { ...item, status: newStatus, updatedAt: new Date().toISOString() }
-          : item
-      )
-    );
+    if (user.id === currentUser?.id) {
+      notifyUser(showToast, "warning", "You cannot deactivate the currently signed-in user.");
+      return;
+    }
 
-    trackActivity("Change User Status", "users", `${user.fullName} changed to ${newStatus}.`);
-    showToast?.("success", `User changed to ${newStatus}.`);
+    const nextIsActive = user.status !== "Active";
+    const nextStatus = nextIsActive ? "Active" : "Inactive";
+
+    setUserConfirmModal({
+      open: true,
+      title: `${nextStatus} User`,
+      message: `Are you sure you want to ${nextStatus.toLowerCase()} ${user.fullName}?`,
+      confirmLabel: nextStatus === "Active" ? "Activate" : "Deactivate",
+      confirmTone: nextStatus === "Active" ? "emerald" : "red",
+      onConfirm: async () => {
+        try {
+          const response = await api.patch(`/users/${user.id}/status`, {
+            isActive: nextIsActive,
+          });
+          const updatedUser = normalizeBackendUserForState(response.data);
+
+          setUsers((prev) =>
+            prev.map((item) => (item.id === updatedUser.id ? updatedUser : item))
+          );
+
+          trackActivity("Change User Status", "users", `${updatedUser.fullName} changed to ${updatedUser.status}.`);
+          notifyUser(showToast, "success", `User changed to ${updatedUser.status}.`);
+        } catch (error) {
+          console.error("Failed to change user status:", error);
+          notifyUser(showToast, "warning", "Failed to change user status.");
+        }
+      },
+    });
   };
 
   const resetPassword = (user) => {
-    if (!hasPermission("users", "resetPassword")) return;
-
-    setUsers((prev) =>
-      prev.map((item) =>
-        makeTenantEntityKey(item) === makeTenantEntityKey(user)
-          ? { ...item, passwordResetRequired: true, updatedAt: new Date().toISOString() }
-          : item
-      )
-    );
-
-    trackActivity("Reset Password", "users", `${user.fullName} marked for password reset.`);
-    showToast?.("success", "Password reset required flag enabled.");
-  };
-
-  const loginAsUser = (user) => {
-    if (user.status !== "Active") {
-      showToast?.("warning", "Inactive users cannot sign in.");
+    if (!hasPermission("users", "resetPassword")) {
+      notifyUser(showToast, "warning", "You do not have permission to reset passwords.");
       return;
     }
 
-    setCurrentUserId(user.id);
-    setSelectedCompanyId?.(user.role === "PlatformAdmin" ? "PLATFORM" : user.companyId || "");
-    setUsers((prev) =>
-      prev.map((item) =>
-        makeTenantEntityKey(item) === makeTenantEntityKey(user) ? { ...item, lastLogin: new Date().toISOString() } : item
-      )
-    );
+    if (!user?.id) return;
 
-    setActivityLog?.((prev) => [
-      createActivityRecord({
-        user,
-        action: "Switch Session",
-        module: "authentication",
-        details: `Local test session switched to ${user.fullName}.`,
-      }),
-      ...prev,
+    setUserConfirmModal({
+      open: true,
+      title: "Reset Password",
+      message: `Generate a temporary password for ${user.fullName}? The user must change it after next login.`,
+      confirmLabel: "Reset Password",
+      confirmTone: "amber",
+      onConfirm: async () => {
+        setResettingPassword(true);
+
+        try {
+          const response = await api.patch(`/users/${user.id}/reset-password`, {});
+          const temporaryPassword = response.data?.temporaryPassword || "";
+
+          setUsers((prev) =>
+            prev.map((item) =>
+              item.id === user.id
+                ? {
+                    ...item,
+                    passwordResetRequired: true,
+                    mustChangePassword: true,
+                    updatedAt: new Date().toISOString(),
+                  }
+                : item
+            )
+          );
+
+          setTemporaryPasswordResult({
+            userName: user.fullName,
+            temporaryPassword,
+          });
+
+          trackActivity("Reset Password", "users", `${user.fullName} temporary password generated.`);
+          notifyUser(showToast, "success", "Temporary password generated.");
+        } catch (error) {
+          console.error("Failed to reset password:", error);
+          notifyUser(showToast, "warning", "Failed to reset password.");
+        } finally {
+          setResettingPassword(false);
+        }
+      },
+    });
+  };
+
+  const formatRoleLabel = (user) =>
+    user.roleName || user.role || "Operator";
+
+  const exportUsersCSV = () => {
+    const headers = [
+      "Full Name",
+      "Email",
+      "Phone",
+      "Role",
+      "Status",
+      "Password Reset Required",
+      "Last Login",
+    ];
+
+    const rows = filteredUsers.map((user) => [
+      user.fullName || "",
+      user.email || "",
+      user.phone || user.mobile || "",
+      formatRoleLabel(user),
+      user.status || "",
+      user.passwordResetRequired || user.mustChangePassword ? "Yes" : "No",
+      user.lastLogin || "",
     ]);
 
-    showToast?.("success", `Signed in locally as ${user.fullName}.`);
+    const csvContent = [headers, ...rows]
+      .map((row) => row.map((cell) => `"${String(cell ?? "").replace(/"/g, '""')}"`).join(","))
+      .join("\n");
+
+    const blob = new Blob([csvContent], { type: "text/csv;charset=utf-8;" });
+    const url = URL.createObjectURL(blob);
+    const link = document.createElement("a");
+    const today = new Date().toISOString().split("T")[0];
+    link.href = url;
+    link.download = `fleet_fuel_pro_users_${today}.csv`;
+    link.click();
+    URL.revokeObjectURL(url);
+
+    notifyUser(showToast, "success", "Users exported successfully.");
   };
 
-  const formatProjectScope = (scope = []) => {
-    if (!scope.length || scope.includes("All")) return "All Projects";
-    return scope.join(", ");
+  const printUsersTable = () => {
+    const rowsHtml = filteredUsers
+      .map(
+        (user) => `
+          <tr>
+            <td>${user.fullName || "-"}</td>
+            <td>${user.email || "-"}</td>
+            <td>${user.phone || user.mobile || "-"}</td>
+            <td>${formatRoleLabel(user)}</td>
+            <td>${user.status || "-"}</td>
+            <td>${user.passwordResetRequired || user.mustChangePassword ? "Required" : "No"}</td>
+            <td>${user.lastLogin || "Never"}</td>
+          </tr>
+        `
+      )
+      .join("");
+
+    const printWindow = window.open("", "_blank", "width=1100,height=800");
+
+    if (!printWindow) {
+      notifyUser(showToast, "warning", "Please allow popups to print the users table.");
+      return;
+    }
+
+    printWindow.document.write(`
+      <html>
+        <head>
+          <title>Fleet Fuel PRO - Users</title>
+          <style>
+            body { font-family: Arial, sans-serif; padding: 24px; color: #0f172a; }
+            h1 { margin: 0 0 4px; font-size: 22px; }
+            p { margin: 0 0 18px; color: #475569; }
+            table { width: 100%; border-collapse: collapse; font-size: 12px; }
+            th, td { border: 1px solid #cbd5e1; padding: 8px; text-align: left; }
+            th { background: #0f172a; color: white; }
+            tr:nth-child(even) { background: #f8fafc; }
+          </style>
+        </head>
+        <body>
+          <h1>Fleet Fuel PRO - Users & Roles</h1>
+          <p>Printed on ${new Date().toLocaleString()}</p>
+          <table>
+            <thead>
+              <tr>
+                <th>Full Name</th>
+                <th>Email</th>
+                <th>Phone</th>
+                <th>Role</th>
+                <th>Status</th>
+                <th>Password Reset</th>
+                <th>Last Login</th>
+              </tr>
+            </thead>
+            <tbody>${rowsHtml || `<tr><td colspan="7">No users found.</td></tr>`}</tbody>
+          </table>
+        </body>
+      </html>
+    `);
+
+    printWindow.document.close();
+    printWindow.focus();
+    printWindow.print();
+    printWindow.close();
   };
+
+  const closeConfirmModal = () => {
+    if (resettingPassword) return;
+
+    setUserConfirmModal({
+      open: false,
+      title: "",
+      message: "",
+      confirmLabel: "Confirm",
+      confirmTone: "amber",
+      onConfirm: null,
+    });
+  };
+
+  const confirmButtonClass =
+    userConfirmModal.confirmTone === "red"
+      ? "bg-red-500 hover:bg-red-400 text-white shadow-red-500/20"
+      : userConfirmModal.confirmTone === "emerald"
+      ? "bg-emerald-500 hover:bg-emerald-400 text-slate-950 shadow-emerald-500/20"
+      : "bg-amber-400 hover:bg-amber-300 text-slate-950 shadow-amber-500/20";
 
   return (
     <div className="bg-transparent min-h-screen text-slate-100 overflow-y-auto h-screen scroll-smooth [scrollbar-color:#334155_transparent]">
       <div className="fleet-page-shell w-full max-w-[1920px] mx-auto px-2 sm:px-3 lg:px-4 xl:px-5 2xl:px-8 py-3 sm:py-4 lg:py-5 text-[12px] lg:text-[13px]">
         <div className="flex flex-col xl:flex-row justify-between xl:items-center gap-3 mb-4">
           <div>
-            <h1 className="text-xl sm:text-2xl font-black tracking-tight text-slate-100">Users & Roles</h1>
-            <p className="text-slate-400 text-sm">Enterprise access control, project scope, and activity tracking</p>
+            <p className="text-[11px] font-black uppercase tracking-[0.28em] text-amber-300 mb-2">
+              Access Control
+            </p>
+            <h1 className="text-xl sm:text-2xl font-black tracking-tight text-slate-100">
+              Users & Roles
+            </h1>
+            <p className="text-slate-400 text-sm">
+              Manage backend users, roles, password resets, and account status inside the current company.
+            </p>
           </div>
 
-          <div className="flex flex-wrap gap-2">
+          <div className="relative" ref={settingsRef}>
             <button
-              onClick={() => setShowActivity(!showActivity)}
-              className="bg-slate-900 hover:bg-slate-800 border border-slate-700 px-4 py-2.5 rounded-xl font-bold transition"
+              onClick={() => setSettingsOpen((prev) => !prev)}
+              className="h-12 w-12 rounded-2xl border border-slate-700 bg-slate-950/80 hover:border-amber-400 hover:bg-slate-900 text-slate-200 hover:text-amber-300 transition flex items-center justify-center cursor-pointer"
+              title="Users settings"
             >
-              {showActivity ? "Hide Activity" : "View Activity"}
+              <span className="flex flex-col gap-1">
+                <span className="block h-0.5 w-5 rounded-full bg-current" />
+                <span className="block h-0.5 w-5 rounded-full bg-current" />
+                <span className="block h-0.5 w-5 rounded-full bg-current" />
+              </span>
             </button>
 
-            {hasPermission("users", "add") && (
-              <button
-                onClick={openAddUser}
-                className="bg-amber-400 hover:bg-amber-300 text-slate-950 px-4 py-2.5 rounded-xl font-bold shadow-lg shadow-amber-500/20 transition-all duration-200 active:scale-[0.98]"
-              >
-                + Add User
-              </button>
+            {settingsOpen && (
+              <div className="absolute right-0 mt-2 w-56 rounded-2xl border border-slate-700 bg-slate-950 shadow-2xl shadow-black/40 z-40 overflow-hidden">
+                <button
+                  onClick={openAddUserModal}
+                  className="w-full px-4 py-3 text-left text-sm font-bold text-slate-200 hover:bg-slate-800/80 hover:text-amber-300 transition flex items-center gap-3 disabled:opacity-40 disabled:cursor-not-allowed"
+                  disabled={!hasPermission("users", "add")}
+                >
+                  <span>＋</span>
+                  <span>Add User</span>
+                </button>
+
+                <button
+                  onClick={exportUsersCSV}
+                  className="w-full px-4 py-3 text-left text-sm font-bold text-slate-200 hover:bg-slate-800/80 hover:text-amber-300 transition flex items-center gap-3"
+                >
+                  <span>⇩</span>
+                  <span>Export CSV</span>
+                </button>
+
+                <button
+                  onClick={printUsersTable}
+                  className="w-full px-4 py-3 text-left text-sm font-bold text-slate-200 hover:bg-slate-800/80 hover:text-amber-300 transition flex items-center gap-3"
+                >
+                  <span>⎙</span>
+                  <span>Print Table</span>
+                </button>
+
+                <button
+                  onClick={refreshUsersAndRolesFromBackend}
+                  className="w-full px-4 py-3 text-left text-sm font-bold text-slate-200 hover:bg-slate-800/80 hover:text-amber-300 transition flex items-center gap-3"
+                >
+                  <span>⟳</span>
+                  <span>Refresh</span>
+                </button>
+              </div>
             )}
           </div>
         </div>
@@ -13503,17 +14138,17 @@ function UsersPage({
 
           <div className="bg-slate-900/80 border border-slate-700/80 rounded-2xl p-4 shadow-xl">
             <p className="text-slate-400 text-xs uppercase tracking-[0.2em]">Active</p>
-            <p className="text-2xl font-black mt-2 text-emerald-300">{users.filter((u) => u.status === "Active").length}</p>
+            <p className="text-2xl font-black mt-2 text-emerald-300">{activeUsersCount}</p>
           </div>
 
           <div className="bg-slate-900/80 border border-slate-700/80 rounded-2xl p-4 shadow-xl">
             <p className="text-slate-400 text-xs uppercase tracking-[0.2em]">Inactive</p>
-            <p className="text-2xl font-black mt-2 text-red-300">{users.filter((u) => u.status === "Inactive").length}</p>
+            <p className="text-2xl font-black mt-2 text-red-300">{inactiveUsersCount}</p>
           </div>
 
           <div className="bg-slate-900/80 border border-slate-700/80 rounded-2xl p-4 shadow-xl">
-            <p className="text-slate-400 text-xs uppercase tracking-[0.2em]">Roles</p>
-            <p className="text-2xl font-black mt-2 text-amber-300">{roleOptions.length}</p>
+            <p className="text-slate-400 text-xs uppercase tracking-[0.2em]">Password Reset</p>
+            <p className="text-2xl font-black mt-2 text-amber-300">{resetRequiredCount}</p>
           </div>
         </div>
 
@@ -13522,7 +14157,7 @@ function UsersPage({
             <input
               value={searchTerm}
               onChange={(e) => setSearchTerm(e.target.value)}
-              placeholder="Search users..."
+              placeholder="Search user, email, phone, role..."
               className="bg-[#080d19] border border-slate-700 hover:border-amber-400 focus:border-amber-400 focus:ring-2 focus:ring-amber-400/20 text-slate-100 px-3 py-2.5 rounded-xl w-full outline-none"
             />
 
@@ -13533,7 +14168,7 @@ function UsersPage({
             >
               <option value="All">All Roles</option>
               {roleOptions.map((role) => (
-                <option key={role} value={role}>{role}</option>
+                <option key={role.id} value={role.normalizedName}>{role.name}</option>
               ))}
             </select>
 
@@ -13548,238 +14183,269 @@ function UsersPage({
             </select>
 
             <div className="bg-slate-950 border border-slate-700 rounded-xl px-3 py-2.5 text-sm">
-              Current: <span className="text-amber-300 font-bold">{currentUser?.fullName}</span>
+              Current: <span className="text-amber-300 font-bold">{currentUser?.fullName || "-"}</span>
             </div>
           </div>
         </div>
 
-        {showActivity && (
-          <div className="bg-slate-900/80 border border-slate-700/80 rounded-2xl p-4 mb-4 shadow-xl">
-            <div className="flex items-center justify-between mb-3">
-              <h2 className="text-lg font-black">Recent Activity</h2>
-              <span className="text-xs text-slate-400">Local mode / backend-ready audit feed</span>
-            </div>
-
-            <div className="max-h-72 overflow-auto rounded-xl border border-slate-800">
-              <table className="w-full text-left text-sm">
-                <thead className="bg-slate-950 sticky top-0 z-[5]">
-                  <tr>
-                    <th className="p-3">Time</th>
-                    <th className="p-3">User</th>
-                    <th className="p-3">Module</th>
-                    <th className="p-3">Action</th>
-                    <th className="p-3">Details</th>
-                  </tr>
-                </thead>
-                <tbody>
-                  {activityLog.length === 0 ? (
-                    <tr>
-                      <td colSpan="5" className="p-4 text-center text-slate-400">No activity recorded yet.</td>
-                    </tr>
-                  ) : (
-                    activityLog.slice(0, 30).map((item) => (
-                      <tr key={item.id} className="border-t border-slate-800 hover:bg-slate-800/50">
-                        <td className="p-3 whitespace-nowrap">{item.createdAt ? new Date(item.createdAt).toLocaleString() : "-"}</td>
-                        <td className="p-3">{item.userName}</td>
-                        <td className="p-3">{item.module}</td>
-                        <td className="p-3 font-bold text-amber-300">{item.action}</td>
-                        <td className="p-3 text-slate-300">{item.details}</td>
-                      </tr>
-                    ))
-                  )}
-                </tbody>
-              </table>
-            </div>
-          </div>
-        )}
+        <div className="rounded-2xl border border-slate-800 bg-slate-950/40 px-4 py-3 text-xs text-slate-400 mb-4">
+          Click a user name to open the edit screen. Status is changed directly from the badge. Password reset generates a one-time temporary password shown only once.
+        </div>
 
         <div className="bg-slate-900/80 border border-slate-700/80 rounded-2xl shadow-xl overflow-hidden">
           <div className="overflow-x-auto">
-            <table className="w-full text-left text-sm min-w-[1050px]">
+            <table className="w-full text-left text-sm min-w-[980px]">
               <thead className="bg-slate-950 sticky top-0 z-[5]">
                 <tr>
-                  <th className="p-3">User</th>
+                  <th className="p-3">User Name</th>
+                  <th className="p-3">Email</th>
+                  <th className="p-3">Phone</th>
                   <th className="p-3">Role</th>
                   <th className="p-3">Status</th>
-                  <th className="p-3">Project Scope</th>
                   <th className="p-3">Password Reset</th>
                   <th className="p-3">Last Login</th>
-                  <th className="p-3 text-right">Actions</th>
+                  <th className="p-3 text-right">Security</th>
                 </tr>
               </thead>
               <tbody>
                 {filteredUsers.map((user) => (
-                  <tr key={makeTenantEntityKey(user)} className="border-t border-slate-800 hover:bg-slate-800/50 transition">
+                  <tr key={user.id} className="border-t border-slate-800 hover:bg-slate-800/50 transition">
                     <td className="p-3">
-                      <div className="font-bold text-slate-100">{user.fullName}</div>
-                      <div className="text-xs text-slate-400">@{user.username} • {user.email}</div>
+                      <button
+                        type="button"
+                        onClick={() => openEditUserModal(user)}
+                        className="font-black text-slate-100 hover:text-amber-300 transition cursor-pointer text-left"
+                      >
+                        {user.fullName || "-"}
+                      </button>
+                      <div className="text-xs text-slate-500">@{user.username || makeUsernameFromUser(user)}</div>
                     </td>
+                    <td className="p-3 text-slate-300">{user.email || "-"}</td>
+                    <td className="p-3 text-slate-300">{user.phone || user.mobile || "-"}</td>
                     <td className="p-3">
-                      <span className="px-2 py-1 rounded-lg bg-amber-400/15 text-amber-300 border border-amber-400/20 font-bold">
-                        {user.role}
+                      <span className="px-2.5 py-1 rounded-lg bg-amber-400/15 text-amber-300 border border-amber-400/20 font-bold">
+                        {formatRoleLabel(user)}
                       </span>
                     </td>
                     <td className="p-3">
-                      <span className={`px-2 py-1 rounded-lg border font-bold ${user.status === "Active" ? "bg-emerald-500/15 text-emerald-300 border-emerald-500/30" : "bg-red-500/15 text-red-300 border-red-500/30"}`}>
+                      <button
+                        type="button"
+                        onClick={() => askChangeUserStatus(user)}
+                        className={`px-3 py-1 rounded-full border font-black text-xs transition cursor-pointer ${
+                          user.status === "Active"
+                            ? "bg-emerald-500/15 text-emerald-300 border-emerald-500/30 hover:bg-emerald-500/25"
+                            : "bg-red-500/15 text-red-300 border-red-500/30 hover:bg-red-500/25"
+                        }`}
+                      >
                         {user.status}
-                      </span>
+                      </button>
                     </td>
-                    <td className="p-3 max-w-[250px] truncate">{formatProjectScope(user.assignedProjects)}</td>
-                    <td className="p-3">{user.passwordResetRequired ? "Required" : "No"}</td>
-                    <td className="p-3 whitespace-nowrap">{user.lastLogin ? new Date(user.lastLogin).toLocaleString() : "Never"}</td>
-                    <td className="p-3">
-                      <div className="flex flex-wrap justify-end gap-2">
-                        <button
-                          onClick={() => loginAsUser(user)}
-                          className="px-3 py-1.5 rounded-lg bg-slate-800 hover:bg-slate-700 border border-slate-700 text-xs font-bold"
-                        >
-                          Login Test
-                        </button>
-
-                        {hasPermission("users", "edit") && (
-                          <button
-                            onClick={() => openEditUser(user)}
-                            className="px-3 py-1.5 rounded-lg bg-blue-500/15 hover:bg-blue-500/25 border border-blue-500/30 text-blue-300 text-xs font-bold"
-                          >
-                            Edit
-                          </button>
-                        )}
-
-                        {hasPermission("users", "resetPassword") && (
-                          <button
-                            onClick={() => resetPassword(user)}
-                            className="px-3 py-1.5 rounded-lg bg-amber-400/15 hover:bg-amber-400/25 border border-amber-400/30 text-amber-300 text-xs font-bold"
-                          >
-                            Reset
-                          </button>
-                        )}
-
-                        {hasPermission("users", "deactivate") && (
-                          <button
-                            onClick={() => toggleUserStatus(user)}
-                            className="px-3 py-1.5 rounded-lg bg-red-500/10 hover:bg-red-500/20 border border-red-500/35 text-red-300 text-xs font-bold"
-                          >
-                            {user.status === "Active" ? "Deactivate" : "Activate"}
-                          </button>
-                        )}
-                      </div>
+                    <td className="p-3 text-slate-300">
+                      {user.passwordResetRequired || user.mustChangePassword ? "Required" : "No"}
+                    </td>
+                    <td className="p-3 whitespace-nowrap text-slate-300">
+                      {user.lastLogin ? new Date(user.lastLogin).toLocaleString() : "Never"}
+                    </td>
+                    <td className="p-3 text-right">
+                      <button
+                        type="button"
+                        onClick={() => resetPassword(user)}
+                        disabled={!hasPermission("users", "resetPassword")}
+                        className="px-3 py-1.5 rounded-lg bg-amber-400/15 hover:bg-amber-400/25 border border-amber-400/30 text-amber-300 text-xs font-bold disabled:opacity-40 disabled:cursor-not-allowed"
+                      >
+                        Reset Password
+                      </button>
                     </td>
                   </tr>
                 ))}
+
+                {!filteredUsers.length && (
+                  <tr>
+                    <td colSpan={8} className="p-8 text-center text-slate-500">
+                      No users found.
+                    </td>
+                  </tr>
+                )}
               </tbody>
             </table>
           </div>
         </div>
       </div>
 
-      {showForm && (
-        <div className="fleet-modal-backdrop fixed inset-0 z-[9998] bg-black/70 backdrop-blur-sm flex items-center justify-center p-4">
-          <div className="bg-slate-950 border border-slate-700 rounded-2xl shadow-2xl w-full max-w-3xl max-h-[90vh] overflow-y-auto">
-            <div className="p-5 border-b border-slate-800 flex items-center justify-between">
-              <div>
-                <h2 className="text-xl font-black">{editingUser ? "Edit User" : "Add User"}</h2>
-                <p className="text-sm text-slate-400">Local user profile now, backend user account later.</p>
-              </div>
-              <button onClick={closeForm} className="text-slate-400 hover:text-white text-xl">×</button>
-            </div>
-
-            <div className="p-5 grid grid-cols-1 md:grid-cols-2 gap-4">
-              <div>
-                <label className="block text-xs text-slate-400 mb-1">Full Name</label>
-                <input value={form.fullName} onChange={(e) => setForm({ ...form, fullName: e.target.value })} className="w-full bg-slate-900 border border-slate-700 rounded-xl p-3 outline-none focus:border-amber-400" />
-              </div>
-
-              <div>
-                <label className="block text-xs text-slate-400 mb-1">Username</label>
-                <input value={form.username} onChange={(e) => setForm({ ...form, username: e.target.value })} className="w-full bg-slate-900 border border-slate-700 rounded-xl p-3 outline-none focus:border-amber-400" />
-              </div>
-
-              <div>
-                <label className="block text-xs text-slate-400 mb-1">Email</label>
-                <input value={form.email} onChange={(e) => setForm({ ...form, email: e.target.value })} className="w-full bg-slate-900 border border-slate-700 rounded-xl p-3 outline-none focus:border-amber-400" />
-              </div>
-
-              <div>
-                <label className="block text-xs text-slate-400 mb-1">Mobile</label>
-                <input value={form.mobile} onChange={(e) => setForm({ ...form, mobile: e.target.value })} className="w-full bg-slate-900 border border-slate-700 rounded-xl p-3 outline-none focus:border-amber-400" />
-              </div>
-
-              <div>
-                <label className="block text-xs text-slate-400 mb-1">Role</label>
-                <select
-                  value={form.role}
-                  onChange={(e) => {
-                    const nextRole = e.target.value;
-                    setForm({
-                      ...form,
-                      role: nextRole,
-                      assignedProjects: ["Operator", "Supervisor"].includes(nextRole)
-                        ? (form.assignedProjects || []).filter((item) => item !== "All")
-                        : (form.assignedProjects?.length ? form.assignedProjects : ["All"]),
-                    });
-                  }}
-                  className="w-full bg-slate-900 border border-slate-700 rounded-xl p-3 outline-none focus:border-amber-400"
-                >
-                  {roleOptions.map((role) => <option key={role} value={role}>{role}</option>)}
-                </select>
-              </div>
-
-              <div>
-                <label className="block text-xs text-slate-400 mb-1">Status</label>
-                <select value={form.status} onChange={(e) => setForm({ ...form, status: e.target.value })} className="w-full bg-slate-900 border border-slate-700 rounded-xl p-3 outline-none focus:border-amber-400">
-                  <option value="Active">Active</option>
-                  <option value="Inactive">Inactive</option>
-                </select>
-              </div>
-
-              <div className="md:col-span-2">
-                <label className="block text-xs text-slate-400 mb-2">Project Scope</label>
-                {isRestrictedScopeRole && (
-                  <p className="text-xs text-amber-300 mb-2">
-                    Operator and Supervisor must be linked to specific projects only. All Projects is disabled for these roles.
+      {userModalMode && (
+        <ModalPortal>
+          <div className="fleet-modal-backdrop fixed inset-0 z-[9998] bg-black/70 backdrop-blur-sm flex items-center justify-center p-4">
+            <div className="bg-slate-950 border border-slate-700 rounded-2xl shadow-2xl w-full max-w-2xl max-h-[90vh] overflow-y-auto">
+              <div className="p-5 border-b border-slate-800 flex items-center justify-between">
+                <div>
+                  <h2 className="text-xl font-black">{userModalMode === "edit" ? "Edit User" : "Add User"}</h2>
+                  <p className="text-sm text-slate-400">
+                    {userModalMode === "edit"
+                      ? "Update backend user profile and assigned role."
+                      : "Create a backend user account inside the current company."}
                   </p>
-                )}
-                <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-2">
-                  {!isRestrictedScopeRole && (
-                    <button
-                      type="button"
-                      onClick={() => toggleProjectScope("All")}
-                      className={`text-left rounded-xl border p-3 transition ${form.assignedProjects.includes("All") ? "bg-amber-400 text-slate-950 border-amber-400 font-bold" : "bg-slate-900 border-slate-700 hover:border-amber-400"}`}
-                    >
-                      All Projects
-                    </button>
-                  )}
+                </div>
+                <button onClick={closeUserModal} className="text-slate-400 hover:text-white text-xl cursor-pointer">×</button>
+              </div>
 
-                  {activeProjects.map((project) => (
-                    <button
-                      key={makeTenantEntityKey(project)}
-                      type="button"
-                      onClick={() => toggleProjectScope(project.id)}
-                      className={`text-left rounded-xl border p-3 transition ${form.assignedProjects.includes(project.id) ? "bg-amber-400 text-slate-950 border-amber-400 font-bold" : "bg-slate-900 border-slate-700 hover:border-amber-400"}`}
+              <form onSubmit={handleSaveUser}>
+                <div className="p-5 grid grid-cols-1 md:grid-cols-2 gap-4">
+                  <div>
+                    <label className="block text-xs text-slate-400 mb-1">Full Name</label>
+                    <input
+                      value={userForm.fullName}
+                      onChange={(e) => handleUserFormChange("fullName", e.target.value)}
+                      className="w-full bg-slate-900 border border-slate-700 rounded-xl p-3 outline-none focus:border-amber-400"
+                    />
+                  </div>
+
+                  <div>
+                    <label className="block text-xs text-slate-400 mb-1">Email</label>
+                    <input
+                      value={userForm.email}
+                      onChange={(e) => handleUserFormChange("email", e.target.value)}
+                      className="w-full bg-slate-900 border border-slate-700 rounded-xl p-3 outline-none focus:border-amber-400"
+                    />
+                  </div>
+
+                  <div>
+                    <label className="block text-xs text-slate-400 mb-1">Phone</label>
+                    <input
+                      value={userForm.phone}
+                      onChange={(e) => handleUserFormChange("phone", e.target.value)}
+                      className="w-full bg-slate-900 border border-slate-700 rounded-xl p-3 outline-none focus:border-amber-400"
+                    />
+                  </div>
+
+                  <div>
+                    <label className="block text-xs text-slate-400 mb-1">Role</label>
+                    <select
+                      value={userForm.roleId}
+                      onChange={(e) => handleUserFormChange("roleId", e.target.value)}
+                      className="w-full bg-slate-900 border border-slate-700 rounded-xl p-3 outline-none focus:border-amber-400"
                     >
-                      <div>{project.id}</div>
-                      <div className="text-xs opacity-80">{project.name}</div>
-                    </button>
-                  ))}
+                      {roleOptions.map((role) => (
+                        <option key={role.id} value={role.id}>{role.name}</option>
+                      ))}
+                    </select>
+                  </div>
+
+                  {userModalMode === "add" && (
+                    <div className="md:col-span-2">
+                      <label className="block text-xs text-slate-400 mb-1">Temporary Password</label>
+                      <input
+                        value={userForm.password}
+                        onChange={(e) => handleUserFormChange("password", e.target.value)}
+                        className="w-full bg-slate-900 border border-slate-700 rounded-xl p-3 outline-none focus:border-amber-400"
+                      />
+                      <p className="text-xs text-slate-500 mt-2">
+                        The user will be required to change this password after the first login.
+                      </p>
+                    </div>
+                  )}
+                </div>
+
+                <div className="p-5 border-t border-slate-800 flex justify-end gap-3">
+                  <button
+                    type="button"
+                    onClick={closeUserModal}
+                    className="px-4 py-2 rounded-xl bg-slate-800 hover:bg-slate-700 text-slate-200 font-bold cursor-pointer"
+                  >
+                    Cancel
+                  </button>
+                  <button
+                    type="submit"
+                    disabled={savingUser}
+                    className="px-4 py-2 rounded-xl bg-amber-400 hover:bg-amber-300 text-slate-950 font-black disabled:opacity-60 disabled:cursor-not-allowed"
+                  >
+                    {savingUser ? "Saving..." : userModalMode === "edit" ? "Save Changes" : "Add User"}
+                  </button>
+                </div>
+              </form>
+            </div>
+          </div>
+        </ModalPortal>
+      )}
+
+      {userConfirmModal.open && (
+        <ModalPortal>
+          <div className="fixed inset-0 z-[9999] flex items-center justify-center bg-black/70 backdrop-blur-sm p-4">
+            <div className="w-full max-w-md rounded-3xl border border-slate-700 bg-[#071226] shadow-2xl shadow-black/50 overflow-hidden">
+              <div className="px-6 pt-6 pb-4 border-b border-slate-700/60">
+                <h3 className="text-xl font-extrabold text-amber-300">
+                  {userConfirmModal.title}
+                </h3>
+                <p className="text-slate-300 text-sm mt-2 leading-relaxed">
+                  {userConfirmModal.message}
+                </p>
+              </div>
+
+              <div className="flex items-center justify-end gap-3 px-6 py-5 bg-slate-900/40">
+                <button
+                  onClick={closeConfirmModal}
+                  disabled={resettingPassword}
+                  className="px-5 py-2 rounded-xl border border-slate-600 text-slate-300 hover:bg-slate-700/40 transition cursor-pointer disabled:opacity-50"
+                >
+                  Cancel
+                </button>
+
+                <button
+                  onClick={async () => {
+                    const action = userConfirmModal.onConfirm;
+                    closeConfirmModal();
+
+                    if (action) {
+                      await action();
+                    }
+                  }}
+                  disabled={resettingPassword}
+                  className={`px-5 py-2 rounded-xl font-black transition shadow-lg cursor-pointer disabled:opacity-50 ${confirmButtonClass}`}
+                >
+                  {resettingPassword ? "Processing..." : userConfirmModal.confirmLabel}
+                </button>
+              </div>
+            </div>
+          </div>
+        </ModalPortal>
+      )}
+
+      {temporaryPasswordResult && (
+        <ModalPortal>
+          <div className="fixed inset-0 z-[10000] flex items-center justify-center bg-black/70 backdrop-blur-sm p-4">
+            <div className="w-full max-w-lg rounded-3xl border border-amber-500/30 bg-[#071226] shadow-2xl shadow-black/50 overflow-hidden">
+              <div className="px-6 pt-6 pb-4 border-b border-slate-700/60">
+                <h3 className="text-xl font-extrabold text-amber-300">Temporary Password Generated</h3>
+                <p className="text-slate-300 text-sm mt-2">
+                  Share this temporary password with {temporaryPasswordResult.userName}. It is shown here only once.
+                </p>
+              </div>
+
+              <div className="px-6 py-5">
+                <div className="rounded-2xl border border-amber-400/30 bg-amber-400/10 px-4 py-4 text-center text-2xl font-black tracking-widest text-amber-300">
+                  {temporaryPasswordResult.temporaryPassword}
                 </div>
               </div>
 
-              <label className="md:col-span-2 flex items-center gap-3 bg-slate-900 border border-slate-700 rounded-xl p-3">
-                <input
-                  type="checkbox"
-                  checked={form.passwordResetRequired}
-                  onChange={(e) => setForm({ ...form, passwordResetRequired: e.target.checked })}
-                />
-                <span>Require password reset on next login</span>
-              </label>
-            </div>
-
-            <div className="p-5 border-t border-slate-800 flex justify-end gap-3">
-              <button onClick={closeForm} className="px-4 py-2 rounded-xl border border-slate-700 hover:bg-slate-800 font-bold">Cancel</button>
-              <button onClick={saveUser} className="px-4 py-2 rounded-xl bg-amber-400 hover:bg-amber-300 text-slate-950 font-black">Save User</button>
+              <div className="flex items-center justify-end gap-3 px-6 py-5 bg-slate-900/40">
+                <button
+                  onClick={() => {
+                    navigator.clipboard?.writeText(temporaryPasswordResult.temporaryPassword);
+                    notifyUser(showToast, "success", "Temporary password copied.");
+                  }}
+                  className="px-5 py-2 rounded-xl border border-amber-400/40 text-amber-300 hover:bg-amber-400/10 transition cursor-pointer font-bold"
+                >
+                  Copy
+                </button>
+                <button
+                  onClick={() => setTemporaryPasswordResult(null)}
+                  className="px-5 py-2 rounded-xl bg-amber-400 text-slate-950 font-black hover:bg-amber-300 transition cursor-pointer"
+                >
+                  Done
+                </button>
+              </div>
             </div>
           </div>
-        </div>
+        </ModalPortal>
       )}
     </div>
   );
@@ -13788,14 +14454,413 @@ function UsersPage({
 
 function CompaniesPage({ companies = [], setCompanies, currentUser, showToast }) {
   const [search, setSearch] = useState("");
+  const [settingsOpen, setSettingsOpen] = useState(false);
+  const [selectedCompanyId, setSelectedCompanyId] = useState("");
+  const [companyModalMode, setCompanyModalMode] = useState(null);
+  const [savingCompany, setSavingCompany] = useState(false);
+  const [companyConfirmModal, setCompanyConfirmModal] = useState({
+    open: false,
+    title: "",
+    message: "",
+    confirmLabel: "Confirm",
+    confirmTone: "amber",
+    onConfirm: null,
+  });
+  const settingsRef = useRef(null);
+
+  const selectedCompany = companies.find((company) => company.id === selectedCompanyId) || null;
+  const selectedCompanyIsEditable = selectedCompany && !selectedCompany.isPlatformContext;
+  const canManageCompanies = currentUser?.role === "PlatformAdmin";
+
+  const emptyCompanyForm = {
+    name: "",
+    code: "",
+    country: "Saudi Arabia",
+    currency: "SAR",
+    timezone: "Asia/Riyadh",
+    language: "EN-AR",
+  };
+
+  const [companyForm, setCompanyForm] = useState(emptyCompanyForm);
+
+  useOutsideClick(settingsRef, () => setSettingsOpen(false));
 
   const visibleCompanies = companies.filter((company) => {
     const q = normalizeScopeValue(search);
     if (!q) return true;
-    return [company.id, company.name, company.country, company.currency, company.status]
+
+    return [
+      company.id,
+      company.name,
+      company.code,
+      company.country,
+      company.city,
+      company.currency,
+      company.timezone,
+      company.language,
+      company.status,
+    ]
       .filter(Boolean)
       .some((value) => normalizeScopeValue(value).includes(q));
   });
+
+  const activeCompaniesCount = companies.filter((company) => company.isActive !== false).length;
+
+  const refreshCompaniesFromBackend = async () => {
+    try {
+      const response = await api.get("/companies");
+      const backendCompanies = Array.isArray(response.data) ? response.data : [];
+
+      setCompanies(
+        mergePlatformConsoleWithCompanies(backendCompanies)
+          .map(normalizeCompanyForState)
+          .filter((company) => company.id)
+      );
+    } catch (error) {
+      console.error("Failed to refresh companies from backend:", error);
+      notifyUser(showToast, "warning", "Failed to refresh companies from backend.");
+    }
+  };
+
+  const openAddCompanyModal = () => {
+    if (!canManageCompanies) {
+      notifyUser(showToast, "warning", "Only Platform Admin can add companies.");
+      return;
+    }
+
+    setCompanyForm(emptyCompanyForm);
+    setCompanyModalMode("add");
+    setSettingsOpen(false);
+  };
+
+  const openEditCompanyModal = (companyToEdit = selectedCompany) => {
+    if (!canManageCompanies) {
+      notifyUser(showToast, "warning", "Only Platform Admin can edit companies.");
+      return;
+    }
+
+    if (!companyToEdit || companyToEdit.isPlatformContext) {
+      notifyUser(showToast, "warning", "Platform Console cannot be edited. Click a real customer company name.");
+      return;
+    }
+
+    setSelectedCompanyId(companyToEdit.id);
+    setCompanyForm({
+      name: companyToEdit.name || "",
+      code: companyToEdit.code || "",
+      country: companyToEdit.country || "Saudi Arabia",
+      currency: normalizeCurrencyForCountry(
+        companyToEdit.country || "Saudi Arabia",
+        companyToEdit.currency || getCurrencyByCountry(companyToEdit.country || "Saudi Arabia")
+      ),
+      timezone: companyToEdit.timezone || getTimezoneByCountry(companyToEdit.country || "Saudi Arabia"),
+      language: companyToEdit.language || "EN-AR",
+    });
+
+    setCompanyModalMode("edit");
+    setSettingsOpen(false);
+  };
+
+  const closeCompanyModal = () => {
+    if (savingCompany) return;
+    setCompanyModalMode(null);
+  };
+
+  const handleCompanyFormChange = (field, value) => {
+    if (field === "country") {
+      const defaultCurrency = getCurrencyByCountry(value);
+      const defaultTimezone = getTimezoneByCountry(value);
+
+      setCompanyForm((prev) => ({
+        ...prev,
+        country: value,
+        currency: defaultCurrency,
+        timezone: defaultTimezone,
+      }));
+
+      return;
+    }
+
+    setCompanyForm((prev) => ({
+      ...prev,
+      [field]: value,
+    }));
+  };
+
+  const handleSaveCompany = async (event) => {
+    event?.preventDefault?.();
+
+    const payload = {
+      name: companyForm.name.trim(),
+      code: companyForm.code.trim(),
+      country: companyForm.country.trim(),
+      currency: normalizeCurrencyForCountry(companyForm.country, companyForm.currency.trim()),
+      timezone: companyForm.timezone.trim() || getTimezoneByCountry(companyForm.country),
+      language: companyForm.language.trim() || "EN-AR",
+    };
+
+    if (!payload.name || !payload.code) {
+      notifyUser(showToast, "warning", "Company name and code are required.");
+      return;
+    }
+
+    setSavingCompany(true);
+
+    try {
+      if (companyModalMode === "add") {
+        const response = await api.post("/companies", payload);
+        const savedCompany = normalizeCompanyForState(response.data);
+
+        setCompanies((prev) =>
+          mergePlatformConsoleWithCompanies([
+            ...prev.filter((company) => !company.isPlatformContext),
+            savedCompany,
+          ])
+            .map(normalizeCompanyForState)
+            .filter((company) => company.id)
+        );
+
+        setSelectedCompanyId(savedCompany.id);
+        notifyUser(showToast, "success", "Company added successfully.");
+      }
+
+      if (companyModalMode === "edit" && selectedCompanyIsEditable) {
+        const response = await api.patch(`/companies/${selectedCompany.id}`, payload);
+        const savedCompany = normalizeCompanyForState(response.data);
+
+        setCompanies((prev) =>
+          mergePlatformConsoleWithCompanies(
+            prev
+              .filter((company) => !company.isPlatformContext)
+              .map((company) => (company.id === savedCompany.id ? savedCompany : company))
+          )
+            .map(normalizeCompanyForState)
+            .filter((company) => company.id)
+        );
+
+        notifyUser(showToast, "success", "Company updated successfully.");
+      }
+
+      setCompanyModalMode(null);
+      await refreshCompaniesFromBackend();
+    } catch (error) {
+      console.error("Failed to save company:", error);
+      notifyUser(
+        showToast,
+        "warning",
+        error?.response?.data?.message || "Failed to save company."
+      );
+    } finally {
+      setSavingCompany(false);
+    }
+  };
+
+  const executeCompanyStatusChange = async (company, nextIsActive) => {
+    try {
+      const response = await api.patch(`/companies/${company.id}/status`, {
+        isActive: nextIsActive,
+      });
+
+      const updatedCompany = normalizeCompanyForState(response.data);
+
+      setCompanies((prev) =>
+        mergePlatformConsoleWithCompanies(
+          prev
+            .filter((item) => !item.isPlatformContext)
+            .map((item) => (item.id === updatedCompany.id ? updatedCompany : item))
+        )
+          .map(normalizeCompanyForState)
+          .filter((item) => item.id)
+      );
+
+      notifyUser(
+        showToast,
+        "success",
+        `Company ${nextIsActive ? "activated" : "deactivated"} successfully.`
+      );
+    } catch (error) {
+      console.error("Failed to update company status:", error);
+      notifyUser(
+        showToast,
+        "warning",
+        error?.response?.data?.message || "Failed to update company status."
+      );
+    }
+  };
+
+  const closeCompanyConfirmModal = () => {
+    setCompanyConfirmModal({
+      open: false,
+      title: "",
+      message: "",
+      confirmLabel: "Confirm",
+      confirmTone: "amber",
+      onConfirm: null,
+    });
+  };
+
+  const handleToggleCompanyStatus = (company) => {
+    if (!canManageCompanies) {
+      notifyUser(showToast, "warning", "Only Platform Admin can change company status.");
+      return;
+    }
+
+    if (company?.isPlatformContext) {
+      notifyUser(showToast, "warning", "Platform Console is a virtual context and cannot be activated or deactivated.");
+      return;
+    }
+
+    const nextIsActive = company.isActive === false;
+    const actionLabel = nextIsActive ? "activate" : "deactivate";
+    const companyName = company.name || company.id;
+
+    setCompanyConfirmModal({
+      open: true,
+      title: nextIsActive ? "Activate Company" : "Deactivate Company",
+      message: `Are you sure you want to ${actionLabel} ${companyName}?`,
+      confirmLabel: nextIsActive ? "Activate" : "Deactivate",
+      confirmTone: nextIsActive ? "emerald" : "red",
+      onConfirm: async () => {
+        await executeCompanyStatusChange(company, nextIsActive);
+      },
+    });
+  };
+
+  const exportCompaniesCSV = () => {
+    const headers = [
+      "Company Name",
+      "Code",
+      "Country",
+      "Currency",
+      "Timezone",
+      "Language",
+      "Status",
+    ];
+
+    const rows = visibleCompanies.map((company) => [
+      company.name || "",
+      company.code || "",
+      company.country || "",
+      company.currency || "",
+      company.timezone || "",
+      company.language || "",
+      company.isActive === false ? "Inactive" : "Active",
+    ]);
+
+    const csvContent = [headers, ...rows]
+      .map((row) =>
+        row.map((cell) => `"${String(cell ?? "").replace(/"/g, '""')}"`).join(",")
+      )
+      .join("\n");
+
+    const blob = new Blob([csvContent], { type: "text/csv;charset=utf-8;" });
+    const url = URL.createObjectURL(blob);
+    const link = document.createElement("a");
+    const today = new Date().toISOString().split("T")[0];
+
+    link.href = url;
+    link.download = `fleet_fuel_pro_companies_${today}.csv`;
+    link.click();
+    URL.revokeObjectURL(url);
+
+    setSettingsOpen(false);
+    notifyUser(showToast, "success", "Companies CSV exported successfully.");
+  };
+
+  const printCompanies = () => {
+    setSettingsOpen(false);
+
+    const headers = [
+      "Company Name",
+      "Code",
+      "Country",
+      "Currency",
+      "Timezone",
+      "Language",
+      "Status",
+    ];
+
+    const rowsHtml = visibleCompanies
+      .map((company) => {
+        const status = company.isActive === false ? "Inactive" : "Active";
+
+        return `
+          <tr>
+            <td>${company.name || "-"}</td>
+            <td>${company.code || "-"}</td>
+            <td>${company.country || "-"}</td>
+            <td>${company.currency || "-"}</td>
+            <td>${company.timezone || "-"}</td>
+            <td>${company.language || "-"}</td>
+            <td>${status}</td>
+          </tr>
+        `;
+      })
+      .join("");
+
+    const printWindow = window.open("", "_blank", "width=1100,height=750");
+
+    if (!printWindow) {
+      notifyUser(showToast, "warning", "Popup blocked. Please allow popups to print the companies table.");
+      return;
+    }
+
+    printWindow.document.write(`
+      <html>
+        <head>
+          <title>Fleet Fuel PRO - Companies</title>
+          <style>
+            body {
+              font-family: Arial, sans-serif;
+              color: #0f172a;
+              padding: 24px;
+            }
+            h1 {
+              margin: 0 0 6px;
+              font-size: 22px;
+            }
+            p {
+              margin: 0 0 18px;
+              color: #475569;
+              font-size: 12px;
+            }
+            table {
+              width: 100%;
+              border-collapse: collapse;
+              font-size: 12px;
+            }
+            th, td {
+              border: 1px solid #cbd5e1;
+              padding: 8px;
+              text-align: left;
+              vertical-align: top;
+            }
+            th {
+              background: #f1f5f9;
+              font-weight: 700;
+            }
+          </style>
+        </head>
+        <body>
+          <h1>Fleet Fuel PRO - Companies</h1>
+          <p>Printed on ${new Date().toLocaleString("en-GB")}</p>
+          <table>
+            <thead>
+              <tr>${headers.map((header) => `<th>${header}</th>`).join("")}</tr>
+            </thead>
+            <tbody>
+              ${rowsHtml || `<tr><td colspan="7">No companies found.</td></tr>`}
+            </tbody>
+          </table>
+        </body>
+      </html>
+    `);
+
+    printWindow.document.close();
+    printWindow.focus();
+    printWindow.print();
+    printWindow.close();
+  };
 
   if (currentUser?.role !== "PlatformAdmin") {
     return (
@@ -13828,7 +14893,7 @@ function CompaniesPage({ companies = [], setCompanies, currentUser, showToast })
             </div>
             <div className="rounded-2xl border border-slate-800 bg-slate-950/50 p-3">
               <p className="text-xl font-black text-emerald-300">
-                {companies.filter((company) => normalizeSystemUserStatus(company.status) === "Active").length}
+                {activeCompaniesCount}
               </p>
               <p className="text-xs text-slate-500">Active</p>
             </div>
@@ -13856,21 +14921,63 @@ function CompaniesPage({ companies = [], setCompanies, currentUser, showToast })
             placeholder="Search company, country, currency..."
             className="w-full sm:max-w-md rounded-2xl border border-slate-700 bg-slate-950 px-4 py-3 text-sm text-white outline-none focus:border-amber-400"
           />
-          <button
-            type="button"
-            onClick={() => notifyUser(showToast, "warning", "Company creation will be connected to Backend APIs later. For now, add companies in the Companies Google Sheet.")}
-            className="rounded-2xl border border-amber-400/40 bg-amber-400/10 px-4 py-3 text-sm font-black text-amber-300 hover:bg-amber-400/20"
-          >
-            Add in Sheet
-          </button>
+
+          <div className="relative" ref={settingsRef}>
+            <button
+              type="button"
+              onClick={() => setSettingsOpen((prev) => !prev)}
+              className="flex h-12 w-12 items-center justify-center rounded-2xl border border-slate-700 bg-slate-950 text-slate-200 hover:border-amber-400 hover:text-amber-300 transition"
+              title="Companies settings"
+              aria-label="Companies settings"
+            >
+              <span className="flex flex-col gap-1" aria-hidden="true">
+                <span className="block h-0.5 w-5 rounded-full bg-current" />
+                <span className="block h-0.5 w-5 rounded-full bg-current" />
+                <span className="block h-0.5 w-5 rounded-full bg-current" />
+              </span>
+            </button>
+
+            {settingsOpen && (
+              <div className="absolute right-0 z-30 mt-2 w-56 overflow-hidden rounded-2xl border border-slate-700 bg-slate-950 shadow-2xl">
+                <button
+                  type="button"
+                  onClick={openAddCompanyModal}
+                  className="flex w-full items-center gap-3 px-4 py-3 text-left text-sm font-bold text-slate-200 hover:bg-slate-800"
+                >
+                  <span className="flex h-7 w-7 items-center justify-center rounded-xl bg-emerald-500/10 text-emerald-300 border border-emerald-500/20">＋</span>
+                  <span>Add Company</span>
+                </button>
+                <button
+                  type="button"
+                  onClick={exportCompaniesCSV}
+                  className="flex w-full items-center gap-3 px-4 py-3 text-left text-sm font-bold text-slate-200 hover:bg-slate-800"
+                >
+                  <span className="flex h-7 w-7 items-center justify-center rounded-xl bg-cyan-500/10 text-cyan-300 border border-cyan-500/20">⇩</span>
+                  <span>Export CSV</span>
+                </button>
+                <button
+                  type="button"
+                  onClick={printCompanies}
+                  className="flex w-full items-center gap-3 px-4 py-3 text-left text-sm font-bold text-slate-200 hover:bg-slate-800"
+                >
+                  <span className="flex h-7 w-7 items-center justify-center rounded-xl bg-amber-500/10 text-amber-300 border border-amber-500/20">⎙</span>
+                  <span>Print Table</span>
+                </button>
+              </div>
+            )}
+          </div>
+        </div>
+
+        <div className="mb-3 rounded-2xl border border-slate-800 bg-slate-950/40 px-4 py-3 text-xs text-slate-400">
+          Click a real customer company name to open the edit screen. The internal database ID is hidden from the table and remains used only by the system APIs.
         </div>
 
         <div className="overflow-auto rounded-2xl border border-slate-800">
           <table className="min-w-full text-sm">
             <thead className="bg-slate-950 text-slate-300 sticky top-0">
               <tr>
-                <th className="text-left p-3">Company ID</th>
                 <th className="text-left p-3">Company Name</th>
+                <th className="text-left p-3">Code</th>
                 <th className="text-left p-3">Country</th>
                 <th className="text-left p-3">Currency</th>
                 <th className="text-left p-3">Timezone</th>
@@ -13879,26 +14986,65 @@ function CompaniesPage({ companies = [], setCompanies, currentUser, showToast })
               </tr>
             </thead>
             <tbody>
-              {visibleCompanies.map((company) => (
-                <tr key={company.id} className="border-t border-slate-800 hover:bg-slate-800/40">
-                  <td className="p-3 font-black text-amber-300">{company.id}</td>
-                  <td className="p-3 font-bold text-slate-100">{company.name || company.id}</td>
-                  <td className="p-3 text-slate-300">{company.country || "-"}</td>
-                  <td className="p-3 text-slate-300">{company.currency || "-"}</td>
-                  <td className="p-3 text-slate-300">{company.timezone || "-"}</td>
-                  <td className="p-3 text-slate-300">{company.language || "-"}</td>
-                  <td className="p-3">
-                    <span className={`rounded-full px-3 py-1 text-xs font-black border ${normalizeSystemUserStatus(company.status) === "Active" ? "bg-emerald-500/10 text-emerald-300 border-emerald-500/30" : "bg-red-500/10 text-red-300 border-red-500/30"}`}>
-                      {company.status || "Active"}
-                    </span>
-                  </td>
-                </tr>
-              ))}
+              {visibleCompanies.map((company) => {
+                const isSelected = selectedCompanyId === company.id;
+                const isActive = company.isActive !== false;
+
+                return (
+                  <tr
+                    key={company.id}
+                    className={`border-t border-slate-800 hover:bg-slate-800/40 ${
+                      isSelected ? "bg-amber-400/10" : ""
+                    }`}
+                  >
+                    <td className="p-3 font-bold text-slate-100">
+                      {company.isPlatformContext ? (
+                        <span title="Platform Console cannot be edited">{company.name || company.id}</span>
+                      ) : (
+                        <button
+                          type="button"
+                          onClick={() => openEditCompanyModal(company)}
+                          className="font-black text-slate-100 cursor-pointer hover:text-amber-300 transition"
+                          title="Click to edit this company"
+                        >
+                          {company.name || company.id}
+                        </button>
+                      )}
+                    </td>
+                    <td className="p-3 text-slate-300">{company.code || "-"}</td>
+                    <td className="p-3 text-slate-300">{company.country || "-"}</td>
+                    <td className="p-3 text-slate-300">{company.currency || "-"}</td>
+                    <td className="p-3 text-slate-300">{company.timezone || "-"}</td>
+                    <td className="p-3 text-slate-300">{company.language || "-"}</td>
+                    <td className="p-3">
+                      <button
+                        type="button"
+                        onClick={(event) => {
+                          event.stopPropagation();
+                          handleToggleCompanyStatus(company);
+                        }}
+                        className={`rounded-full px-3 py-1 text-xs font-black border transition ${
+                          isActive
+                            ? "bg-emerald-500/10 text-emerald-300 border-emerald-500/30 hover:bg-emerald-500/20"
+                            : "bg-red-500/10 text-red-300 border-red-500/30 hover:bg-red-500/20"
+                        } ${company.isPlatformContext ? "cursor-not-allowed opacity-70" : "cursor-pointer"}`}
+                        title={
+                          company.isPlatformContext
+                            ? "Platform Console cannot be changed"
+                            : "Click to change company status"
+                        }
+                      >
+                        {isActive ? "Active" : "Inactive"}
+                      </button>
+                    </td>
+                  </tr>
+                );
+              })}
 
               {!visibleCompanies.length && (
                 <tr>
                   <td colSpan={7} className="p-8 text-center text-slate-500">
-                    No companies found. Add Companies CSV URL or company_id values in Users / Team / Projects.
+                    No companies found. Add companies from Settings using the backend Companies API.
                   </td>
                 </tr>
               )}
@@ -13906,10 +15052,187 @@ function CompaniesPage({ companies = [], setCompanies, currentUser, showToast })
           </table>
         </div>
       </div>
+
+      {companyConfirmModal.open && (
+        <ModalPortal>
+          <div className="fixed inset-0 z-[120] flex items-center justify-center bg-black/75 backdrop-blur-sm p-4">
+            <div className="w-full max-w-md overflow-hidden rounded-3xl border border-slate-700 bg-slate-950 shadow-2xl shadow-black/60">
+              <div className="border-b border-slate-800 px-6 pt-6 pb-4">
+                <p className="text-[11px] uppercase tracking-[0.22em] text-amber-300 font-bold">
+                  Fleet Fuel PRO Confirmation
+                </p>
+                <h3 className="mt-2 text-xl font-black text-white">
+                  {companyConfirmModal.title}
+                </h3>
+                <p className="mt-3 text-sm leading-relaxed text-slate-300">
+                  {companyConfirmModal.message}
+                </p>
+              </div>
+
+              <div className="flex flex-col-reverse gap-3 bg-slate-900/50 px-6 py-5 sm:flex-row sm:justify-end">
+                <button
+                  type="button"
+                  onClick={closeCompanyConfirmModal}
+                  className="rounded-2xl border border-slate-700 px-5 py-3 text-sm font-black text-slate-300 transition hover:border-slate-500 hover:bg-slate-800 cursor-pointer"
+                >
+                  Cancel
+                </button>
+                <button
+                  type="button"
+                  onClick={async () => {
+                    const action = companyConfirmModal.onConfirm;
+                    closeCompanyConfirmModal();
+
+                    if (typeof action === "function") {
+                      await action();
+                    }
+                  }}
+                  className={`rounded-2xl border px-5 py-3 text-sm font-black transition cursor-pointer ${
+                    companyConfirmModal.confirmTone === "red"
+                      ? "border-red-400/40 bg-red-500/10 text-red-300 hover:bg-red-500/20"
+                      : companyConfirmModal.confirmTone === "emerald"
+                      ? "border-emerald-400/40 bg-emerald-500/10 text-emerald-300 hover:bg-emerald-500/20"
+                      : "border-amber-400/40 bg-amber-400/10 text-amber-300 hover:bg-amber-400/20"
+                  }`}
+                >
+                  {companyConfirmModal.confirmLabel || "Confirm"}
+                </button>
+              </div>
+            </div>
+          </div>
+        </ModalPortal>
+      )}
+
+      {companyModalMode && (
+        <ModalPortal>
+          <div className="fixed inset-0 z-[100] flex items-center justify-center bg-black/70 p-4">
+            <form
+              onSubmit={handleSaveCompany}
+              className="w-full max-w-2xl rounded-3xl border border-slate-700 bg-slate-950 p-5 shadow-2xl"
+            >
+              <div className="mb-5 flex items-start justify-between gap-4">
+                <div>
+                  <p className="text-[11px] uppercase tracking-[0.22em] text-amber-300 font-bold">
+                    Companies Management
+                  </p>
+                  <h2 className="mt-1 text-2xl font-black text-white">
+                    {companyModalMode === "add" ? "Add Company" : "Edit Company"}
+                  </h2>
+                </div>
+                <button
+                  type="button"
+                  onClick={closeCompanyModal}
+                  className="rounded-xl border border-slate-700 px-3 py-2 text-sm font-bold text-slate-300 hover:border-red-400 hover:text-red-300"
+                >
+                  Close
+                </button>
+              </div>
+
+              <div className="grid gap-4 sm:grid-cols-2">
+                <label className="block">
+                  <span className="text-xs font-bold text-slate-400">Company Name *</span>
+                  <input
+                    value={companyForm.name}
+                    onChange={(e) => handleCompanyFormChange("name", e.target.value)}
+                    className="mt-2 w-full rounded-2xl border border-slate-700 bg-slate-900 px-4 py-3 text-sm text-white outline-none focus:border-amber-400"
+                    placeholder="ABC Contracting"
+                  />
+                </label>
+
+                <label className="block">
+                  <span className="text-xs font-bold text-slate-400">Company Code *</span>
+                  <input
+                    value={companyForm.code}
+                    onChange={(e) => handleCompanyFormChange("code", e.target.value)}
+                    className="mt-2 w-full rounded-2xl border border-slate-700 bg-slate-900 px-4 py-3 text-sm text-white outline-none focus:border-amber-400"
+                    placeholder="ABC"
+                  />
+                </label>
+
+                <label className="block">
+                  <span className="text-xs font-bold text-slate-400">Country</span>
+                  <select
+                    value={companyForm.country}
+                    onChange={(e) => handleCompanyFormChange("country", e.target.value)}
+                    className="mt-2 w-full rounded-2xl border border-slate-700 bg-slate-900 px-4 py-3 text-sm text-white outline-none focus:border-amber-400"
+                  >
+                    {COUNTRY_SETTINGS_OPTIONS.map((item) => (
+                      <option key={item.country} value={item.country}>
+                        {item.country}
+                      </option>
+                    ))}
+                  </select>
+                </label>
+
+                <label className="block">
+                  <span className="text-xs font-bold text-slate-400">Currency</span>
+                  <select
+                    value={companyForm.currency}
+                    onChange={(e) => handleCompanyFormChange("currency", e.target.value)}
+                    className="mt-2 w-full rounded-2xl border border-slate-700 bg-slate-900 px-4 py-3 text-sm text-white outline-none focus:border-amber-400"
+                  >
+                    {getCurrencyOptionsForCountry(companyForm.country).map((currency) => (
+                      <option key={currency} value={currency}>
+                        {currency}
+                      </option>
+                    ))}
+                  </select>
+                  <p className="mt-2 text-[11px] text-slate-500">
+                    Currency is limited to the selected country currency or USD only.
+                  </p>
+                </label>
+
+                <label className="block">
+                  <span className="text-xs font-bold text-slate-400">Timezone</span>
+                  <select
+                    value={companyForm.timezone}
+                    onChange={(e) => handleCompanyFormChange("timezone", e.target.value)}
+                    className="mt-2 w-full rounded-2xl border border-slate-700 bg-slate-900 px-4 py-3 text-sm text-white outline-none focus:border-amber-400"
+                  >
+                    <option value={getTimezoneByCountry(companyForm.country)}>
+                      {getTimezoneByCountry(companyForm.country)}
+                    </option>
+                  </select>
+                  <p className="mt-2 text-[11px] text-slate-500">
+                    Timezone is automatically selected based on the company country.
+                  </p>
+                </label>
+
+                <label className="block">
+                  <span className="text-xs font-bold text-slate-400">Language</span>
+                  <input
+                    value={companyForm.language}
+                    onChange={(e) => handleCompanyFormChange("language", e.target.value)}
+                    className="mt-2 w-full rounded-2xl border border-slate-700 bg-slate-900 px-4 py-3 text-sm text-white outline-none focus:border-amber-400"
+                    placeholder="EN-AR"
+                  />
+                </label>
+
+              </div>
+
+              <div className="mt-6 flex flex-col-reverse sm:flex-row sm:justify-end gap-3">
+                <button
+                  type="button"
+                  onClick={closeCompanyModal}
+                  className="rounded-2xl border border-slate-700 px-5 py-3 text-sm font-black text-slate-300 hover:border-red-400 hover:text-red-300"
+                >
+                  Cancel
+                </button>
+                <button
+                  type="submit"
+                  disabled={savingCompany}
+                  className="rounded-2xl border border-amber-400/40 bg-amber-400/10 px-5 py-3 text-sm font-black text-amber-300 hover:bg-amber-400/20 disabled:cursor-not-allowed disabled:opacity-50"
+                >
+                  {savingCompany ? "Saving..." : "Save Company"}
+                </button>
+              </div>
+            </form>
+          </div>
+        </ModalPortal>
+      )}
     </div>
   );
 }
-
 
 function LoginPage({
   users = [],
@@ -13918,6 +15241,8 @@ function LoginPage({
   setSelectedCompanyId,
   loginIdentifier,
   setLoginIdentifier,
+  loginPassword = "",
+  setLoginPassword,
   rememberSession,
   setRememberSession,
   loginError,
@@ -14026,7 +15351,7 @@ function LoginPage({
               Sign in to Diesel Management System
             </h2>
             <p className="login-muted text-sm text-slate-400 leading-6 max-w-xl">
-              Frontend session layer connected to UsersRoles CSV and Team data. Password authentication will be replaced later by Backend / JWT.
+              Secure backend login connected to NestJS, JWT, PostgreSQL, Roles and Permissions. CSV data remains available temporarily during the migration phase.
             </p>
           </div>
 
@@ -14056,7 +15381,7 @@ function LoginPage({
         >
           <div className="flex items-center justify-between gap-4 mb-7">
             <div>
-              <p className="login-muted text-[10px] uppercase tracking-[0.22em] text-slate-500 font-bold">Local Session</p>
+              <p className="login-muted text-[10px] uppercase tracking-[0.22em] text-slate-500 font-bold">Backend JWT Session</p>
               <h3 className="login-title text-2xl font-black text-white mt-1">Login</h3>
             </div>
             <button
@@ -14088,14 +15413,24 @@ function LoginPage({
           </label>
 
           <label className="block mb-4">
-            <span className="login-muted text-xs font-bold text-slate-400">User ID / Email / Username / Full Name</span>
+            <span className="login-muted text-xs font-bold text-slate-400">Email / User ID / Username / Full Name</span>
             <input
               value={loginIdentifier}
               onChange={(e) => setLoginIdentifier(e.target.value)}
-              placeholder={selectedCompanyId ? "Example: 788 or a.eldokany86@gmail.com" : "Select company first"}
-              disabled={!selectedCompanyId}
+              placeholder="admin@fleetfuelpro.com"
               className="login-input mt-2 w-full rounded-2xl border border-slate-700 bg-slate-950 px-4 py-3 text-sm text-white outline-none focus:border-amber-400 focus:ring-2 focus:ring-amber-400/20"
               autoFocus
+            />
+          </label>
+
+          <label className="block mb-4">
+            <span className="login-muted text-xs font-bold text-slate-400">Password</span>
+            <input
+              value={loginPassword}
+              onChange={(e) => setLoginPassword?.(e.target.value)}
+              placeholder="Admin@12345"
+              type="password"
+              className="login-input mt-2 w-full rounded-2xl border border-slate-700 bg-slate-950 px-4 py-3 text-sm text-white outline-none focus:border-amber-400 focus:ring-2 focus:ring-amber-400/20"
             />
           </label>
 
