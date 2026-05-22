@@ -187,6 +187,81 @@ const SAUDI_PROJECT_LOCATIONS = [
   "Al Jouf Region",
 ];
 
+const EGYPT_PROJECT_LOCATIONS = [
+  "Cairo Governorate",
+  "Giza Governorate",
+  "Alexandria Governorate",
+  "Qalyubia Governorate",
+  "Port Said Governorate",
+  "Suez Governorate",
+  "Dakahlia Governorate",
+  "Sharqia Governorate",
+  "Gharbia Governorate",
+  "Monufia Governorate",
+  "Beheira Governorate",
+  "Kafr El Sheikh Governorate",
+  "Damietta Governorate",
+  "Ismailia Governorate",
+  "Fayoum Governorate",
+  "Beni Suef Governorate",
+  "Minya Governorate",
+  "Assiut Governorate",
+  "Sohag Governorate",
+  "Qena Governorate",
+  "Luxor Governorate",
+  "Aswan Governorate",
+  "Red Sea Governorate",
+  "New Valley Governorate",
+  "Matrouh Governorate",
+  "North Sinai Governorate",
+  "South Sinai Governorate",
+];
+
+const UAE_PROJECT_LOCATIONS = [
+  "Abu Dhabi Emirate",
+  "Dubai Emirate",
+  "Sharjah Emirate",
+  "Ajman Emirate",
+  "Umm Al Quwain Emirate",
+  "Ras Al Khaimah Emirate",
+  "Fujairah Emirate",
+];
+
+function normalizeCountryName(country) {
+  return String(country || "")
+    .trim()
+    .toLowerCase()
+    .replace(/[\s_-]+/g, " ");
+}
+
+function getProjectLocationOptionsByCountry(country) {
+  const normalizedCountry = normalizeCountryName(country);
+
+  if (
+    normalizedCountry === "saudi arabia" ||
+    normalizedCountry === "kingdom of saudi arabia" ||
+    normalizedCountry === "ksa"
+  ) {
+    return SAUDI_PROJECT_LOCATIONS;
+  }
+
+  if (
+    normalizedCountry === "egypt" ||
+    normalizedCountry === "arab republic of egypt"
+  ) {
+    return EGYPT_PROJECT_LOCATIONS;
+  }
+
+  if (
+    normalizedCountry === "united arab emirates" ||
+    normalizedCountry === "uae"
+  ) {
+    return UAE_PROJECT_LOCATIONS;
+  }
+
+  return [];
+}
+
 const PLATFORM_CONTEXT_ID = "PLATFORM";
 
 const PLATFORM_COMPANY_OPTION = {
@@ -1586,6 +1661,51 @@ function useOutsideClick(ref, callback) {
   }, [ref, callback]);
 }
 
+
+function useSmartDropdownPosition(ref, isOpen, menuWidth = 260) {
+  const [menuAlign, setMenuAlign] = useState("left");
+
+  useEffect(() => {
+    if (!isOpen || typeof window === "undefined") return;
+
+    const updateMenuPosition = () => {
+      const element = ref?.current;
+      if (!element) return;
+
+      const rect = element.getBoundingClientRect();
+      const safePadding = 16;
+      const viewportWidth = window.innerWidth || 0;
+
+      const spaceIfOpenRight = viewportWidth - rect.left - safePadding;
+      const spaceIfOpenLeft = rect.right - safePadding;
+
+      if (spaceIfOpenRight >= menuWidth) {
+        setMenuAlign("left");
+      } else if (spaceIfOpenLeft >= menuWidth) {
+        setMenuAlign("right");
+      } else {
+        setMenuAlign("right");
+      }
+    };
+
+    updateMenuPosition();
+
+    window.addEventListener("resize", updateMenuPosition);
+    window.addEventListener("scroll", updateMenuPosition, true);
+
+    return () => {
+      window.removeEventListener("resize", updateMenuPosition);
+      window.removeEventListener("scroll", updateMenuPosition, true);
+    };
+  }, [ref, isOpen, menuWidth]);
+
+  return menuAlign;
+}
+
+function getSmartDropdownClass(menuAlign, widthClass = "w-64") {
+  return `absolute ${menuAlign === "right" ? "right-0" : "left-0"} mt-3 ${widthClass} max-w-[calc(100vw-1.5rem)]`;
+}
+
 function ModalPortal({ children }) {
   const [mounted, setMounted] = useState(false);
 
@@ -1992,6 +2112,110 @@ setLoginIdentifier("");
     showToast?.("warning", "Request sent to Manager approval queue.");
     return approvalRequest;
   };
+
+  const mapBackendProjectForState = (project = {}) => ({
+    backendId: project.id || "",
+    id: project.code || project.id || "",
+    code: project.code || project.id || "",
+    name: project.name || project.code || project.id || "",
+    location: project.location || "",
+    description: project.description || "",
+    status: project.isActive === false ? "Inactive" : "Active",
+    isActive: project.isActive !== false,
+    approvalStatus: "Approved",
+    companyId: project.companyId || project.company?.id || "",
+    companyName: project.company?.name || "",
+    projectManagerId: project.projectManagerId || project.projectManager?.id || "",
+    projectManagerName: project.projectManager?.fullName || "",
+    projectManagerEmail: project.projectManager?.email || "",
+    source: "Backend",
+    createdAt: project.createdAt || "",
+    updatedAt: project.updatedAt || "",
+  });
+
+  const refreshBackendProjects = async (companyId = "") => {
+    try {
+      const response = await api.get("/projects", {
+        params: companyId && !isPlatformContextValue(companyId) ? { companyId } : {},
+      });
+
+      const backendProjects = Array.isArray(response.data) ? response.data : [];
+      setProjects(backendProjects.map(mapBackendProjectForState).filter((project) => project.id));
+      return backendProjects;
+    } catch (error) {
+      console.error("Failed to refresh projects from backend:", error);
+      showToast?.("warning", "Projects backend API is not available.");
+      return [];
+    }
+  };
+
+  const handleCreateProject = async (payload) => {
+    const response = await api.post("/projects", payload);
+    const createdProject = mapBackendProjectForState(response.data);
+
+    setProjects((prev) => [
+      createdProject,
+      ...prev.filter((project) =>
+        normalizeScopeValue(project.backendId || project.id) !==
+        normalizeScopeValue(createdProject.backendId || createdProject.id)
+      ),
+    ]);
+
+    return createdProject;
+  };
+
+  const handleUpdateProject = async (project, payload) => {
+    const backendId = project?.backendId || project?.id || project;
+    const response = await api.patch(`/projects/${backendId}`, payload);
+    const updatedProject = mapBackendProjectForState(response.data);
+
+    setProjects((prev) =>
+      prev.map((item) =>
+        normalizeScopeValue(item.backendId || item.id) === normalizeScopeValue(backendId) ||
+        normalizeScopeValue(item.id) === normalizeScopeValue(updatedProject.id)
+          ? updatedProject
+          : item
+      )
+    );
+
+    return updatedProject;
+  };
+
+  const handleAssignProjectManager = async (project, managerUserId) => {
+    const backendId = project?.backendId || project?.id || project;
+
+    if (!backendId) {
+      throw new Error("Project backend ID is required.");
+    }
+
+    const response = await api.patch(`/projects/${backendId}/manager`, {
+      managerUserId,
+    });
+
+    const updatedProject = mapBackendProjectForState(response.data);
+
+    setProjects((prev) =>
+      prev.map((item) =>
+        normalizeScopeValue(item.backendId || item.id) === normalizeScopeValue(backendId) ||
+        normalizeScopeValue(item.id) === normalizeScopeValue(updatedProject.id)
+          ? updatedProject
+          : item
+      )
+    );
+
+    return updatedProject;
+  };
+
+  const handleDeleteProject = async (project) => {
+    const backendId = project?.backendId || project?.id || project;
+    await api.delete(`/projects/${backendId}`);
+
+    setProjects((prev) =>
+      prev.filter((item) =>
+        normalizeScopeValue(item.backendId || item.id) !== normalizeScopeValue(backendId)
+      )
+    );
+  };
  
   useEffect(() => {
     async function fetchData() {
@@ -2018,6 +2242,16 @@ setLoginIdentifier("");
           }
         };
 
+        const fetchBackendProjects = async () => {
+          try {
+            const response = await api.get("/projects");
+            return Array.isArray(response.data) ? response.data : [];
+          } catch (error) {
+            console.warn("Projects backend API is not available. Using CSV fallback.", error);
+            return null;
+          }
+        };
+
         const [
           trxText,
           assetsText,
@@ -2025,6 +2259,7 @@ setLoginIdentifier("");
           fuelersText,
           projectsText,
           backendCompanies,
+          backendProjects,
         ] = await Promise.all([
           fetchCsvText(TRANSACTIONS_CSV),
           fetchCsvText(ASSETS_CSV),
@@ -2032,6 +2267,7 @@ setLoginIdentifier("");
           fetchCsvText(FUELERS_CSV),
           fetchCsvText(PROJECTS_CSV),
           fetchBackendCompanies(),
+          fetchBackendProjects(),
         ]);
 
         // TRANSACTIONS
@@ -2126,21 +2362,32 @@ setLoginIdentifier("");
 
         setFuelers(mappedFuelers);
 
-        // PROJECTS
-        const projectRows = parseCSV(projectsText);
-        const projectHeaders = projectRows[0] || [];
+        // PROJECTS - prefer NestJS/PostgreSQL backend, keep CSV only as a temporary fallback.
+        if (Array.isArray(backendProjects)) {
+          setProjects(
+            backendProjects
+              .map(mapBackendProjectForState)
+              .filter((project) => project.id)
+          );
+        } else {
+          const projectRows = parseCSV(projectsText);
+          const projectHeaders = projectRows[0] || [];
 
-        const mappedProjects = projectRows
-          .slice(1)
-          .map((row) => ({
-            id: getValue(row, projectHeaders, ["project_id", "id"]),
-            name: getValue(row, projectHeaders, ["project_name", "name"]),
-            status: getValue(row, projectHeaders, ["status"]),
-            companyId: getValue(row, projectHeaders, ["company_id", "Company ID", "company id", "company"]),
-          }))
-          .filter((project) => project.id);
+          const mappedProjects = projectRows
+            .slice(1)
+            .map((row) => ({
+              id: getValue(row, projectHeaders, ["project_id", "id"]),
+              code: getValue(row, projectHeaders, ["project_id", "id"]),
+              name: getValue(row, projectHeaders, ["project_name", "name"]),
+              status: getValue(row, projectHeaders, ["status"]),
+              location: getValue(row, projectHeaders, ["location", "Location"]),
+              companyId: getValue(row, projectHeaders, ["company_id", "Company ID", "company id", "company"]),
+              source: "CSV Fallback",
+            }))
+            .filter((project) => project.id);
 
-        setProjects(mappedProjects);
+          setProjects(mappedProjects);
+        }
 
         // COMPANIES - now loaded from NestJS/PostgreSQL public endpoint only.
         // Platform Console is a frontend tenant context option, not customer operational data.
@@ -2457,9 +2704,18 @@ if (page === "projects") {
       getLiterPriceByDate={getLiterPriceByDate}
       assetProjectHistory={assetProjectHistory}
       currentUser={currentUser}
+      currentCompany={currentCompany}
+      currentCompanyId={currentCompanyId}
       hasPermission={hasPermission}
       trackActivity={trackActivity}
       submitApprovalRequest={submitApprovalRequest}
+      onCreateProject={handleCreateProject}
+      onUpdateProject={handleUpdateProject}
+      onDeleteProject={handleDeleteProject}
+      onAssignProjectManager={handleAssignProjectManager}
+      refreshProjects={refreshBackendProjects}
+      users={companyUsers}
+      theme={theme}
     />
   );
 }
@@ -3614,6 +3870,42 @@ const [showForm, setShowForm] = useState(false);
     showToast?.("success", "Operation added successfully.");
 
     closeForm();
+  };
+
+  const deleteProject = async (project) => {
+    if (!hasPermission("projects", "delete")) {
+      showToast?.("warning", "Read-only access: you cannot delete projects.");
+      return;
+    }
+
+    const projectLabel = project?.name || project?.id || "this project";
+    const confirmed = window.confirm(
+      `Are you sure you want to delete ${projectLabel}?\n\nThis will hide the project from active screens, but it will remain in the database for audit history.`
+    );
+
+    if (!confirmed) return;
+
+    try {
+      if (typeof onDeleteProject === "function" && project?.backendId) {
+        await onDeleteProject(project);
+      } else {
+        setLocalProjects((prev) => prev.filter((item) => !isSameText(item.id, project.id)));
+      }
+
+      if (selectedProject && isSameText(selectedProject.id, project.id)) {
+        setSelectedProject(null);
+      }
+
+      trackActivity?.("Delete Project", "projects", `${project.id} was soft deleted.`);
+      showToast?.("success", "Project deleted successfully.");
+    } catch (error) {
+      const backendMessage = error?.response?.data?.message || "Failed to delete project.";
+      notifyUser(
+        typeof showToast !== "undefined" ? showToast : null,
+        "warning",
+        Array.isArray(backendMessage) ? backendMessage.join(", ") : backendMessage
+      );
+    }
   };
 
   const exportRowsToCSV = (fileName, csvHeaders, csvRows) => {
@@ -4880,7 +5172,7 @@ const [showForm, setShowForm] = useState(false);
                 <div className="absolute left-0 mt-2 w-44 bg-slate-950 border border-slate-700 rounded-xl shadow-2xl z-[9999] overflow-hidden">
                   <button
                     onClick={exportEquipmentSummaryCSV}
-                    className="block w-full text-left px-4 py-3 hover:bg-slate-800 transition text-white"
+                    className="block w-full cursor-pointer text-left px-4 py-3 hover:bg-slate-800 transition text-white"
                   >
                     Export CSV
                   </button>
@@ -4893,7 +5185,7 @@ const [showForm, setShowForm] = useState(false);
                       );
                       setShowEquipmentSummarySettings(false);
                     }}
-                    className="block w-full text-left px-4 py-3 hover:bg-slate-800 transition text-white border-t border-gray-700"
+                    className="block w-full cursor-pointer text-left px-4 py-3 hover:bg-slate-800 transition text-white border-t border-gray-700"
                   >
                     Print
                   </button>
@@ -4983,7 +5275,7 @@ const [showForm, setShowForm] = useState(false);
                   <div className="absolute left-0 mt-2 w-44 bg-slate-950 border border-slate-700 rounded-xl shadow-2xl z-[9999] overflow-hidden">
                     <button
                       onClick={exportEquipmentTypeSummaryCSV}
-                      className="block w-full text-left px-4 py-3 hover:bg-slate-800 transition text-white"
+                      className="block w-full cursor-pointer text-left px-4 py-3 hover:bg-slate-800 transition text-white"
                     >
                       Export CSV
                     </button>
@@ -4996,7 +5288,7 @@ const [showForm, setShowForm] = useState(false);
                         );
                         setShowEquipmentTypeSettings(false);
                       }}
-                      className="block w-full text-left px-4 py-3 hover:bg-slate-800 transition text-white border-t border-gray-700"
+                      className="block w-full cursor-pointer text-left px-4 py-3 hover:bg-slate-800 transition text-white border-t border-gray-700"
                     >
                       Print
                     </button>
@@ -5068,7 +5360,7 @@ const [showForm, setShowForm] = useState(false);
                   <div className="absolute left-0 mt-2 w-44 bg-slate-950 border border-slate-700 rounded-xl shadow-2xl z-[9999] overflow-hidden">
                     <button
                       onClick={exportDailyConsumptionCSV}
-                      className="block w-full text-left px-4 py-3 hover:bg-slate-800 transition text-white"
+                      className="block w-full cursor-pointer text-left px-4 py-3 hover:bg-slate-800 transition text-white"
                     >
                       Export CSV
                     </button>
@@ -5081,7 +5373,7 @@ const [showForm, setShowForm] = useState(false);
                         );
                         setShowDailyConsumptionSettings(false);
                       }}
-                      className="block w-full text-left px-4 py-3 hover:bg-slate-800 transition text-white border-t border-gray-700"
+                      className="block w-full cursor-pointer text-left px-4 py-3 hover:bg-slate-800 transition text-white border-t border-gray-700"
                     >
                       Print
                     </button>
@@ -5528,7 +5820,7 @@ const [showForm, setShowForm] = useState(false);
             </div>
 
 
-            <div className="flex justify-end gap-3 border-t pt-4">
+            <div className="flex justify-end gap-3 border-t border-slate-700/80 px-6 py-5 bg-slate-950/90">
               <button
                 onClick={closeEditCell}
                 className="bg-gray-200 px-3 lg:px-4 py-2 rounded-lg"
@@ -5729,6 +6021,7 @@ const [showForm, setShowForm] = useState(false);
 const [showAssetSettings, setShowAssetSettings] = useState(false);
 const [showExportMenu, setShowExportMenu] = useState(false);
 const assetSettingsRef = useRef(null);
+  const assetSettingsMenuAlign = useSmartDropdownPosition(assetSettingsRef, showAssetSettings, 224);
 
 useOutsideClick(assetSettingsRef, () => {
   setShowAssetSettings(false);
@@ -6424,6 +6717,77 @@ const printAssetsReport = () => {
 };
   return (
     <div className="bg-gray-900 min-h-screen text-white overflow-y-auto h-screen">
+      <style jsx global>{`
+        /* Projects page live theme and pointer fixes */
+        button,
+        a,
+        select,
+        summary,
+        [role="button"],
+        input[type="button"],
+        input[type="submit"],
+        input[type="checkbox"],
+        input[type="radio"],
+        .settings-layer-safe,
+        .settings-layer-safe *,
+        .project-title,
+        .project-card-print button {
+          cursor: pointer !important;
+        }
+
+        button:disabled,
+        select:disabled,
+        input:disabled {
+          cursor: not-allowed !important;
+        }
+
+        [data-theme="light"] .project-card-print {
+          background: linear-gradient(135deg, #ffffff 0%, #f8fafc 100%) !important;
+          color: #0f172a !important;
+          border-color: #cbd5e1 !important;
+          box-shadow: 0 18px 35px rgba(15, 23, 42, 0.10) !important;
+        }
+
+        [data-theme="light"] .project-card-accent {
+          background: linear-gradient(90deg, rgba(245, 158, 11, 0.95), rgba(37, 99, 235, 0.50), transparent) !important;
+        }
+
+        [data-theme="light"] .project-card-print .project-title {
+          color: #1e3a8a !important;
+        }
+
+        [data-theme="light"] .project-card-print .project-title:hover {
+          color: #b45309 !important;
+        }
+
+        [data-theme="light"] .project-card-print .project-id,
+        [data-theme="light"] .project-card-print .label,
+        [data-theme="light"] .project-card-print .text-slate-500,
+        [data-theme="light"] .project-card-print .text-slate-400,
+        [data-theme="light"] .project-card-print .text-gray-400 {
+          color: #64748b !important;
+        }
+
+        [data-theme="light"] .project-card-print .value,
+        [data-theme="light"] .project-card-print .text-slate-300,
+        [data-theme="light"] .project-card-print .text-slate-200,
+        [data-theme="light"] .project-card-print .text-slate-100,
+        [data-theme="light"] .project-card-print .text-white {
+          color: #0f172a !important;
+        }
+
+        [data-theme="light"] .project-card-print .metric {
+          background: #f8fafc !important;
+          border-color: #cbd5e1 !important;
+          box-shadow: inset 0 1px 0 rgba(255, 255, 255, 0.85) !important;
+        }
+
+        [data-theme="light"] .project-card-print .border-slate-700\/80,
+        [data-theme="light"] .project-card-print .border-slate-700,
+        [data-theme="light"] .project-card-print .border-gray-700 {
+          border-color: #cbd5e1 !important;
+        }
+      `}</style>
       <div className="fleet-page-shell w-full max-w-[1920px] mx-auto px-2 sm:px-3 lg:px-4 xl:px-5 2xl:px-8 py-3 sm:py-4 lg:py-5 text-[12px] lg:text-[13px]">
       <div className="flex justify-between items-center mb-4 gap-4">
   <div>
@@ -6443,20 +6807,20 @@ const printAssetsReport = () => {
     <div ref={assetSettingsRef} className="relative settings-layer-safe">
       <button
         onClick={() => setShowAssetSettings(!showAssetSettings)}
-        className="bg-gray-800 hover:bg-gray-700 border border-gray-700 hover:border-yellow-400 text-yellow-400 px-3 lg:px-4 py-2 lg:py-3 rounded-xl shadow-lg transition-all duration-300 hover:scale-105"
+        className="cursor-pointer bg-gray-800 hover:bg-gray-700 border border-gray-700 hover:border-yellow-400 text-yellow-400 px-3 lg:px-4 py-2 lg:py-3 rounded-xl shadow-lg transition-all duration-300 hover:scale-105"
       >
         ☰
       </button>
 
       {showAssetSettings && (
-        <div className="absolute left-0 mt-3 w-56 bg-gray-900 border border-gray-700 rounded-2xl shadow-2xl overflow-visible z-[10020]">
+        <div className={`${getSmartDropdownClass(assetSettingsMenuAlign, "w-56")} bg-gray-900 border border-gray-700 rounded-2xl shadow-2xl overflow-visible z-[10020]`}>
           {hasPermission("assets", "add") && (
             <button
               onClick={() => {
                 setShowAssetSettings(false);
                 setShowForm(true);
               }}
-              className="flex items-center gap-3 w-full text-left px-5 py-4 hover:bg-slate-800 transition text-white"
+              className="flex items-center gap-3 w-full cursor-pointer text-left px-5 py-4 hover:bg-slate-800 transition text-white"
             >
               <span className="text-green-400 text-lg">＋</span>
               Add Asset
@@ -6469,7 +6833,7 @@ const printAssetsReport = () => {
               setShowExportMenu(false);
               printAssetsReport();
             }}
-            className="flex items-center gap-3 w-full text-left px-5 py-4 hover:bg-slate-800 transition text-white border-t border-gray-700"
+            className="flex items-center gap-3 w-full cursor-pointer text-left px-5 py-4 hover:bg-slate-800 transition text-white border-t border-gray-700"
           >
             <span className="text-yellow-400 text-lg">⎙</span>
             Print Assets Report
@@ -6654,10 +7018,10 @@ const printAssetsReport = () => {
               This status change will be saved directly without reason or password.
             </p>
 
-            <div className="flex justify-end gap-3 border-t pt-4">
+            <div className="flex justify-end gap-3 border-t border-slate-700/80 px-6 py-5 bg-slate-950/90">
               <button
                 onClick={() => setAssetStatusConfirm(null)}
-                className="bg-gray-200 px-4 py-2 rounded-lg"
+                className="rounded-xl border border-slate-600 bg-slate-900 px-5 py-2.5 font-bold text-slate-200 hover:bg-slate-800 transition"
               >
                 Cancel
               </button>
@@ -7421,6 +7785,7 @@ const [showForm, setShowForm] = useState(false);
   const [showExportMenu, setShowExportMenu] = useState(false);
   const [selectedProject, setSelectedProject] = useState("All");
   const stationSettingsRef = useRef(null);
+  const stationSettingsMenuAlign = useSmartDropdownPosition(stationSettingsRef, showSettings, 256);
 
   useOutsideClick(stationSettingsRef, () => {
     setShowSettings(false);
@@ -8445,8 +8810,8 @@ const getLatestStationCounter = (stationId, fallbackValue = 0) => {
   };
 
   return (
-    <div className="bg-gray-900 min-h-screen text-white overflow-y-auto h-screen">
-      <div className="fleet-page-shell w-full max-w-[1920px] mx-auto px-2 sm:px-3 lg:px-4 xl:px-5 2xl:px-8 py-3 sm:py-4 lg:py-5 text-[12px] lg:text-[13px]">
+    <div className="bg-gray-900 min-h-screen text-white overflow-y-auto overflow-x-hidden h-screen">
+      <div className="fleet-page-shell w-full max-w-full min-w-0 mx-auto px-2 sm:px-3 lg:px-4 xl:px-5 2xl:px-8 py-3 sm:py-4 lg:py-5 text-[12px] lg:text-[13px]">
       <div className="flex flex-col sm:flex-row justify-between sm:items-start xl:items-center gap-3 mb-4">
         <div>
           <h1 className="text-xl sm:text-2xl font-bold">Fuel Stations</h1>
@@ -8484,7 +8849,7 @@ const getLatestStationCounter = (stationId, fallbackValue = 0) => {
           {showSettings && (
             <div
               onClick={(e) => e.stopPropagation()}
-              className="absolute left-0 mt-3 w-64 bg-gray-900 border border-gray-700 rounded-2xl shadow-2xl overflow-visible z-[10020] backdrop-blur-xl"
+              className={`${getSmartDropdownClass(stationSettingsMenuAlign, "w-64")} bg-gray-900 border border-gray-700 rounded-2xl shadow-2xl overflow-visible z-[10020] backdrop-blur-xl`}
             >
               {hasPermission("stations", "add") && (
                 <button
@@ -8493,7 +8858,7 @@ const getLatestStationCounter = (stationId, fallbackValue = 0) => {
                     setShowExportMenu(false);
                     setShowForm(true);
                   }}
-                  className="flex items-center gap-3 w-full text-left px-5 py-4 hover:bg-slate-800 transition text-white"
+                  className="flex items-center gap-3 w-full cursor-pointer text-left px-5 py-4 hover:bg-slate-800 transition text-white"
                 >
                   <span className="text-green-400 text-lg">＋</span>
                   Add Station
@@ -8504,7 +8869,7 @@ const getLatestStationCounter = (stationId, fallbackValue = 0) => {
                 <>
                   <button
                     onClick={openInventoryAdjustment}
-                    className="flex items-center gap-3 w-full text-left px-5 py-4 hover:bg-red-900/30 transition text-red-400"
+                    className="flex items-center gap-3 w-full cursor-pointer text-left px-5 py-4 hover:bg-red-900/30 transition text-red-400"
                   >
                     <span className="text-lg">⚠</span>
                     Zero Balance
@@ -8512,7 +8877,7 @@ const getLatestStationCounter = (stationId, fallbackValue = 0) => {
 
                   <button
                     onClick={openStockCountAdjustment}
-                    className="flex items-center gap-3 w-full text-left px-5 py-4 hover:bg-amber-500/10 transition text-amber-300 border-t border-gray-700"
+                    className="flex items-center gap-3 w-full cursor-pointer text-left px-5 py-4 hover:bg-amber-500/10 transition text-amber-300 border-t border-gray-700"
                   >
                     <span className="text-lg">≋</span>
                     Stock Count Adjustment
@@ -8933,7 +9298,7 @@ const getLatestStationCounter = (stationId, fallbackValue = 0) => {
           <div className="bg-white text-black w-[560px] rounded-2xl shadow-2xl p-6">
             <div className="flex justify-between items-center mb-5 border-b pb-3">
               <div>
-                <h2 className="text-2xl font-bold">Change Station Project</h2>
+                <h2 className="text-2xl font-extrabold text-white">Change Station Project</h2>
                 <p className="text-sm text-gray-500 mt-1">
                   Station: {editingProjectStation.id}
                 </p>
@@ -8990,10 +9355,10 @@ const getLatestStationCounter = (stationId, fallbackValue = 0) => {
               />
             </div>
 
-            <div className="flex justify-end gap-3 border-t pt-4">
+            <div className="flex justify-end gap-3 border-t border-slate-700/80 px-6 py-5 bg-slate-950/90">
               <button
                 onClick={() => setEditingProjectStation(null)}
-                className="bg-gray-200 px-4 py-2 rounded-lg"
+                className="rounded-xl border border-slate-600 bg-slate-900 px-5 py-2.5 font-bold text-slate-200 hover:bg-slate-800 transition"
               >
                 Cancel
               </button>
@@ -9339,7 +9704,7 @@ const getLatestStationCounter = (stationId, fallbackValue = 0) => {
             <div className="flex justify-end gap-3 mt-6 border-t pt-4">
               <button
                 onClick={() => setProjectEditStation(null)}
-                className="bg-gray-200 px-4 py-2 rounded-lg"
+                className="rounded-xl border border-slate-600 bg-slate-900 px-5 py-2.5 font-bold text-slate-200 hover:bg-slate-800 transition"
               >
                 Cancel
               </button>
@@ -9392,7 +9757,7 @@ const getLatestStationCounter = (stationId, fallbackValue = 0) => {
             <div className="flex justify-end gap-3 mt-6 border-t pt-4">
               <button
                 onClick={() => setStatusEditStation(null)}
-                className="bg-gray-200 px-4 py-2 rounded-lg"
+                className="rounded-xl border border-slate-600 bg-slate-900 px-5 py-2.5 font-bold text-slate-200 hover:bg-slate-800 transition"
               >
                 Cancel
               </button>
@@ -10469,7 +10834,7 @@ function TeamPage({
                         exportFuelersCSV();
                         setShowFuelersSettings(false);
                       }}
-                      className="block w-full text-left px-4 py-3 hover:bg-slate-800 transition text-white"
+                      className="block w-full cursor-pointer text-left px-4 py-3 hover:bg-slate-800 transition text-white"
                     >
                       Export CSV
                     </button>
@@ -10479,7 +10844,7 @@ function TeamPage({
                         printTable("fuelers-table", "Team Report");
                         setShowFuelersSettings(false);
                       }}
-                      className="block w-full text-left px-4 py-3 hover:bg-slate-800 transition text-white border-t border-gray-700"
+                      className="block w-full cursor-pointer text-left px-4 py-3 hover:bg-slate-800 transition text-white border-t border-gray-700"
                     >
                       Print
                     </button>
@@ -10858,7 +11223,7 @@ function TeamPage({
                 </select>
               </div>
 
-              <div className="flex justify-end gap-3 border-t pt-4">
+              <div className="flex justify-end gap-3 border-t border-slate-700/80 px-6 py-5 bg-slate-950/90">
                 <button
                   onClick={closeAddFueler}
                   className="bg-gray-200 px-3 lg:px-4 py-2 rounded-lg"
@@ -10972,7 +11337,7 @@ function TeamPage({
               )}
 
 
-              <div className="flex justify-end gap-3 border-t pt-4">
+              <div className="flex justify-end gap-3 border-t border-slate-700/80 px-6 py-5 bg-slate-950/90">
                 <button
                   onClick={closeFuelerEdit}
                   className="bg-gray-200 px-3 lg:px-4 py-2 rounded-lg"
@@ -11007,9 +11372,18 @@ function ProjectsPage({
   getLiterPriceByDate,
   assetProjectHistory = [],
   currentUser,
+  currentCompany = null,
+  currentCompanyId = "",
   hasPermission = () => false,
   trackActivity = () => {},
   submitApprovalRequest = () => {},
+  onCreateProject,
+  onUpdateProject,
+  onDeleteProject,
+  refreshProjects,
+  onAssignProjectManager,
+  users = [],
+  theme = "dark",
 }) {
   const [showForm, setShowForm] = useState(false);
   const [searchTerm, setSearchTerm] = useState("");
@@ -11025,10 +11399,205 @@ function ProjectsPage({
     approvalStatus: "Pending Approval",
   });
 
+  const [backendProjectManagers, setBackendProjectManagers] = useState([]);
+  const [pendingManagerConfirmation, setPendingManagerConfirmation] = useState(null);
+  const [managerSaving, setManagerSaving] = useState(false);
+
   const [statusEdit, setStatusEdit] = useState(null);
+  const [pendingProjectConfirmation, setPendingProjectConfirmation] = useState(null);
+  const [projectRejection, setProjectRejection] = useState(null);
+  const currentCompanyCountry = currentCompany?.country || "";
+  const projectLocationOptions = getProjectLocationOptionsByCountry(currentCompanyCountry);
+  const shouldUseLocationDropdown = projectLocationOptions.length > 0;
+  const [projectDeleteTarget, setProjectDeleteTarget] = useState(null);
   const settingsRef = useRef(null);
+  const settingsMenuAlign = useSmartDropdownPosition(settingsRef, showSettings, 224);
 
   useOutsideClick(settingsRef, () => setShowSettings(false));
+
+  useEffect(() => {
+    if (!shouldUseLocationDropdown) return;
+    if (!newProject.location) return;
+    if (projectLocationOptions.includes(newProject.location)) return;
+
+    setNewProject((prev) => ({
+      ...prev,
+      location: "",
+    }));
+  }, [shouldUseLocationDropdown, projectLocationOptions.join("|")]);
+
+  useEffect(() => {
+    if (typeof refreshProjects !== "function") return;
+    if (!currentCompanyId || isPlatformContextValue(currentCompanyId)) return;
+
+    refreshProjects(currentCompanyId);
+  }, [currentCompanyId]);
+
+  useEffect(() => {
+    async function loadProjectManagerOptions() {
+      if (currentUser?.role !== "Admin") {
+        setBackendProjectManagers([]);
+        return;
+      }
+
+      if (!currentCompanyId || isPlatformContextValue(currentCompanyId)) {
+        setBackendProjectManagers([]);
+        return;
+      }
+
+      try {
+        const response = await api.get("/users", {
+          params: {
+            companyId: currentCompanyId,
+          },
+        });
+
+        const backendUsers = Array.isArray(response.data) ? response.data : [];
+
+        setBackendProjectManagers(
+          backendUsers
+            .map((user) => ({
+              id: user.id,
+              fullName: user.fullName || user.name || user.email || "",
+              email: user.email || "",
+              companyId: user.companyId || "",
+              role: normalizeBackendRoleName(
+                user.role?.name || user.roleName || user.role || ""
+              ),
+              status: user.isActive === false ? "Inactive" : "Active",
+            }))
+            .filter((user) => user.id)
+        );
+      } catch (error) {
+        console.warn("Failed to load project manager options.", error);
+        setBackendProjectManagers([]);
+      }
+    }
+
+    loadProjectManagerOptions();
+  }, [currentUser?.role, currentCompanyId]);
+
+  const projectManagerOptions = useMemo(() => {
+    const combinedUsers = uniqueUsersById([
+      ...users,
+      ...backendProjectManagers,
+    ]);
+
+    return combinedUsers
+      .filter((user) => {
+        const role = normalizeBackendRoleName(user.roleName || user.role || user.role?.name || "");
+        const status = normalizeSystemUserStatus(user.status || (user.isActive === false ? "Inactive" : "Active"));
+
+        return (
+          user.id &&
+          role === "Manager" &&
+          status === "Active" &&
+          companyMatches(user.companyId, currentCompanyId)
+        );
+      })
+      .sort((a, b) => String(a.fullName || a.email || "").localeCompare(String(b.fullName || b.email || "")));
+  }, [users, backendProjectManagers, currentCompanyId]);
+
+  const isAdminProjectManagerEditor = currentUser?.role === "Admin";
+
+  const getProjectManagerDisplayName = (project) => {
+    if (project?.projectManagerName) return project.projectManagerName;
+
+    const manager = projectManagerOptions.find((user) =>
+      normalizeScopeValue(user.id) === normalizeScopeValue(project?.projectManagerId)
+    );
+
+    return manager?.fullName || manager?.email || "Unassigned";
+  };
+
+  const requestProjectManagerChange = (project, managerUserId) => {
+    if (!isAdminProjectManagerEditor) {
+      showToast?.("warning", "Only Admin can change the Project Manager.");
+      return;
+    }
+
+    if (!project?.backendId) {
+      showToast?.("warning", "Project must be saved in backend before assigning a manager.");
+      return;
+    }
+
+    if (!managerUserId) {
+      showToast?.("warning", "Please select a Project Manager.");
+      return;
+    }
+
+    if (normalizeScopeValue(project.projectManagerId) === normalizeScopeValue(managerUserId)) {
+      return;
+    }
+
+    const manager = projectManagerOptions.find((user) =>
+      normalizeScopeValue(user.id) === normalizeScopeValue(managerUserId)
+    );
+
+    setPendingManagerConfirmation({
+      project,
+      managerUserId,
+      managerName: manager?.fullName || manager?.email || managerUserId,
+      oldManagerName: getProjectManagerDisplayName(project),
+    });
+  };
+
+  const confirmProjectManagerChange = async () => {
+    if (!pendingManagerConfirmation) return;
+
+    setManagerSaving(true);
+
+    try {
+      const updatedProject =
+        typeof onAssignProjectManager === "function"
+          ? await onAssignProjectManager(
+              pendingManagerConfirmation.project,
+              pendingManagerConfirmation.managerUserId
+            )
+          : null;
+
+      if (!updatedProject) {
+        setLocalProjects((prev) =>
+          prev.map((project) =>
+            isSameText(project.id, pendingManagerConfirmation.project.id)
+              ? {
+                  ...project,
+                  projectManagerId: pendingManagerConfirmation.managerUserId,
+                  projectManagerName: pendingManagerConfirmation.managerName,
+                }
+              : project
+          )
+        );
+      }
+
+      if (selectedProject && isSameText(selectedProject.id, pendingManagerConfirmation.project.id)) {
+        setSelectedProject((prev) => ({
+          ...prev,
+          ...(updatedProject || {}),
+          projectManagerId: updatedProject?.projectManagerId || pendingManagerConfirmation.managerUserId,
+          projectManagerName: updatedProject?.projectManagerName || pendingManagerConfirmation.managerName,
+        }));
+      }
+
+      trackActivity?.(
+        "Change Project Manager",
+        "projects",
+        `${pendingManagerConfirmation.project.id} manager changed to ${pendingManagerConfirmation.managerName}.`
+      );
+
+      showToast?.("success", "Project Manager changed successfully.");
+      setPendingManagerConfirmation(null);
+    } catch (error) {
+      const backendMessage = error?.response?.data?.message || "Failed to change Project Manager.";
+      notifyUser(
+        typeof showToast !== "undefined" ? showToast : null,
+        "warning",
+        Array.isArray(backendMessage) ? backendMessage.join(", ") : backendMessage
+      );
+    } finally {
+      setManagerSaving(false);
+    }
+  };
 
   const operationIdIndex = getHeaderIndex(headers, [
     "operation_id",
@@ -11258,6 +11827,7 @@ function ProjectsPage({
 
     return {
       ...project,
+      projectManagerName: getProjectManagerDisplayName(project),
       assignedAssetsCount: assignedAssets.length,
       assignedStationsCount: assignedStations.length,
       assignedFuelersCount: assignedFuelers.length,
@@ -11285,6 +11855,8 @@ function ProjectsPage({
 
   const closeForm = () => {
     setShowForm(false);
+    setPendingProjectConfirmation(null);
+    setProjectRejection(null);
     setNewProject({
       id: "",
       name: "",
@@ -11294,39 +11866,140 @@ function ProjectsPage({
     });
   };
 
-  const saveProject = () => {
+  const showProjectRejection = ({ title = "Project cannot be created", message, hint = "" }) => {
+    setPendingProjectConfirmation(null);
+    setProjectRejection({
+      title,
+      message,
+      hint,
+    });
+    setShowForm(true);
+  };
+
+  const goBackToProjectForm = () => {
+    setProjectRejection(null);
+    setShowForm(true);
+  };
+
+  const cancelProjectCreation = () => {
+    setProjectRejection(null);
+    closeForm();
+  };
+
+  const saveProject = async () => {
     if (!hasPermission("projects", "add")) {
-      showToast?.("warning", "Read-only access: you cannot add projects.");
+      showProjectRejection({
+        title: "Action not allowed",
+        message: "Read-only access: you cannot add projects.",
+        hint: "Contact your system admin if you believe you should have permission to add projects.",
+      });
+      return;
+    }
+
+    if (!currentCompanyId || isPlatformContextValue(currentCompanyId)) {
+      showProjectRejection({
+        title: "Company is required",
+        message: "Please select a customer company before adding projects.",
+        hint: "Projects must always be linked to a real customer company.",
+      });
       return;
     }
 
     if (!newProject.id.trim()) {
-      notifyUser(typeof showToast !== "undefined" ? showToast : null, inferToastTypeFromMessage("Please enter Project ID."), "Please enter Project ID.");
+      showProjectRejection({
+        title: "Project ID is required",
+        message: "Please enter Project ID.",
+        hint: "Project ID will be locked after creation, so make sure it is correct.",
+      });
       return;
     }
 
     if (!newProject.name.trim()) {
-      notifyUser(typeof showToast !== "undefined" ? showToast : null, inferToastTypeFromMessage("Please enter Project Name."), "Please enter Project Name.");
+      showProjectRejection({
+        title: "Project Name is required",
+        message: "Please enter Project Name.",
+        hint: "Project Name will be locked after creation, so make sure it is correct.",
+      });
       return;
     }
 
-    const duplicated = allProjects.some((project) => isSameText(project.id, newProject.id));
-    if (duplicated) {
-      notifyUser(typeof showToast !== "undefined" ? showToast : null, inferToastTypeFromMessage("Project ID already exists."), "Project ID already exists.");
+    const duplicatedProject = allProjects.find((project) => isSameText(project.id, newProject.id));
+    if (duplicatedProject) {
+      const duplicateStatus = duplicatedProject.status || "Existing";
+      showProjectRejection({
+        title: "Project ID cannot be reused",
+        message: `Project ID ${newProject.id.trim()} already exists as ${duplicateStatus} and cannot be reused.`,
+        hint: "Use a new Project ID. Project IDs remain reserved for audit and historical records.",
+      });
       return;
     }
 
-    setLocalProjects((prev) => [
-      ...prev,
-      {
-        ...newProject,
-        source: "Local Pending Add",
-        createdAt: new Date().toISOString(),
-      },
-    ]);
+    setProjectRejection(null);
+    setPendingProjectConfirmation({
+      id: newProject.id.trim(),
+      name: newProject.name.trim(),
+      status: newProject.status || "Active",
+      location: newProject.location || "",
+      description: newProject.description || "",
+    });
+  };
 
-    showToast?.("success", "Project saved locally and ready for backend submission.");
-    closeForm();
+  const confirmCreateProject = async () => {
+    if (!pendingProjectConfirmation) return;
+
+    try {
+      if (typeof onCreateProject === "function") {
+        await onCreateProject({
+          companyId: currentCompanyId,
+          code: pendingProjectConfirmation.id,
+          name: pendingProjectConfirmation.name,
+          location: pendingProjectConfirmation.location || "",
+          description: pendingProjectConfirmation.description || "",
+          isActive: isSameText(pendingProjectConfirmation.status, "Active"),
+        });
+
+        trackActivity?.("Add Project", "projects", `${pendingProjectConfirmation.id} created from backend.`);
+        showToast?.("success", "Project saved successfully.");
+        closeForm();
+        return;
+      }
+
+      setLocalProjects((prev) => [
+        ...prev,
+        {
+          ...pendingProjectConfirmation,
+          companyId: currentCompanyId,
+          source: "Local Pending Add",
+          createdAt: new Date().toISOString(),
+        },
+      ]);
+
+      showToast?.("success", "Project saved locally and ready for backend submission.");
+      closeForm();
+    } catch (error) {
+      const rawBackendMessage =
+        error?.response?.data?.message ||
+        "Failed to save project.";
+
+      const normalizedBackendMessage = Array.isArray(rawBackendMessage)
+        ? rawBackendMessage.join(", ")
+        : String(rawBackendMessage || "Failed to save project.");
+
+      const friendlyMessage =
+        normalizedBackendMessage.toLowerCase().includes("previously used") ||
+        normalizedBackendMessage.toLowerCase().includes("cannot be reused") ||
+        normalizedBackendMessage.toLowerCase().includes("unique") ||
+        normalizedBackendMessage.toLowerCase().includes("duplicate") ||
+        normalizedBackendMessage.toLowerCase().includes("already")
+          ? "Project ID already exists in system history and cannot be reused."
+          : normalizedBackendMessage;
+
+      showProjectRejection({
+        title: "Project cannot be created",
+        message: friendlyMessage,
+        hint: "Use a new Project ID. Project IDs remain reserved even after soft delete.",
+      });
+    }
   };
 
   const openStatusEdit = (project) => {
@@ -11344,7 +12017,7 @@ function ProjectsPage({
     });
   };
 
-  const saveStatusEdit = () => {
+  const saveStatusEdit = async () => {
     if (!hasPermission("projects", "edit")) {
       showToast?.("warning", "Read-only access: you cannot save project status changes.");
       setStatusEdit(null);
@@ -11353,41 +12026,94 @@ function ProjectsPage({
 
     if (!statusEdit) return;
 
-    setLocalProjects((prev) => {
-      const exists = prev.some((project) => isSameText(project.id, statusEdit.id));
+    const baseProject = allProjects.find((project) => isSameText(project.id, statusEdit.id));
 
-      if (exists) {
-        return prev.map((project) =>
-          isSameText(project.id, statusEdit.id)
-            ? {
-                ...project,
-                status: statusEdit.newStatus,
-                approvalStatus: "Approved",
-                statusChangeReason: "Status changed by confirmation",
-                statusChangedAt: new Date().toISOString(),
-              }
-            : project
+    try {
+      if (typeof onUpdateProject === "function" && baseProject?.backendId) {
+        await onUpdateProject(baseProject, {
+          isActive: isSameText(statusEdit.newStatus, "Active"),
+        });
+      } else {
+        setLocalProjects((prev) => {
+          const exists = prev.some((project) => isSameText(project.id, statusEdit.id));
+
+          if (exists) {
+            return prev.map((project) =>
+              isSameText(project.id, statusEdit.id)
+                ? {
+                    ...project,
+                    status: statusEdit.newStatus,
+                    approvalStatus: "Approved",
+                    statusChangeReason: "Status changed by confirmation",
+                    statusChangedAt: new Date().toISOString(),
+                  }
+                : project
+            );
+          }
+
+          return [
+            ...prev,
+            {
+              ...baseProject,
+              status: statusEdit.newStatus,
+              approvalStatus: "Approved",
+              source: "Local Status Update",
+              statusChangeReason: "Status changed by confirmation",
+              statusChangedAt: new Date().toISOString(),
+            },
+          ];
+        });
+      }
+
+      trackActivity?.("Change Project Status", "projects", `${statusEdit.id} status changed to ${statusEdit.newStatus}.`);
+      showToast?.("success", "Project status changed successfully.");
+      setStatusEdit(null);
+    } catch (error) {
+      const backendMessage = error?.response?.data?.message || "Failed to change project status.";
+      notifyUser(
+        typeof showToast !== "undefined" ? showToast : null,
+        "warning",
+        Array.isArray(backendMessage) ? backendMessage.join(", ") : backendMessage
+      );
+    }
+  };
+
+  const deleteProject = async (project) => {
+    if (!hasPermission("projects", "delete")) {
+      showToast?.("warning", "Read-only access: you cannot delete projects.");
+      return;
+    }
+
+    setProjectDeleteTarget(project);
+  };
+
+  const confirmDeleteProject = async () => {
+    if (!projectDeleteTarget) return;
+
+    try {
+      if (typeof onDeleteProject === "function" && projectDeleteTarget?.backendId) {
+        await onDeleteProject(projectDeleteTarget);
+      } else {
+        setLocalProjects((prev) =>
+          prev.filter((item) => !isSameText(item.id, projectDeleteTarget.id))
         );
       }
 
-      const baseProject = allProjects.find((project) => isSameText(project.id, statusEdit.id));
+      if (selectedProject && isSameText(selectedProject.id, projectDeleteTarget.id)) {
+        setSelectedProject(null);
+      }
 
-      return [
-        ...prev,
-        {
-          ...baseProject,
-          status: statusEdit.newStatus,
-          approvalStatus: "Approved",
-          source: "Local Status Update",
-          statusChangeReason: "Status changed by confirmation",
-          statusChangedAt: new Date().toISOString(),
-        },
-      ];
-    });
-
-    trackActivity?.("Change Project Status", "projects", `${statusEdit.id} status changed to ${statusEdit.newStatus}.`);
-    showToast?.("success", "Project status changed directly.");
-    setStatusEdit(null);
+      trackActivity?.("Delete Project", "projects", `${projectDeleteTarget.id} was soft deleted.`);
+      showToast?.("success", "Project deleted successfully.");
+      setProjectDeleteTarget(null);
+    } catch (error) {
+      const backendMessage = error?.response?.data?.message || "Failed to delete project.";
+      notifyUser(
+        typeof showToast !== "undefined" ? showToast : null,
+        "warning",
+        Array.isArray(backendMessage) ? backendMessage.join(", ") : backendMessage
+      );
+    }
   };
 
   const exportRowsToCSV = (fileName, csvHeaders, csvRows) => {
@@ -11419,6 +12145,7 @@ function ProjectsPage({
         "Project Name",
         "Status",
         "Approval Status",
+        "Project Manager",
         "Assigned Assets",
         "Assigned Stations",
         "Assigned Fuelers",
@@ -11432,6 +12159,7 @@ function ProjectsPage({
         project.name,
         project.status,
         project.approvalStatus,
+        project.projectManagerName || "Unassigned",
         project.assignedAssetsCount,
         project.assignedStationsCount,
         project.assignedFuelersCount,
@@ -11491,12 +12219,12 @@ function ProjectsPage({
             <p className="text-gray-400">Project cards, direct refuel tracking, and site assignment overview</p>
           </div>
 
-          <div className="flex items-center gap-3 w-full lg:w-auto">
+          <div className="flex items-center gap-3 w-full lg:w-auto min-w-0">
             <input
               value={searchTerm}
               onChange={(e) => setSearchTerm(e.target.value)}
               placeholder="Search projects..."
-              className="h-[48px] flex-1 lg:flex-none bg-gray-800 border border-gray-700 focus:border-yellow-400 focus:ring-2 focus:ring-yellow-400/20 outline-none text-white placeholder:text-slate-400 px-3 lg:px-4 rounded-xl min-w-0 lg:w-full sm:w-[320px] text-[12px] lg:text-sm transition-all"
+              className="h-[48px] flex-1 min-w-0 bg-gray-800 border border-gray-700 focus:border-yellow-400 focus:ring-2 focus:ring-yellow-400/20 outline-none text-white placeholder:text-slate-400 px-3 lg:px-4 rounded-xl w-full sm:max-w-[320px] text-[12px] lg:text-sm transition-all"
             />
 
             {searchTerm && (
@@ -11508,24 +12236,24 @@ function ProjectsPage({
               </button>
             )}
 
-            <div ref={settingsRef} className="relative shrink-0 settings-layer-safe">
+            <div ref={settingsRef} className="relative shrink-0 settings-layer-safe cursor-pointer">
               <button
                 onClick={() => setShowSettings(!showSettings)}
-                className="h-[48px] w-[48px] flex items-center justify-center bg-gray-800 hover:bg-gray-700 border border-gray-700 hover:border-yellow-400 text-yellow-400 rounded-xl transition"
+                className="h-[48px] w-[48px] cursor-pointer flex items-center justify-center bg-gray-800 hover:bg-gray-700 border border-gray-700 hover:border-yellow-400 text-yellow-400 rounded-xl transition"
                 title="Projects settings"
               >
                 ☰
               </button>
 
               {showSettings && (
-                <div className="absolute Right-0 mt-2 w-48 bg-gray-900 border border-gray-700 rounded-xl shadow-2xl z-[10020] overflow-visible">
+                <div className={`${getSmartDropdownClass(settingsMenuAlign, "w-48").replace("mt-3", "mt-2")} bg-gray-900 border border-gray-700 rounded-xl shadow-2xl z-[10020] overflow-visible`}>
                   {hasPermission("projects", "add") && (
                     <button
                       onClick={() => {
                         setShowForm(true);
                         setShowSettings(false);
                       }}
-                      className="block w-full text-left px-4 py-3 hover:bg-slate-800 transition text-white"
+                      className="block w-full cursor-pointer text-left px-4 py-3 hover:bg-slate-800 transition text-white"
                     >
                       + Add Project
                     </button>
@@ -11533,14 +12261,14 @@ function ProjectsPage({
 
                   <button
                     onClick={exportProjectsCSV}
-                    className="block w-full text-left px-4 py-3 hover:bg-slate-800 transition text-white border-t border-gray-700"
+                    className="block w-full cursor-pointer text-left px-4 py-3 hover:bg-slate-800 transition text-white border-t border-gray-700"
                   >
                     Export CSV
                   </button>
 
                   <button
                     onClick={printProjectsCards}
-                    className="block w-full text-left px-4 py-3 hover:bg-slate-800 transition text-white border-t border-gray-700"
+                    className="block w-full cursor-pointer text-left px-4 py-3 hover:bg-slate-800 transition text-white border-t border-gray-700"
                   >
                     Print Cards
                   </button>
@@ -11550,7 +12278,7 @@ function ProjectsPage({
           </div>
         </div>
 
-        <div className="grid grid-cols-1 sm:grid-cols-2 xl:grid-cols-5 gap-3 mb-4">
+        <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 2xl:grid-cols-5 gap-3 mb-4 min-w-0">
           <Card title="Total Projects" value={formatNumber(projectSummary.length)} />
           <Card title="Active Projects" value={formatNumber(activeProjects)} />
           <Card title="Inactive Projects" value={formatNumber(inactiveProjects)} />
@@ -11568,78 +12296,253 @@ function ProjectsPage({
             </div>
           </div>
 
-          <div id="projects-cards-print-area" className="print-grid grid grid-cols-1 md:grid-cols-2 xl:grid-cols-3 gap-4 p-4">
+          <div id="projects-cards-print-area" className="print-grid grid grid-cols-1 md:grid-cols-2 xl:grid-cols-3 gap-4 p-4 overflow-x-hidden min-w-0">
+            {filteredProjects.length === 0 && (
+              <div className="col-span-full rounded-2xl border border-dashed border-slate-600 bg-slate-950/60 p-8 text-center shadow-inner shadow-black/20">
+                <div className="mx-auto mb-3 flex h-12 w-12 items-center justify-center rounded-full border border-amber-400/40 bg-amber-400/10 text-2xl">
+                  🏗️
+                </div>
+                <h3 className="text-lg font-extrabold text-slate-100">No projects found</h3>
+                <p className="mt-2 text-sm text-slate-400">
+                  Add your first project for this company, or adjust the search filter to show existing projects.
+                </p>
+              </div>
+            )}
+
             {filteredProjects.map((project) => (
               <div
-                key={makeTenantEntityKey(project)}
-                className="project-card-print bg-gray-900 border border-gray-700 hover:border-yellow-400 rounded-2xl p-4 shadow-xl transition"
-              >
-                <div className="flex justify-between items-start gap-3 mb-4">
-                  <div className="min-w-0">
-                    <button
-                      onClick={() => {
-                        setSelectedProject(project);
-                        setProjectOperationSearch("");
-                      }}
-                      className="project-title text-left text-base sm:text-lg font-bold text-blue-300 hover:text-yellow-400 transition block truncate"
-                    >
-                      {project.name || project.id}
-                    </button>
-                    <p className="project-id text-xs text-gray-400 mt-1">Project ID: {project.id}</p>
-                  </div>
+  key={makeTenantEntityKey(project)}
+  className={`project-card-print group relative overflow-hidden rounded-2xl p-4 shadow-xl transition duration-200 hover:-translate-y-0.5 min-w-0 ${
+    theme === "light"
+      ? "bg-white border border-slate-300 shadow-slate-200/80 hover:border-amber-400"
+      : "bg-gradient-to-br from-slate-950 via-gray-900 to-slate-900 border border-slate-700/90 shadow-black/20 hover:border-amber-400/80"
+  }`}
+>
+  <div className="absolute inset-x-0 top-0 h-1 bg-gradient-to-r from-amber-400/90 via-blue-400/60 to-transparent" />
 
-                  {hasPermission("projects", "edit") ? (
-                    <button
-                      onClick={() => openStatusEdit(project)}
-                      title="Click to change status"
-                      className="rounded-full transition hover:scale-105"
-                    >
-                      <StatusBadge status={project.status || "Inactive"} />
-                    </button>
-                  ) : (
-                    <StatusBadge status={project.status || "Inactive"} />
-                  )}
-                </div>
+  <div className="flex justify-between items-start gap-3 mb-4 pt-1">
+    <div className="min-w-0">
+      <button
+        onClick={() => {
+          setSelectedProject(project);
+          setProjectOperationSearch("");
+        }}
+        className={`project-title cursor-pointer text-left text-base sm:text-lg font-extrabold transition block truncate ${
+          theme === "light"
+            ? "text-blue-900 hover:text-amber-700"
+            : "text-blue-200 group-hover:text-amber-300"
+        }`}
+      >
+        {project.name || project.id}
+      </button>
 
-                <div className="grid grid-cols-1 sm:grid-cols-3 gap-2 mb-3">
-                  <div className="metric bg-gray-800 rounded-xl p-2 lg:p-3 border border-gray-700 min-w-0">
-                    <p className="label text-[11px] text-gray-400">Assets</p>
-                    <p className="value text-xl font-bold text-white mt-1">{formatNumber(project.assignedAssetsCount)}</p>
-                  </div>
+      <p
+        className={`project-id text-[11px] mt-1 ${
+          theme === "light" ? "text-slate-600" : "text-slate-400"
+        }`}
+      >
+        <span className={theme === "light" ? "text-slate-500" : "text-slate-500"}>
+          Project ID:
+        </span>{" "}
+        <span
+          className={`font-semibold ${
+            theme === "light" ? "text-slate-800" : "text-slate-300"
+          }`}
+        >
+          {project.id}
+        </span>
+      </p>
 
-                  <div className="metric bg-gray-800 rounded-xl p-2 lg:p-3 border border-gray-700 min-w-0">
-                    <p className="label text-[11px] text-gray-400">Stations</p>
-                    <p className="value text-xl font-bold text-white mt-1">{formatNumber(project.assignedStationsCount)}</p>
-                  </div>
+      <div className={`mt-3 rounded-xl border px-3 py-2 ${
+        theme === "light"
+          ? "border-slate-300 bg-slate-50"
+          : "border-slate-700 bg-slate-950/70"
+      }`}>
+        <p className={`text-[10px] uppercase tracking-[0.16em] font-bold ${
+          theme === "light" ? "text-slate-500" : "text-slate-400"
+        }`}>
+          Project Manager
+        </p>
 
-                  <div className="metric bg-gray-800 rounded-xl p-2 lg:p-3 border border-gray-700 min-w-0">
-                    <p className="label text-[11px] text-gray-400">Fuelers</p>
-                    <p className="value text-xl font-bold text-white mt-1">{formatNumber(project.assignedFuelersCount)}</p>
-                  </div>
-                </div>
+        {isAdminProjectManagerEditor ? (
+          <select
+            value={project.projectManagerId || ""}
+            onChange={(event) => requestProjectManagerChange(project, event.target.value)}
+            className={`mt-1 w-full cursor-pointer rounded-lg border px-2 py-1.5 text-xs font-bold outline-none transition ${
+              theme === "light"
+                ? "border-slate-300 bg-white text-slate-800 focus:border-amber-500"
+                : "border-slate-700 bg-slate-900 text-slate-100 focus:border-amber-400"
+            }`}
+          >
+            <option value="">Assign manager</option>
+            {projectManagerOptions.map((manager) => (
+              <option key={manager.id} value={manager.id}>
+                {manager.fullName || manager.email}
+              </option>
+            ))}
+          </select>
+        ) : (
+          <p className={`mt-1 truncate text-sm font-extrabold ${
+            theme === "light" ? "text-slate-800" : "text-slate-100"
+          }`}>
+            {project.projectManagerName || "Unassigned"}
+          </p>
+        )}
+      </div>
+    </div>
 
-                <div className="grid grid-cols-1 sm:grid-cols-3 gap-2">
-                  <div className="metric bg-gray-800 rounded-xl p-2 lg:p-3 border border-gray-700 min-w-0">
-                    <p className="label text-[11px] text-gray-400">Direct Refuel</p>
-                    <p className="value text-xl font-bold text-yellow-300 mt-1">{formatNumber(project.operationsCount)}</p>
-                  </div>
+    <div className="flex items-center gap-2 shrink-0">
+      {hasPermission("projects", "edit") ? (
+        <button
+          onClick={() => openStatusEdit(project)}
+          title="Click to change status"
+          className="cursor-pointer rounded-full transition hover:scale-105"
+        >
+          <StatusBadge status={project.status || "Inactive"} />
+        </button>
+      ) : (
+        <StatusBadge status={project.status || "Inactive"} />
+      )}
 
-                  <div className="metric bg-gray-800 rounded-xl p-2 lg:p-3 border border-gray-700 min-w-0">
-                    <p className="label text-[11px] text-gray-400">Qty Liters</p>
-                    <p className="value text-xl font-bold text-green-300 mt-1">{formatNumber(project.dieselQty)}</p>
-                  </div>
+      {hasPermission("projects", "delete") && (
+        <button
+          onClick={() => deleteProject(project)}
+          title="Delete project"
+          className={`h-8 w-8 cursor-pointer flex items-center justify-center rounded-full border transition hover:scale-105 ${
+            theme === "light"
+              ? "border-red-300 bg-red-50 text-red-600 hover:bg-red-100"
+              : "border-red-500/40 bg-red-500/10 text-red-300 hover:bg-red-500/25 hover:text-red-100"
+          }`}
+        >
+          🗑
+        </button>
+      )}
+    </div>
+  </div>
 
-                  <div className="metric bg-gray-800 rounded-xl p-2 lg:p-3 border border-gray-700 min-w-0">
-                    <p className="label text-[11px] text-gray-400">Cost</p>
-                    <p className="value text-base sm:text-lg font-bold text-blue-300 mt-1">{formatNumber(project.dieselCost)}</p>
-                  </div>
-                </div>
+                <div className="grid grid-cols-1 sm:grid-cols-3 gap-2 mb-3 min-w-0">
+  <div
+    className={`metric rounded-xl p-2 lg:p-3 border min-w-0 shadow-inner ${
+      theme === "light"
+        ? "bg-slate-50 border-slate-300 shadow-slate-200/70"
+        : "bg-slate-950/70 border-slate-700/80 shadow-black/10"
+    }`}
+  >
+    <p className={`label text-[11px] ${theme === "light" ? "text-slate-500" : "text-gray-400"}`}>
+      Assets
+    </p>
 
-                <div className="mt-4 flex justify-between items-center text-xs text-gray-400 border-t border-gray-700 pt-3">
-                  <span>Approval: {project.approvalStatus || "Approved"}</span>
-                  <span>{currency}</span>
-                </div>
-              </div>
+    <p
+      className={`value text-xl font-bold mt-1 ${
+        theme === "light" ? "text-slate-900" : "text-white"
+      }`}
+    >
+      {formatNumber(project.assignedAssetsCount)}
+    </p>
+  </div>
+
+  <div
+    className={`metric rounded-xl p-2 lg:p-3 border min-w-0 shadow-inner ${
+      theme === "light"
+        ? "bg-slate-50 border-slate-300 shadow-slate-200/70"
+        : "bg-slate-950/70 border-slate-700/80 shadow-black/10"
+    }`}
+  >
+    <p className={`label text-[11px] ${theme === "light" ? "text-slate-500" : "text-gray-400"}`}>
+      Stations
+    </p>
+
+    <p
+      className={`value text-xl font-bold mt-1 ${
+        theme === "light" ? "text-slate-900" : "text-white"
+      }`}
+    >
+      {formatNumber(project.assignedStationsCount)}
+    </p>
+  </div>
+
+  <div
+    className={`metric rounded-xl p-2 lg:p-3 border min-w-0 shadow-inner ${
+      theme === "light"
+        ? "bg-slate-50 border-slate-300 shadow-slate-200/70"
+        : "bg-slate-950/70 border-slate-700/80 shadow-black/10"
+    }`}
+  >
+    <p className={`label text-[11px] ${theme === "light" ? "text-slate-500" : "text-gray-400"}`}>
+      Fuelers
+    </p>
+
+    <p
+      className={`value text-xl font-bold mt-1 ${
+        theme === "light" ? "text-slate-900" : "text-white"
+      }`}
+    >
+      {formatNumber(project.assignedFuelersCount)}
+    </p>
+  </div>
+</div>
+
+<div className="grid grid-cols-1 sm:grid-cols-3 gap-2 min-w-0">
+  <div
+    className={`metric rounded-xl p-2 lg:p-3 border min-w-0 shadow-inner ${
+      theme === "light"
+        ? "bg-slate-50 border-slate-300 shadow-slate-200/70"
+        : "bg-slate-950/70 border-slate-700/80 shadow-black/10"
+    }`}
+  >
+    <p className={`label text-[11px] ${theme === "light" ? "text-slate-500" : "text-gray-400"}`}>
+      Direct Refuel
+    </p>
+
+    <p className="value text-xl font-bold text-yellow-500 mt-1">
+      {formatNumber(project.operationsCount)}
+    </p>
+  </div>
+
+  <div
+    className={`metric rounded-xl p-2 lg:p-3 border min-w-0 shadow-inner ${
+      theme === "light"
+        ? "bg-slate-50 border-slate-300 shadow-slate-200/70"
+        : "bg-slate-950/70 border-slate-700/80 shadow-black/10"
+    }`}
+  >
+    <p className={`label text-[11px] ${theme === "light" ? "text-slate-500" : "text-gray-400"}`}>
+      Qty Liters
+    </p>
+
+    <p className="value text-xl font-bold text-emerald-500 mt-1">
+      {formatNumber(project.dieselQty)}
+    </p>
+  </div>
+
+  <div
+    className={`metric rounded-xl p-2 lg:p-3 border min-w-0 shadow-inner ${
+      theme === "light"
+        ? "bg-slate-50 border-slate-300 shadow-slate-200/70"
+        : "bg-slate-950/70 border-slate-700/80 shadow-black/10"
+    }`}
+  >
+    <p className={`label text-[11px] ${theme === "light" ? "text-slate-500" : "text-gray-400"}`}>
+      Cost
+    </p>
+
+    <p className="value text-base sm:text-lg font-bold text-blue-600 mt-1">
+      {formatNumber(project.dieselCost)}
+    </p>
+  </div>
+</div>
+
+<div
+  className={`mt-4 flex justify-between items-center text-xs border-t pt-3 ${
+    theme === "light"
+      ? "text-slate-500 border-slate-300"
+      : "text-gray-400 border-gray-700"
+  }`}
+>
+  <span>Approval: {project.approvalStatus || "Approved"}</span>
+  <span>{currency}</span>
+</div>
+   </div>
             ))}
           </div>
         </div>
@@ -11654,6 +12557,9 @@ function ProjectsPage({
                   </h2>
                   <p className="text-gray-400 mt-1">
                     Project: <span className="text-blue-300 font-semibold">{selectedProject.name || selectedProject.id}</span>
+                  </p>
+                  <p className="text-gray-400 mt-1 text-sm">
+                    Project Manager: <span className="text-emerald-300 font-semibold">{selectedProject.projectManagerName || "Unassigned"}</span>
                   </p>
                 </div>
 
@@ -11768,7 +12674,7 @@ function ProjectsPage({
                 This status change will be saved directly after confirmation without reason or password.
               </p>
 
-              <div className="flex justify-end gap-3 border-t pt-4">
+              <div className="flex justify-end gap-3 border-t border-slate-700/80 px-6 py-5 bg-slate-950/90">
                 <button
                   onClick={() => setStatusEdit(null)}
                   className="bg-gray-200 px-3 lg:px-4 py-2 rounded-lg"
@@ -11787,38 +12693,358 @@ function ProjectsPage({
           </div>
         )}
 
+        {pendingManagerConfirmation && (
+          <ModalPortal>
+            <div className="fixed inset-0 z-[10000] flex items-center justify-center bg-black/75 p-3 backdrop-blur-sm">
+              <div className="w-full max-w-xl overflow-hidden rounded-3xl border border-amber-400/40 bg-slate-950 text-white shadow-2xl shadow-black/40">
+                <div className="border-b border-slate-700 bg-gradient-to-r from-slate-900 to-slate-800 p-5">
+                  <p className="text-xs font-bold uppercase tracking-[0.22em] text-amber-300">Admin confirmation</p>
+                  <h2 className="mt-1 text-xl font-extrabold">Change Project Manager</h2>
+                </div>
+
+                <div className="space-y-4 p-5">
+                  <div className="rounded-2xl border border-slate-700 bg-slate-900/80 p-4 text-sm leading-6 text-slate-300">
+                    <p>
+                      Project: <span className="font-extrabold text-blue-200">{pendingManagerConfirmation.project?.name || pendingManagerConfirmation.project?.id}</span>
+                    </p>
+                    <p>
+                      Current Manager: <span className="font-bold text-slate-100">{pendingManagerConfirmation.oldManagerName || "Unassigned"}</span>
+                    </p>
+                    <p>
+                      New Manager: <span className="font-bold text-emerald-300">{pendingManagerConfirmation.managerName}</span>
+                    </p>
+                  </div>
+
+                  <div className="rounded-2xl border border-amber-400/40 bg-amber-400/10 p-4 text-sm text-amber-100">
+                    Only Admin can change the Project Manager. This change will be applied immediately after confirmation and does not require approval workflow.
+                  </div>
+                </div>
+
+                <div className="flex flex-col justify-end gap-3 border-t border-slate-700 bg-slate-950 p-5 sm:flex-row">
+                  <button
+                    onClick={() => setPendingManagerConfirmation(null)}
+                    disabled={managerSaving}
+                    className="rounded-xl border border-slate-600 bg-slate-900 px-5 py-2.5 font-bold text-slate-200 transition hover:bg-slate-800 disabled:opacity-60"
+                  >
+                    Cancel
+                  </button>
+
+                  <button
+                    onClick={confirmProjectManagerChange}
+                    disabled={managerSaving}
+                    className="rounded-xl bg-amber-500 px-5 py-2.5 font-extrabold text-slate-950 shadow-lg shadow-amber-950/30 transition hover:bg-amber-400 disabled:opacity-60"
+                  >
+                    {managerSaving ? "Saving..." : "Confirm Change"}
+                  </button>
+                </div>
+              </div>
+            </div>
+          </ModalPortal>
+        )}
+
+        {projectRejection && (
+          <div className="fixed inset-0 bg-black/75 backdrop-blur-sm flex items-center justify-center z-[10090] p-3">
+            <div className="bg-slate-950 text-white w-full max-w-[540px] rounded-3xl shadow-2xl border border-red-400/30 overflow-hidden">
+              <div className="p-5 border-b border-slate-700 bg-gradient-to-r from-red-950/70 to-slate-900 flex items-start justify-between gap-4">
+                <div>
+                  <p className="text-xs uppercase tracking-[0.22em] text-red-300 font-bold">
+                    Creation rejected
+                  </p>
+                  <h2 className="text-xl sm:text-2xl font-extrabold mt-1">
+                    {projectRejection.title}
+                  </h2>
+                </div>
+
+                <button
+                  onClick={cancelProjectCreation}
+                  className="h-9 w-9 rounded-full border border-slate-600 text-slate-300 hover:text-white hover:bg-slate-800 transition cursor-pointer"
+                >
+                  ×
+                </button>
+              </div>
+
+              <div className="p-5 space-y-4">
+                <div className="rounded-2xl border border-red-400/40 bg-red-500/10 p-4">
+                  <p className="text-sm font-bold text-red-200">
+                    {projectRejection.message}
+                  </p>
+
+                  {projectRejection.hint && (
+                    <p className="text-xs text-red-100/80 mt-2 leading-5">
+                      {projectRejection.hint}
+                    </p>
+                  )}
+                </div>
+
+                <div className="rounded-2xl border border-slate-700 bg-slate-900/80 p-4 text-xs leading-5 text-slate-300">
+                  You can go back to correct the project details, or cancel the creation process completely.
+                </div>
+              </div>
+
+              <div className="p-5 border-t border-slate-700 flex flex-col sm:flex-row justify-end gap-3 bg-slate-950">
+                <button
+                  onClick={cancelProjectCreation}
+                  className="px-4 py-2 rounded-xl border border-slate-600 text-slate-200 hover:bg-slate-800 transition cursor-pointer"
+                >
+                  Cancel
+                </button>
+
+                <button
+                  onClick={goBackToProjectForm}
+                  className="px-5 py-2 rounded-xl bg-amber-400 hover:bg-amber-300 text-black font-extrabold shadow-lg shadow-amber-500/10 transition cursor-pointer"
+                >
+                  Back to Add Project
+                </button>
+              </div>
+            </div>
+          </div>
+        )}
+
+        {pendingProjectConfirmation && (
+          <div className="fixed inset-0 bg-black/75 backdrop-blur-sm flex items-center justify-center z-[10080] p-3">
+            <div className="bg-slate-950 text-white w-full max-w-[560px] rounded-3xl shadow-2xl border border-amber-400/30 overflow-hidden">
+              <div className="p-5 border-b border-slate-700 bg-gradient-to-r from-slate-900 to-slate-800 flex items-start justify-between gap-4">
+                <div>
+                  <p className="text-xs uppercase tracking-[0.22em] text-amber-300 font-bold">Final confirmation</p>
+                  <h2 className="text-xl sm:text-2xl font-extrabold mt-1">Create Project</h2>
+                </div>
+                <button
+                  onClick={() => setPendingProjectConfirmation(null)}
+                  className="h-9 w-9 rounded-full border border-slate-600 text-slate-300 hover:text-white hover:bg-slate-800 transition"
+                >
+                  ×
+                </button>
+              </div>
+
+              <div className="p-5 space-y-4">
+                <div className="rounded-2xl border border-slate-700 bg-slate-900/80 p-4">
+                  <div className="grid grid-cols-1 sm:grid-cols-2 gap-3 text-sm">
+                    <div>
+                      <p className="text-slate-400 text-xs">Project ID</p>
+                      <p className="font-bold text-blue-200 mt-1">{pendingProjectConfirmation.id}</p>
+                    </div>
+                    <div>
+                      <p className="text-slate-400 text-xs">Status</p>
+                      <p className="font-bold text-emerald-200 mt-1">{pendingProjectConfirmation.status}</p>
+                    </div>
+                    <div className="sm:col-span-2">
+                      <p className="text-slate-400 text-xs">Project Name</p>
+                      <p className="font-bold text-white mt-1">{pendingProjectConfirmation.name}</p>
+                    </div>
+                    <div className="sm:col-span-2">
+                      <p className="text-slate-400 text-xs">Location</p>
+                      <p className="font-bold text-slate-200 mt-1">{pendingProjectConfirmation.location || "-"}</p>
+                    </div>
+                  </div>
+                </div>
+
+                <div className="rounded-2xl border border-amber-400/40 bg-amber-400/10 p-4">
+                  <p className="text-sm font-bold text-amber-200">This data cannot be edited later.</p>
+                  <p className="text-xs text-amber-100/80 mt-1 leading-5">
+                    Please confirm that Project ID, name, and location are correct before creating this project.
+                  </p>
+                </div>
+              </div>
+
+              <div className="p-5 border-t border-slate-700 flex flex-col sm:flex-row justify-end gap-3 bg-slate-950">
+                <button
+                  onClick={() => {
+                    setPendingProjectConfirmation(null);
+                    setShowForm(true);
+                  }}
+                  className="px-4 py-2 rounded-xl border border-slate-600 text-slate-200 hover:bg-slate-800 transition"
+                >
+                  Review Again
+                </button>
+                <button
+                  onClick={confirmCreateProject}
+                  className="px-5 py-2 rounded-xl bg-amber-400 hover:bg-amber-300 text-black font-extrabold shadow-lg shadow-amber-500/10 transition"
+                >
+                  Confirm & Create
+                </button>
+              </div>
+            </div>
+          </div>
+        )}
+
+        {projectDeleteTarget && (
+          <div className="fixed inset-0 bg-black/75 backdrop-blur-sm flex items-center justify-center z-[10030] p-3">
+            <div className="bg-slate-950 text-white w-full max-w-[520px] rounded-3xl shadow-2xl border border-red-400/30 overflow-hidden">
+              <div className="p-5 border-b border-slate-700 bg-gradient-to-r from-red-950/70 to-slate-900 flex items-start justify-between gap-4">
+                <div>
+                  <p className="text-xs uppercase tracking-[0.22em] text-red-300 font-bold">Soft delete</p>
+                  <h2 className="text-xl sm:text-2xl font-extrabold mt-1">Delete Project?</h2>
+                </div>
+                <button
+                  onClick={() => setProjectDeleteTarget(null)}
+                  className="h-9 w-9 rounded-full border border-slate-600 text-slate-300 hover:text-white hover:bg-slate-800 transition"
+                >
+                  ×
+                </button>
+              </div>
+
+              <div className="p-5 space-y-4">
+                <div className="rounded-2xl border border-slate-700 bg-slate-900/80 p-4">
+                  <p className="text-xs text-slate-400">Project</p>
+                  <p className="font-extrabold text-white mt-1">{projectDeleteTarget.name || projectDeleteTarget.id}</p>
+                  <p className="text-xs text-slate-400 mt-2">Project ID: {projectDeleteTarget.id}</p>
+                </div>
+
+                <div className="rounded-2xl border border-red-400/40 bg-red-500/10 p-4">
+                  <p className="text-sm font-bold text-red-200">The project will be hidden from active screens.</p>
+                  <p className="text-xs text-red-100/80 mt-1 leading-5">
+                    This is a soft delete. The record will remain in the database for audit history and future reference.
+                  </p>
+                </div>
+              </div>
+
+              <div className="p-5 border-t border-slate-700 flex flex-col sm:flex-row justify-end gap-3 bg-slate-950">
+                <button
+                  onClick={() => setProjectDeleteTarget(null)}
+                  className="px-4 py-2 rounded-xl border border-slate-600 text-slate-200 hover:bg-slate-800 transition"
+                >
+                  Cancel
+                </button>
+                <button
+                  onClick={confirmDeleteProject}
+                  className="px-5 py-2 rounded-xl bg-red-500 hover:bg-red-400 text-white font-extrabold shadow-lg shadow-red-500/10 transition"
+                >
+                  Delete Project
+                </button>
+              </div>
+            </div>
+          </div>
+        )}
+
         {showForm && (
-          <GenericModal title="Add Project" closeForm={closeForm} saveText="Save Project" onSave={saveProject}>
-            <Field
-              label="Project ID"
-              value={newProject.id}
-              onChange={(e) => setNewProject({ ...newProject, id: e.target.value })}
-              placeholder="Example: PRJ-001"
-            />
+          <ModalPortal>
+            <div className="fixed inset-0 z-[10030] flex items-center justify-center bg-black/75 p-3 backdrop-blur-sm">
+              <div className="w-[95%] max-w-2xl max-h-[92vh] overflow-y-auto rounded-3xl border border-amber-400/25 bg-slate-950 text-slate-100 shadow-2xl shadow-black/50">
+                <div className="flex items-start justify-between gap-4 border-b border-slate-700 bg-gradient-to-r from-slate-950 via-slate-900 to-slate-950 px-6 py-5">
+                  <div>
+                    <p className="text-xs font-bold uppercase tracking-[0.22em] text-amber-300">
+                      Projects / Sites
+                    </p>
+                    <h2 className="mt-1 text-2xl font-extrabold text-white">
+                      Add Project
+                    </h2>
+                  </div>
 
-            <Field
-              label="Project Name"
-              value={newProject.name}
-              onChange={(e) => setNewProject({ ...newProject, name: e.target.value })}
-              placeholder="Example: NEOM Site A"
-            />
+                  <button
+                    onClick={closeForm}
+                    className="flex h-9 w-9 items-center justify-center rounded-full border border-slate-600 text-slate-300 transition hover:bg-slate-800 hover:text-white"
+                  >
+                    ×
+                  </button>
+                </div>
 
-            <SelectField
-              label="Status"
-              value={newProject.status}
-              onChange={(e) => setNewProject({ ...newProject, status: e.target.value })}
-              options={["Active", "Inactive"]}
-              placeholder="Select status"
-            />
+                <div className="space-y-5 px-6 py-5">
+                  <div className="rounded-2xl border border-amber-400/60 bg-gradient-to-r from-amber-950/95 via-slate-900 to-slate-950 p-4 shadow-lg shadow-black/20">
+                    <div className="flex items-start gap-3">
+                      <span className="inline-flex h-10 w-10 shrink-0 items-center justify-center rounded-full border border-amber-300/60 bg-amber-400/15 font-black text-amber-200">
+                        !
+                      </span>
 
-            <SelectField
-              label="Location"
-              value={newProject.location}
-              onChange={(e) => setNewProject({ ...newProject, location: e.target.value })}
-              options={SAUDI_PROJECT_LOCATIONS}
-              placeholder="Select Saudi location"
-            />
-          </GenericModal>
+                      <div>
+                        <p className="text-sm font-extrabold uppercase tracking-[0.18em] text-amber-300">
+                          Data lock warning
+                        </p>
+                        <p className="mt-1 text-base font-extrabold text-white">
+                          Please verify project details before saving
+                        </p>
+                        <p className="mt-1 text-sm leading-6 text-slate-300">
+                          Project ID, name, location, and description will be locked after creation.
+                          You can only change the project status later from the Active / Inactive badge.
+                        </p>
+                      </div>
+                    </div>
+                  </div>
+
+                  <div className="grid grid-cols-1 gap-4">
+                    <div className="grid grid-cols-1 gap-2 sm:grid-cols-3 sm:items-center sm:gap-4">
+                      <label className="font-semibold text-slate-300">Project ID</label>
+                      <input
+                        value={newProject.id}
+                        onChange={(e) => setNewProject({ ...newProject, id: e.target.value })}
+                        placeholder="Example: PRJ-001"
+                        className="col-span-2 w-full rounded-xl border border-slate-600 bg-slate-900 px-3 py-2.5 text-slate-100 outline-none transition placeholder:text-slate-500 focus:border-amber-400 focus:ring-2 focus:ring-amber-400/20"
+                      />
+                    </div>
+
+                    <div className="grid grid-cols-1 gap-2 sm:grid-cols-3 sm:items-center sm:gap-4">
+                      <label className="font-semibold text-slate-300">Project Name</label>
+                      <input
+                        value={newProject.name}
+                        onChange={(e) => setNewProject({ ...newProject, name: e.target.value })}
+                        placeholder="Example: NEOM Site A"
+                        className="col-span-2 w-full rounded-xl border border-slate-600 bg-slate-900 px-3 py-2.5 text-slate-100 outline-none transition placeholder:text-slate-500 focus:border-amber-400 focus:ring-2 focus:ring-amber-400/20"
+                      />
+                    </div>
+
+                    <div className="grid grid-cols-1 gap-2 sm:grid-cols-3 sm:items-center sm:gap-4">
+                      <label className="font-semibold text-slate-300">Status</label>
+                      <select
+                        value={newProject.status}
+                        onChange={(e) => setNewProject({ ...newProject, status: e.target.value })}
+                        className="col-span-2 w-full rounded-xl border border-slate-600 bg-slate-900 px-3 py-2.5 text-slate-100 outline-none transition focus:border-amber-400 focus:ring-2 focus:ring-amber-400/20"
+                      >
+                        <option value="">Select status</option>
+                        {["Active", "Inactive"].map((item) => (
+                          <option key={item} value={item}>
+                            {item}
+                          </option>
+                        ))}
+                      </select>
+                    </div>
+
+                    <div className="grid grid-cols-1 gap-2 sm:grid-cols-3 sm:items-center sm:gap-4">
+                      <label className="font-semibold text-slate-300">Location</label>
+
+                      {shouldUseLocationDropdown ? (
+                        <select
+                          value={newProject.location}
+                          onChange={(e) => setNewProject({ ...newProject, location: e.target.value })}
+                          className="col-span-2 w-full rounded-xl border border-slate-600 bg-slate-900 px-3 py-2.5 text-slate-100 outline-none transition focus:border-amber-400 focus:ring-2 focus:ring-amber-400/20"
+                        >
+                          <option value="">
+                            Select location for {currentCompanyCountry || "company country"}
+                          </option>
+                          {projectLocationOptions.map((item) => (
+                            <option key={item} value={item}>
+                              {item}
+                            </option>
+                          ))}
+                        </select>
+                      ) : (
+                        <input
+                          value={newProject.location}
+                          onChange={(e) => setNewProject({ ...newProject, location: e.target.value })}
+                          placeholder={currentCompanyCountry ? `Enter location in ${currentCompanyCountry}` : "Enter location manually"}
+                          className="col-span-2 w-full rounded-xl border border-slate-600 bg-slate-900 px-3 py-2.5 text-slate-100 outline-none transition placeholder:text-slate-500 focus:border-amber-400 focus:ring-2 focus:ring-amber-400/20"
+                        />
+                      )}
+                    </div>
+                  </div>
+                </div>
+
+                <div className="flex flex-col justify-end gap-3 border-t border-slate-700 bg-slate-950/95 px-6 py-5 sm:flex-row">
+                  <button
+                    onClick={closeForm}
+                    className="rounded-xl border border-slate-600 bg-slate-900 px-5 py-2.5 font-bold text-slate-200 transition hover:bg-slate-800"
+                  >
+                    Cancel
+                  </button>
+
+                  <button
+                    onClick={saveProject}
+                    className="rounded-xl bg-emerald-500 px-5 py-2.5 font-extrabold text-white shadow-lg shadow-emerald-950/30 transition hover:bg-emerald-400"
+                  >
+                    Save Project
+                  </button>
+                </div>
+              </div>
+            </div>
+          </ModalPortal>
         )}
       </div>
     </div>
@@ -12136,7 +13362,7 @@ function AddOperationModal({
       <div className="bg-white text-black w-full max-w-3xl rounded-2xl shadow-2xl overflow-hidden">
         <div className="flex justify-between items-center p-5 border-b">
           <div>
-            <h2 className="text-2xl font-bold">Add Diesel Operation</h2>
+            <h2 className="text-2xl font-extrabold text-white">Add Diesel Operation</h2>
             <p className="text-sm text-gray-500 mt-1">
               User project scope controls stations, fuelers, and destinations
             </p>
@@ -12589,7 +13815,7 @@ function ImageField({ label, preview, setPreview }) {
           type="file"
           accept="image/*"
           capture={isMobile ? "environment" : undefined}
-          className="border rounded-lg p-2 w-full"
+          className="w-full rounded-xl border border-slate-600 bg-slate-900 px-3 py-2.5 text-slate-100 outline-none transition placeholder:text-slate-500 focus:border-amber-400 focus:ring-2 focus:ring-amber-400/20"
           onChange={(e) => {
             const file = e.target.files[0];
 
@@ -15615,7 +16841,7 @@ function ForcePasswordChangePage({
           <p className="mt-1 text-sm font-bold text-slate-100">{currentUser?.fullName || currentUser?.email || "User"}</p>
         </div>
 
-        <form onSubmit={onSubmit} className="space-y-4">
+        <form onSubmit={onSubmit} className="space-y-4 px-6 py-5">
           <label className="block">
             <span className="text-xs font-bold text-slate-400">Temporary Password</span>
             <input
@@ -15844,6 +17070,134 @@ function LoginPage({
         [data-theme="light"] .login-theme-button:hover {
           border-color: #f59e0b !important;
           color: #b45309 !important;
+        }
+
+
+        /* Projects page polish */
+        [data-theme="light"] .project-card-print {
+          background: #ffffff !important;
+          color: #0f172a !important;
+          border-color: #cbd5e1 !important;
+          box-shadow: 0 18px 35px rgba(15, 23, 42, 0.10) !important;
+        }
+
+        [data-theme="light"] .project-card-print .project-title {
+          color: #1d4ed8 !important;
+        }
+
+        [data-theme="light"] .project-card-print .project-title:hover {
+          color: #b45309 !important;
+        }
+
+        [data-theme="light"] .project-card-print .project-id,
+        [data-theme="light"] .project-card-print .label {
+          color: #64748b !important;
+        }
+
+        [data-theme="light"] .project-card-print .value {
+          color: #0f172a !important;
+        }
+
+        [data-theme="light"] .project-card-print .metric {
+          background: #f8fafc !important;
+          border-color: #cbd5e1 !important;
+          box-shadow: inset 0 1px 0 rgba(255,255,255,0.75) !important;
+        }
+
+        [data-theme="light"] .project-card-print .text-slate-400,
+        [data-theme="light"] .project-card-print .text-slate-500,
+        [data-theme="light"] .project-card-print .text-gray-400 {
+          color: #64748b !important;
+        }
+
+        [data-theme="light"] .project-card-print .text-slate-300,
+        [data-theme="light"] .project-card-print .text-slate-100,
+        [data-theme="light"] .project-card-print .text-white {
+          color: #0f172a !important;
+        }
+
+        [data-theme="light"] .project-card-print .border-slate-700\/80,
+        [data-theme="light"] .project-card-print .border-gray-700 {
+          border-color: #cbd5e1 !important;
+        }
+
+
+        /* Global clickable cursor */
+        button,
+        a,
+        select,
+        summary,
+        [role="button"],
+        input[type="button"],
+        input[type="submit"],
+        input[type="checkbox"],
+        input[type="radio"],
+        .cursor-clickable,
+        .project-title,
+        .project-card-print button {
+          cursor: pointer !important;
+        }
+
+        button:disabled,
+        select:disabled,
+        input:disabled {
+          cursor: not-allowed !important;
+        }
+
+        /* Project cards theme fix */
+        [data-theme="light"] .project-card-print {
+          background: linear-gradient(135deg, #ffffff 0%, #f8fafc 100%) !important;
+          color: #0f172a !important;
+          border-color: #cbd5e1 !important;
+          box-shadow: 0 18px 35px rgba(15, 23, 42, 0.10) !important;
+        }
+
+        [data-theme="light"] .project-card-print::before {
+          background: linear-gradient(90deg, rgba(245, 158, 11, 0.95), rgba(59, 130, 246, 0.55), transparent) !important;
+        }
+
+        [data-theme="light"] .project-card-print .project-title {
+          color: #1e3a8a !important;
+        }
+
+        [data-theme="light"] .project-card-print .project-title:hover {
+          color: #b45309 !important;
+        }
+
+        [data-theme="light"] .project-card-print .project-id,
+        [data-theme="light"] .project-card-print .label {
+          color: #64748b !important;
+        }
+
+        [data-theme="light"] .project-card-print .value,
+        [data-theme="light"] .project-card-print .font-bold,
+        [data-theme="light"] .project-card-print .font-extrabold {
+          color: #0f172a !important;
+        }
+
+        [data-theme="light"] .project-card-print .metric {
+          background: #f8fafc !important;
+          border-color: #cbd5e1 !important;
+          box-shadow: inset 0 1px 0 rgba(255, 255, 255, 0.85) !important;
+        }
+
+        [data-theme="light"] .project-card-print .text-slate-500,
+        [data-theme="light"] .project-card-print .text-slate-400,
+        [data-theme="light"] .project-card-print .text-gray-400 {
+          color: #64748b !important;
+        }
+
+        [data-theme="light"] .project-card-print .text-slate-300,
+        [data-theme="light"] .project-card-print .text-slate-200,
+        [data-theme="light"] .project-card-print .text-slate-100,
+        [data-theme="light"] .project-card-print .text-white {
+          color: #0f172a !important;
+        }
+
+        [data-theme="light"] .project-card-print .border-slate-700\/80,
+        [data-theme="light"] .project-card-print .border-gray-700,
+        [data-theme="light"] .project-card-print .border-slate-700 {
+          border-color: #cbd5e1 !important;
         }
       `}</style>
 
