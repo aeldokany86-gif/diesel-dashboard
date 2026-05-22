@@ -263,11 +263,14 @@ function getProjectLocationOptionsByCountry(country) {
 }
 
 const PLATFORM_CONTEXT_ID = "PLATFORM";
+const PLATFORM_REAL_COMPANY_ID = "cmph898d701k6cm1g9sjttcoe";
+const PLATFORM_CONTEXT_CODE = "PLATFORM";
+const PLATFORM_CONTEXT_NAME = "Platform Console";
 
 const PLATFORM_COMPANY_OPTION = {
   id: PLATFORM_CONTEXT_ID,
-  code: PLATFORM_CONTEXT_ID,
-  name: "Platform Console",
+  code: PLATFORM_CONTEXT_CODE,
+  name: PLATFORM_CONTEXT_NAME,
   country: "",
   currency: "SAR",
   timezone: "Asia/Riyadh",
@@ -278,25 +281,47 @@ const PLATFORM_COMPANY_OPTION = {
 
 function isPlatformContextValue(value) {
   const normalized = normalizeScopeValue(value);
-  return normalized === "platform" || normalized === "platform console";
+  return (
+    normalized === "platform" ||
+    normalized === "platform console" ||
+    normalized === normalizeScopeValue(PLATFORM_REAL_COMPANY_ID)
+  );
+}
+
+function isPlatformCompany(company) {
+  if (!company) return false;
+
+  return (
+    Boolean(company.isPlatformContext) ||
+    isPlatformContextValue(company.id) ||
+    isPlatformContextValue(company.code) ||
+    isPlatformContextValue(company.name)
+  );
+}
+
+function getPlatformCompany(companies = []) {
+  return companies.find((company) => isPlatformCompany(company)) || null;
+}
+
+function getPlatformCompanyId(companies = []) {
+  return getPlatformCompany(companies)?.id || PLATFORM_CONTEXT_ID;
 }
 
 function mergePlatformConsoleWithCompanies(companies = []) {
   const map = new Map();
-
-  map.set(normalizeScopeValue(PLATFORM_COMPANY_OPTION.id), PLATFORM_COMPANY_OPTION);
+  let hasRealPlatformCompany = false;
 
   companies.forEach((company) => {
     if (!company?.id) return;
+
     const key = normalizeScopeValue(company.id);
 
-    if (isPlatformContextValue(company.id) || isPlatformContextValue(company.code) || isPlatformContextValue(company.name)) {
-      map.set(normalizeScopeValue(PLATFORM_COMPANY_OPTION.id), {
-        ...PLATFORM_COMPANY_OPTION,
+    if (isPlatformCompany(company)) {
+      hasRealPlatformCompany = true;
+      map.set(key, {
         ...company,
-        id: PLATFORM_CONTEXT_ID,
-        code: PLATFORM_CONTEXT_ID,
-        name: "Platform Console",
+        code: company.code || PLATFORM_CONTEXT_CODE,
+        name: company.name || PLATFORM_CONTEXT_NAME,
         isPlatformContext: true,
       });
       return;
@@ -304,6 +329,10 @@ function mergePlatformConsoleWithCompanies(companies = []) {
 
     map.set(key, company);
   });
+
+  if (!hasRealPlatformCompany) {
+    map.set(normalizeScopeValue(PLATFORM_COMPANY_OPTION.id), PLATFORM_COMPANY_OPTION);
+  }
 
   return Array.from(map.values());
 }
@@ -329,7 +358,7 @@ function normalizeCompanyForState(company = {}) {
     subscriptionPlan: company.subscriptionPlan || "trial",
     status: isActive ? "Active" : "Inactive",
     isActive,
-    isPlatformContext: Boolean(company.isPlatformContext),
+    isPlatformContext: Boolean(company.isPlatformContext) || isPlatformCompany(company),
     createdAt: company.createdAt || "",
     updatedAt: company.updatedAt || "",
   };
@@ -548,6 +577,26 @@ function normalizeSystemRole(value) {
   if (compact === "topmanagement") return "TopManagement";
   if (compact === "platformadmin") return "PlatformAdmin";
   return "Operator";
+}
+
+
+function mapFrontendEmployeeStatusForBackend(status) {
+  const normalized = String(status || "")
+    .trim()
+    .toLowerCase()
+    .replace(/[\s_-]+/g, "");
+
+  if (normalized === "vacation" || normalized === "invacation") return "VACATION";
+  if (
+    normalized === "retiredresigned" ||
+    normalized === "retired/resigned" ||
+    normalized === "retired" ||
+    normalized === "resigned"
+  ) {
+    return "RETIRED_RESIGNED";
+  }
+
+  return "ON_DUTY";
 }
 
 function makeUsernameFromUser({ id, fullName, email }) {
@@ -1739,6 +1788,10 @@ export default function Home() {
   const [stationCounterResetHistory, setStationCounterResetHistory] = useState([]);
 
   const [users, setUsers] = useState([]);
+  const [usersLoading, setUsersLoading] = useState(false);
+  const [usersLoaded, setUsersLoaded] = useState(false);
+  const [usersLoadError, setUsersLoadError] = useState("");
+  const usersFetchSignatureRef = useRef("");
   const [currentUserId, setCurrentUserId] = useState("");
   const [authLoaded, setAuthLoaded] = useState(false);
   const [loginIdentifier, setLoginIdentifier] = useState("");
@@ -1747,6 +1800,7 @@ export default function Home() {
   const [loginError, setLoginError] = useState("");
   const [activityLog, setActivityLog] = useState([]);
   const [pendingApprovals, setPendingApprovals] = useState([]);
+  const [employeeTransferRequests, setEmployeeTransferRequests] = useState([]);
   const [notificationReadMap, setNotificationReadMap] = useState({});
   const [loginPassword, setLoginPassword] = useState("Admin@12345");
   const [forcePasswordChangeOpen, setForcePasswordChangeOpen] = useState(false);
@@ -1774,7 +1828,7 @@ export default function Home() {
     users.find((user) => {
       if (user.id !== currentUserId || user.status !== "Active") return false;
       if (user.role === "PlatformAdmin") {
-        return normalizeScopeValue(selectedCompanyId) === "platform" || normalizeScopeValue(user.companyId) === "platform";
+        return isPlatformContextValue(selectedCompanyId) || isPlatformContextValue(user.companyId);
       }
       return companyMatches(user.companyId, selectedCompanyId || user.companyId);
     }) ||
@@ -1827,7 +1881,7 @@ useEffect(() => {
     const matchedUser = users.find((user) => {
       if (user.id !== currentUserId || user.status !== "Active") return false;
       if (user.role === "PlatformAdmin") {
-        return normalizeScopeValue(selectedCompanyId) === "platform" || normalizeScopeValue(user.companyId) === "platform";
+        return isPlatformContextValue(selectedCompanyId) || isPlatformContextValue(user.companyId);
       }
       return companyMatches(user.companyId, selectedCompanyId || user.companyId);
     });
@@ -1906,7 +1960,7 @@ useEffect(() => {
        await reloadBackendUser();
 
 const finalCompanyId = isPlatformUser
-  ? selectedCompanyId || PLATFORM_CONTEXT_ID
+  ? selectedCompanyId || getPlatformCompanyId(companies)
   : selectedCompanyId || loggedUser.companyId || "";
 
 startLocalSession(
@@ -2133,6 +2187,92 @@ setLoginIdentifier("");
     updatedAt: project.updatedAt || "",
   });
 
+  const mapBackendEmployeeStatusForState = (status) => {
+    const normalized = String(status || "")
+      .trim()
+      .toUpperCase();
+
+    if (normalized === "VACATION") return "In Vacation";
+    if (normalized === "RETIRED_RESIGNED") return "Retired / Resigned";
+    return "On Duty";
+  };
+
+  const mapFrontendEmployeeStatusForBackend = (status) => {
+    const normalized = String(status || "")
+      .trim()
+      .toLowerCase()
+      .replace(/[\s_-]+/g, "");
+
+    if (normalized === "vacation" || normalized === "invacation") return "VACATION";
+    if (
+      normalized === "retiredresigned" ||
+      normalized === "retired/resigned" ||
+      normalized === "retired" ||
+      normalized === "resigned"
+    ) {
+      return "RETIRED_RESIGNED";
+    }
+
+    return "ON_DUTY";
+  };
+
+  const mapBackendEmployeeForState = (employee = {}) => ({
+    backendId: employee.id || "",
+    id: employee.employeeId || employee.id || "",
+    employeeId: employee.employeeId || employee.id || "",
+    name: employee.name || "",
+    mobile: employee.phone || "",
+    phone: employee.phone || "",
+    email: employee.email || "",
+    projectId: employee.projectId || employee.project?.id || "",
+    projectName:
+      employee.project?.name ||
+      employee.project?.code ||
+      employee.projectId ||
+      "-",
+    project: employee.project?.name || employee.projectId || "-",
+    companyId: employee.companyId || employee.company?.id || "",
+    linkedUserId: employee.linkedUserId || employee.linkedUser?.id || "",
+    linkedUserName: employee.linkedUser?.fullName || "",
+    linkedUserIsActive: employee.linkedUser?.isActive !== false,
+    role: employee.jobTitle || "Operator",
+    jobTitle: employee.jobTitle || "Operator",
+    status: mapBackendEmployeeStatusForState(employee.status),
+    userStatus:
+      (employee.linkedUserId || employee.linkedUser?.id) &&
+      employee.linkedUser?.isActive !== false
+        ? "Linked"
+        : "Not Linked",
+    source: "Backend",
+    createdAt: employee.createdAt || "",
+    updatedAt: employee.updatedAt || "",
+  });
+
+  const mapBackendEmployeeTransferForState = (transfer = {}) => ({
+    id: transfer.id || "",
+    employeeBackendId: transfer.employeeId || transfer.employee?.id || "",
+    employeeId: transfer.employee?.employeeId || transfer.employeeId || "",
+    employeeName: transfer.employee?.name || "",
+    fromProjectId: transfer.fromProjectId || transfer.fromProject?.id || "",
+    fromProjectName:
+      transfer.fromProject?.name ||
+      transfer.fromProject?.code ||
+      transfer.fromProjectId ||
+      "-",
+    toProjectId: transfer.toProjectId || transfer.toProject?.id || "",
+    toProjectName:
+      transfer.toProject?.name ||
+      transfer.toProject?.code ||
+      transfer.toProjectId ||
+      "-",
+    requestedByUserId: transfer.requestedByUserId || "",
+    status: transfer.status || "PENDING",
+    reason: transfer.reason || "",
+    createdAt: transfer.createdAt || "",
+    approvedAt: transfer.approvedAt || "",
+    appliedAt: transfer.appliedAt || "",
+  });
+
   const refreshBackendProjects = async (companyId = "") => {
     try {
       const response = await api.get("/projects", {
@@ -2216,6 +2356,250 @@ setLoginIdentifier("");
       )
     );
   };
+  const refreshBackendEmployees = async (companyId = "", viewerUserId = "") => {
+    try {
+      const response = await api.get("/employees", {
+        params: {
+          ...(companyId && !isPlatformContextValue(companyId) ? { companyId } : {}),
+          ...(viewerUserId ? { viewerUserId } : {}),
+        },
+      });
+
+      const backendEmployees = Array.isArray(response.data) ? response.data : [];
+      const mappedEmployees = backendEmployees
+        .map(mapBackendEmployeeForState)
+        .filter((employee) => employee.id);
+
+      setFuelers(mappedEmployees);
+      return mappedEmployees;
+    } catch (error) {
+      console.warn("Employees backend API is not available.", error);
+      showToast?.("warning", "Employees backend API is not available.");
+      return [];
+    }
+  };
+
+  const refreshBackendEmployeeTransfers = async () => {
+    try {
+      const response = await api.get("/employee-transfers/pending");
+      const backendTransfers = Array.isArray(response.data) ? response.data : [];
+      const mappedTransfers = backendTransfers
+        .map(mapBackendEmployeeTransferForState)
+        .filter((transfer) => transfer.id);
+
+      setEmployeeTransferRequests(mappedTransfers);
+      return mappedTransfers;
+    } catch (error) {
+      console.warn("Employee transfers API is not available.", error);
+      setEmployeeTransferRequests([]);
+      return [];
+    }
+  };
+
+  const handleCreateEmployee = async (payload) => {
+    const response = await api.post("/employees", payload);
+    const createdEmployee = mapBackendEmployeeForState(response.data);
+
+    setFuelers((prev) => [
+      createdEmployee,
+      ...prev.filter((employee) =>
+        normalizeScopeValue(employee.backendId || employee.id) !==
+          normalizeScopeValue(createdEmployee.backendId || createdEmployee.id) &&
+        normalizeScopeValue(employee.id) !== normalizeScopeValue(createdEmployee.id)
+      ),
+    ]);
+
+    return createdEmployee;
+  };
+
+  const handleUpdateEmployee = async (employee, payload) => {
+    const backendId = employee?.backendId || employee?.id || employee;
+
+    if (!backendId) {
+      throw new Error("Employee backend ID is required.");
+    }
+
+    const response = await api.patch(`/employees/${backendId}`, payload);
+    const updatedEmployee = mapBackendEmployeeForState(response.data);
+
+    setFuelers((prev) =>
+      prev.map((item) =>
+        normalizeScopeValue(item.backendId || item.id) === normalizeScopeValue(backendId) ||
+        normalizeScopeValue(item.id) === normalizeScopeValue(updatedEmployee.id)
+          ? updatedEmployee
+          : item
+      )
+    );
+
+    return updatedEmployee;
+  };
+
+  const handleCreateEmployeeTransfer = async (employee, toProjectId) => {
+    const employeeBackendId = employee?.backendId || employee?.employeeBackendId || employee?.id;
+    const requestedByUserId = backendAuthUser?.id || currentUser?.id || "";
+
+    if (!employeeBackendId) {
+      throw new Error("Employee backend ID is required.");
+    }
+
+    if (!toProjectId) {
+      throw new Error("Target project is required.");
+    }
+
+    if (!requestedByUserId) {
+      throw new Error("Requester user ID is required.");
+    }
+
+    const response = await api.post("/employee-transfers", {
+      employeeId: employeeBackendId,
+      toProjectId,
+      requestedByUserId,
+    });
+
+    const createdTransfer = mapBackendEmployeeTransferForState(response.data);
+
+    setEmployeeTransferRequests((prev) => [
+      createdTransfer,
+      ...prev.filter((item) =>
+        normalizeScopeValue(item.id) !== normalizeScopeValue(createdTransfer.id)
+      ),
+    ]);
+
+    await refreshBackendEmployeeTransfers();
+
+    return createdTransfer;
+  };
+
+  const mapBackendUserForState = (user = {}) => {
+    const roleName =
+      user.role?.name ||
+      user.roleName ||
+      user.role ||
+      "Operator";
+
+    const isActive =
+      user.isActive === false ||
+      normalizeScopeValue(user.status) === "inactive" ||
+      normalizeScopeValue(user.status) === "disabled"
+        ? false
+        : true;
+
+    return {
+      id: user.id,
+      fullName: user.fullName || user.name || user.email || "",
+      username: makeUsernameFromUser({
+        id: user.id,
+        fullName: user.fullName,
+        email: user.email,
+      }),
+      email: String(user.email || "").toLowerCase(),
+      phone: user.phone || "",
+      mobile: user.phone || user.mobile || "",
+      role: normalizeBackendRoleName(roleName),
+      roleName,
+      roleId: user.roleId || user.role?.id || "",
+      companyId: user.companyId || user.company?.id || currentUser?.companyId || "",
+      companyName: user.company?.name || user.companyName || "",
+      status: isActive ? "Active" : "Inactive",
+      isActive,
+      passwordResetRequired: Boolean(user.mustChangePassword ?? user.passwordResetRequired),
+      mustChangePassword: Boolean(user.mustChangePassword ?? user.passwordResetRequired),
+      lastLogin: user.lastLogin || "",
+      createdAt: user.createdAt || "",
+      updatedAt: user.updatedAt || "",
+      backendUser: true,
+    };
+  };
+
+  const handleCreateUserFromEmployee = async (payload) => {
+    const response = await api.post("/users", payload);
+    const savedUser = mapBackendUserForState(response.data);
+
+    setUsers((prev) => [
+      savedUser,
+      ...prev.filter((user) =>
+        normalizeScopeValue(user.id) !== normalizeScopeValue(savedUser.id)
+      ),
+    ]);
+
+    return savedUser;
+  };
+
+  const handleUpdateUserStatusFromTeam = async (userId, isActive) => {
+    if (!userId) {
+      throw new Error("User ID is required.");
+    }
+
+    const response = await api.patch(`/users/${userId}/status`, {
+      isActive,
+    });
+
+    const savedUser = mapBackendUserForState(response.data);
+
+    setUsers((prev) =>
+      prev.map((user) =>
+        normalizeScopeValue(user.id) === normalizeScopeValue(savedUser.id)
+          ? savedUser
+          : user
+      )
+    );
+
+    return savedUser;
+  };
+
+ 
+  const refreshBackendUsers = async (companyId = "", options = {}) => {
+    const { force = false, silent = false } = options || {};
+    const normalizedCompanyId = normalizeScopeValue(companyId);
+    const signature = normalizedCompanyId || "all-companies";
+
+    if (!force && usersFetchSignatureRef.current === signature && usersLoaded) {
+      return users;
+    }
+
+    usersFetchSignatureRef.current = signature;
+
+    if (!silent) {
+      setUsersLoadError("");
+    }
+
+    setUsersLoading(true);
+
+    try {
+      const response = await api.get("/users", {
+        params:
+          companyId && !isPlatformContextValue(companyId)
+            ? { companyId }
+            : {},
+      });
+
+      const backendUsers = Array.isArray(response.data) ? response.data : [];
+      const mappedUsers = backendUsers
+        .map(mapBackendUserForState)
+        .filter((user) => user.id);
+
+      setUsers(mappedUsers);
+      setUsersLoaded(true);
+      setUsersLoadError("");
+
+      return mappedUsers;
+    } catch (error) {
+      console.warn("Users backend API is not available.", error);
+
+      if (!silent) {
+        setUsersLoadError(
+          error?.response?.data?.message ||
+            error?.message ||
+            "Users backend API is not available."
+        );
+      }
+
+      return [];
+    } finally {
+      setUsersLoading(false);
+    }
+  };
+
  
   useEffect(() => {
     async function fetchData() {
@@ -2252,6 +2636,16 @@ setLoginIdentifier("");
           }
         };
 
+        const fetchBackendEmployees = async () => {
+          try {
+            const response = await api.get("/employees");
+            return Array.isArray(response.data) ? response.data : [];
+          } catch (error) {
+            console.warn("Employees backend API is not available. Using CSV fallback.", error);
+            return null;
+          }
+        };
+
         const [
           trxText,
           assetsText,
@@ -2260,6 +2654,7 @@ setLoginIdentifier("");
           projectsText,
           backendCompanies,
           backendProjects,
+          backendEmployees,
         ] = await Promise.all([
           fetchCsvText(TRANSACTIONS_CSV),
           fetchCsvText(ASSETS_CSV),
@@ -2268,6 +2663,7 @@ setLoginIdentifier("");
           fetchCsvText(PROJECTS_CSV),
           fetchBackendCompanies(),
           fetchBackendProjects(),
+          fetchBackendEmployees(),
         ]);
 
         // TRANSACTIONS
@@ -2360,7 +2756,15 @@ setLoginIdentifier("");
           }))
           .filter((fueler) => fueler.id);
 
-        setFuelers(mappedFuelers);
+        if (Array.isArray(backendEmployees)) {
+          setFuelers(
+            backendEmployees
+              .map(mapBackendEmployeeForState)
+              .filter((employee) => employee.id)
+          );
+        } else {
+          setFuelers(mappedFuelers);
+        }
 
         // PROJECTS - prefer NestJS/PostgreSQL backend, keep CSV only as a temporary fallback.
         if (Array.isArray(backendProjects)) {
@@ -2404,7 +2808,7 @@ setLoginIdentifier("");
             subscriptionPlan: company.subscriptionPlan || "trial",
             status: company.isActive === false ? "Inactive" : company.status || "Active",
             isActive: company.isActive !== false,
-            isPlatformContext: Boolean(company.isPlatformContext),
+            isPlatformContext: Boolean(company.isPlatformContext) || isPlatformCompany(company),
             createdAt: company.createdAt || "",
             updatedAt: company.updatedAt || "",
           }))
@@ -2420,7 +2824,7 @@ setLoginIdentifier("");
         setFuelers([]);
         setProjects([]);
         setCompanies([]);
-        setUsers([]);
+        // Keep existing users state; other pages depend on it for user-linked data.
       }
     }
 
@@ -2464,7 +2868,7 @@ setLoginIdentifier("");
 
   const literPrice = getLiterPriceByDate(new Date().toISOString());
 
-  const currentCompanyId = currentUser?.role === "PlatformAdmin" ? selectedCompanyId || PLATFORM_CONTEXT_ID : currentUser?.companyId || selectedCompanyId;
+  const currentCompanyId = currentUser?.role === "PlatformAdmin" ? selectedCompanyId || getPlatformCompanyId(companies) : currentUser?.companyId || selectedCompanyId;
   const isPlatformConsoleContext = isPlatformContextValue(currentCompanyId);
   const currentCompany = companies.find((company) =>
     companyMatches(company.id, currentCompanyId) ||
@@ -2492,6 +2896,49 @@ setLoginIdentifier("");
   // Platform + selected company shows only that company's users.
   // Company Admin shows only users that belong to his own company.
   const usersPageUsers = companyUsers;
+
+  useEffect(() => {
+    if (!backendIsLoggedIn) return;
+    if (!currentUser?.id) return;
+
+    const canLoadUsers =
+      ["Admin", "PlatformAdmin"].includes(currentUser?.role) ||
+      hasBackendPermission?.("users.read") ||
+      hasBackendPermission?.("users.status.change");
+
+    if (!canLoadUsers) return;
+
+    const targetCompanyId =
+      isPlatformAdminUser(currentUser) && isPlatformConsoleContext
+        ? ""
+        : currentCompanyId;
+
+    if (!targetCompanyId && !isPlatformAdminUser(currentUser)) return;
+
+    refreshBackendUsers(targetCompanyId, { silent: true });
+  }, [
+    backendIsLoggedIn,
+    currentUser?.id,
+    currentUser?.role,
+    currentCompanyId,
+    isPlatformConsoleContext,
+    hasBackendPermission,
+  ]);
+
+  useEffect(() => {
+    if (!backendIsLoggedIn) return;
+    if (!currentCompanyId || isPlatformContextValue(currentCompanyId)) return;
+    if (!hasBackendPermission?.("team.read")) return;
+
+    refreshBackendEmployees(currentCompanyId, currentUser?.id || backendAuthUser?.id || "");
+    refreshBackendEmployeeTransfers();
+  }, [
+    backendIsLoggedIn,
+    currentCompanyId,
+    currentUser?.id,
+    backendAuthUser?.id,
+    hasBackendPermission,
+  ]);
 
   const companyProjects = filterByCompany(projects, currentCompanyId, currentUser);
   const companyAssets = filterByCompanyWithProjectFallback(assets, currentCompanyId, currentUser, companyProjects, "project");
@@ -2550,17 +2997,42 @@ setLoginIdentifier("");
       );
 
   const scopedTeamMembers = scopedFuelers.map((member) => {
-    const linkedUser = companyUsers.find((user) =>
-      normalizeScopeValue(user.id) === normalizeScopeValue(member.id) &&
-      (isPlatformAdminUser(currentUser) ? companyMatches(user.companyId, member.companyId) : true)
-    );
+    const linkedUser = companyUsers.find((user) => {
+      const sameCompany = isPlatformAdminUser(currentUser)
+        ? companyMatches(user.companyId, member.companyId)
+        : true;
+
+      if (!sameCompany) return false;
+
+      return (
+        normalizeScopeValue(user.id) === normalizeScopeValue(member.linkedUserId) ||
+        normalizeScopeValue(user.id) === normalizeScopeValue(member.id) ||
+        (
+          member.email &&
+          normalizeScopeValue(user.email) === normalizeScopeValue(member.email)
+        )
+      );
+    });
+
+    const explicitlyLinkedUser =
+      companyUsers.find((user) =>
+        normalizeScopeValue(user.id) === normalizeScopeValue(member.linkedUserId)
+      ) || null;
+
+    const linkedUserIsActive = explicitlyLinkedUser
+      ? explicitlyLinkedUser.status === "Active"
+      : member.linkedUserIsActive !== false && member.userStatus === "Linked";
 
     return {
       ...member,
-      role: linkedUser?.role || "Not Linked",
-      userStatus: linkedUser?.status || "Not Linked",
-      linkedUserId: linkedUser?.id || "",
-      linkedUserName: linkedUser?.fullName || "",
+      role: explicitlyLinkedUser?.role || member.role || member.jobTitle || "Operator",
+      userStatus:
+        member.linkedUserId && linkedUserIsActive
+          ? "Linked"
+          : "Not Linked",
+      linkedUserId: member.linkedUserId || "",
+      linkedUserName: explicitlyLinkedUser?.fullName || member.linkedUserName || "",
+      linkedUserIsActive,
     };
   });
 
@@ -2686,6 +3158,12 @@ setLoginIdentifier("");
       hasPermission={hasPermission}
       trackActivity={trackActivity}
       submitApprovalRequest={submitApprovalRequest}
+      onCreateEmployee={handleCreateEmployee}
+      onUpdateEmployee={handleUpdateEmployee}
+      onCreateEmployeeTransfer={handleCreateEmployeeTransfer}
+      onCreateUserFromEmployee={handleCreateUserFromEmployee}
+      onUpdateUserStatus={handleUpdateUserStatusFromTeam}
+      pendingEmployeeTransfers={employeeTransferRequests}
     />
   );
 }
@@ -2774,6 +3252,11 @@ if (page === "users") {
     <UsersPage
       users={usersPageUsers}
       setUsers={setUsers}
+      usersLoading={usersLoading}
+      usersLoaded={usersLoaded}
+      usersLoadError={usersLoadError}
+      refreshUsers={refreshBackendUsers}
+      setFuelers={setFuelers}
       companies={companies}
       projects={filterActiveProjects(companyProjects)}
       currentUser={currentUser}
@@ -10204,14 +10687,33 @@ function TeamPage({
   hasPermission = () => false,
   trackActivity = () => {},
   submitApprovalRequest = () => {},
+  onCreateEmployee,
+  onUpdateEmployee,
+  onCreateEmployeeTransfer,
+  onCreateUserFromEmployee,
+  onUpdateUserStatus,
+  pendingEmployeeTransfers = [],
 }) {
   const [localFuelers, setLocalFuelers] = useState([]);
   const [localFuelerUpdates, setLocalFuelerUpdates] = useState({});
-  const [editFueler, setEditFueler] = useState(null);
+  const [inlineFuelerEdit, setInlineFuelerEdit] = useState(null);
+  const [pendingTeamChange, setPendingTeamChange] = useState(null);
+  const [savingTeamChange, setSavingTeamChange] = useState(false);
+  const [updatingUserStatusByFuelerId, setUpdatingUserStatusByFuelerId] = useState({});
+  const [linkUserModal, setLinkUserModal] = useState(null);
+  const [teamRoleOptions, setTeamRoleOptions] = useState([]);
+  const [loadingTeamRoles, setLoadingTeamRoles] = useState(false);
+  const [savingLinkedUser, setSavingLinkedUser] = useState(false);
   const [showAddFueler, setShowAddFueler] = useState(false);
   const [selectedFuelerHistory, setSelectedFuelerHistory] = useState(null);
   const [fuelerAuditLog, setFuelerAuditLog] = useState([]);
   const [showFuelersSettings, setShowFuelersSettings] = useState(false);
+  const [teamSearch, setTeamSearch] = useState("");
+  const [selectedTeamMemberIds, setSelectedTeamMemberIds] = useState([]);
+  const [bulkTransferModalOpen, setBulkTransferModalOpen] = useState(false);
+  const [bulkTransferProjectId, setBulkTransferProjectId] = useState("");
+  const [savingBulkTransfer, setSavingBulkTransfer] = useState(false);
+  const teamRoleOptionsCacheRef = useRef({});
 
   const fuelersSettingsRef = useRef(null);
 
@@ -10224,6 +10726,8 @@ function TeamPage({
     name: "",
     mobile: "",
     email: "",
+    jobTitle: "Operator",
+    projectId: "",
     projectName: "",
     status: "On Duty",
   });
@@ -10314,24 +10818,70 @@ function TeamPage({
   );
 
   const displayFuelers = masterFuelers.map((fueler) => {
-    const linkedUser = users.find(
-      (user) => normalizeText(user.id) === normalizeText(fueler.id)
+    const localUpdate = localFuelerUpdates[fueler.id] || {};
+    const effectiveLinkedUserId =
+      localUpdate.linkedUserId !== undefined
+        ? localUpdate.linkedUserId
+        : fueler.linkedUserId || "";
+
+    const explicitlyLinkedUser = users.find(
+      (user) => normalizeText(user.id) === normalizeText(effectiveLinkedUserId)
     );
+
+    const matchedEmailUser = !explicitlyLinkedUser
+      ? users.find((user) => {
+          const userEmail = normalizeText(user.email);
+          return userEmail && userEmail === normalizeText(fueler.email);
+        })
+      : null;
+
+    const linkedUser = explicitlyLinkedUser || matchedEmailUser;
+    const linkedUserIsActive =
+      localUpdate.linkedUserIsActive !== undefined
+        ? Boolean(localUpdate.linkedUserIsActive)
+        : explicitlyLinkedUser?.status === "Active" || explicitlyLinkedUser?.isActive === true;
+
+    const pendingTransfer = pendingEmployeeTransfers.find((transfer) => {
+      const status = String(transfer.status || "").toUpperCase();
+
+      if (!["PENDING", "PARTIALLY_APPROVED"].includes(status)) return false;
+
+      return (
+        normalizeText(transfer.employeeBackendId) === normalizeText(fueler.backendId) ||
+        normalizeText(transfer.employeeId) === normalizeText(fueler.id)
+      );
+    });
 
     return {
       ...fueler,
-      ...localFuelerUpdates[fueler.id],
-      mobile: localFuelerUpdates[fueler.id]?.mobile || fueler.mobile || "-",
-      email: localFuelerUpdates[fueler.id]?.email || fueler.email || "-",
+      ...localUpdate,
+      backendId: fueler.backendId || fueler.id,
+      mobile: localUpdate.mobile || fueler.mobile || "-",
+      email: localUpdate.email || fueler.email || "-",
+      projectId:
+        localUpdate.projectId ||
+        fueler.projectId ||
+        "",
       projectName:
-        localFuelerUpdates[fueler.id]?.projectName ||
+        localUpdate.projectName ||
         fueler.projectName ||
         fueler.project ||
         "-",
-      status: localFuelerUpdates[fueler.id]?.status || fueler.status || "On Duty",
-      role: linkedUser?.role || fueler.role || "Not Linked",
-      userStatus: linkedUser?.status || fueler.userStatus || "Not Linked",
-      linkedUserName: linkedUser?.fullName || fueler.linkedUserName || "-",
+      status: localUpdate.status || fueler.status || "On Duty",
+      role: explicitlyLinkedUser?.role || fueler.role || "Operator",
+      jobTitle: localUpdate.jobTitle || fueler.jobTitle || fueler.role || "Operator",
+      userStatus:
+        effectiveLinkedUserId && linkedUserIsActive
+          ? "Linked"
+          : "Not Linked",
+      linkedUserName: explicitlyLinkedUser?.fullName || localUpdate.linkedUserName || fueler.linkedUserName || "-",
+      linkedUserId: effectiveLinkedUserId,
+      linkedUserIsActive,
+      userStatusUpdating: Boolean(updatingUserStatusByFuelerId[fueler.id]),
+      suggestedUserId: matchedEmailUser?.id || "",
+      suggestedUserName: matchedEmailUser?.fullName || "",
+      suggestedUserStatus: matchedEmailUser?.status || "",
+      pendingTransfer,
     };
   });
 
@@ -10376,28 +10926,166 @@ function TeamPage({
     };
   });
 
-  const chartData = fuelersWithKpi
+  const activeTeamFuelers = fuelersWithKpi.filter(
+    (fueler) => !isRetiredTeamStatus(fueler.status)
+  );
+
+  const normalizedTeamSearch = normalizeText(teamSearch);
+  const visibleTeamFuelers = normalizedTeamSearch
+    ? activeTeamFuelers.filter((fueler) => {
+        const searchableText = [
+          fueler.id,
+          fueler.name,
+          fueler.mobile,
+          fueler.email,
+          fueler.jobTitle,
+          fueler.projectName,
+          fueler.status,
+          fueler.userStatus,
+        ]
+          .map((value) => normalizeText(value))
+          .join(" ");
+
+        return searchableText.includes(normalizedTeamSearch);
+      })
+    : activeTeamFuelers;
+
+  const selectedTeamFuelers = selectedTeamMemberIds
+    .map((id) => activeTeamFuelers.find((fueler) => normalizeText(fueler.backendId || fueler.id) === normalizeText(id)))
+    .filter(Boolean);
+
+  const visibleSelectableFuelerIds = visibleTeamFuelers.map((fueler) => fueler.backendId || fueler.id);
+  const allVisibleFuelersSelected =
+    visibleSelectableFuelerIds.length > 0 &&
+    visibleSelectableFuelerIds.every((id) => selectedTeamMemberIds.includes(id));
+
+  const chartData = activeTeamFuelers
     .map((fueler) => ({
       name: fueler.name || fueler.id,
       dieselQty: Number(fueler.dieselQty) || 0,
     }))
     .sort((a, b) => b.dieselQty - a.dieselQty);
 
-  const totalOperations = fuelersWithKpi.reduce(
+  const totalOperations = activeTeamFuelers.reduce(
     (sum, fueler) => sum + fueler.operationsCount,
     0
   );
 
-  const totalDiesel = fuelersWithKpi.reduce(
+  const totalDiesel = activeTeamFuelers.reduce(
     (sum, fueler) => sum + fueler.dieselQty,
     0
   );
 
   const assignedProjectsCount = new Set(
-    fuelersWithKpi
+    activeTeamFuelers
       .map((fueler) => fueler.projectName)
       .filter((projectName) => projectName && projectName !== "-")
   ).size;
+
+  const toggleTeamMemberSelection = (fueler) => {
+    const key = fueler.backendId || fueler.id;
+    setSelectedTeamMemberIds((prev) =>
+      prev.includes(key) ? prev.filter((item) => item !== key) : [...prev, key]
+    );
+  };
+
+  const toggleVisibleTeamSelection = () => {
+    setSelectedTeamMemberIds((prev) => {
+      if (allVisibleFuelersSelected) {
+        return prev.filter((id) => !visibleSelectableFuelerIds.includes(id));
+      }
+
+      return Array.from(new Set([...prev, ...visibleSelectableFuelerIds]));
+    });
+  };
+
+  const clearTeamSelection = () => {
+    setSelectedTeamMemberIds([]);
+  };
+
+  const openBulkTransferModal = () => {
+    if (!hasPermission("team", "edit")) {
+      showToast?.("warning", "Read-only access: you cannot transfer team members.");
+      return;
+    }
+
+    if (!selectedTeamFuelers.length) {
+      showToast?.("warning", "Please select at least one team member.");
+      return;
+    }
+
+    setBulkTransferProjectId("");
+    setBulkTransferModalOpen(true);
+  };
+
+  const closeBulkTransferModal = () => {
+    if (savingBulkTransfer) return;
+    setBulkTransferModalOpen(false);
+    setBulkTransferProjectId("");
+  };
+
+  const confirmBulkTransfer = async () => {
+    if (savingBulkTransfer) return;
+
+    if (!bulkTransferProjectId) {
+      showToast?.("warning", "Please select destination project.");
+      return;
+    }
+
+    if (!selectedTeamFuelers.length) {
+      showToast?.("warning", "Please select at least one team member.");
+      return;
+    }
+
+    if (typeof onCreateEmployeeTransfer !== "function") {
+      showToast?.("warning", "Employee transfer API is not configured.");
+      return;
+    }
+
+    setSavingBulkTransfer(true);
+
+    try {
+      const targetProjectName = getProjectNameById(bulkTransferProjectId);
+
+      for (const fueler of selectedTeamFuelers) {
+        if (normalizeText(fueler.projectId || fueler.projectName) === normalizeText(bulkTransferProjectId)) {
+          continue;
+        }
+
+        await onCreateEmployeeTransfer(fueler, bulkTransferProjectId);
+      }
+
+      showToast?.(
+        "success",
+        `Bulk transfer request submitted for ${selectedTeamFuelers.length} team member(s) to ${targetProjectName}.`
+      );
+
+      setFuelerAuditLog((prev) => [
+        ...prev,
+        {
+          fuelerId: selectedTeamFuelers.map((fueler) => fueler.id).join(", "),
+          fuelerName: `${selectedTeamFuelers.length} selected team member(s)`,
+          field: "Bulk Transfer",
+          oldValue: selectedTeamFuelers.map((fueler) => `${fueler.id} - ${fueler.projectName || "-"}`).join(" | "),
+          newValue: targetProjectName,
+          reason: "Bulk transfer request",
+          editedBy: currentUser?.fullName || currentUser?.email || "System",
+          editedAt: new Date().toISOString(),
+        },
+      ]);
+
+      clearTeamSelection();
+      closeBulkTransferModal();
+    } catch (error) {
+      const message =
+        error?.response?.data?.message ||
+        error?.message ||
+        "Failed to submit bulk transfer request.";
+      showToast?.("warning", message);
+    } finally {
+      setSavingBulkTransfer(false);
+    }
+  };
 
   const getStatusBadgeClass = (status) => {
     const value = cleanCsvCell(status).toLowerCase();
@@ -10421,6 +11109,41 @@ function TeamPage({
 
     return "bg-gray-500/20 text-gray-300 border border-gray-500/30";
   };
+
+  function isRetiredTeamStatus(status) {
+    const value = cleanCsvCell(status).toLowerCase().replace(/[\s_-]+/g, "");
+
+    return (
+      value === "retiredresigned" ||
+      value === "retired/resigned" ||
+      value === "retired" ||
+      value === "resigned"
+    );
+  }
+
+  const requestRetireFueler = (fueler) => {
+    if (!hasPermission("team", "edit")) {
+      showToast?.("warning", "Read-only access: you cannot retire team members.");
+      return;
+    }
+
+    if (!fueler?.id) {
+      showToast?.("warning", "Team member is not valid.");
+      return;
+    }
+
+    setPendingTeamChange({
+      fueler,
+      field: "retire",
+      oldValue: fueler.status || "On Duty",
+      newValue: "Retired / Resigned",
+      oldDisplayValue: fueler.status || "On Duty",
+      newDisplayValue: "Retired / Resigned",
+      message:
+        "This team member will be retired and hidden from the Team page. Historical operations and reports will remain unchanged. If this employee has a linked system user, the user login will be deactivated. If the employee returns later, create a new team member with a new Team Member ID.",
+    });
+  };
+
 
   const printTable = (tableId, title = "Team Report") => {
     const tableElement = document.getElementById(tableId);
@@ -10543,25 +11266,21 @@ function TeamPage({
         "Name",
         "Mobile",
         "Email",
-        "Role",
+        "Job Title",
         "User Status",
         "Project Name",
         "Work Status",
-        "Direct Refuel Operations",
-        "Diesel Qty (L)",
       ],
-      fuelersWithKpi.map((fueler, i) => [
+      activeTeamFuelers.map((fueler, i) => [
         i + 1,
         fueler.id,
         fueler.name || "-",
         fueler.mobile || "-",
         fueler.email || "-",
-        fueler.role || "Operator",
+        fueler.jobTitle || "Operator",
         fueler.userStatus || "Active",
         fueler.projectName || "-",
         fueler.status || "On Duty",
-        fueler.operationsCount,
-        fueler.dieselQty,
       ])
     );
   };
@@ -10572,6 +11291,8 @@ function TeamPage({
       name: "",
       mobile: "",
       email: "",
+      jobTitle: "Operator",
+      projectId: "",
       projectName: "",
       status: "On Duty",
     });
@@ -10582,7 +11303,7 @@ function TeamPage({
     resetNewFueler();
   };
 
-  const saveNewFueler = () => {
+  const saveNewFueler = async () => {
     if (!hasPermission("team", "add")) {
       showToast?.("warning", "Read-only access: you cannot add team members.");
       return;
@@ -10592,6 +11313,12 @@ function TeamPage({
     const fuelerName = newFueler.name.trim();
     const mobile = newFueler.mobile.trim();
     const email = newFueler.email.trim();
+    const jobTitle = String(newFueler.jobTitle || "Operator").trim() || "Operator";
+    const projectId = newFueler.projectId || newFueler.projectName || "";
+    const selectedProject = transferProjects.find((project) =>
+      normalizeText(project.backendId || project.id) === normalizeText(projectId) ||
+      normalizeText(project.name) === normalizeText(projectId)
+    );
 
     if (!fuelerId) {
       notifyUser(typeof showToast !== "undefined" ? showToast : null, inferToastTypeFromMessage("Please enter Team Member ID."), "Please enter Team Member ID.");
@@ -10608,6 +11335,11 @@ function TeamPage({
       return;
     }
 
+    if (!projectId) {
+      notifyUser(typeof showToast !== "undefined" ? showToast : null, inferToastTypeFromMessage("Please select Project."), "Please select Project.");
+      return;
+    }
+
     const idExists = masterFuelers.some(
       (fueler) => normalizeText(fueler.id) === normalizeText(fuelerId)
     );
@@ -10617,153 +11349,673 @@ function TeamPage({
       return;
     }
 
-    if (isOfficerUser(currentUser)) {
-      submitApprovalRequest({
-        type: "master_data_change",
-        module: "team",
-        title: `New team member ${fuelerId}`,
-        details: `Officer requested new fueler ${fuelerName}`,
-        payload: { entity: "team_member", action: "add", values: { ...newFueler, id: fuelerId, name: fuelerName, mobile, email } },
-      });
+    try {
+      if (typeof onCreateEmployee === "function") {
+        await onCreateEmployee({
+          companyId:
+            currentUser?.companyId ||
+            selectedProject?.companyId ||
+            "",
+          employeeId: fuelerId,
+          name: fuelerName,
+          phone: mobile,
+          email: email || undefined,
+          projectId,
+          jobTitle,
+          status: mapFrontendEmployeeStatusForBackend(newFueler.status),
+        });
+
+        showToast?.("success", "Team member added successfully.");
+        closeAddFueler();
+        return;
+      }
+
+      if (isOfficerUser(currentUser)) {
+        submitApprovalRequest({
+          type: "master_data_change",
+          module: "team",
+          title: `New team member ${fuelerId}`,
+          details: `Officer requested new operator ${fuelerName}`,
+          payload: { entity: "team_member", action: "add", values: { ...newFueler, id: fuelerId, name: fuelerName, mobile, email } },
+        });
+        closeAddFueler();
+        return;
+      }
+
+      setLocalFuelers((prev) => [
+        ...prev,
+        {
+          id: fuelerId,
+          name: fuelerName,
+          mobile,
+          email,
+          projectId,
+          projectName: selectedProject?.name || newFueler.projectName || "-",
+          status: newFueler.status || "On Duty",
+          jobTitle,
+          createdLocally: true,
+        },
+      ]);
+
+      showToast?.("success", "Team member added locally.");
       closeAddFueler();
+    } catch (error) {
+      const message =
+        error?.response?.data?.message ||
+        error?.message ||
+        "Failed to add team member.";
+      showToast?.("warning", message);
+    }
+  };
+
+  const getEditableTeamValue = (fueler, field) => {
+    if (field === "name") return fueler.name || "";
+    if (field === "jobTitle") return fueler.jobTitle || "Operator";
+    if (field === "mobile") return fueler.mobile || "";
+    if (field === "email") return fueler.email || "";
+    if (field === "status") return fueler.status || "On Duty";
+    if (field === "project") return fueler.projectId || fueler.projectName || "";
+    return "";
+  };
+
+  const getTeamFieldLabel = (field) => {
+    if (field === "name") return "Name";
+    if (field === "mobile") return "Mobile";
+    if (field === "email") return "Email";
+    if (field === "jobTitle") return "Job Title";
+    if (field === "status") return "Operational Status";
+    if (field === "project") return "Project";
+    if (field === "userLink") return "User Status";
+    return "Field";
+  };
+
+  const getProjectNameById = (projectId) => {
+    const project = filterActiveProjects(transferProjects).find((item) =>
+      normalizeText(item.backendId || item.id) === normalizeText(projectId) ||
+      normalizeText(item.name) === normalizeText(projectId)
+    );
+
+    return project?.name || projectId || "-";
+  };
+
+  const buildTeamChangeMessage = ({ field, oldDisplayValue, newDisplayValue }) => {
+    if (field === "project") {
+      return `Are you sure you want to submit a transfer request from ${oldDisplayValue || "-"} to ${newDisplayValue || "-"}? The current project will not change until approval is completed.`;
+    }
+
+    return `Are you sure you want to change ${getTeamFieldLabel(field)} from ${oldDisplayValue || "-"} to ${newDisplayValue || "-"}?`;
+  };
+
+  const buildUserLinkMessage = ({ action }) => {
+    if (action === "unlink") {
+      return "Are you sure you want to deactivate login access for this employee? The employee-user link will remain saved so you can reactivate it later.";
+    }
+
+    return "Are you sure you want to activate login access for this employee?";
+  };
+
+  const getExistingUserForFueler = (fueler) => {
+    const explicitUser = users.find(
+      (user) => normalizeText(user.id) === normalizeText(fueler.linkedUserId)
+    );
+
+    if (explicitUser) return explicitUser;
+
+    return users.find((user) => {
+      const userEmail = normalizeText(user.email);
+      return userEmail && userEmail === normalizeText(fueler.email);
+    });
+  };
+
+  const loadTeamRoleOptions = async (companyId) => {
+    const cacheKey = normalizeScopeValue(companyId) || "all-companies";
+    const cachedOptions = teamRoleOptionsCacheRef.current[cacheKey];
+
+    if (Array.isArray(cachedOptions) && cachedOptions.length) {
+      setTeamRoleOptions(cachedOptions);
+      return cachedOptions;
+    }
+
+    // Keep any already-loaded options visible while refreshing role options for this company.
+    setLoadingTeamRoles(true);
+
+    try {
+      const response = await api.get(
+        companyId
+          ? `/roles?companyId=${encodeURIComponent(companyId)}`
+          : "/roles"
+      );
+
+      const roles = Array.isArray(response.data) ? response.data : [];
+      const options = roles
+        .filter((role) => {
+          const normalized = normalizeScopeValue(role.name);
+          return (
+            normalized !== "platform user" &&
+            normalized !== "platformadmin" &&
+            normalized !== "platform admin"
+          );
+        })
+        .map((role) => ({
+          id: role.id,
+          name: role.name,
+          normalizedName: normalizeBackendRoleName(role.name),
+        }));
+
+      teamRoleOptionsCacheRef.current[cacheKey] = options;
+      setTeamRoleOptions(options);
+      return options;
+    } catch (error) {
+      const message =
+        error?.response?.data?.message ||
+        error?.message ||
+        "Failed to load roles.";
+      showToast?.("warning", message);
+      return [];
+    } finally {
+      setLoadingTeamRoles(false);
+    }
+  };
+
+  const getDefaultTeamRoleId = (roles = []) => {
+    return (
+      roles.find((role) => role.normalizedName === "Operator")?.id ||
+      roles.find((role) => role.normalizedName === "Officer")?.id ||
+      roles[0]?.id ||
+      ""
+    );
+  };
+
+  const openCreateUserFromFueler = async (fueler) => {
+    if (!fueler?.email || fueler.email === "-") {
+      showToast?.("warning", "Employee email is required before creating a system user.");
       return;
     }
 
-    setLocalFuelers((prev) => [
-      ...prev,
-      {
-        id: fuelerId,
-        name: fuelerName,
-        mobile,
-        email,
-        projectName: newFueler.projectName || "-",
-        status: newFueler.status || "On Duty",
-        createdLocally: true,
-      },
-    ]);
+    const companyId = fueler.companyId || currentUser?.companyId || "";
+    const cacheKey = normalizeScopeValue(companyId) || "all-companies";
+    const cachedRoles = teamRoleOptionsCacheRef.current[cacheKey] || teamRoleOptions;
+    const cachedDefaultRoleId = getDefaultTeamRoleId(cachedRoles);
 
-    if (showToast) {
-      showToast("success", "Team member added locally.");
+    // Open the modal immediately. Role options continue loading inside the modal,
+    // so the user never feels that the Linked action is frozen.
+    setLinkUserModal({
+      fueler,
+      roleId: cachedDefaultRoleId || "",
+      password: `FFP@${Math.floor(100000 + Math.random() * 900000)}`,
+    });
+
+    const roles = await loadTeamRoleOptions(companyId);
+    const defaultRoleId = getDefaultTeamRoleId(roles);
+
+    if (!defaultRoleId) {
+      showToast?.("warning", "No valid role is available for this company.");
+      return;
     }
 
-    closeAddFueler();
+    setLinkUserModal((prev) => {
+      if (!prev || normalizeText(prev.fueler?.id) !== normalizeText(fueler.id)) return prev;
+      return {
+        ...prev,
+        roleId: prev.roleId || defaultRoleId,
+      };
+    });
   };
 
-  const openFuelerEdit = (fueler, field) => {
+  const handleUserLinkStatusChange = async (fueler, nextStatus) => {
+    if (!hasPermission("team", "edit")) {
+      showToast?.("warning", "Read-only access: you cannot link team members to users.");
+      return;
+    }
+
+    const normalizedNextStatus = normalizeText(nextStatus);
+
+    if (normalizedNextStatus === "not linked") {
+      const existingUser = getExistingUserForFueler(fueler);
+
+      if (!existingUser && !fueler.linkedUserId) {
+        return;
+      }
+
+      setPendingTeamChange({
+        fueler,
+        field: "userLink",
+        action: "unlink",
+        user: existingUser,
+        oldValue: "Linked",
+        newValue: "Not Linked",
+        oldDisplayValue: "Linked",
+        newDisplayValue: "Not Linked",
+        message: buildUserLinkMessage({ action: "unlink" }),
+      });
+
+      return;
+    }
+
+    const existingUser = getExistingUserForFueler(fueler);
+
+    if (existingUser) {
+      setPendingTeamChange({
+        fueler,
+        field: "userLink",
+        action: "link-existing",
+        user: existingUser,
+        oldValue: fueler.userStatus || "Not Linked",
+        newValue: "Linked",
+        oldDisplayValue: "Not Linked",
+        newDisplayValue: "Linked",
+        message: buildUserLinkMessage({
+          action: "link-existing",
+        }),
+      });
+
+      return;
+    }
+
+    await openCreateUserFromFueler(fueler);
+  };
+
+  const closeLinkUserModal = () => {
+    setLinkUserModal(null);
+  };
+
+  const confirmCreateAndLinkUser = async () => {
+    if (!linkUserModal?.fueler) return;
+
+    if (loadingTeamRoles) {
+      showToast?.("warning", "Please wait until user roles are loaded.");
+      return;
+    }
+
+    if (!linkUserModal.roleId) {
+      showToast?.("warning", "Please select user role.");
+      return;
+    }
+
+    if (!String(linkUserModal.password || "").trim()) {
+      showToast?.("warning", "Temporary password is required.");
+      return;
+    }
+
+    if (typeof onCreateUserFromEmployee !== "function") {
+      showToast?.("warning", "Create user API is not configured.");
+      return;
+    }
+
+    if (typeof onUpdateEmployee !== "function") {
+      showToast?.("warning", "Employee update API is not configured.");
+      return;
+    }
+
+    setSavingLinkedUser(true);
+
+    try {
+      const fueler = linkUserModal.fueler;
+      const fuelerId = fueler.id;
+
+      setUpdatingUserStatusByFuelerId((prev) => ({
+        ...prev,
+        [fuelerId]: true,
+      }));
+
+      const createdUser = await onCreateUserFromEmployee({
+        fullName: fueler.name || fueler.id,
+        email: fueler.email,
+        phone: fueler.mobile || fueler.phone || "",
+        roleId: linkUserModal.roleId,
+        companyId: fueler.companyId || currentUser?.companyId || "",
+        password: linkUserModal.password,
+        isActive: true,
+      });
+
+      // Instant UI update: the created user is already inserted into users state by
+      // onCreateUserFromEmployee, so we update only this employee row locally instead
+      // of waiting for a full Users/Team reload.
+      setLocalFuelerUpdates((prev) => ({
+        ...prev,
+        [fuelerId]: {
+          ...prev[fuelerId],
+          linkedUserId: createdUser.id,
+          linkedUserName: createdUser.fullName || createdUser.email || "Linked User",
+          linkedUserIsActive: true,
+          userStatus: "Linked",
+        },
+      }));
+
+      closeLinkUserModal();
+      showToast?.("success", "System user created and linked. Saving employee link...");
+
+      await onUpdateEmployee(fueler, {
+        linkedUserId: createdUser.id,
+      });
+
+      setLocalFuelerUpdates((prev) => ({
+        ...prev,
+        [fuelerId]: {
+          ...prev[fuelerId],
+          linkedUserId: createdUser.id,
+          linkedUserName: createdUser.fullName || createdUser.email || "Linked User",
+          linkedUserIsActive: true,
+          userStatus: "Linked",
+        },
+      }));
+
+      showToast?.("success", "Employee-user link saved successfully.");
+    } catch (error) {
+      const message =
+        error?.response?.data?.message ||
+        error?.message ||
+        "Failed to create and link user.";
+      showToast?.("warning", message);
+    } finally {
+      const fuelerId = linkUserModal?.fueler?.id;
+
+      if (fuelerId) {
+        setUpdatingUserStatusByFuelerId((prev) => {
+          const next = { ...prev };
+          delete next[fuelerId];
+          return next;
+        });
+      }
+
+      setSavingLinkedUser(false);
+    }
+  };
+
+  const requestTeamChange = ({ fueler, field, newValue }) => {
     if (!hasPermission("team", "edit")) {
       showToast?.("warning", "Read-only access: you cannot edit team members.");
       return;
     }
 
-    const oldValue =
-      field === "mobile"
-        ? fueler.mobile || ""
-        : field === "status"
-        ? fueler.status || "On Duty"
-        : fueler.projectName || "";
+    const oldValue = getEditableTeamValue(fueler, field);
 
-    setEditFueler({
-      fuelerId: fueler.id,
-      fuelerName: fueler.name,
+    if (normalizeText(oldValue) === normalizeText(newValue)) return;
+
+    if (!String(newValue || "").trim()) {
+      showToast?.("warning", `Please select or enter ${getTeamFieldLabel(field)}.`);
+      return;
+    }
+
+    const oldDisplayValue = field === "project" ? fueler.projectName || "-" : oldValue || "-";
+    const newDisplayValue = field === "project" ? getProjectNameById(newValue) : newValue || "-";
+
+    if (field === "status" && isRetiredTeamStatus(newValue)) {
+      setPendingTeamChange({
+        fueler,
+        field: "retire",
+        oldValue,
+        newValue: "Retired / Resigned",
+        oldDisplayValue,
+        newDisplayValue: "Retired / Resigned",
+        message:
+          "This team member will be retired and hidden from the Team page. Historical operations and reports will remain unchanged. If this employee has a linked system user, the user login will be deactivated. If the employee returns later, create a new team member with a new Team Member ID.",
+      });
+      return;
+    }
+
+    setPendingTeamChange({
+      fueler,
       field,
       oldValue,
-      newValue: oldValue,
-      reason: "",
+      newValue,
+      oldDisplayValue,
+      newDisplayValue,
+      message: buildTeamChangeMessage({ field, oldDisplayValue, newDisplayValue }),
     });
   };
 
-  const closeFuelerEdit = () => {
-    setEditFueler(null);
+  const closeTeamChangeConfirmation = () => {
+    if (savingTeamChange) return;
+    setPendingTeamChange(null);
   };
 
-  const saveFuelerEdit = () => {
-    if (!hasPermission("team", "edit")) {
-      showToast?.("warning", "Read-only access: you cannot save team changes.");
-      closeFuelerEdit();
-      return;
-    }
+  const saveTeamChange = async () => {
+    if (!pendingTeamChange || savingTeamChange) return;
 
-    if (!editFueler) return;
+    const { fueler, field, newValue, oldValue, oldDisplayValue, newDisplayValue } = pendingTeamChange;
+    const fuelerId = fueler.id;
+    const fieldLabel = getTeamFieldLabel(field);
 
-    if (!String(editFueler.newValue).trim()) {
-      notifyUser(typeof showToast !== "undefined" ? showToast : null, inferToastTypeFromMessage("Please enter a new value."), "Please enter a new value.");
-      return;
-    }
+    setSavingTeamChange(true);
 
-    if (editFueler.field !== "status" && !editFueler.reason.trim()) {
-      notifyUser(typeof showToast !== "undefined" ? showToast : null, inferToastTypeFromMessage("Please enter edit reason."), "Please enter edit reason.");
-      return;
-    }
+    try {
+      if (field === "userLink") {
+        if (pendingTeamChange.action === "unlink") {
+          const linkedUserId = pendingTeamChange.user?.id || fueler.linkedUserId || "";
 
+          if (!linkedUserId) {
+            throw new Error("Linked user ID is required.");
+          }
 
-    const updateKey =
-      editFueler.field === "mobile"
-        ? "mobile"
-        : editFueler.field === "email"
-        ? "email"
-        : editFueler.field === "status"
-        ? "status"
-        : "projectName";
+          if (typeof onUpdateUserStatus !== "function") {
+            throw new Error("User status API is not configured.");
+          }
 
-    const fieldLabel =
-      editFueler.field === "mobile"
-        ? "Mobile"
-        : editFueler.field === "email"
-        ? "Email"
-        : editFueler.field === "status"
-        ? "Status"
-        : "Project";
+          setUpdatingUserStatusByFuelerId((prev) => ({
+            ...prev,
+            [fuelerId]: true,
+          }));
 
-    if (isOfficerUser(currentUser) && editFueler.field !== "status") {
-      submitApprovalRequest?.({
-        type: "master_data_change",
-        module: "team",
-        title: `Team member ${editFueler.fuelerId} ${fieldLabel} change`,
-        details: editFueler.reason || `${fieldLabel} change requested.`,
-        payload: {
-          entity: "team_member",
-          id: editFueler.fuelerId,
-          field: editFueler.field,
-          oldValue: editFueler.oldValue,
-          newValue: editFueler.newValue,
-          project: editFueler.field === "project" ? editFueler.newValue : undefined,
-          changedFields: [
-            { field: editFueler.field, label: fieldLabel, oldValue: editFueler.oldValue, newValue: editFueler.newValue, sensitive: editFueler.field !== "status" },
-          ],
+          await onUpdateUserStatus(linkedUserId, false);
+
+          setLocalFuelerUpdates((prev) => ({
+            ...prev,
+            [fuelerId]: {
+              ...prev[fuelerId],
+              linkedUserId,
+              linkedUserName:
+                pendingTeamChange.user?.fullName ||
+                fueler.linkedUserName ||
+                "Linked User",
+              linkedUserIsActive: false,
+              userStatus: "Not Linked",
+            },
+          }));
+
+          showToast?.("success", "User login deactivated. The employee-user link remains saved.");
+          setPendingTeamChange(null);
+          return;
+        }
+
+        const targetUser = pendingTeamChange.user;
+
+        if (!targetUser?.id) {
+          throw new Error("Target user is required.");
+        }
+
+        if (typeof onUpdateUserStatus !== "function") {
+          throw new Error("User status API is not configured.");
+        }
+
+        setUpdatingUserStatusByFuelerId((prev) => ({
+          ...prev,
+          [fuelerId]: true,
+        }));
+
+        await onUpdateUserStatus(targetUser.id, true);
+
+        setLocalFuelerUpdates((prev) => ({
+          ...prev,
+          [fuelerId]: {
+            ...prev[fuelerId],
+            linkedUserId: targetUser.id,
+            linkedUserName: targetUser.fullName || targetUser.email || "Linked User",
+            linkedUserIsActive: true,
+            userStatus: "Linked",
+          },
+        }));
+
+        showToast?.("success", "Employee linked and user login activated.");
+        setPendingTeamChange(null);
+        return;
+      }
+
+      if (field === "retire") {
+        if (typeof onUpdateEmployee !== "function") {
+          throw new Error("Employee update API is not configured.");
+        }
+
+        await onUpdateEmployee(fueler, {
+          status: "RETIRED_RESIGNED",
+        });
+
+        const linkedUserId =
+          fueler.linkedUserId ||
+          pendingTeamChange.user?.id ||
+          getExistingUserForFueler(fueler)?.id ||
+          "";
+
+        if (linkedUserId && typeof onUpdateUserStatus === "function") {
+          await onUpdateUserStatus(linkedUserId, false);
+        }
+
+        setLocalFuelerUpdates((prev) => ({
+          ...prev,
+          [fuelerId]: {
+            ...prev[fuelerId],
+            status: "Retired / Resigned",
+            linkedUserIsActive: false,
+            userStatus: linkedUserId ? "Not Linked" : prev[fuelerId]?.userStatus,
+          },
+        }));
+
+        setSelectedTeamMemberIds((prev) =>
+          prev.filter((id) => normalizeText(id) !== normalizeText(fueler.backendId || fueler.id))
+        );
+
+        setFuelerAuditLog((prev) => [
+          ...prev,
+          {
+            fuelerId,
+            fuelerName: fueler.name,
+            field: "Retire Employee",
+            oldValue: oldDisplayValue || oldValue,
+            newValue: "Retired / Resigned",
+            reason: "Employee retired from Team page",
+            editedBy: currentUser?.fullName || currentUser?.email || "System",
+            editedAt: new Date().toISOString(),
+          },
+        ]);
+
+        showToast?.(
+          "success",
+          "Team member retired successfully. Historical operations remain unchanged and linked user login was deactivated if applicable."
+        );
+
+        setPendingTeamChange(null);
+        return;
+      }
+
+      if (field === "project") {
+        if (typeof onCreateEmployeeTransfer !== "function") {
+          throw new Error("Employee transfer API is not configured.");
+        }
+
+        await onCreateEmployeeTransfer(fueler, newValue);
+
+        showToast?.(
+          "success",
+          "Transfer request submitted for approval. The current project will remain unchanged until approval is completed."
+        );
+
+        closeTeamChangeConfirmation();
+        return;
+      }
+
+      const payload =
+        field === "name"
+          ? { name: newValue }
+          : field === "jobTitle"
+          ? { jobTitle: newValue }
+          : field === "mobile"
+          ? { phone: newValue }
+          : field === "email"
+          ? { email: newValue }
+          : field === "status"
+          ? { status: mapFrontendEmployeeStatusForBackend(newValue) }
+          : {};
+
+      if (typeof onUpdateEmployee === "function") {
+        await onUpdateEmployee(fueler, payload);
+      } else {
+        const updateKey =
+          field === "name"
+            ? "name"
+            : field === "jobTitle"
+            ? "jobTitle"
+            : field === "mobile"
+            ? "mobile"
+            : field === "email"
+            ? "email"
+            : "status";
+
+        setLocalFuelerUpdates((prev) => ({
+          ...prev,
+          [fuelerId]: {
+            ...prev[fuelerId],
+            [updateKey]: newValue,
+          },
+        }));
+      }
+
+      setFuelerAuditLog((prev) => [
+        ...prev,
+        {
+          fuelerId,
+          fuelerName: fueler.name,
+          field: fieldLabel,
+          oldValue: oldDisplayValue || oldValue,
+          newValue: newDisplayValue || newValue,
+          reason: field === "status" ? "Status update" : "Inline table edit",
+          editedBy: currentUser?.fullName || currentUser?.email || "System",
+          editedAt: new Date().toISOString(),
         },
-      });
-      closeFuelerEdit();
-      showToast?.("warning", "Team change sent for manager approval.");
-      return;
+      ]);
+
+      showToast?.("success", `${fieldLabel} updated successfully.`);
+      closeTeamChangeConfirmation();
+    } catch (error) {
+      const message =
+        error?.response?.data?.message ||
+        error?.message ||
+        "Failed to save team change.";
+      showToast?.("warning", message);
+    } finally {
+      setSavingTeamChange(false);
+
+      if (field === "userLink") {
+        setUpdatingUserStatusByFuelerId((prev) => {
+          const next = { ...prev };
+          delete next[fuelerId];
+          return next;
+        });
+      }
     }
+  };
 
-    setLocalFuelerUpdates((prev) => ({
-      ...prev,
-      [editFueler.fuelerId]: {
-        ...prev[editFueler.fuelerId],
-        [updateKey]: editFueler.newValue,
-      },
-    }));
+  const startInlineFuelerEdit = (fueler, field) => {
+    if (!hasPermission("team", "edit")) return;
 
-    setFuelerAuditLog((prev) => [
-      ...prev,
-      {
-        fuelerId: editFueler.fuelerId,
-        fuelerName: editFueler.fuelerName,
-        field: fieldLabel,
-        oldValue: editFueler.oldValue,
-        newValue: editFueler.newValue,
-        reason: editFueler.field === "status" ? "Status update" : editFueler.reason,
-        editedBy: "Amr",
-        editedAt: new Date().toISOString(),
-      },
-    ]);
+    setInlineFuelerEdit({
+      fuelerId: fueler.id,
+      field,
+      value: getEditableTeamValue(fueler, field),
+    });
+  };
 
-    if (showToast) {
-      showToast("success", `${fieldLabel} updated locally.`);
-    }
+  const cancelInlineFuelerEdit = () => {
+    setInlineFuelerEdit(null);
+  };
 
-    closeFuelerEdit();
+  const commitInlineFuelerEdit = (fueler) => {
+    if (!inlineFuelerEdit) return;
+
+    const value = String(inlineFuelerEdit.value || "").trim();
+    const field = inlineFuelerEdit.field;
+
+    setInlineFuelerEdit(null);
+    requestTeamChange({ fueler, field, newValue: value });
   };
 
   return (
@@ -10810,13 +12062,13 @@ function TeamPage({
                 Team Members List
               </h2>
               <p className="text-xs text-gray-400 mt-1">
-                Mobile, project, and status changes are saved locally and ready for backend integration
+                Project and status update from dropdowns. Double click Name, Mobile, Email or Job Title to edit inline.
               </p>
             </div>
 
             <div className="flex flex-wrap items-center gap-3">
               <span className="text-sm text-slate-400">
-                {fuelersWithKpi.length} team members
+                {visibleTeamFuelers.length} shown / {activeTeamFuelers.length} active team members
               </span>
 
               <div ref={fuelersSettingsRef} className="relative">
@@ -10854,30 +12106,93 @@ function TeamPage({
             </div>
           </div>
 
+          <div className="border-b border-slate-700/80 bg-slate-950/50 px-4 py-3">
+            <div className="flex flex-col gap-3 lg:flex-row lg:items-center lg:justify-between">
+              <div className="flex flex-col gap-2 sm:flex-row sm:items-center">
+                <input
+                  value={teamSearch}
+                  onChange={(e) => setTeamSearch(e.target.value)}
+                  placeholder="Search by employee ID, name, mobile, email, job title, project..."
+                  className="w-full sm:w-[420px] rounded-xl border border-slate-700 bg-slate-950 px-3 py-2 text-sm text-white outline-none focus:border-amber-400"
+                />
+                {teamSearch && (
+                  <button
+                    onClick={() => setTeamSearch("")}
+                    className="rounded-xl border border-slate-700 px-3 py-2 text-sm text-slate-300 hover:bg-slate-800"
+                  >
+                    Clear Search
+                  </button>
+                )}
+              </div>
+
+              <div className="flex flex-wrap items-center gap-2">
+                <span className="rounded-full border border-slate-700 bg-slate-900 px-3 py-1.5 text-xs font-semibold text-slate-300">
+                  {selectedTeamFuelers.length} selected
+                </span>
+                {selectedTeamFuelers.length > 0 && (
+                  <>
+                    <button
+                      onClick={clearTeamSelection}
+                      className="rounded-xl border border-slate-700 px-3 py-2 text-sm text-slate-300 hover:bg-slate-800"
+                    >
+                      Clear Selection
+                    </button>
+                    <button
+                      onClick={openBulkTransferModal}
+                      className="rounded-xl bg-amber-500 px-3 py-2 text-sm font-bold text-black hover:bg-amber-400"
+                    >
+                      Transfer Selected
+                    </button>
+                  </>
+                )}
+              </div>
+            </div>
+          </div>
+
           <div className="max-h-[520px] overflow-auto rounded-b-2xl">
             <table
               id="fuelers-table"
-              className="min-w-[900px] lg:min-w-[1050px] xl:min-w-[1150px] w-full border-separate border-spacing-0 text-[11px] sm:text-xs lg:text-sm"
+              className="min-w-[980px] lg:min-w-[1120px] xl:min-w-[1200px] w-full border-separate border-spacing-0 text-[11px] sm:text-xs lg:text-sm"
             >
               <thead className="bg-slate-800 sticky top-0 z-[1] shadow-[0_8px_18px_rgba(0,0,0,0.22)]">
                 <tr>
+                  <Th>
+                    <input
+                      type="checkbox"
+                      checked={allVisibleFuelersSelected}
+                      onChange={toggleVisibleTeamSelection}
+                      className="h-4 w-4 cursor-pointer accent-amber-400"
+                      title="Select all visible team members"
+                    />
+                  </Th>
                   <Th>#</Th>
                   <Th>Team Member ID</Th>
                   <Th>Name</Th>
                   <Th>Mobile</Th>
                   <Th>Email</Th>
-                  <Th>Role</Th>
+                  <Th>Job Title</Th>
                   <Th>User Status</Th>
                   <Th>Project Name</Th>
                   <Th>Work Status</Th>
-                  <Th>KPI Operations</Th>
-                  <Th>Diesel Qty</Th>
                 </tr>
               </thead>
 
               <tbody>
-                {fuelersWithKpi.map((fueler, i) => (
-                  <tr key={makeTenantEntityKey(fueler)} className="odd:bg-slate-900/20 even:bg-slate-800/20 hover:bg-amber-400/10 transition-colors duration-200">
+                {visibleTeamFuelers.map((fueler, i) => {
+                  const selectionKey = fueler.backendId || fueler.id;
+                  const isSelected = selectedTeamMemberIds.includes(selectionKey);
+
+                  return (
+                  <tr key={makeTenantEntityKey(fueler)} className={`odd:bg-slate-900/20 even:bg-slate-800/20 hover:bg-amber-400/10 transition-colors duration-200 ${isSelected ? "bg-amber-400/10 ring-1 ring-amber-400/30" : ""}`}>
+                    <Td>
+                      <input
+                        type="checkbox"
+                        checked={isSelected}
+                        onChange={() => toggleTeamMemberSelection(fueler)}
+                        className="h-4 w-4 cursor-pointer accent-amber-400"
+                        title="Select team member"
+                      />
+                    </Td>
                     <Td>{i + 1}</Td>
 
                     <Td>
@@ -10890,60 +12205,202 @@ function TeamPage({
                       </button>
                     </Td>
 
-                    <Td strong>{fueler.name || "-"}</Td>
+                    <Td strong>
+                      {hasPermission("team", "edit") &&
+                      inlineFuelerEdit?.fuelerId === fueler.id &&
+                      inlineFuelerEdit?.field === "name" ? (
+                        <input
+                          autoFocus
+                          value={inlineFuelerEdit.value}
+                          onChange={(e) => setInlineFuelerEdit({ ...inlineFuelerEdit, value: e.target.value })}
+                          onBlur={() => commitInlineFuelerEdit(fueler)}
+                          onKeyDown={(e) => {
+                            if (e.key === "Enter") {
+                              e.preventDefault();
+                              e.currentTarget.blur();
+                            }
+                            if (e.key === "Escape") cancelInlineFuelerEdit();
+                          }}
+                          className="w-44 rounded-lg border border-amber-400/60 bg-slate-950 px-2 py-1 text-slate-100 outline-none"
+                        />
+                      ) : (
+                        <span
+                          onDoubleClick={() => startInlineFuelerEdit(fueler, "name")}
+                          className={hasPermission("team", "edit") ? "cursor-text text-blue-300 hover:text-yellow-400" : ""}
+                          title={hasPermission("team", "edit") ? "Double click to edit" : ""}
+                        >
+                          {fueler.name || "-"}
+                        </span>
+                      )}
+                    </Td>
 
                     <Td>
-                      {hasPermission("team", "edit") ? (
-                        <button
-                          onClick={() => openFuelerEdit(fueler, "mobile")}
-                          className="text-blue-300 hover:text-yellow-400 transition cursor-pointer"
+                      {hasPermission("team", "edit") &&
+                      inlineFuelerEdit?.fuelerId === fueler.id &&
+                      inlineFuelerEdit?.field === "mobile" ? (
+                        <input
+                          autoFocus
+                          value={inlineFuelerEdit.value}
+                          onChange={(e) => setInlineFuelerEdit({ ...inlineFuelerEdit, value: e.target.value })}
+                          onBlur={() => commitInlineFuelerEdit(fueler)}
+                          onKeyDown={(e) => {
+                            if (e.key === "Enter") {
+                              e.preventDefault();
+                              e.currentTarget.blur();
+                            }
+                            if (e.key === "Escape") cancelInlineFuelerEdit();
+                          }}
+                          className="w-36 rounded-lg border border-amber-400/60 bg-slate-950 px-2 py-1 text-slate-100 outline-none"
+                        />
+                      ) : (
+                        <span
+                          onDoubleClick={() => startInlineFuelerEdit(fueler, "mobile")}
+                          className={hasPermission("team", "edit") ? "cursor-text text-blue-300 hover:text-yellow-400" : ""}
+                          title={hasPermission("team", "edit") ? "Double click to edit" : ""}
                         >
                           {fueler.mobile || "-"}
-                        </button>
-                      ) : (
-                        <span>{fueler.mobile || "-"}</span>
+                        </span>
                       )}
                     </Td>
 
                     <Td>
-                      {hasPermission("team", "edit") ? (
-                        <button
-                          onClick={() => openFuelerEdit(fueler, "email")}
-                          className="text-blue-300 hover:text-yellow-400 transition cursor-pointer"
+                      {hasPermission("team", "edit") &&
+                      inlineFuelerEdit?.fuelerId === fueler.id &&
+                      inlineFuelerEdit?.field === "email" ? (
+                        <input
+                          autoFocus
+                          value={inlineFuelerEdit.value}
+                          onChange={(e) => setInlineFuelerEdit({ ...inlineFuelerEdit, value: e.target.value })}
+                          onBlur={() => commitInlineFuelerEdit(fueler)}
+                          onKeyDown={(e) => {
+                            if (e.key === "Enter") {
+                              e.preventDefault();
+                              e.currentTarget.blur();
+                            }
+                            if (e.key === "Escape") cancelInlineFuelerEdit();
+                          }}
+                          className="w-48 rounded-lg border border-amber-400/60 bg-slate-950 px-2 py-1 text-slate-100 outline-none"
+                        />
+                      ) : (
+                        <span
+                          onDoubleClick={() => startInlineFuelerEdit(fueler, "email")}
+                          className={hasPermission("team", "edit") ? "cursor-text text-blue-300 hover:text-yellow-400" : ""}
+                          title={hasPermission("team", "edit") ? "Double click to edit" : ""}
                         >
                           {fueler.email || "-"}
-                        </button>
-                      ) : (
-                        <span>{fueler.email || "-"}</span>
-                      )}
-                    </Td>
-
-                    <Td>{fueler.role || "Operator"}</Td>
-                    <Td>{fueler.userStatus || "Active"}</Td>
-
-                    <Td>
-                      {hasPermission("team", "edit") ? (
-                        <button
-                          onClick={() => openFuelerEdit(fueler, "project")}
-                          className="text-blue-300 hover:text-yellow-400 transition cursor-pointer"
-                        >
-                          {fueler.projectName || "-"}
-                        </button>
-                      ) : (
-                        <span>{fueler.projectName || "-"}</span>
+                        </span>
                       )}
                     </Td>
 
                     <Td>
-                      {hasPermission("team", "edit") ? (
-                        <button
-                          onClick={() => openFuelerEdit(fueler, "status")}
-                          className={`px-2 py-1 rounded-full text-xs font-semibold transition cursor-pointer ${getStatusBadgeClass(
-                            fueler.status
-                          )}`}
+                      {hasPermission("team", "edit") &&
+                      inlineFuelerEdit?.fuelerId === fueler.id &&
+                      inlineFuelerEdit?.field === "jobTitle" ? (
+                        <input
+                          autoFocus
+                          value={inlineFuelerEdit.value}
+                          onChange={(e) => setInlineFuelerEdit({ ...inlineFuelerEdit, value: e.target.value })}
+                          onBlur={() => commitInlineFuelerEdit(fueler)}
+                          onKeyDown={(e) => {
+                            if (e.key === "Enter") {
+                              e.preventDefault();
+                              e.currentTarget.blur();
+                            }
+                            if (e.key === "Escape") cancelInlineFuelerEdit();
+                          }}
+                          className="w-36 rounded-lg border border-amber-400/60 bg-slate-950 px-2 py-1 text-slate-100 outline-none"
+                        />
+                      ) : (
+                        <span
+                          onDoubleClick={() => startInlineFuelerEdit(fueler, "jobTitle")}
+                          className={hasPermission("team", "edit") ? "cursor-text text-blue-300 hover:text-yellow-400" : ""}
+                          title={hasPermission("team", "edit") ? "Double click to edit" : ""}
                         >
-                          {fueler.status || "On Duty"}
-                        </button>
+                          {fueler.jobTitle || "Operator"}
+                        </span>
+                      )}
+                    </Td>
+                    <Td>
+                      {fueler.userStatusUpdating ? (
+                        <span className="inline-flex items-center gap-2 rounded-full border border-amber-400/40 bg-amber-500/10 px-2 py-1 text-xs font-semibold text-amber-200">
+                          <span className="h-3 w-3 animate-spin rounded-full border-2 border-amber-200 border-t-transparent" />
+                          Updating...
+                        </span>
+                      ) : hasPermission("team", "edit") ? (
+                        <select
+                          value={fueler.userStatus === "Linked" ? "Linked" : "Not Linked"}
+                          onChange={(e) => handleUserLinkStatusChange(fueler, e.target.value)}
+                          disabled={fueler.userStatusUpdating}
+                          className={`rounded-full px-2 py-1 text-xs font-semibold outline-none cursor-pointer disabled:cursor-wait ${
+                            fueler.userStatus === "Linked"
+                              ? "bg-green-500/20 text-green-300 border border-green-500/30"
+                              : "bg-slate-700/60 text-slate-300 border border-slate-600"
+                          }`}
+                        >
+                          <option value="Linked">Linked</option>
+                          <option value="Not Linked">Not Linked</option>
+                        </select>
+                      ) : (
+                        <span
+                          className={`px-2 py-1 rounded-full text-xs font-semibold ${
+                            fueler.userStatus === "Linked"
+                              ? "bg-green-500/20 text-green-300 border border-green-500/30"
+                              : "bg-slate-700/60 text-slate-300 border border-slate-600"
+                          }`}
+                        >
+                          {fueler.userStatus || "Not Linked"}
+                        </span>
+                      )}
+
+                      {fueler.suggestedUserId && !fueler.linkedUserId && (
+                        <div className="mt-1 text-[10px] text-amber-300">
+                          User found by email
+                        </div>
+                      )}
+                    </Td>
+
+                    <Td>
+                      <div className="flex flex-col gap-1">
+                        {hasPermission("team", "edit") ? (
+                          <select
+                            value={fueler.projectId || ""}
+                            onChange={(e) => requestTeamChange({ fueler, field: "project", newValue: e.target.value })}
+                            className="max-w-[220px] rounded-lg border border-slate-700 bg-slate-950 px-2 py-1 text-blue-200 outline-none hover:border-amber-400 cursor-pointer"
+                          >
+                            <option value={fueler.projectId || ""}>{fueler.projectName || "Current Project"}</option>
+                            {filterActiveProjects(transferProjects)
+                              .filter((project) => normalizeText(project.backendId || project.id) !== normalizeText(fueler.projectId))
+                              .map((project) => (
+                                <option key={makeTenantEntityKey(project, project.name)} value={project.backendId || project.id}>
+                                  {project.name || project.id}
+                                </option>
+                              ))}
+                          </select>
+                        ) : (
+                          <span>{fueler.projectName || "-"}</span>
+                        )}
+
+                        {fueler.pendingTransfer && (
+                          <span className="inline-flex w-fit rounded-full border border-amber-400/40 bg-amber-500/10 px-2 py-0.5 text-[10px] font-semibold text-amber-300">
+                            {String(fueler.pendingTransfer.status || "").toUpperCase() === "PARTIALLY_APPROVED"
+                              ? "Transfer in progress"
+                              : `Requested → ${fueler.pendingTransfer.toProjectName || "-"}`}
+                          </span>
+                        )}
+                      </div>
+                    </Td>
+
+                    <Td>
+                      {hasPermission("team", "edit") ? (
+                        <select
+                          value={fueler.status || "On Duty"}
+                          onChange={(e) => requestTeamChange({ fueler, field: "status", newValue: e.target.value })}
+                          className={`rounded-full px-2 py-1 text-xs font-semibold outline-none cursor-pointer ${getStatusBadgeClass(fueler.status)}`}
+                        >
+                          <option value="On Duty">On Duty</option>
+                          <option value="In Vacation">In Vacation</option>
+                          <option value="Retired / Resigned">Retired / Resigned</option>
+                        </select>
                       ) : (
                         <span className={`px-2 py-1 rounded-full text-xs font-semibold ${getStatusBadgeClass(fueler.status)}`}>
                           {fueler.status || "On Duty"}
@@ -10951,14 +12408,14 @@ function TeamPage({
                       )}
                     </Td>
 
-                    <Td>{formatNumber(fueler.operationsCount)}</Td>
-                    <Td>{formatNumber(fueler.dieselQty)} L</Td>
-                  </tr>
-                ))}
 
-                {fuelersWithKpi.length === 0 && (
+                  </tr>
+                  );
+                })}
+
+                {visibleTeamFuelers.length === 0 && (
                   <tr>
-                    <Td colSpan={11}>No team members found.</Td>
+                    <Td colSpan={10}>No team members found.</Td>
                   </tr>
                 )}
               </tbody>
@@ -11021,6 +12478,207 @@ function TeamPage({
                 ))}
             </div>
           </div>
+        )}
+
+        {linkUserModal && (
+          <ModalPortal>
+            <div className="fixed inset-0 bg-black/75 backdrop-blur-sm flex items-center justify-center z-[10000] p-3">
+              <div className="bg-gray-900 text-white w-[520px] max-w-[95vw] rounded-3xl shadow-2xl border border-gray-700 overflow-hidden">
+                <div className="p-5 border-b border-gray-700">
+                  <h2 className="text-xl font-bold text-yellow-400">
+                    Create Linked System User
+                  </h2>
+                  <p className="text-sm text-gray-400 mt-1">
+                    This will create a user account, activate login access, and link it to this employee.
+                  </p>
+                </div>
+
+                <div className="p-5 space-y-4">
+                  <div className="grid grid-cols-1 sm:grid-cols-2 gap-3 text-sm">
+                    <div>
+                      <p className="text-gray-500 text-xs">Employee ID</p>
+                      <p className="font-semibold text-blue-300">{linkUserModal.fueler.id}</p>
+                    </div>
+
+                    <div>
+                      <p className="text-gray-500 text-xs">Employee Name</p>
+                      <p className="font-semibold">{linkUserModal.fueler.name || "-"}</p>
+                    </div>
+
+                    <div>
+                      <p className="text-gray-500 text-xs">Email</p>
+                      <p className="font-semibold">{linkUserModal.fueler.email || "-"}</p>
+                    </div>
+
+                    <div>
+                      <p className="text-gray-500 text-xs">Mobile</p>
+                      <p className="font-semibold">{linkUserModal.fueler.mobile || "-"}</p>
+                    </div>
+                  </div>
+
+                  <div>
+                    <label className="block text-sm text-gray-300 mb-1">
+                      User Role
+                    </label>
+                    <select
+                      value={linkUserModal.roleId}
+                      onChange={(e) =>
+                        setLinkUserModal((prev) => ({
+                          ...prev,
+                          roleId: e.target.value,
+                        }))
+                      }
+                      disabled={loadingTeamRoles || savingLinkedUser}
+                      className="w-full rounded-xl border border-slate-700 bg-slate-950 px-3 py-2 text-white outline-none focus:border-amber-400"
+                    >
+                      {loadingTeamRoles && !teamRoleOptions.length && (
+                        <option value="">Loading roles...</option>
+                      )}
+
+                      {!loadingTeamRoles && !teamRoleOptions.length && (
+                        <option value="">No roles available</option>
+                      )}
+
+                      {teamRoleOptions.map((role) => (
+                        <option key={role.id} value={role.id}>
+                          {role.name}
+                        </option>
+                      ))}
+                    </select>
+                  </div>
+
+                  <div>
+                    <label className="block text-sm text-gray-300 mb-1">
+                      Temporary Password
+                    </label>
+                    <input
+                      value={linkUserModal.password}
+                      onChange={(e) =>
+                        setLinkUserModal((prev) => ({
+                          ...prev,
+                          password: e.target.value,
+                        }))
+                      }
+                      disabled={savingLinkedUser}
+                      className="w-full rounded-xl border border-slate-700 bg-slate-950 px-3 py-2 text-white outline-none focus:border-amber-400"
+                    />
+                    <p className="text-xs text-gray-500 mt-1">
+                      The user will be asked to change this password after login.
+                    </p>
+                  </div>
+                </div>
+
+                <div className="p-5 border-t border-gray-700 flex justify-end gap-3">
+                  <button
+                    onClick={closeLinkUserModal}
+                    disabled={savingLinkedUser}
+                    className="px-4 py-2 rounded-xl border border-slate-600 text-slate-200 hover:bg-slate-800"
+                  >
+                    Cancel
+                  </button>
+
+                  <button
+                    onClick={confirmCreateAndLinkUser}
+                    disabled={savingLinkedUser || loadingTeamRoles || !linkUserModal.roleId}
+                    className="px-4 py-2 rounded-xl bg-yellow-500 hover:bg-yellow-400 text-black font-bold disabled:opacity-60"
+                  >
+                    {savingLinkedUser ? "Saving..." : loadingTeamRoles ? "Loading Roles..." : "Create & Link"}
+                  </button>
+                </div>
+              </div>
+            </div>
+          </ModalPortal>
+        )}
+
+
+        {bulkTransferModalOpen && (
+          <ModalPortal>
+            <div className="fixed inset-0 bg-black/75 backdrop-blur-sm flex items-center justify-center z-[10000] p-3">
+              <div className="w-[min(760px,calc(100vw-2rem))] max-h-[92vh] overflow-hidden rounded-3xl border border-slate-700 bg-slate-950 text-white shadow-2xl">
+                <div className="border-b border-slate-700 px-6 py-5">
+                  <h2 className="text-xl font-bold text-amber-300">Bulk Team Transfer</h2>
+                  <p className="mt-1 text-sm text-slate-400">
+                    Submit one transfer action for the selected team members. Current projects will not change until approval is completed.
+                  </p>
+                </div>
+
+                <div className="max-h-[62vh] overflow-auto px-6 py-5 space-y-5">
+                  <div>
+                    <label className="mb-2 block text-sm font-semibold text-slate-300">Transfer To Project</label>
+                    <select
+                      value={bulkTransferProjectId}
+                      onChange={(e) => setBulkTransferProjectId(e.target.value)}
+                      disabled={savingBulkTransfer}
+                      className="w-full rounded-xl border border-slate-700 bg-slate-900 px-3 py-2 text-white outline-none focus:border-amber-400 disabled:cursor-wait disabled:opacity-60"
+                    >
+                      <option value="">Select destination project</option>
+                      {filterActiveProjects(transferProjects).map((project) => (
+                        <option key={makeTenantEntityKey(project, project.name)} value={project.backendId || project.id}>
+                          {project.name || project.id}
+                        </option>
+                      ))}
+                    </select>
+                  </div>
+
+                  <div className="rounded-2xl border border-slate-700 bg-slate-900/70 p-4">
+                    <div className="mb-3 flex items-center justify-between gap-3">
+                      <h3 className="font-bold text-slate-100">Selected Team Members</h3>
+                      <span className="rounded-full bg-amber-500/15 px-3 py-1 text-xs font-bold text-amber-300">
+                        {selectedTeamFuelers.length} selected
+                      </span>
+                    </div>
+
+                    <div className="max-h-72 overflow-auto rounded-xl border border-slate-800">
+                      <table className="w-full min-w-[560px] text-sm">
+                        <thead className="sticky top-0 bg-slate-800 text-slate-300">
+                          <tr>
+                            <Th>#</Th>
+                            <Th>Employee ID</Th>
+                            <Th>Name</Th>
+                            <Th>Current Project</Th>
+                          </tr>
+                        </thead>
+                        <tbody>
+                          {selectedTeamFuelers.map((fueler, index) => (
+                            <tr key={fueler.backendId || fueler.id} className="border-t border-slate-800 hover:bg-slate-800/60">
+                              <Td>{index + 1}</Td>
+                              <Td strong>{fueler.id}</Td>
+                              <Td>{fueler.name || "-"}</Td>
+                              <Td>{fueler.projectName || "-"}</Td>
+                            </tr>
+                          ))}
+                        </tbody>
+                      </table>
+                    </div>
+                  </div>
+                </div>
+
+                <div className="flex justify-end gap-3 border-t border-slate-700 bg-slate-900 px-6 py-4">
+                  <button
+                    onClick={closeBulkTransferModal}
+                    disabled={savingBulkTransfer}
+                    className="rounded-xl border border-slate-600 px-4 py-2 text-slate-200 hover:bg-slate-800 disabled:cursor-not-allowed disabled:opacity-50"
+                  >
+                    Cancel
+                  </button>
+                  <button
+                    onClick={confirmBulkTransfer}
+                    disabled={savingBulkTransfer || !bulkTransferProjectId || !selectedTeamFuelers.length}
+                    className={`inline-flex items-center gap-2 rounded-xl px-4 py-2 font-bold disabled:cursor-wait disabled:opacity-70 ${
+                    pendingTeamChange.field === "retire"
+                      ? "bg-red-500 text-white hover:bg-red-400"
+                      : "bg-amber-500 text-black hover:bg-amber-400"
+                  }`}
+                  >
+                    {savingBulkTransfer && (
+                      <span className="h-4 w-4 animate-spin rounded-full border-2 border-black/60 border-t-transparent" />
+                    )}
+                    {savingBulkTransfer ? "Submitting..." : "Submit Transfer Request"}
+                  </button>
+                </div>
+              </div>
+            </div>
+          </ModalPortal>
         )}
 
         {selectedFuelerHistory && (
@@ -11194,6 +12852,17 @@ function TeamPage({
                 </div>
 
                 <div>
+                  <label className="font-medium text-gray-700">Job Title</label>
+                  <input
+                    type="text"
+                    value={newFueler.jobTitle}
+                    onChange={(e) => setNewFueler({ ...newFueler, jobTitle: e.target.value })}
+                    className="border rounded-lg p-3 w-full mt-2"
+                    placeholder="Example: Operator, Fueler, Mechanic, Manager"
+                  />
+                </div>
+
+                <div>
                   <label className="font-medium text-gray-700">Status</label>
                   <select
                     value={newFueler.status}
@@ -11210,13 +12879,24 @@ function TeamPage({
               <div className="mb-5">
                 <label className="font-medium text-gray-700">Project Name</label>
                 <select
-                  value={newFueler.projectName}
-                  onChange={(e) => setNewFueler({ ...newFueler, projectName: e.target.value })}
+                  value={newFueler.projectId}
+                  onChange={(e) => {
+                    const projectId = e.target.value;
+                    const selectedProject = filterActiveProjects(transferProjects).find((project) =>
+                      normalizeText(project.backendId || project.id) === normalizeText(projectId)
+                    );
+
+                    setNewFueler({
+                      ...newFueler,
+                      projectId,
+                      projectName: selectedProject?.name || selectedProject?.id || "",
+                    });
+                  }}
                   className="border rounded-lg p-3 w-full mt-2"
                 >
                   <option value="">Select Project</option>
                   {filterActiveProjects(transferProjects).map((project) => (
-                    <option key={makeTenantEntityKey(project, project.name)} value={project.name || project.id}>
+                    <option key={makeTenantEntityKey(project, project.name)} value={project.backendId || project.id}>
                       {project.name || project.id}
                     </option>
                   ))}
@@ -11247,109 +12927,54 @@ function TeamPage({
           </div>
         )}
 
-        {editFueler && (
+        {pendingTeamChange && (
           <div className="fixed inset-0 bg-black/75 backdrop-blur-sm flex items-center justify-center z-[10000] p-3">
-            <div className="bg-white text-black w-[min(560px,calc(100vw-2rem))] rounded-2xl shadow-2xl p-6">
-              <div className="flex justify-between items-center mb-5 border-b pb-3">
-                <div>
-                  <h2 className="text-xl sm:text-2xl font-bold">
-                    Edit {editFueler.field === "mobile"
-                      ? "Mobile"
-                      : editFueler.field === "email"
-                      ? "Email"
-                      : editFueler.field === "status"
-                      ? "Status"
-                      : "Project"}
-                  </h2>
-                  <p className="text-sm text-gray-500 mt-1">
-                    Team Member: {editFueler.fuelerId} - {editFueler.fuelerName}
-                  </p>
+            <div className="w-[min(520px,calc(100vw-2rem))] rounded-2xl border border-slate-700 bg-slate-950 text-white shadow-2xl overflow-hidden">
+              <div className="border-b border-slate-700 px-6 py-5">
+                <h2 className={`text-xl font-bold ${pendingTeamChange.field === "retire" ? "text-red-300" : "text-amber-300"}`}>
+                  {pendingTeamChange.field === "retire" ? "Confirm Employee Retirement" : "Confirm Team Change"}
+                </h2>
+                <p className="mt-1 text-sm text-slate-400">
+                  {pendingTeamChange.fueler?.id} - {pendingTeamChange.fueler?.name || "Team Member"}
+                </p>
+              </div>
+
+              <div className="px-6 py-5 space-y-4">
+                <p className="text-sm text-slate-200">{pendingTeamChange.message}</p>
+
+                <div className="grid grid-cols-1 sm:grid-cols-2 gap-3 text-sm">
+                  <div className="rounded-xl border border-red-400/30 bg-red-500/10 p-3">
+                    <div className="text-xs text-red-200">Current</div>
+                    <div className="mt-1 font-bold text-red-100">{pendingTeamChange.oldDisplayValue || "-"}</div>
+                  </div>
+                  <div className="rounded-xl border border-emerald-400/30 bg-emerald-500/10 p-3">
+                    <div className="text-xs text-emerald-200">New</div>
+                    <div className="mt-1 font-bold text-emerald-100">{pendingTeamChange.newDisplayValue || "-"}</div>
+                  </div>
                 </div>
+              </div>
 
+              <div className="flex justify-end gap-3 border-t border-slate-700 bg-slate-900 px-6 py-4">
                 <button
-                  onClick={closeFuelerEdit}
-                  className="text-gray-500 hover:text-black text-xl"
-                >
-                  ×
-                </button>
-              </div>
-
-              <div className="bg-gray-100 rounded-xl p-4 mb-4">
-                <p className="text-sm text-gray-600">Old Value</p>
-                <p className="text-xl font-bold">{editFueler.oldValue || "-"}</p>
-              </div>
-
-              <div className="mb-4">
-                <label className="font-medium text-gray-700">New Value</label>
-
-                {editFueler.field === "project" ? (
-                  <select
-                    value={editFueler.newValue}
-                    onChange={(e) =>
-                      setEditFueler({ ...editFueler, newValue: e.target.value })
-                    }
-                    className="border rounded-lg p-3 w-full mt-2"
-                  >
-                    <option value="">Select Project</option>
-                    {filterActiveProjects(transferProjects).map((project) => (
-                      <option key={makeTenantEntityKey(project, project.name)} value={project.name || project.id}>
-                        {project.name || project.id}
-                      </option>
-                    ))}
-                  </select>
-                ) : editFueler.field === "status" ? (
-                  <select
-                    value={editFueler.newValue}
-                    onChange={(e) =>
-                      setEditFueler({ ...editFueler, newValue: e.target.value })
-                    }
-                    className="border rounded-lg p-3 w-full mt-2"
-                  >
-                    <option value="On Duty">On Duty</option>
-                    <option value="In Vacation">In Vacation</option>
-                    <option value="Retired / Resigned">Retired / Resigned</option>
-                  </select>
-                ) : (
-                  <input
-                    type="text"
-                    value={editFueler.newValue}
-                    onChange={(e) =>
-                      setEditFueler({ ...editFueler, newValue: e.target.value })
-                    }
-                    className="border rounded-lg p-3 w-full mt-2"
-                    placeholder="Enter mobile number"
-                  />
-                )}
-              </div>
-
-              {editFueler.field !== "status" && (
-                <div className="mb-4">
-                  <label className="font-medium text-gray-700">Edit Reason</label>
-                  <textarea
-                    value={editFueler.reason}
-                    onChange={(e) =>
-                      setEditFueler({ ...editFueler, reason: e.target.value })
-                    }
-                    className="border rounded-lg p-3 w-full mt-2 h-24"
-                    placeholder="Enter correction reason..."
-                  />
-                </div>
-              )}
-
-
-              <div className="flex justify-end gap-3 border-t border-slate-700/80 px-6 py-5 bg-slate-950/90">
-                <button
-                  onClick={closeFuelerEdit}
-                  className="bg-gray-200 px-3 lg:px-4 py-2 rounded-lg"
+                  onClick={closeTeamChangeConfirmation}
+                  disabled={savingTeamChange}
+                  className="rounded-xl border border-slate-600 px-4 py-2 text-slate-200 hover:bg-slate-800 disabled:cursor-not-allowed disabled:opacity-50"
                 >
                   Cancel
                 </button>
-
                 <button
-                  onClick={saveFuelerEdit}
-                  className="bg-red-600 text-white px-3 lg:px-4 py-2 rounded-lg"
+                  onClick={saveTeamChange}
+                  disabled={savingTeamChange}
+                  className="inline-flex items-center gap-2 rounded-xl bg-amber-500 px-4 py-2 font-bold text-black hover:bg-amber-400 disabled:cursor-wait disabled:opacity-70"
                 >
-                  Save Correction
+                  {savingTeamChange && (
+                    <span className="h-4 w-4 animate-spin rounded-full border-2 border-black/60 border-t-transparent" />
+                  )}
+                  {savingTeamChange
+                    ? "Saving..."
+                    : pendingTeamChange.field === "retire"
+                    ? "Retire Employee"
+                    : "Confirm Change"}
                 </button>
               </div>
             </div>
@@ -14888,6 +16513,11 @@ function formatApprovalDate(rawDate) {
 function UsersPage({
   users = [],
   setUsers,
+  usersLoading = false,
+  usersLoaded = false,
+  usersLoadError = "",
+  refreshUsers,
+  setFuelers = () => {},
   companies = [],
   projects = [],
   currentUser,
@@ -14904,6 +16534,7 @@ function UsersPage({
   const [selectedUserId, setSelectedUserId] = useState("");
   const [backendRoles, setBackendRoles] = useState([]);
   const [savingUser, setSavingUser] = useState(false);
+  const [updatingUserStatusById, setUpdatingUserStatusById] = useState({});
   const [resettingPassword, setResettingPassword] = useState(false);
   const [temporaryPasswordResult, setTemporaryPasswordResult] = useState(null);
   const [userConfirmModal, setUserConfirmModal] = useState({
@@ -15078,26 +16709,40 @@ function UsersPage({
     }
 
     try {
-      const usersEndpoint =
+      const targetCompanyId =
         isPlatformUserContext && activeContextCompanyId
-          ? `/users?companyId=${encodeURIComponent(activeContextCompanyId)}`
-          : "/users";
+          ? activeContextCompanyId
+          : currentUser?.companyId || contextCompanyId || "";
 
-      const usersResponse = await api.get(usersEndpoint);
+      let backendUsers = [];
 
-      const backendUsers = Array.isArray(usersResponse.data) ? usersResponse.data : [];
+      if (typeof refreshUsers === "function") {
+        backendUsers = await refreshUsers(targetCompanyId, {
+          force: true,
+          silent: true,
+        });
+      } else {
+        const usersResponse = await api.get("/users", {
+          params:
+            targetCompanyId && !isPlatformContextValue(targetCompanyId)
+              ? { companyId: targetCompanyId }
+              : {},
+        });
+
+        backendUsers = Array.isArray(usersResponse.data) ? usersResponse.data : [];
+
+        setUsers(
+          backendUsers
+            .map(normalizeBackendUserForState)
+            .filter((user) => user.id)
+        );
+      }
 
       if (!isPlatformUserContext) {
-        await loadRolesForCompany(currentUser?.companyId);
+        await loadRolesForCompany(currentUser?.companyId || targetCompanyId);
       } else {
         setBackendRoles([]);
       }
-
-      setUsers(
-        backendUsers
-          .map(normalizeBackendUserForState)
-          .filter((user) => user.id)
-      );
     } catch (error) {
       console.error("Failed to load users and roles from backend:", error);
       notifyUser(showToast, "warning", "Failed to load users and roles from backend.");
@@ -15106,7 +16751,7 @@ function UsersPage({
 
   useEffect(() => {
     refreshUsersAndRolesFromBackend();
-  }, [canUseBackendUsersApi, currentUser?.companyId, contextCompanyId]);
+  }, [canUseBackendUsersApi, currentUser?.companyId, contextCompanyId, currentUser?.role]);
 
   const filteredUsers = users.filter((user) => {
     const search = normalizeScopeValue(searchTerm);
@@ -15336,6 +16981,8 @@ function UsersPage({
 
     if (!user?.id) return;
 
+    if (updatingUserStatusById[user.id]) return;
+
     if (user.id === currentUser?.id) {
       notifyUser(showToast, "warning", "You cannot deactivate the currently signed-in user.");
       return;
@@ -15351,21 +16998,64 @@ function UsersPage({
       confirmLabel: nextStatus === "Active" ? "Activate" : "Deactivate",
       confirmTone: nextStatus === "Active" ? "emerald" : "red",
       onConfirm: async () => {
+        const previousUser = { ...user };
+
+        setUpdatingUserStatusById((prev) => ({
+          ...prev,
+          [user.id]: true,
+        }));
+
         try {
           const response = await api.patch(`/users/${user.id}/status`, {
             isActive: nextIsActive,
           });
+
           const updatedUser = normalizeBackendUserForState(response.data);
 
           setUsers((prev) =>
             prev.map((item) => (item.id === updatedUser.id ? updatedUser : item))
           );
 
+          setFuelers((prev) =>
+            prev.map((fueler) => {
+              const linkedUserId = fueler.linkedUserId || fueler.linkedUser?.id || "";
+
+              if (normalizeScopeValue(linkedUserId) !== normalizeScopeValue(updatedUser.id)) {
+                return fueler;
+              }
+
+              return {
+                ...fueler,
+                linkedUserId: updatedUser.id,
+                linkedUserName: updatedUser.fullName || updatedUser.email || fueler.linkedUserName || "",
+                userStatus: updatedUser.isActive ? "Linked" : "Not Linked",
+                linkedUser: {
+                  ...(fueler.linkedUser || {}),
+                  id: updatedUser.id,
+                  fullName: updatedUser.fullName || fueler.linkedUser?.fullName || "",
+                  email: updatedUser.email || fueler.linkedUser?.email || "",
+                  isActive: updatedUser.isActive,
+                },
+              };
+            })
+          );
+
           trackActivity("Change User Status", "users", `${updatedUser.fullName} changed to ${updatedUser.status}.`);
           notifyUser(showToast, "success", `User changed to ${updatedUser.status}.`);
         } catch (error) {
           console.error("Failed to change user status:", error);
+
+          setUsers((prev) =>
+            prev.map((item) => (item.id === previousUser.id ? previousUser : item))
+          );
+
           notifyUser(showToast, "warning", "Failed to change user status.");
+        } finally {
+          setUpdatingUserStatusById((prev) => {
+            const next = { ...prev };
+            delete next[user.id];
+            return next;
+          });
         }
       },
     });
@@ -15686,6 +17376,19 @@ function UsersPage({
           Click a user name to open the edit screen. Status is changed directly from the badge. Password reset generates a one-time temporary password shown only once.
         </div>
 
+        {usersLoading && (
+          <div className="mb-4 flex items-center gap-3 rounded-2xl border border-amber-400/30 bg-amber-500/10 px-4 py-3 text-sm font-semibold text-amber-200">
+            <span className="h-4 w-4 animate-spin rounded-full border-2 border-amber-200 border-t-transparent" />
+            Loading users from backend...
+          </div>
+        )}
+
+        {usersLoadError && !usersLoading && (
+          <div className="mb-4 rounded-2xl border border-red-400/30 bg-red-500/10 px-4 py-3 text-sm font-semibold text-red-200">
+            {usersLoadError}
+          </div>
+        )}
+
         <div className="bg-slate-900/80 border border-slate-700/80 rounded-2xl shadow-xl overflow-hidden">
           <div className="overflow-x-auto">
             <table className="w-full text-left text-sm min-w-[1120px]">
@@ -15728,17 +17431,25 @@ function UsersPage({
                       </span>
                     </td>
                     <td className="p-3">
-                      <button
-                        type="button"
-                        onClick={() => askChangeUserStatus(user)}
-                        className={`px-3 py-1 rounded-full border font-black text-xs transition cursor-pointer ${
-                          user.status === "Active"
-                            ? "bg-emerald-500/15 text-emerald-300 border-emerald-500/30 hover:bg-emerald-500/25"
-                            : "bg-red-500/15 text-red-300 border-red-500/30 hover:bg-red-500/25"
-                        }`}
-                      >
-                        {user.status}
-                      </button>
+                      {updatingUserStatusById[user.id] ? (
+                        <span className="inline-flex items-center gap-2 rounded-full border border-amber-400/40 bg-amber-500/10 px-3 py-1 text-xs font-black text-amber-200">
+                          <span className="h-3 w-3 animate-spin rounded-full border-2 border-amber-200 border-t-transparent" />
+                          Updating...
+                        </span>
+                      ) : (
+                        <button
+                          type="button"
+                          onClick={() => askChangeUserStatus(user)}
+                          disabled={Boolean(updatingUserStatusById[user.id])}
+                          className={`px-3 py-1 rounded-full border font-black text-xs transition cursor-pointer disabled:cursor-wait disabled:opacity-70 ${
+                            user.status === "Active"
+                              ? "bg-emerald-500/15 text-emerald-300 border-emerald-500/30 hover:bg-emerald-500/25"
+                              : "bg-red-500/15 text-red-300 border-red-500/30 hover:bg-red-500/25"
+                          }`}
+                        >
+                          {user.status}
+                        </button>
+                      )}
                     </td>
                     <td className="p-3 text-slate-300">
                       {user.passwordResetRequired || user.mustChangePassword ? "Required" : "No"}
@@ -15762,7 +17473,7 @@ function UsersPage({
                 {!filteredUsers.length && (
                   <tr>
                     <td colSpan={9} className="p-8 text-center text-slate-500">
-                      No users found.
+                      {usersLoading ? "Loading users..." : usersLoaded ? "No users found." : "Users are not loaded yet."}
                     </td>
                   </tr>
                 )}
@@ -16927,10 +18638,7 @@ function LoginPage({
 
   const loginCompanies = useMemo(
     () =>
-      [
-        PLATFORM_COMPANY_OPTION,
-        ...companies,
-      ].filter((company, index, list) =>
+      mergePlatformConsoleWithCompanies(companies).filter((company, index, list) =>
         company?.id &&
         normalizeSystemUserStatus(company.status || "Active") === "Active" &&
         list.findIndex((item) => normalizeScopeValue(item.id) === normalizeScopeValue(company.id)) === index
@@ -16987,7 +18695,7 @@ function LoginPage({
         const info = response?.data || {};
         const isPlatformUser = Boolean(info.isPlatformUser);
         const nextCompanyId = isPlatformUser
-          ? selectedCompanyId || PLATFORM_CONTEXT_ID
+          ? selectedCompanyId || getPlatformCompanyId(loginCompanies)
           : info.companyId || "";
 
         setLoginCompanyInfo(info);
@@ -17288,7 +18996,7 @@ function LoginPage({
 
             {isDetectedPlatformUser ? (
               <select
-                value={selectedCompanyId || PLATFORM_CONTEXT_ID}
+                value={selectedCompanyId || getPlatformCompanyId(loginCompanies)}
                 onChange={(e) => setSelectedCompanyId?.(e.target.value)}
                 className="login-input mt-2 w-full rounded-2xl border border-slate-700 bg-slate-950 px-4 py-3 text-sm text-white outline-none focus:border-amber-400 focus:ring-2 focus:ring-amber-400/20"
               >
