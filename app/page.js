@@ -1466,8 +1466,23 @@ function isActiveProject(project) {
   return normalizeScopeValue(project?.status || "Active") === "active";
 }
 
+function hasAssignedProjectManager(project) {
+  return Boolean(
+    project?.projectManagerId ||
+      project?.managerUserId ||
+      project?.managerId ||
+      project?.projectManager?.id
+  );
+}
+
 function filterActiveProjects(projects = []) {
   return projects.filter((project) => project?.id && isActiveProject(project));
+}
+
+function filterAvailableProjects(projects = []) {
+  return projects.filter(
+    (project) => project?.id && isActiveProject(project) && hasAssignedProjectManager(project)
+  );
 }
 
 function userCanAccessAllProjects(user) {
@@ -2100,6 +2115,12 @@ setLoginIdentifier("");
 
 
   const hasPermission = (module, action = "view") => {
+    // Users & Roles is a governance page. Keep it available only for Admin and PlatformAdmin,
+    // even if a backend permission is accidentally returned for another role.
+    if (module === "users" && !["Admin", "PlatformAdmin"].includes(currentUser?.role)) {
+      return false;
+    }
+
     if (backendIsLoggedIn) {
       const backendPermission = mapLegacyPermissionToBackendPermission(module, action);
       if (!backendPermission) return true;
@@ -2110,6 +2131,12 @@ setLoginIdentifier("");
   };
 
   const canAccessPage = (pageKey) => {
+    // Users & Roles should not appear for Manager/Officer/Supervisor/Operator.
+    // Admin and PlatformAdmin remain the only roles that can open it.
+    if (pageKey === "users") {
+      return ["Admin", "PlatformAdmin"].includes(currentUser?.role);
+    }
+
     if (backendIsLoggedIn) {
       const requiredPermission = BACKEND_PAGE_PERMISSION_MAP[pageKey];
       if (!requiredPermission) return true;
@@ -2253,6 +2280,19 @@ setLoginIdentifier("");
     employeeBackendId: transfer.employeeId || transfer.employee?.id || "",
     employeeId: transfer.employee?.employeeId || transfer.employeeId || "",
     employeeName: transfer.employee?.name || "",
+    employeeRole:
+      normalizeBackendRoleName(
+        transfer.employee?.linkedUser?.role?.name ||
+          transfer.employee?.jobTitle ||
+          ""
+      ) || "Operator",
+    isManagerTransfer:
+      String(transfer.reason || "").toUpperCase().includes("MANAGER_TRANSFER_ADMIN_APPROVAL") ||
+      normalizeBackendRoleName(
+        transfer.employee?.linkedUser?.role?.name ||
+          transfer.employee?.jobTitle ||
+          ""
+      ) === "Manager",
     fromProjectId: transfer.fromProjectId || transfer.fromProject?.id || "",
     fromProjectName:
       transfer.fromProject?.name ||
@@ -2330,6 +2370,7 @@ setLoginIdentifier("");
 
     const response = await api.patch(`/projects/${backendId}/manager`, {
       managerUserId,
+      requestedByUserId: backendAuthUser?.id || currentUser?.id || "",
     });
 
     const updatedProject = mapBackendProjectForState(response.data);
@@ -2468,6 +2509,97 @@ setLoginIdentifier("");
     await refreshBackendEmployeeTransfers();
 
     return createdTransfer;
+  };
+
+  const applyEmployeeTransferLocally = (transfer) => {
+    if (!transfer?.id && !transfer?.employeeBackendId && !transfer?.employeeId) return;
+
+    setFuelers((prev) =>
+      prev.map((employee) => {
+        const sameEmployee =
+          normalizeScopeValue(employee.backendId || employee.id) === normalizeScopeValue(transfer.employeeBackendId) ||
+          normalizeScopeValue(employee.id) === normalizeScopeValue(transfer.employeeId);
+
+        if (!sameEmployee) return employee;
+
+        return {
+          ...employee,
+          projectId: transfer.toProjectId || employee.projectId,
+          projectName: transfer.toProjectName || transfer.toProjectId || employee.projectName,
+          project: transfer.toProjectName || transfer.toProjectId || employee.project,
+        };
+      })
+    );
+  };
+
+  const handleApproveEmployeeTransfer = async (transfer, reviewerUserId = "") => {
+    const transferId = transfer?.backendId || transfer?.id;
+    const managerUserId = reviewerUserId || backendAuthUser?.id || currentUser?.id || "";
+
+    if (!transferId) {
+      throw new Error("Employee transfer ID is required.");
+    }
+
+    if (!managerUserId) {
+      throw new Error("Approver user ID is required.");
+    }
+
+    const response = await api.patch(`/employee-transfers/${transferId}/review`, {
+      managerUserId,
+      approve: true,
+    });
+
+    const reviewedTransfer = mapBackendEmployeeTransferForState(response.data);
+
+    setEmployeeTransferRequests((prev) => {
+      if (String(reviewedTransfer.status || "").toUpperCase() === "APPROVED") {
+        return prev.filter((item) => normalizeScopeValue(item.id) !== normalizeScopeValue(reviewedTransfer.id));
+      }
+
+      return prev.map((item) =>
+        normalizeScopeValue(item.id) === normalizeScopeValue(reviewedTransfer.id)
+          ? reviewedTransfer
+          : item
+      );
+    });
+
+    if (String(reviewedTransfer.status || "").toUpperCase() === "APPROVED") {
+      applyEmployeeTransferLocally(reviewedTransfer);
+    }
+
+    await refreshBackendEmployees(currentCompanyId, currentUser?.id);
+    await refreshBackendEmployeeTransfers();
+
+    return reviewedTransfer;
+  };
+
+  const handleRejectEmployeeTransfer = async (transfer, reason = "", reviewerUserId = "") => {
+    const transferId = transfer?.backendId || transfer?.id;
+    const managerUserId = reviewerUserId || backendAuthUser?.id || currentUser?.id || "";
+
+    if (!transferId) {
+      throw new Error("Employee transfer ID is required.");
+    }
+
+    if (!managerUserId) {
+      throw new Error("Reviewer user ID is required.");
+    }
+
+    const response = await api.patch(`/employee-transfers/${transferId}/review`, {
+      managerUserId,
+      approve: false,
+      rejectionReason: reason || "Rejected",
+    });
+
+    const reviewedTransfer = mapBackendEmployeeTransferForState(response.data);
+
+    setEmployeeTransferRequests((prev) =>
+      prev.filter((item) => normalizeScopeValue(item.id) !== normalizeScopeValue(reviewedTransfer.id))
+    );
+
+    await refreshBackendEmployeeTransfers();
+
+    return reviewedTransfer;
   };
 
   const mapBackendUserForState = (user = {}) => {
@@ -2954,46 +3086,121 @@ setLoginIdentifier("");
     projects,
   });
 
-  const scopedProjects = (userCanAccessAllProjects(currentUser)
-    ? companyProjects
-    : companyProjects.filter((project) =>
-        isProjectAllowedForUser(currentUser, project.id, companyProjects) ||
-        isProjectAllowedForUser(currentUser, project.name, companyProjects)
+  const currentUserProjectScopeValues = useMemo(() => {
+    if (!currentUser?.id) return [];
+
+    if (["PlatformAdmin", "Admin", "TopManagement"].includes(currentUser.role)) {
+      return ["all"];
+    }
+
+    const values = new Set();
+    const addProjectValues = (project) => {
+      [project?.id, project?.backendId, project?.code, project?.name]
+        .filter(Boolean)
+        .forEach((value) => values.add(normalizeScopeValue(value)));
+    };
+
+    if (currentUser.role === "Manager") {
+      companyProjects
+        .filter((project) =>
+          normalizeScopeValue(project.projectManagerId) === normalizeScopeValue(currentUser.id) ||
+          normalizeScopeValue(project.managerUserId) === normalizeScopeValue(currentUser.id) ||
+          normalizeScopeValue(project.managerId) === normalizeScopeValue(currentUser.id) ||
+          normalizeScopeValue(project.projectManager?.id) === normalizeScopeValue(currentUser.id)
+        )
+        .forEach(addProjectValues);
+
+      return Array.from(values).filter(Boolean);
+    }
+
+    companyFuelers
+      .filter((employee) =>
+        normalizeScopeValue(employee.linkedUserId) === normalizeScopeValue(currentUser.id) ||
+        normalizeScopeValue(employee.linkedUser?.id) === normalizeScopeValue(currentUser.id) ||
+        (
+          currentUser.email &&
+          employee.email &&
+          normalizeScopeValue(employee.email) === normalizeScopeValue(currentUser.email)
+        )
       )
+      .forEach((employee) => {
+        [employee.projectId, employee.projectName, employee.project]
+          .filter(Boolean)
+          .forEach((value) => values.add(normalizeScopeValue(value)));
+      });
+
+    return Array.from(values).filter(Boolean);
+  }, [
+    currentUser?.id,
+    currentUser?.email,
+    currentUser?.role,
+    companyProjects,
+    companyFuelers,
+  ]);
+
+  const currentUserCanAccessAllOperationalProjects = currentUserProjectScopeValues.includes("all");
+
+  const projectMatchesCurrentScope = (project) => {
+    if (currentUserCanAccessAllOperationalProjects) return true;
+    if (!project?.id) return false;
+
+    const projectValues = [project.id, project.backendId, project.code, project.name]
+      .filter(Boolean)
+      .map(normalizeScopeValue);
+
+    return projectValues.some((value) => currentUserProjectScopeValues.includes(value));
+  };
+
+  const projectValueMatchesCurrentScope = (projectValue) => {
+    if (currentUserCanAccessAllOperationalProjects) return true;
+    if (!projectValue) return false;
+
+    const normalizedProjectValue = normalizeScopeValue(projectValue);
+    if (currentUserProjectScopeValues.includes(normalizedProjectValue)) return true;
+
+    const matchedProject = companyProjects.find((project) =>
+      [project.id, project.backendId, project.code, project.name]
+        .filter(Boolean)
+        .map(normalizeScopeValue)
+        .includes(normalizedProjectValue)
+    );
+
+    return matchedProject ? projectMatchesCurrentScope(matchedProject) : false;
+  };
+
+  const scopedProjects = (currentUserCanAccessAllOperationalProjects
+    ? companyProjects
+    : companyProjects.filter(projectMatchesCurrentScope)
   ).filter((project) => {
     const isHeadOffice = normalizeScopeValue(project.name) === "head office";
     if (!isHeadOffice) return true;
     return currentUser?.role === "Admin";
   });
 
-  const activeScopedProjects = filterActiveProjects(scopedProjects);
-  const activeProjectsForTransfer = filterActiveProjects(companyProjects);
+  const availableScopedProjects = filterAvailableProjects(scopedProjects);
+  const availableProjectsForTransfer = filterAvailableProjects(companyProjects);
 
   // Enterprise transfer rule:
   // The user sees his scoped project data in tables, including historical/inactive records.
-  // Project-change dropdowns must show Active projects only, so inactive projects remain visible
-  // in history/reports but cannot be selected for new transfers or assignments.
+  // Project-change dropdowns must show operationally available projects only:
+  // Active projects with an assigned Project Manager.
+  // Projects without a manager remain visible in Projects / Sites so Admin can assign a manager,
+  // but they are hidden from operational transfer and assignment dropdowns.
   const transferDestinationProjects =
-    currentUser?.role === "Officer" ? activeProjectsForTransfer : activeScopedProjects;
+    currentUser?.role === "Officer" ? availableProjectsForTransfer : availableScopedProjects;
 
-  const scopedAssets = filterMasterDataByUserProjectScope({
-    user: currentUser,
-    items: companyAssets,
-    projects: companyProjects,
-    projectKey: "project",
-  });
+  const scopedAssets = currentUserCanAccessAllOperationalProjects
+    ? companyAssets
+    : companyAssets.filter((asset) => projectValueMatchesCurrentScope(asset.project));
 
-  const scopedStations = filterMasterDataByUserProjectScope({
-    user: currentUser,
-    items: companyStations,
-    projects: companyProjects,
-    projectKey: "project",
-  });
+  const scopedStations = currentUserCanAccessAllOperationalProjects
+    ? companyStations
+    : companyStations.filter((station) => projectValueMatchesCurrentScope(station.project));
 
-  const scopedFuelers = userCanAccessAllProjects(currentUser)
+  const scopedFuelers = currentUserCanAccessAllOperationalProjects
     ? companyFuelers
     : companyFuelers.filter((fueler) =>
-        isProjectAllowedForUser(currentUser, fueler.projectName, companyProjects)
+        projectValueMatchesCurrentScope(fueler.projectName || fueler.projectId || fueler.project)
       );
 
   const scopedTeamMembers = scopedFuelers.map((member) => {
@@ -3036,24 +3243,118 @@ setLoginIdentifier("");
     };
   });
 
-  const scopedData = filterDataByUserProjectScope({
-    user: currentUser,
-    data: companyData,
-    headers,
-    assets: companyAssets,
-    stations: companyStations,
-    projects: companyProjects,
-  });
+  const scopedData = currentUserCanAccessAllOperationalProjects
+    ? companyData
+    : companyData.filter((row) =>
+        projectValueMatchesCurrentScope(
+          getRowProjectValue(row, headers, companyAssets, companyStations)
+        )
+      );
+
+  const employeeTransferApprovals = employeeTransferRequests
+    .filter((transfer) => ["PENDING", "PARTIALLY_APPROVED"].includes(String(transfer.status || "").toUpperCase()))
+    .map((transfer) => {
+      const requestedBy = companyUsers.find((user) => user.id === transfer.requestedByUserId) || currentUser;
+      const isManagerTransfer = Boolean(transfer.isManagerTransfer);
+      const sourceManager = findManagerForProject(transfer.fromProjectName || transfer.fromProjectId, companyUsers, companyProjects);
+      const destinationManager = findManagerForProject(transfer.toProjectName || transfer.toProjectId, companyUsers, companyProjects);
+      const adminApprovers = companyUsers.filter((user) =>
+        ["Admin", "PlatformAdmin"].includes(user.role) && user.status === "Active"
+      );
+
+      const requiredApprovers = (isManagerTransfer
+        ? [
+            ...(adminApprovers.length ? adminApprovers : currentUser?.role === "Admin" ? [currentUser] : []),
+          ].map((admin) => ({
+            userId: admin.id,
+            userName: admin.fullName || admin.email || "Admin",
+            role: "Admin",
+            projectId: transfer.toProjectName || transfer.toProjectId || "-",
+            approvalStage: "Admin Approval",
+            status: "Pending",
+            reviewedAt: "",
+            reviewNote: "",
+          }))
+        : [
+            sourceManager && {
+              userId: sourceManager.id,
+              userName: sourceManager.fullName,
+              role: "Manager",
+              projectId: transfer.fromProjectName || transfer.fromProjectId || "-",
+              approvalStage: "Source Project Manager",
+              status: "Pending",
+              reviewedAt: "",
+              reviewNote: "",
+            },
+            destinationManager && {
+              userId: destinationManager.id,
+              userName: destinationManager.fullName,
+              role: "Manager",
+              projectId: transfer.toProjectName || transfer.toProjectId || "-",
+              approvalStage: "Destination Project Manager",
+              status: "Pending",
+              reviewedAt: "",
+              reviewNote: "",
+            },
+          ]
+      )
+        .filter(Boolean)
+        .filter((approver, index, list) =>
+          list.findIndex((item) => item.userId === approver.userId && item.approvalStage === approver.approvalStage) === index
+        );
+
+      return {
+        id: `EMP-TRANSFER-${transfer.id}`,
+        type: "employee_transfer",
+        module: "team",
+        title: `${isManagerTransfer ? "Manager Transfer" : "Team Transfer"}: ${transfer.employeeName || transfer.employeeId || "Team Member"}`,
+        payload: {
+          transfer,
+          employeeTransferId: transfer.id,
+        },
+        details: `${isManagerTransfer ? "Manager transfer requiring Admin approval" : "Transfer"} ${transfer.employeeName || transfer.employeeId || "team member"} from ${transfer.fromProjectName || "-"} to ${transfer.toProjectName || "-"}.`,
+        status: "Pending",
+        changedFields: [
+          {
+            field: "project",
+            label: "Project Transfer",
+            oldValue: transfer.fromProjectName || transfer.fromProjectId || "-",
+            newValue: transfer.toProjectName || transfer.toProjectId || "-",
+            sensitive: true,
+          },
+        ],
+        entityType: "Team Member",
+        entityId: transfer.employeeId || transfer.employeeBackendId || "-",
+        sensitivity: "Sensitive",
+        riskLevel: "High",
+        approvalRoute: {
+          routeType: isManagerTransfer ? "admin_manager_transfer" : "dual_project_manager",
+          sourceProject: transfer.fromProjectName || transfer.fromProjectId || "-",
+          destinationProject: transfer.toProjectName || transfer.toProjectId || "-",
+          requiredApprovers,
+          routeStatus: "Pending",
+        },
+        requestedById: requestedBy?.id || transfer.requestedByUserId || "System",
+        requestedByName: requestedBy?.fullName || requestedBy?.name || "System",
+        requestedByRole: requestedBy?.role || "System",
+        requestedAt: transfer.createdAt || new Date().toISOString(),
+        reviewedBy: "",
+        reviewedAt: "",
+        reviewNote: "",
+      };
+    });
+
+  const allApprovalRequests = [...pendingApprovals, ...employeeTransferApprovals];
 
   const notifications = buildNotificationItems({
-    approvals: pendingApprovals,
+    approvals: allApprovalRequests,
     activityLog,
     currentUser,
     readMap: notificationReadMap,
   });
 
   const unreadNotificationCount = notifications.filter((item) => !item.read).length;
-  const routedPendingApprovalCount = pendingApprovals.filter(
+  const routedPendingApprovalCount = allApprovalRequests.filter(
     (item) => item.status === "Pending" && canUserViewApproval(currentUser, item)
   ).length;
 
@@ -3213,7 +3514,7 @@ if (page === "notifications") {
 if (page === "auditTimeline") {
   return (
     <AuditTimelinePage
-      approvals={pendingApprovals}
+      approvals={allApprovalRequests}
       activityLog={activityLog}
       currentUser={currentUser}
       hasPermission={hasPermission}
@@ -3224,13 +3525,15 @@ if (page === "auditTimeline") {
 if (page === "approvals") {
   return (
     <ApprovalsPage
-      approvals={pendingApprovals}
+      approvals={allApprovalRequests}
       setApprovals={setPendingApprovals}
       currentUser={currentUser}
       hasPermission={hasPermission}
       setData={setData}
       trackActivity={trackActivity}
       showToast={showToast}
+      onApproveEmployeeTransfer={handleApproveEmployeeTransfer}
+      onRejectEmployeeTransfer={handleRejectEmployeeTransfer}
     />
   );
 }
@@ -3258,7 +3561,7 @@ if (page === "users") {
       refreshUsers={refreshBackendUsers}
       setFuelers={setFuelers}
       companies={companies}
-      projects={filterActiveProjects(companyProjects)}
+      projects={filterAvailableProjects(companyProjects)}
       currentUser={currentUser}
       contextCompanyId={selectedCompanyId}
       currentUserId={currentUserId}
@@ -11438,6 +11741,44 @@ function TeamPage({
     return project?.name || projectId || "-";
   };
 
+  const isEmployeeCurrentProjectManager = (fueler) => {
+    if (!fueler) return false;
+
+    const linkedUserId = normalizeText(
+      fueler.linkedUserId ||
+        fueler.userId ||
+        fueler.user?.id ||
+        fueler.systemUserId ||
+        ""
+    );
+
+    const employeeId = normalizeText(fueler.backendId || fueler.id || "");
+    const employeeEmail = normalizeText(fueler.email || "");
+
+    const matchedUser = users.find((user) => {
+      const userId = normalizeText(user.id || "");
+      const userEmail = normalizeText(user.email || "");
+
+      return (linkedUserId && userId === linkedUserId) || (employeeEmail && userEmail === employeeEmail);
+    });
+
+    const managerUserId = linkedUserId || normalizeText(matchedUser?.id || "");
+
+    return filterActiveProjects(projects).some((project) => {
+      const projectManagerId = normalizeText(
+        project.projectManagerId ||
+          project.managerUserId ||
+          project.managerId ||
+          project.projectManager?.id ||
+          ""
+      );
+
+      if (!projectManagerId) return false;
+
+      return projectManagerId === managerUserId || projectManagerId === employeeId;
+    });
+  };
+
   const buildTeamChangeMessage = ({ field, oldDisplayValue, newDisplayValue }) => {
     if (field === "project") {
       return `Are you sure you want to submit a transfer request from ${oldDisplayValue || "-"} to ${newDisplayValue || "-"}? The current project will not change until approval is completed.`;
@@ -11761,7 +12102,10 @@ function TeamPage({
       newValue,
       oldDisplayValue,
       newDisplayValue,
-      message: buildTeamChangeMessage({ field, oldDisplayValue, newDisplayValue }),
+      message:
+        field === "project" && isEmployeeCurrentProjectManager(fueler)
+          ? `Are you sure you want to submit a Manager transfer request from ${oldDisplayValue || "-"} to ${newDisplayValue || "-"}? This transfer requires Admin approval and will only change the Team assignment, not Project Manager authority.`
+          : buildTeamChangeMessage({ field, oldDisplayValue, newDisplayValue }),
     });
   };
 
@@ -11916,10 +12260,12 @@ function TeamPage({
 
         showToast?.(
           "success",
-          "Transfer request submitted for approval. The current project will remain unchanged until approval is completed."
+          isEmployeeCurrentProjectManager(fueler)
+            ? "Manager transfer request submitted for Admin approval. Project Manager authority will not change."
+            : "Transfer request submitted for approval. The current project will remain unchanged until approval is completed."
         );
 
-        closeTeamChangeConfirmation();
+        setPendingTeamChange(null);
         return;
       }
 
@@ -11974,7 +12320,7 @@ function TeamPage({
       ]);
 
       showToast?.("success", `${fieldLabel} updated successfully.`);
-      closeTeamChangeConfirmation();
+      setPendingTeamChange(null);
     } catch (error) {
       const message =
         error?.response?.data?.message ||
@@ -13442,7 +13788,9 @@ function ProjectsPage({
     }, 0);
   };
 
-  const projectSummary = allProjects.map((project) => {
+  const projectSummarySource = allProjects;
+
+  const projectSummary = projectSummarySource.map((project) => {
     const assignedAssets = getProjectAssets(project);
     const assignedStations = getProjectStations(project);
     const assignedFuelers = getProjectFuelers(project);
@@ -16052,6 +16400,8 @@ function ApprovalsPage({
   setData,
   trackActivity = () => {},
   showToast,
+  onApproveEmployeeTransfer,
+  onRejectEmployeeTransfer,
 }) {
   const [selectedStatus, setSelectedStatus] = useState("Pending");
   const [reviewNotes, setReviewNotes] = useState({});
@@ -16062,7 +16412,7 @@ function ApprovalsPage({
     return selectedStatus === "All" ? true : item.status === selectedStatus;
   });
 
-  const approveRequest = (request) => {
+  const approveRequest = async (request) => {
     if (!canUserReviewApproval(currentUser, request)) return;
 
     if (request.status !== "Pending") {
@@ -16080,7 +16430,7 @@ function ApprovalsPage({
 
     const updatedApprovers = routeApprovers.map((approver) => {
       const shouldApprove = currentUser?.role === "Admin"
-        ? approver.userId === currentStage?.userId && approver.approvalStage === currentStage?.approvalStage
+        ? approver.status === "Pending"
         : approver.userId === currentUser?.id && approver.status === "Pending";
 
       return shouldApprove
@@ -16094,10 +16444,40 @@ function ApprovalsPage({
         : approver;
     });
 
-    const fullyApproved = updatedApprovers.length > 0 && updatedApprovers.every((approver) => approver.status === "Approved");
+    let fullyApproved = updatedApprovers.length > 0 && updatedApprovers.every((approver) => approver.status === "Approved");
 
     if (fullyApproved && request.type === "operation_external_supply" && request.payload?.row) {
       setData?.((prev) => [...prev, request.payload.row]);
+    }
+
+    if (request.type === "employee_transfer") {
+      try {
+        const pendingApprovers = routeApprovers.filter((approver) => approver.status === "Pending");
+        const approverIdsToSubmit =
+          currentUser?.role === "Admin"
+            ? pendingApprovers.map((approver) => approver.userId).filter(Boolean)
+            : [currentUser?.id].filter(Boolean);
+
+        let latestReviewResult = null;
+
+        for (const reviewerUserId of approverIdsToSubmit) {
+          latestReviewResult = await onApproveEmployeeTransfer?.(
+            request.payload?.transfer || request.payload,
+            reviewerUserId
+          );
+        }
+
+        if (String(latestReviewResult?.status || "").toUpperCase() === "APPROVED") {
+          fullyApproved = true;
+        }
+      } catch (error) {
+        const message =
+          error?.response?.data?.message ||
+          error?.message ||
+          "Failed to apply employee transfer.";
+        showToast?.("warning", message);
+        return;
+      }
     }
 
     setApprovals((prev) =>
@@ -16128,7 +16508,7 @@ function ApprovalsPage({
     showToast?.("success", fullyApproved ? "Approval request fully approved." : "Approval stage approved. Waiting for remaining manager approval.");
   };
 
-  const rejectRequest = (request) => {
+  const rejectRequest = async (request) => {
     if (!canUserReviewApproval(currentUser, request) && currentUser?.role !== "Admin") return;
 
     if (request.status !== "Pending") {
@@ -16138,6 +16518,30 @@ function ApprovalsPage({
 
     const reviewedAt = new Date().toISOString();
     const note = reviewNotes[request.id] || "Rejected";
+
+    if (request.type === "employee_transfer") {
+      try {
+        const routeApprovers = request.approvalRoute?.requiredApprovers || [];
+        const firstPendingApprover = routeApprovers.find((approver) => approver.status === "Pending");
+        const reviewerUserId =
+          currentUser?.role === "Admin"
+            ? firstPendingApprover?.userId || currentUser?.id
+            : currentUser?.id;
+
+        await onRejectEmployeeTransfer?.(
+          request.payload?.transfer || request.payload,
+          note,
+          reviewerUserId
+        );
+      } catch (error) {
+        const message =
+          error?.response?.data?.message ||
+          error?.message ||
+          "Failed to reject employee transfer.";
+        showToast?.("warning", message);
+        return;
+      }
+    }
 
     setApprovals((prev) =>
       prev.map((item) => {
@@ -16647,6 +17051,18 @@ function UsersPage({
       ? contextCompanyId
       : "";
 
+  const isPlatformConsoleCompanyContext =
+    isPlatformUserContext &&
+    !activeContextCompanyId &&
+    (!currentUser?.companyId || isPlatformContextValue(currentUser.companyId));
+
+  const effectiveUserFormCompanyId =
+    userForm.companyId ||
+    activeContextCompanyId ||
+    (!isPlatformUserContext ? currentUser?.companyId || "" : "");
+
+  const canChangeUserCompany = isPlatformConsoleCompanyContext && !savingUser;
+
   const currentUserCompanyName =
     companies.find((company) => companyMatches(company.id, currentUser?.companyId))?.name ||
     currentUser?.companyName ||
@@ -16654,7 +17070,7 @@ function UsersPage({
     "Current Company";
 
   const selectedFormCompanyName =
-    companyOptions.find((company) => companyMatches(company.id, userForm.companyId))?.name ||
+    companyOptions.find((company) => companyMatches(company.id, effectiveUserFormCompanyId))?.name ||
     currentUserCompanyName;
 
   const selectedUser = users.find((user) => user.id === selectedUserId) || null;
@@ -16676,7 +17092,7 @@ function UsersPage({
     }
 
     const targetCompanyId = isPlatformUserContext
-      ? companyId
+      ? companyId || activeContextCompanyId || userForm.companyId || ""
       : currentUser?.companyId || companyId;
 
     if (!targetCompanyId) {
@@ -16685,12 +17101,34 @@ function UsersPage({
     }
 
     try {
-      const response = await api.get(
-        isPlatformUserContext
-          ? `/roles?companyId=${encodeURIComponent(targetCompanyId)}`
-          : "/roles"
-      );
-      const roles = Array.isArray(response.data) ? response.data : [];
+      const roleEndpoints = isPlatformUserContext
+        ? [
+            `/roles?companyId=${encodeURIComponent(targetCompanyId)}`,
+            "/roles",
+          ]
+        : ["/roles"];
+
+      let roles = [];
+      let lastError = null;
+
+      for (const endpoint of roleEndpoints) {
+        try {
+          const response = await api.get(endpoint);
+          const nextRoles = Array.isArray(response.data) ? response.data : [];
+
+          if (nextRoles.length) {
+            roles = nextRoles;
+            break;
+          }
+        } catch (error) {
+          lastError = error;
+        }
+      }
+
+      if (!roles.length && lastError) {
+        throw lastError;
+      }
+
       setBackendRoles(roles);
       return roles;
     } catch (error) {
@@ -16801,7 +17239,7 @@ function UsersPage({
     }
 
     const defaultCompanyId = isPlatformUserContext
-      ? activeContextCompanyId || companyOptions[0]?.id || ""
+      ? activeContextCompanyId || ""
       : currentUser?.companyId || "";
 
     setUserForm({
@@ -16834,7 +17272,10 @@ function UsersPage({
       return;
     }
 
-    const formCompanyId = user.companyId || currentUser?.companyId || "";
+    const formCompanyId =
+      user.companyId ||
+      activeContextCompanyId ||
+      (!isPlatformUserContext ? currentUser?.companyId || "" : "");
 
     setSelectedUserId(user.id);
     setUserForm({
@@ -16870,7 +17311,9 @@ function UsersPage({
   };
 
   const handleUserFormChange = (field, value) => {
-    if (field === "companyId" && isPlatformUserContext) {
+    if (field === "companyId") {
+      if (!canChangeUserCompany) return;
+
       setUserForm((prev) => ({
         ...prev,
         companyId: value,
@@ -16898,8 +17341,8 @@ function UsersPage({
     event?.preventDefault?.();
 
     const resolvedCompanyId = isPlatformUserContext
-      ? userForm.companyId
-      : currentUser?.companyId || userForm.companyId;
+      ? effectiveUserFormCompanyId
+      : currentUser?.companyId || effectiveUserFormCompanyId;
 
     const payload = {
       fullName: userForm.fullName.trim(),
@@ -16909,6 +17352,10 @@ function UsersPage({
     };
 
     if (userModalMode === "add") {
+      payload.companyId = resolvedCompanyId;
+    }
+
+    if (userModalMode === "edit" && canChangeUserCompany && resolvedCompanyId) {
       payload.companyId = resolvedCompanyId;
     }
 
@@ -17526,11 +17973,11 @@ function UsersPage({
 
                   <div>
                     <label className="block text-xs text-slate-400 mb-1">Company</label>
-                    {isPlatformUserContext ? (
+                    {canChangeUserCompany ? (
                       <select
                         value={userForm.companyId}
                         onChange={(e) => handleUserFormChange("companyId", e.target.value)}
-                        disabled={userModalMode === "edit" || savingUser}
+                        disabled={savingUser}
                         className="w-full bg-slate-900 border border-slate-700 rounded-xl p-3 text-slate-100 placeholder:text-slate-500 outline-none focus:border-amber-400 focus:ring-2 focus:ring-amber-400/20 disabled:bg-slate-800 disabled:text-slate-400 disabled:cursor-not-allowed"
                       >
                         <option value="" className="bg-slate-900 text-slate-100">Select company</option>
@@ -17548,11 +17995,11 @@ function UsersPage({
                       />
                     )}
                     <p className="text-xs text-slate-500 mt-2">
-                      {isPlatformUserContext
-                        ? userModalMode === "edit"
-                          ? "Company cannot be changed while editing this user."
-                          : "Platform users can create users inside any active company."
-                        : "Company is locked to the signed-in admin company."}
+                      {canChangeUserCompany
+                        ? "Platform Console can select the target company before assigning roles."
+                        : isPlatformUserContext
+                          ? "Company is locked to the selected company context."
+                          : "Company is locked to the signed-in admin company."}
                     </p>
                   </div>
 
@@ -17571,12 +18018,12 @@ function UsersPage({
                     <select
                       value={userForm.roleId}
                       onChange={(e) => handleUserFormChange("roleId", e.target.value)}
-                      disabled={savingUser || !userForm.companyId || !roleOptions.length}
+                      disabled={savingUser || !effectiveUserFormCompanyId || !roleOptions.length}
                       className="w-full bg-slate-900 border border-slate-700 rounded-xl p-3 text-slate-100 placeholder:text-slate-500 outline-none focus:border-amber-400 focus:ring-2 focus:ring-amber-400/20 disabled:bg-slate-800 disabled:text-slate-500 disabled:cursor-not-allowed"
                     >
-                      {!roleOptions.length && (
+                      {(!effectiveUserFormCompanyId || !roleOptions.length) && (
                         <option value="" className="bg-slate-900 text-slate-100">
-                          Select company first
+                          {!effectiveUserFormCompanyId ? "Select company first" : "No roles available"}
                         </option>
                       )}
                       {roleOptions.map((role) => (
