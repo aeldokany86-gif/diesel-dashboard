@@ -157,9 +157,6 @@ function Bell({ size = 18, className = "" }) {
 const TRANSACTIONS_CSV =
   "https://docs.google.com/spreadsheets/d/e/2PACX-1vRX0JNF_J9UzMQ5lyr7pxPrdL0GeLD8TkCf4MPNGdyOPT9rATlsmUnBQjx0MVoNy4nPHiRKc7jtmeku/pub?gid=836310880&single=true&output=csv";
  
-const ASSETS_CSV =
-  "https://docs.google.com/spreadsheets/d/e/2PACX-1vRX0JNF_J9UzMQ5lyr7pxPrdL0GeLD8TkCf4MPNGdyOPT9rATlsmUnBQjx0MVoNy4nPHiRKc7jtmeku/pub?gid=477887446&single=true&output=csv";
- 
 const STATIONS_CSV =
   "https://docs.google.com/spreadsheets/d/e/2PACX-1vRX0JNF_J9UzMQ5lyr7pxPrdL0GeLD8TkCf4MPNGdyOPT9rATlsmUnBQjx0MVoNy4nPHiRKc7jtmeku/pub?gid=123801173&single=true&output=csv";
  
@@ -1485,6 +1482,65 @@ function filterAvailableProjects(projects = []) {
   );
 }
 
+function normalizeBackendAssetStatusForState(status) {
+  const normalized = String(status || "ACTIVE")
+    .trim()
+    .toUpperCase()
+    .replace(/[\s-]+/g, "_");
+
+  if (normalized === "INACTIVE") return "Inactive";
+  return "Active";
+}
+
+function mapFrontendAssetStatusForBackend(status) {
+  const normalized = String(status || "ACTIVE")
+    .trim()
+    .toUpperCase()
+    .replace(/[\s-]+/g, "_");
+
+  if (normalized === "INACTIVE") return "INACTIVE";
+  return "ACTIVE";
+}
+
+function mapBackendAssetForState(asset = {}) {
+  const projectName =
+    asset.project?.name ||
+    asset.project?.code ||
+    asset.projectName ||
+    asset.projectId ||
+    "-";
+
+  return {
+    backendId: asset.id || "",
+    assetBackendId: asset.id || "",
+    id: asset.assetId || asset.id || "",
+    assetId: asset.assetId || asset.id || "",
+    type: asset.type || "",
+    category: asset.category || "",
+    odometer:
+      asset.currentOdometer === undefined || asset.currentOdometer === null
+        ? "0"
+        : String(asset.currentOdometer),
+    currentOdometer: asset.currentOdometer ?? 0,
+    fuelTank:
+      asset.fuelTankCapacity === undefined || asset.fuelTankCapacity === null
+        ? "0"
+        : String(asset.fuelTankCapacity),
+    fuelTankCapacity: asset.fuelTankCapacity ?? null,
+    project: projectName,
+    projectId: asset.projectId || asset.project?.id || "",
+    projectCode: asset.project?.code || "",
+    projectName,
+    status: normalizeBackendAssetStatusForState(asset.status),
+    companyId: asset.companyId || asset.company?.id || "",
+    companyName: asset.company?.name || "",
+    deletedAt: asset.deletedAt || "",
+    source: "Backend",
+    createdAt: asset.createdAt || "",
+    updatedAt: asset.updatedAt || "",
+  };
+}
+
 function userCanAccessAllProjects(user) {
   if (!user) return false;
 
@@ -1811,6 +1867,7 @@ export default function Home() {
   const [authLoaded, setAuthLoaded] = useState(false);
   const [loginIdentifier, setLoginIdentifier] = useState("");
   const [selectedCompanyId, setSelectedCompanyId] = useState("");
+  const [selectedProjectScope, setSelectedProjectScope] = useState("");
   const [rememberSession, setRememberSession] = useState(true);
   const [loginError, setLoginError] = useState("");
   const [activityLog, setActivityLog] = useState([]);
@@ -2778,24 +2835,34 @@ setLoginIdentifier("");
           }
         };
 
+        const fetchBackendAssets = async () => {
+          try {
+            const response = await api.get("/assets");
+            return Array.isArray(response.data) ? response.data : [];
+          } catch (error) {
+            console.error("Assets backend API is not available. Assets CSV fallback has been removed.", error);
+            throw error;
+          }
+        };
+
         const [
           trxText,
-          assetsText,
           stationsText,
           fuelersText,
           projectsText,
           backendCompanies,
           backendProjects,
           backendEmployees,
+          backendAssets,
         ] = await Promise.all([
           fetchCsvText(TRANSACTIONS_CSV),
-          fetchCsvText(ASSETS_CSV),
           fetchCsvText(STATIONS_CSV),
           fetchCsvText(FUELERS_CSV),
           fetchCsvText(PROJECTS_CSV),
           fetchBackendCompanies(),
           fetchBackendProjects(),
           fetchBackendEmployees(),
+          fetchBackendAssets(),
         ]);
 
         // TRANSACTIONS
@@ -2803,35 +2870,13 @@ setLoginIdentifier("");
         setHeaders(trxRows[0] || []);
         setData(trxRows.slice(1));
 
-        // ASSETS
-        const assetRows = parseCSV(assetsText);
-        const assetHeaders = assetRows[0] || [];
-
-        const mappedAssets = assetRows
-          .slice(1)
-          .map((row) => ({
-            id: getValue(row, assetHeaders, ["asset_id", "id"]),
-            type: getValue(row, assetHeaders, ["asset_type", "type"]),
-            category: getValue(row, assetHeaders, ["asset_category", "category"]),
-            odometer: getValue(row, assetHeaders, [
-              "current_odometer",
-              "odometer",
-            ]),
-            fuelTank: getValue(row, assetHeaders, [
-              "fuel_tank_capacity",
-              "tank_capacity",
-            ]),
-            project: getValue(row, assetHeaders, [
-              "project_id",
-              "project",
-              "project_name",
-            ]),
-            status: getValue(row, assetHeaders, ["status"]),
-            companyId: getValue(row, assetHeaders, ["company_id", "Company ID", "company id", "company"]),
-          }))
-          .filter((asset) => asset.id);
-
-        setAssets(mappedAssets);
+        // ASSETS - backend only. No CSV fallback.
+        setAssets(
+          backendAssets
+            .filter((asset) => !asset.deletedAt)
+            .map(mapBackendAssetForState)
+            .filter((asset) => asset.id)
+        );
 
         // STATIONS
         const stationRows = parseCSV(stationsText);
@@ -2948,7 +2993,7 @@ setLoginIdentifier("");
 
         setCompanies(mappedCompanies);
       } catch (error) {
-        console.error("Failed to load Fleet Fuel PRO CSV data:", error);
+        console.error("Failed to load Fleet Fuel PRO data:", error);
         setHeaders([]);
         setData([]);
         setAssets([]);
@@ -3086,7 +3131,7 @@ setLoginIdentifier("");
     projects,
   });
 
-  const currentUserProjectScopeValues = useMemo(() => {
+  const baseCurrentUserProjectScopeValues = useMemo(() => {
     if (!currentUser?.id) return [];
 
     if (["PlatformAdmin", "Admin", "TopManagement"].includes(currentUser.role)) {
@@ -3137,6 +3182,97 @@ setLoginIdentifier("");
     companyProjects,
     companyFuelers,
   ]);
+
+  const projectScopeOptions = useMemo(() => {
+    if (!currentUser) return [];
+
+    if (currentUser.role === "PlatformAdmin") {
+      return [
+        {
+          value: "all",
+          label: "Global Access",
+          project: null,
+        },
+      ];
+    }
+
+    if (["Admin", "TopManagement"].includes(currentUser.role)) {
+      return [
+        {
+          value: "all",
+          label: "All Projects",
+          project: null,
+        },
+        ...companyProjects
+          .filter((project) => project?.id)
+          .map((project) => ({
+            value: project.id || project.backendId || project.name,
+            label: project.name || project.code || project.id,
+            project,
+          })),
+      ];
+    }
+
+    const allowedProjects = companyProjects.filter((project) => {
+      const projectValues = [project?.id, project?.backendId, project?.code, project?.name]
+        .filter(Boolean)
+        .map(normalizeScopeValue);
+
+      return projectValues.some((value) => baseCurrentUserProjectScopeValues.includes(value));
+    });
+
+    return allowedProjects.map((project) => ({
+      value: project.id || project.backendId || project.name,
+      label: project.name || project.code || project.id,
+      project,
+    }));
+  }, [currentUser, companyProjects, baseCurrentUserProjectScopeValues]);
+
+  useEffect(() => {
+    if (!currentUser) {
+      setSelectedProjectScope("");
+      return;
+    }
+
+    if (!projectScopeOptions.length) {
+      if (selectedProjectScope) setSelectedProjectScope("");
+      return;
+    }
+
+    const selectedStillAvailable = projectScopeOptions.some(
+      (option) => normalizeScopeValue(option.value) === normalizeScopeValue(selectedProjectScope)
+    );
+
+    if (!selectedStillAvailable) {
+      setSelectedProjectScope(projectScopeOptions[0].value);
+    }
+  }, [currentUser?.id, currentUser?.role, selectedProjectScope, projectScopeOptions]);
+
+  const selectedProjectScopeOption =
+    projectScopeOptions.find(
+      (option) => normalizeScopeValue(option.value) === normalizeScopeValue(selectedProjectScope)
+    ) || projectScopeOptions[0] || null;
+
+  const selectedProjectScopeValues = useMemo(() => {
+    if (!selectedProjectScopeOption) return [];
+    if (selectedProjectScopeOption.value === "all") return ["all"];
+
+    const project = selectedProjectScopeOption.project;
+
+    return [
+      selectedProjectScopeOption.value,
+      project?.id,
+      project?.backendId,
+      project?.code,
+      project?.name,
+    ]
+      .filter(Boolean)
+      .map(normalizeScopeValue);
+  }, [selectedProjectScopeOption]);
+
+  const currentUserProjectScopeValues = selectedProjectScopeValues.length
+    ? selectedProjectScopeValues
+    : baseCurrentUserProjectScopeValues;
 
   const currentUserCanAccessAllOperationalProjects = currentUserProjectScopeValues.includes("all");
 
@@ -3403,6 +3539,7 @@ setLoginIdentifier("");
       return (
         <AssetsPage
           assets={scopedAssets}
+          setAssets={setAssets}
           projects={scopedProjects}
           transferProjects={transferDestinationProjects}
           showToast={showToast}
@@ -3606,35 +3743,20 @@ const sidebarItems = [
 ].filter((item) => canAccessPage(item.key));
 
 const currentUserProjectSectionLabel =
-  currentUser?.role === "PlatformAdmin" ? "Access" : "Project";
-
-const isRealProjectName = (value) => {
-  const normalizedValue = normalizeScopeValue(value);
-  if (!normalizedValue) return false;
-
-  const blockedValues = [
-    normalizeScopeValue(currentUser?.companyName),
-    normalizeScopeValue(currentCompany?.name),
-    normalizeScopeValue("Platform Console"),
-    normalizeScopeValue("Tenant Context"),
-    normalizeScopeValue("Global Access"),
-    normalizeScopeValue("All"),
-  ].filter(Boolean);
-
-  return !blockedValues.includes(normalizedValue);
-};
+  currentUser?.role === "PlatformAdmin" ? "Access" : "Project Scope";
 
 const currentUserProjectLabel =
-  currentUser?.role === "PlatformAdmin"
+  selectedProjectScopeOption?.label ||
+  (currentUser?.role === "PlatformAdmin"
     ? "Global Access"
-    : currentUser?.role === "TopManagement"
-    ? "Head Office"
-    : isRealProjectName(currentUser?.teamProject)
-    ? currentUser.teamProject
-    : Array.isArray(currentUser?.assignedProjects) &&
-      currentUser.assignedProjects.some(isRealProjectName)
-    ? currentUser.assignedProjects.filter(isRealProjectName).join(", ")
-    : "No Project Assigned";
+    : currentUser?.role === "Admin"
+    ? "All Projects"
+    : "No Project Assigned");
+
+const projectScopeDropdownDisabled =
+  !projectScopeOptions.length ||
+  currentUser?.role === "PlatformAdmin" ||
+  (!["Admin", "TopManagement", "Manager"].includes(currentUser?.role) && projectScopeOptions.length <= 1);
 
 const sidebarContentCollapsed = sidebarCollapsed && !mobileSidebarOpen;
 
@@ -4117,9 +4239,27 @@ if (currentUser?.passwordResetRequired || forcePasswordChangeOpen) {
             <p className="text-xs text-amber-300 mt-0.5">{currentUser.role}</p>
             <div className="mt-2 rounded-xl border border-slate-800/80 bg-slate-950/40 px-3 py-2">
               <p className="text-[9px] uppercase tracking-[0.16em] text-slate-500 mb-1">{currentUserProjectSectionLabel}</p>
-              <p className="text-xs font-semibold text-slate-200 truncate">
-                {currentUserProjectLabel}
-              </p>
+              <select
+                value={selectedProjectScopeOption?.value || ""}
+                onChange={(event) => setSelectedProjectScope(event.target.value)}
+                disabled={projectScopeDropdownDisabled}
+                className={`w-full rounded-lg border border-slate-700 bg-slate-950 px-2 py-1.5 text-xs font-semibold text-slate-100 outline-none transition ${
+                  projectScopeDropdownDisabled
+                    ? "cursor-not-allowed opacity-70"
+                    : "cursor-pointer hover:border-amber-400/70 focus:border-amber-400"
+                }`}
+                title={currentUserProjectLabel}
+              >
+                {projectScopeOptions.length ? (
+                  projectScopeOptions.map((option) => (
+                    <option key={option.value} value={option.value}>
+                      {option.label}
+                    </option>
+                  ))
+                ) : (
+                  <option value="">No Project Assigned</option>
+                )}
+              </select>
             </div>
 
             <div className="mt-3 pt-3 border-t border-slate-800/80">
@@ -6652,6 +6792,7 @@ const [showForm, setShowForm] = useState(false);
 }
 function AssetsPage({
   assets,
+  setAssets,
   projects = [],
   transferProjects = projects,
   showToast,
@@ -6814,6 +6955,59 @@ useOutsideClick(assetSettingsRef, () => {
   setShowExportMenu(false);
 });
 
+  const getBackendAssetId = (asset) => asset?.backendId || asset?.assetBackendId || "";
+
+  const resolveProjectId = (projectValue) => {
+    const normalized = normalizeScopeValue(projectValue);
+    const matchedProject = (transferProjects || projects || []).find((project) => {
+      return (
+        normalizeScopeValue(project.id) === normalized ||
+        normalizeScopeValue(project.backendId) === normalized ||
+        normalizeScopeValue(project.name) === normalized ||
+        normalizeScopeValue(project.code) === normalized
+      );
+    });
+
+    return matchedProject?.backendId || matchedProject?.id || projectValue || "";
+  };
+
+  const replaceAssetInState = (updatedAsset) => {
+    const mappedAsset = mapBackendAssetForState(updatedAsset);
+
+    if (typeof setAssets === "function") {
+      setAssets((prev) => {
+        const next = [...(prev || [])];
+        const index = next.findIndex((item) => {
+          return (
+            normalizeScopeValue(item.backendId || item.assetBackendId) === normalizeScopeValue(mappedAsset.backendId) ||
+            normalizeScopeValue(item.id) === normalizeScopeValue(mappedAsset.id)
+          );
+        });
+
+        if (index === -1) return [mappedAsset, ...next];
+
+        next[index] = { ...next[index], ...mappedAsset };
+        return next;
+      });
+    }
+
+    return mappedAsset;
+  };
+
+  const removeAssetFromState = (asset) => {
+    const backendId = getBackendAssetId(asset);
+    if (typeof setAssets !== "function") return;
+
+    setAssets((prev) =>
+      (prev || []).filter((item) => {
+        return !(
+          normalizeScopeValue(item.backendId || item.assetBackendId) === normalizeScopeValue(backendId) ||
+          normalizeScopeValue(item.id) === normalizeScopeValue(asset?.id)
+        );
+      })
+    );
+  };
+
   const [selectedAsset, setSelectedAsset] = useState(null);
 
   const [localAssetUpdates, setLocalAssetUpdates] = useState({});
@@ -6868,7 +7062,7 @@ useOutsideClick(assetSettingsRef, () => {
     resetNewAsset();
   };
 
-  const saveNewAsset = () => {
+  const saveNewAsset = async () => {
     if (!hasPermission("assets", "add")) {
       showToast?.("warning", "Read-only access: you cannot add assets.");
       return;
@@ -6899,33 +7093,60 @@ useOutsideClick(assetSettingsRef, () => {
       return;
     }
 
-    const cleanAsset = {
-      id: newAsset.id.trim(),
-      project: newAsset.project || "-",
-      type: newAsset.type || "-",
-      category: newAsset.category || "-",
-      odometer: newAsset.odometer || "0",
-      fuelTank: newAsset.fuelTank || "0",
-      status: newAsset.status || "Active",
-      createdLocally: true,
+    const projectId = resolveProjectId(newAsset.project);
+    const matchedProject = (transferProjects || projects || []).find((project) =>
+      [project.id, project.backendId, project.name, project.code]
+        .map(normalizeScopeValue)
+        .includes(normalizeScopeValue(newAsset.project))
+    );
+
+    const companyId =
+      currentUser?.companyId ||
+      matchedProject?.companyId ||
+      projects.find((project) => normalizeScopeValue(project.id) === normalizeScopeValue(projectId))?.companyId ||
+      "";
+
+    if (!companyId || isPlatformContextValue(companyId)) {
+      showToast?.("warning", "Cannot create asset without a valid company.");
+      return;
+    }
+
+    const payload = {
+      companyId,
+      assetId: newAsset.id.trim(),
+      type: newAsset.type.trim(),
+      category: newAsset.category.trim(),
+      currentOdometer: Number(newAsset.odometer || 0),
+      fuelTankCapacity: Number(newAsset.fuelTank || 0),
+      projectId,
+      status: mapFrontendAssetStatusForBackend(newAsset.status),
+      createdById: currentUser?.id || undefined,
     };
 
     if (isOfficerUser(currentUser)) {
       submitApprovalRequest?.({
         type: "master_data_change",
         module: "assets",
-        title: `New asset ${cleanAsset.id}`,
-        details: `Officer requested new asset ${cleanAsset.id}`,
-        payload: { entity: "asset", action: "add", values: cleanAsset },
+        title: `New asset ${payload.assetId}`,
+        details: `Officer requested new asset ${payload.assetId}`,
+        payload: { entity: "asset", action: "add", values: payload },
       });
       closeAddAsset();
       return;
     }
 
-    setLocalAssets((prev) => [...prev, cleanAsset]);
-    trackActivity?.("Add Asset", "assets", `${cleanAsset.id} added locally.`);
-    showToast?.("success", "Asset added locally.");
-    closeAddAsset();
+    try {
+      const response = await api.post("/assets", payload);
+      replaceAssetInState(response.data);
+      trackActivity?.("Add Asset", "assets", `${payload.assetId} added from backend.`);
+      showToast?.("success", "Asset added successfully.");
+      closeAddAsset();
+    } catch (error) {
+      showToast?.(
+        "warning",
+        error?.response?.data?.message || error?.message || "Failed to add asset."
+      );
+    }
   };
 
   const displayAssets = [...assets, ...localAssets].map((asset) => ({
@@ -7074,25 +7295,41 @@ useOutsideClick(assetSettingsRef, () => {
     });
   };
 
-  const confirmAssetStatusChange = () => {
+  const confirmAssetStatusChange = async () => {
     if (!assetStatusConfirm?.asset) return;
 
     const { asset, newStatus } = assetStatusConfirm;
+    const backendAssetId = getBackendAssetId(asset);
 
-    setLocalAssetUpdates((prev) => ({
-      ...prev,
-      [asset.id]: {
-        ...prev[asset.id],
-        status: newStatus,
-      },
-    }));
+    if (!backendAssetId) {
+      setLocalAssetUpdates((prev) => ({
+        ...prev,
+        [asset.id]: {
+          ...prev[asset.id],
+          status: newStatus,
+        },
+      }));
+      showToast?.("success", `Asset status changed to ${newStatus}.`);
+      setAssetStatusConfirm(null);
+      return;
+    }
 
-    trackActivity?.("Change Asset Status", "assets", `${asset.id} status changed to ${newStatus}.`);
-    showToast
-      ? showToast("success", `Asset status changed to ${newStatus}.`)
-      : notifyUser(typeof showToast !== "undefined" ? showToast : null, inferToastTypeFromMessage(`Asset status changed to ${newStatus}.`), `Asset status changed to ${newStatus}.`);
+    try {
+      const response = await api.patch(`/assets/${backendAssetId}`, {
+        status: mapFrontendAssetStatusForBackend(newStatus),
+      });
 
-    setAssetStatusConfirm(null);
+      replaceAssetInState(response.data);
+      trackActivity?.("Change Asset Status", "assets", `${asset.id} status changed to ${newStatus}.`);
+      showToast?.("success", `Asset status changed to ${newStatus}.`);
+    } catch (error) {
+      showToast?.(
+        "warning",
+        error?.response?.data?.message || error?.message || "Failed to change asset status."
+      );
+    } finally {
+      setAssetStatusConfirm(null);
+    }
   };
 
   const openProjectChange = (asset) => {
@@ -7136,57 +7373,46 @@ useOutsideClick(assetSettingsRef, () => {
     confirmProjectUpdate();
   };
 
-  const confirmProjectUpdate = () => {
+  const confirmProjectUpdate = async () => {
     if (!hasPermission("assets", "edit")) {
       showToast?.("warning", "Read-only access: you cannot update asset project.");
       resetProjectWorkflow();
       return;
     }
 
+    const backendAssetId = getBackendAssetId(projectTargetAsset);
+    const toProjectId = resolveProjectId(selectedProjectValue);
 
-    const projectHistoryRecord = {
-      assetId: projectTargetAsset.id,
-      oldProject: projectTargetAsset.project || "-",
-      newProject: selectedProjectValue,
-      effectiveDate: projectEffectiveDate,
-      changedBy: "Amr",
-      changedAt: new Date().toISOString(),
-      status: "Local",
-    };
-
-    if (setAssetProjectHistory) {
-      setAssetProjectHistory((prev) => [...prev, projectHistoryRecord]);
-    }
-
-    if (isOfficerUser(currentUser)) {
-      submitApprovalRequest({
-        type: "master_data_change",
-        module: "assets",
-        title: `Asset ${projectTargetAsset.id} project change`,
-        details: `Project change from ${projectTargetAsset.project || "-"} to ${selectedProjectValue}`,
-        payload: { entity: "asset", id: projectTargetAsset.id, field: "project", oldValue: projectTargetAsset.project, newValue: selectedProjectValue },
-      });
+    if (!backendAssetId) {
+      showToast?.("warning", "This asset is not linked to backend yet.");
       resetProjectWorkflow();
       return;
     }
 
-    setLocalAssetUpdates((prev) => ({
-      ...prev,
-      [projectTargetAsset.id]: {
-        ...prev[projectTargetAsset.id],
-        project: selectedProjectValue,
-      },
-    }));
+    if (!toProjectId) {
+      showToast?.("warning", "Please select a valid project.");
+      return;
+    }
 
-    setProjectTargetAsset(null);
-    setSelectedProjectValue("");
-    setProjectEffectiveDate("");
-    setShowProjectConfirm(false);
-    setShowProjectPassword(false);
+    try {
+      await api.post(`/assets/${backendAssetId}/transfer`, {
+        toProjectId,
+        requestedByUserId: currentUser?.id || "",
+      });
 
-    showToast
-      ? showToast("success", "Asset project updated successfully.")
-      : notifyUser(typeof showToast !== "undefined" ? showToast : null, inferToastTypeFromMessage("Asset project updated successfully."), "Asset project updated successfully.");
+      showToast?.("warning", "Asset transfer request submitted for project manager approval.");
+      trackActivity?.(
+        "Request Asset Transfer",
+        "assets",
+        `${projectTargetAsset.id} transfer requested from ${projectTargetAsset.project || "-"} to ${selectedProjectValue}.`
+      );
+      resetProjectWorkflow();
+    } catch (error) {
+      showToast?.(
+        "warning",
+        error?.response?.data?.message || error?.message || "Failed to submit asset transfer request."
+      );
+    }
   };
 
   const proceedDeleteConfirm = () => {
@@ -7273,55 +7499,67 @@ useOutsideClick(assetSettingsRef, () => {
     confirmOdometerRequest();
   };
 
-  const confirmOdometerRequest = () => {
+  const confirmOdometerRequest = async () => {
     if (!hasPermission("assets", "edit")) {
-      showToast?.("warning", "Read-only access: you cannot request odometer reset.");
+      showToast?.("warning", "Read-only access: you cannot reset odometer.");
       return;
     }
 
-
-    const oldReading = Number(oldOdometerBeforeReset) || 0;
-    const newReading = Number(newOdometer) || 0;
-
-    const odometerHistoryRecord = {
-      assetId: odometerTargetAsset.id,
-      oldOdometerBeforeReset: oldReading,
-      newOdometerAfterReset: newReading,
-      effectiveDate: odometerEffectiveDate,
-      odometerOffset: oldReading,
-      actualOdometerAfterReset: oldReading + newReading,
-      reason: odometerReason,
-      requestedBy: "Amr",
-      requestedAt: new Date().toISOString(),
-      status: "Pending Approval",
-    };
-
-    if (setAssetOdometerHistory) {
-      setAssetOdometerHistory((prev) => [...prev, odometerHistoryRecord]);
+    const backendAssetId = getBackendAssetId(odometerTargetAsset);
+    if (!backendAssetId) {
+      showToast?.("warning", "This asset is not linked to backend yet.");
+      return;
     }
 
-    submitApprovalRequest({
-      type: "master_data_change",
-      module: "assets",
-      title: `Asset ${odometerTargetAsset?.id} odometer reset`,
-      details: odometerReason,
-      payload: { entity: "asset", action: "odometer_reset", values: odometerHistoryRecord },
-    });
+    try {
+      const response = await api.post(`/assets/${backendAssetId}/reset-odometer`, {
+        newOdometer: Number(newOdometer) || 0,
+        reason: odometerReason,
+        effectiveAt: odometerEffectiveDate || undefined,
+        createdByUserId: currentUser?.id || undefined,
+      });
 
-    setOdometerTargetAsset(null);
-    setOldOdometerBeforeReset("");
-    setNewOdometer("");
-    setOdometerEffectiveDate("");
-    setOdometerReason("");
-    setShowOdometerConfirm(false);
-    setShowOdometerPassword(false);
+      if (response.data?.asset) {
+        replaceAssetInState(response.data.asset);
+      }
 
-    showToast
-      ? showToast(
-          "success",
-          "Odometer reset request submitted for manager approval."
-        )
-      : notifyUser(typeof showToast !== "undefined" ? showToast : null, inferToastTypeFromMessage("Odometer reset request submitted for manager approval."), "Odometer reset request submitted for manager approval.");
+      if (response.data?.resetRecord && setAssetOdometerHistory) {
+        const record = response.data.resetRecord;
+        setAssetOdometerHistory((prev) => [
+          ...prev,
+          {
+            assetId: odometerTargetAsset.id,
+            entityId: odometerTargetAsset.id,
+            companyId: record.companyId,
+            oldOdometerBeforeReset: record.oldOdometer,
+            newOdometerAfterReset: record.newOdometer,
+            newReading: record.newOdometer,
+            effectiveDate: record.effectiveAt,
+            effectiveFrom: record.effectiveAt,
+            reason: record.reason,
+            requestedBy: currentUser?.fullName || currentUser?.name || "System",
+            requestedAt: record.createdAt || new Date().toISOString(),
+            status: "Approved",
+          },
+        ]);
+      }
+
+      showToast?.("success", "Odometer reset saved successfully.");
+      trackActivity?.("Reset Asset Odometer", "assets", `${odometerTargetAsset.id} odometer reset to ${newOdometer}.`);
+    } catch (error) {
+      showToast?.(
+        "warning",
+        error?.response?.data?.message || error?.message || "Failed to reset odometer."
+      );
+    } finally {
+      setOdometerTargetAsset(null);
+      setOldOdometerBeforeReset("");
+      setNewOdometer("");
+      setOdometerEffectiveDate("");
+      setOdometerReason("");
+      setShowOdometerConfirm(false);
+      setShowOdometerPassword(false);
+    }
   };
 
 const exportAssetsToCSV = () => {
@@ -8041,7 +8279,7 @@ const printAssetsReport = () => {
                     <button
                       onClick={() => {
                         setOdometerTargetAsset(selectedAsset);
-                        setOldOdometerBeforeReset(selectedAsset.odometer || "");
+                        setOldOdometerBeforeReset(String(getEffectiveAssetOdometer(selectedAsset) || ""));
                         setNewOdometer("0");
                         setOdometerEffectiveDate("");
                         setOdometerReason("");
@@ -8053,7 +8291,7 @@ const printAssetsReport = () => {
                   </div>
 
                   <p className="text-lg font-semibold text-yellow-300">
-                    {formatNumber(selectedAsset.odometer)}
+                    {formatNumber(getEffectiveAssetOdometer(selectedAsset))}
                   </p>
                 </div>
 
