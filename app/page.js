@@ -1261,6 +1261,22 @@ function createApprovalRequest({ type, module, title, payload, requestedBy, deta
 }
 
 
+function formatProjectFuelPriceDate(value) {
+  if (!value) return "-";
+
+  const date = new Date(value);
+
+  if (Number.isNaN(date.getTime())) return "-";
+
+  return date.toLocaleString("en-GB", {
+    year: "numeric",
+    month: "2-digit",
+    day: "2-digit",
+    hour: "2-digit",
+    minute: "2-digit",
+  });
+}
+
 function formatNotificationDate(rawDate) {
   if (!rawDate) return "-";
   const d = new Date(rawDate);
@@ -2514,6 +2530,9 @@ useEffect(() => {
     projectManagerId: project.projectManagerId || project.projectManager?.id || "",
     projectManagerName: project.projectManager?.fullName || "",
     projectManagerEmail: project.projectManager?.email || "",
+    currentFuelPrice: Number(project.currentFuelPrice || 0),
+    fuelPriceCurrency: project.fuelPriceCurrency || project.company?.currency || "SAR",
+    fuelPriceEffectiveFrom: project.fuelPriceEffectiveFrom || "",
     source: "Backend",
     createdAt: project.createdAt || "",
     updatedAt: project.updatedAt || "",
@@ -5261,6 +5280,141 @@ const [showForm, setShowForm] = useState(false);
     "fueler id",
     "fueler",
   ]);
+
+  const formatProjectFuelPriceDate = (rawDate) => {
+    if (!rawDate) return "-";
+    const date = new Date(rawDate);
+    if (Number.isNaN(date.getTime())) return "-";
+
+    return date.toLocaleString("en-GB", {
+      year: "numeric",
+      month: "2-digit",
+      day: "2-digit",
+      hour: "2-digit",
+      minute: "2-digit",
+    });
+  };
+
+  const openFuelPriceModal = (project) => {
+    if (!hasPermission("projects", "edit")) {
+      showToast?.("warning", "Read-only access: you cannot update project fuel price.");
+      return;
+    }
+
+    if (!project?.backendId) {
+      showToast?.("warning", "Project must be saved in backend before updating fuel price.");
+      return;
+    }
+
+    setSelectedProjectForFuelPrice(project);
+    setFuelPriceForm({
+      pricePerLiter:
+        project.currentFuelPrice === undefined || project.currentFuelPrice === null
+          ? ""
+          : String(project.currentFuelPrice),
+      effectiveFrom: project.fuelPriceEffectiveFrom
+        ? new Date(project.fuelPriceEffectiveFrom).toISOString().slice(0, 16)
+        : new Date().toISOString().slice(0, 16),
+      reason: "",
+    });
+    setFuelPriceModalOpen(true);
+  };
+
+  const closeFuelPriceModal = () => {
+    setFuelPriceModalOpen(false);
+    setSelectedProjectForFuelPrice(null);
+    setFuelPriceForm({
+      pricePerLiter: "",
+      effectiveFrom: "",
+      reason: "",
+    });
+    setFuelPriceSaving(false);
+  };
+
+  const saveProjectFuelPrice = async () => {
+    if (!selectedProjectForFuelPrice?.backendId) {
+      showToast?.("warning", "Project backend ID is required.");
+      return;
+    }
+
+    const pricePerLiter = Number(fuelPriceForm.pricePerLiter);
+
+    if (!Number.isFinite(pricePerLiter) || pricePerLiter <= 0) {
+      showToast?.("warning", "Fuel price must be greater than zero.");
+      return;
+    }
+
+    if (!fuelPriceForm.effectiveFrom) {
+      showToast?.("warning", "Effective date is required.");
+      return;
+    }
+
+    setFuelPriceSaving(true);
+
+    try {
+      const response = await api.post(
+        `/projects/${selectedProjectForFuelPrice.backendId}/update-fuel-price`,
+        {
+          pricePerLiter,
+          effectiveFrom: new Date(fuelPriceForm.effectiveFrom).toISOString(),
+          reason: fuelPriceForm.reason?.trim() || "Project fuel price update",
+          ...(currentUser?.id ? { createdByUserId: currentUser.id } : {}),
+        }
+      );
+
+      const updatedPrice = response.data || {};
+      const nextFuelPrice = Number(updatedPrice.pricePerLiter || pricePerLiter);
+      const nextCurrency =
+        updatedPrice.currency ||
+        selectedProjectForFuelPrice.fuelPriceCurrency ||
+        currentCompany?.currency ||
+        currency ||
+        "SAR";
+      const nextEffectiveFrom = updatedPrice.effectiveFrom || new Date(fuelPriceForm.effectiveFrom).toISOString();
+
+      const patchProject = (project) => ({
+        ...project,
+        currentFuelPrice: nextFuelPrice,
+        fuelPriceCurrency: nextCurrency,
+        fuelPriceEffectiveFrom: nextEffectiveFrom,
+      });
+
+      setLocalProjects((prev) => {
+        const key = normalizeScopeValue(selectedProjectForFuelPrice.id);
+        const exists = prev.some((project) => normalizeScopeValue(project.id) === key);
+
+        if (exists) {
+          return prev.map((project) =>
+            normalizeScopeValue(project.id) === key ? patchProject(project) : project
+          );
+        }
+
+        return [...prev, patchProject(selectedProjectForFuelPrice)];
+      });
+
+      if (selectedProject && normalizeScopeValue(selectedProject.id) === normalizeScopeValue(selectedProjectForFuelPrice.id)) {
+        setSelectedProject((prev) => (prev ? patchProject(prev) : prev));
+      }
+
+      trackActivity?.(
+        "Update Project Fuel Price",
+        "projects",
+        `${selectedProjectForFuelPrice.id} fuel price updated to ${nextFuelPrice} ${nextCurrency}/L.`
+      );
+
+      showToast?.("success", "Project fuel price updated successfully.");
+      closeFuelPriceModal();
+    } catch (error) {
+      const backendMessage = error?.response?.data?.message || "Failed to update project fuel price.";
+      notifyUser(
+        typeof showToast !== "undefined" ? showToast : null,
+        "warning",
+        Array.isArray(backendMessage) ? backendMessage.join(", ") : backendMessage
+      );
+    } finally {
+      setFuelPriceSaving(false);
+    }
+  };
 
   const operationIdIndex = getHeaderIndex(headers, [
     "operation_id",
@@ -9387,9 +9541,11 @@ const printAssetsReport = () => {
             <input
               type="number"
               value={oldOdometerBeforeReset}
-              onChange={(e) => setOldOdometerBeforeReset(e.target.value)}
+              readOnly
+              aria-readonly="true"
+              title="Old odometer is captured from the current asset reading and cannot be edited here."
               placeholder="Reading before computer / meter replacement"
-              className="border rounded-xl p-3 w-full mb-4"
+              className="border rounded-xl p-3 w-full mb-4 bg-gray-100 text-gray-700 cursor-not-allowed"
             />
 
             <label className="block text-sm font-medium text-gray-700 mb-2">
@@ -10668,7 +10824,6 @@ const getLatestStationCounter = (stationId, fallbackValue = 0) => {
       "Current Stock",
       "Tank Level",
       "Status",
-      "Liter Price",
     ];
 
     const csvRows = filteredStations.map((station) => [
@@ -10678,7 +10833,6 @@ const getLatestStationCounter = (stationId, fallbackValue = 0) => {
       station.currentStock || "",
       `${Number(station.percentage || 0).toFixed(1)}%`,
       station.status || "",
-      `${literPrice} ${currency}/L`,
     ]);
 
     const csvContent = [csvHeaders, ...csvRows]
@@ -10788,26 +10942,6 @@ const getLatestStationCounter = (stationId, fallbackValue = 0) => {
                     Stock Count Adjustment
                   </button>
                 </>
-              )}
-
-              {hasPermission("stations", "updatePrice") && (
-                <button
-                  onClick={() => {
-                    setShowSettings(false);
-                    setShowExportMenu(false);
-                    setShowLiterPrice(true);
-                  }}
-                  className="flex items-center justify-between w-full px-5 py-4 hover:bg-yellow-500/10 transition text-white border-t border-gray-700"
-                >
-                <span className="flex flex-wrap items-center gap-3">
-                  <span className="text-lg">{countryFlag}</span>
-                  Liter Price
-                </span>
-
-                <span className="text-[11px] text-slate-400 whitespace-nowrap">
-                  {literPrice} {currency}/L
-                </span>
-              </button>
               )}
 
               <div className="border-t border-gray-700">
@@ -12095,6 +12229,16 @@ function FuelLevelIcon({ percentage }) {
   );
 }
  
+
+const TEAM_CREATE_USER_ROLE_NAMES = [
+  "Admin",
+  "Manager",
+  "Officer",
+  "Supervisor",
+  "Operator",
+  "Top Management",
+];
+
 function TeamPage({
   fuelers = [],
   users = [],
@@ -12124,8 +12268,6 @@ function TeamPage({
   const [savingTeamChange, setSavingTeamChange] = useState(false);
   const [updatingUserStatusByFuelerId, setUpdatingUserStatusByFuelerId] = useState({});
   const [linkUserModal, setLinkUserModal] = useState(null);
-  const [teamRoleOptions, setTeamRoleOptions] = useState([]);
-  const [loadingTeamRoles, setLoadingTeamRoles] = useState(false);
   const [savingLinkedUser, setSavingLinkedUser] = useState(false);
   const [showAddFueler, setShowAddFueler] = useState(false);
   const [selectedFuelerHistory, setSelectedFuelerHistory] = useState(null);
@@ -12136,13 +12278,37 @@ function TeamPage({
   const [bulkTransferModalOpen, setBulkTransferModalOpen] = useState(false);
   const [bulkTransferProjectId, setBulkTransferProjectId] = useState("");
   const [savingBulkTransfer, setSavingBulkTransfer] = useState(false);
-  const teamRoleOptionsCacheRef = useRef({});
 
   const fuelersSettingsRef = useRef(null);
 
   useOutsideClick(fuelersSettingsRef, () => {
     setShowFuelersSettings(false);
   });
+
+  const teamRoleOptions = useMemo(() => {
+    const roleIdByNormalizedName = new Map();
+
+    users.forEach((user) => {
+      const normalizedName = normalizeBackendRoleName(user.roleName || user.role || "");
+      const roleId = user.roleId || "";
+
+      if (!normalizedName || normalizedName === "PlatformAdmin" || !roleId) return;
+
+      roleIdByNormalizedName.set(normalizedName, roleId);
+    });
+
+    return TEAM_CREATE_USER_ROLE_NAMES.map((roleName) => {
+      const normalizedName = normalizeBackendRoleName(roleName);
+
+      return {
+        id: roleIdByNormalizedName.get(normalizedName) || roleName,
+        name: roleName,
+        normalizedName,
+      };
+    });
+  }, [users]);
+
+  const loadingTeamRoles = false;
 
   const getCompanyCodeForFueler = (fueler = {}) => {
     const matchedCompany = companies.find((company) =>
@@ -12945,54 +13111,75 @@ function TeamPage({
     });
   };
 
-  const loadTeamRoleOptions = async (companyId) => {
-    const cacheKey = normalizeScopeValue(companyId) || "all-companies";
-    const cachedOptions = teamRoleOptionsCacheRef.current[cacheKey];
+  const loadTeamRoleOptions = async () => teamRoleOptions;
 
-    if (Array.isArray(cachedOptions) && cachedOptions.length) {
-      setTeamRoleOptions(cachedOptions);
-      return cachedOptions;
+  const getTeamRoleOptionByValue = (roleValue) => {
+    const normalizedRoleValue = normalizeScopeValue(roleValue);
+
+    return (teamRoleOptions || []).find((role) =>
+      normalizeScopeValue(role.id) === normalizedRoleValue ||
+      normalizeScopeValue(role.normalizedName) === normalizedRoleValue ||
+      normalizeScopeValue(role.name) === normalizedRoleValue
+    );
+  };
+
+  const roleOptionNeedsBackendId = (roleOption, roleValue) => {
+    if (!roleOption?.id) return true;
+
+    const normalizedId = normalizeScopeValue(roleOption.id);
+    const normalizedName = normalizeScopeValue(roleOption.name);
+    const normalizedSystemName = normalizeScopeValue(roleOption.normalizedName);
+    const normalizedRoleValue = normalizeScopeValue(roleValue);
+
+    return (
+      normalizedId === normalizedName ||
+      normalizedId === normalizedSystemName ||
+      normalizedId === normalizedRoleValue
+    );
+  };
+
+  const resolveTeamRoleForSave = async (roleValue, companyId = "") => {
+    const selectedRole = getTeamRoleOptionByValue(roleValue) || {
+      id: roleValue,
+      name: roleValue,
+      normalizedName: normalizeBackendRoleName(roleValue),
+    };
+
+    if (!roleOptionNeedsBackendId(selectedRole, roleValue)) {
+      return selectedRole;
     }
 
-    // Keep any already-loaded options visible while refreshing role options for this company.
-    setLoadingTeamRoles(true);
+    const targetCompanyId = companyId || currentUser?.companyId || "";
+    const roleEndpoints = targetCompanyId
+      ? [`/roles?companyId=${encodeURIComponent(targetCompanyId)}`, "/roles"]
+      : ["/roles"];
 
-    try {
-      const response = await api.get(
-        companyId
-          ? `/roles?companyId=${encodeURIComponent(companyId)}`
-          : "/roles"
-      );
+    const targetNormalizedRole = normalizeBackendRoleName(
+      selectedRole.normalizedName || selectedRole.name || roleValue
+    );
 
-      const roles = Array.isArray(response.data) ? response.data : [];
-      const options = roles
-        .filter((role) => {
-          const normalized = normalizeScopeValue(role.name);
-          return (
-            normalized !== "platform user" &&
-            normalized !== "platformadmin" &&
-            normalized !== "platform admin"
-          );
-        })
-        .map((role) => ({
-          id: role.id,
-          name: role.name,
-          normalizedName: normalizeBackendRoleName(role.name),
-        }));
+    for (const endpoint of roleEndpoints) {
+      try {
+        const response = await api.get(endpoint);
+        const roles = Array.isArray(response.data) ? response.data : [];
+        const matchedRole = roles.find((role) =>
+          normalizeBackendRoleName(role.name || role.roleName || role.label || role.key) ===
+          targetNormalizedRole
+        );
 
-      teamRoleOptionsCacheRef.current[cacheKey] = options;
-      setTeamRoleOptions(options);
-      return options;
-    } catch (error) {
-      const message =
-        error?.response?.data?.message ||
-        error?.message ||
-        "Failed to load roles.";
-      showToast?.("warning", message);
-      return [];
-    } finally {
-      setLoadingTeamRoles(false);
+        if (matchedRole?.id) {
+          return {
+            id: matchedRole.id,
+            name: matchedRole.name || selectedRole.name || roleValue,
+            normalizedName: targetNormalizedRole,
+          };
+        }
+      } catch (error) {
+        // Try the next endpoint. If all fail, the caller will handle the safe fallback.
+      }
     }
+
+    return selectedRole;
   };
 
   const getDefaultTeamRoleId = (roles = []) => {
@@ -13012,33 +13199,13 @@ function TeamPage({
       return;
     }
 
-    const companyId = fueler.companyId || currentUser?.companyId || "";
-    const cacheKey = normalizeScopeValue(companyId) || "all-companies";
-    const cachedRoles = teamRoleOptionsCacheRef.current[cacheKey] || teamRoleOptions;
-    const cachedDefaultRoleId = getDefaultTeamRoleId(cachedRoles);
+    const fallbackRoles = teamRoleOptions;
+    const defaultRoleId = getDefaultTeamRoleId(fallbackRoles);
 
-    // Open the modal immediately. Role options continue loading inside the modal,
-    // so the user never feels that the Linked action is frozen.
     setLinkUserModal({
       fueler,
-      roleId: cachedDefaultRoleId || "",
+      roleId: defaultRoleId || "Operator",
       password: `FFP@${Math.floor(100000 + Math.random() * 900000)}`,
-    });
-
-    const roles = await loadTeamRoleOptions(companyId);
-    const defaultRoleId = getDefaultTeamRoleId(roles);
-
-    if (!defaultRoleId) {
-      showToast?.("warning", "No valid role is available for this company.");
-      return;
-    }
-
-    setLinkUserModal((prev) => {
-      if (!prev || normalizeText(prev.fueler?.id) !== normalizeText(fueler.id)) return prev;
-      return {
-        ...prev,
-        roleId: prev.roleId || defaultRoleId,
-      };
     });
   };
 
@@ -13102,11 +13269,6 @@ function TeamPage({
   const confirmCreateAndLinkUser = async () => {
     if (!linkUserModal?.fueler) return;
 
-    if (loadingTeamRoles) {
-      showToast?.("warning", "Please wait until user roles are loaded.");
-      return;
-    }
-
     if (!linkUserModal.roleId) {
       showToast?.("warning", "Please select user role.");
       return;
@@ -13152,14 +13314,34 @@ function TeamPage({
         [fuelerId]: true,
       }));
 
+      const roleCompanyId = fueler.companyId || currentUser?.companyId || "";
+      const selectedTeamRole = await resolveTeamRoleForSave(linkUserModal.roleId, roleCompanyId);
+
+      if (roleOptionNeedsBackendId(selectedTeamRole, linkUserModal.roleId)) {
+        showToast?.("warning", "Selected role is not valid for this company.");
+        setSavingLinkedUser(false);
+        setUpdatingUserStatusByFuelerId((prev) => ({
+          ...prev,
+          [fuelerId]: false,
+        }));
+        return;
+      }
+
+      const selectedTeamRoleName = selectedTeamRole?.name || linkUserModal.roleId;
+      const selectedTeamNormalizedRole = normalizeBackendRoleName(
+        selectedTeamRole?.normalizedName || selectedTeamRoleName
+      );
+
       const createdUser = await onCreateUserFromEmployee({
         employeeId,
         linkedEmployeeId,
         fullName: fueler.name || employeeId,
         email: fueler.email && fueler.email !== "-" ? fueler.email : "",
         phone: fueler.mobile || fueler.phone || "",
-        roleId: linkUserModal.roleId,
-        companyId: fueler.companyId || currentUser?.companyId || "",
+        roleId: selectedTeamRole.id,
+        role: selectedTeamNormalizedRole,
+        roleName: selectedTeamRoleName,
+        companyId: roleCompanyId,
         password: linkUserModal.password,
         isActive: true,
       });
@@ -14034,17 +14216,9 @@ function TeamPage({
                           roleId: e.target.value,
                         }))
                       }
-                      disabled={loadingTeamRoles || savingLinkedUser}
+                      disabled={savingLinkedUser}
                       className="w-full rounded-xl border border-slate-700 bg-slate-950 px-3 py-2 text-white outline-none focus:border-amber-400"
                     >
-                      {loadingTeamRoles && !teamRoleOptions.length && (
-                        <option value="">Loading roles...</option>
-                      )}
-
-                      {!loadingTeamRoles && !teamRoleOptions.length && (
-                        <option value="">No roles available</option>
-                      )}
-
                       {teamRoleOptions.map((role) => (
                         <option key={role.id} value={role.id}>
                           {role.name}
@@ -14085,10 +14259,10 @@ function TeamPage({
 
                   <button
                     onClick={confirmCreateAndLinkUser}
-                    disabled={savingLinkedUser || loadingTeamRoles || !linkUserModal.roleId}
+                    disabled={savingLinkedUser || !linkUserModal.roleId}
                     className="px-4 py-2 rounded-xl bg-yellow-500 hover:bg-yellow-400 text-black font-bold disabled:opacity-60"
                   >
-                    {savingLinkedUser ? "Saving..." : loadingTeamRoles ? "Loading Roles..." : "Create & Link"}
+                    {savingLinkedUser ? "Saving..." : "Create & Link"}
                   </button>
                 </div>
               </div>
@@ -14530,6 +14704,142 @@ function ProjectsPage({
     approvalStatus: "Pending Approval",
   });
 
+  const [fuelPriceModalOpen, setFuelPriceModalOpen] = useState(false);
+  const [selectedProjectForFuelPrice, setSelectedProjectForFuelPrice] = useState(null);
+  const [fuelPriceSaving, setFuelPriceSaving] = useState(false);
+  const [fuelPriceForm, setFuelPriceForm] = useState({
+    pricePerLiter: "",
+    effectiveFrom: "",
+    reason: "",
+  });
+
+  const openFuelPriceModal = (project) => {
+    if (!hasPermission("projects", "edit")) {
+      showToast?.("warning", "Read-only access: you cannot update project fuel price.");
+      return;
+    }
+
+    if (!project?.backendId) {
+      showToast?.("warning", "Project must be saved in backend before updating fuel price.");
+      return;
+    }
+
+    setSelectedProjectForFuelPrice(project);
+    setFuelPriceForm({
+      pricePerLiter:
+        project.currentFuelPrice === undefined || project.currentFuelPrice === null
+          ? ""
+          : String(project.currentFuelPrice),
+      effectiveFrom: project.fuelPriceEffectiveFrom
+        ? new Date(project.fuelPriceEffectiveFrom).toISOString().slice(0, 16)
+        : new Date().toISOString().slice(0, 16),
+      reason: "",
+    });
+    setFuelPriceModalOpen(true);
+  };
+
+  const closeFuelPriceModal = () => {
+    setFuelPriceModalOpen(false);
+    setSelectedProjectForFuelPrice(null);
+    setFuelPriceForm({
+      pricePerLiter: "",
+      effectiveFrom: "",
+      reason: "",
+    });
+    setFuelPriceSaving(false);
+  };
+
+  const saveProjectFuelPrice = async () => {
+    if (!selectedProjectForFuelPrice?.backendId) {
+      showToast?.("warning", "Project backend ID is required.");
+      return;
+    }
+
+    const pricePerLiter = Number(fuelPriceForm.pricePerLiter);
+
+    if (!Number.isFinite(pricePerLiter) || pricePerLiter <= 0) {
+      showToast?.("warning", "Fuel price must be greater than zero.");
+      return;
+    }
+
+    if (!fuelPriceForm.effectiveFrom) {
+      showToast?.("warning", "Effective date is required.");
+      return;
+    }
+
+    setFuelPriceSaving(true);
+
+    try {
+      const response = await api.post(
+        `/projects/${selectedProjectForFuelPrice.backendId}/update-fuel-price`,
+        {
+          pricePerLiter,
+          effectiveFrom: new Date(fuelPriceForm.effectiveFrom).toISOString(),
+          reason: fuelPriceForm.reason?.trim() || "Project fuel price update",
+          ...(currentUser?.id ? { createdByUserId: currentUser.id } : {}),
+        }
+      );
+
+      const updatedPrice = response.data || {};
+      const nextFuelPrice = Number(updatedPrice.pricePerLiter || pricePerLiter);
+      const nextCurrency =
+        updatedPrice.currency ||
+        selectedProjectForFuelPrice.fuelPriceCurrency ||
+        currentCompany?.currency ||
+        currency ||
+        "SAR";
+      const nextEffectiveFrom =
+        updatedPrice.effectiveFrom || new Date(fuelPriceForm.effectiveFrom).toISOString();
+
+      const patchProject = (project) => ({
+        ...project,
+        currentFuelPrice: nextFuelPrice,
+        fuelPriceCurrency: nextCurrency,
+        fuelPriceEffectiveFrom: nextEffectiveFrom,
+      });
+
+      setLocalProjects((prev) => {
+        const key = normalizeScopeValue(selectedProjectForFuelPrice.id);
+        const exists = prev.some((project) => normalizeScopeValue(project.id) === key);
+
+        if (exists) {
+          return prev.map((project) =>
+            normalizeScopeValue(project.id) === key ? patchProject(project) : project
+          );
+        }
+
+        return [...prev, patchProject(selectedProjectForFuelPrice)];
+      });
+
+      if (
+        selectedProject &&
+        normalizeScopeValue(selectedProject.id) === normalizeScopeValue(selectedProjectForFuelPrice.id)
+      ) {
+        setSelectedProject((prev) => (prev ? patchProject(prev) : prev));
+      }
+
+      trackActivity?.(
+        "Update Project Fuel Price",
+        "projects",
+        `${selectedProjectForFuelPrice.id} fuel price updated to ${nextFuelPrice} ${nextCurrency}/L.`
+      );
+
+      showToast?.("success", "Project fuel price updated successfully.");
+      closeFuelPriceModal();
+    } catch (error) {
+      const backendMessage =
+        error?.response?.data?.message || "Failed to update project fuel price.";
+
+      notifyUser(
+        typeof showToast !== "undefined" ? showToast : null,
+        "warning",
+        Array.isArray(backendMessage) ? backendMessage.join(", ") : backendMessage
+      );
+    } finally {
+      setFuelPriceSaving(false);
+    }
+  };
+
   const [backendProjectManagers, setBackendProjectManagers] = useState([]);
   const [pendingManagerConfirmation, setPendingManagerConfirmation] = useState(null);
   const [managerSaving, setManagerSaving] = useState(false);
@@ -14942,9 +15252,12 @@ function ProjectsPage({
   };
 
   const getProjectDieselCost = (project) => {
+    const projectFuelPrice = Number(project.currentFuelPrice || 0);
+
     return getDirectRefuelOperations(project).reduce((sum, item) => {
       const diesel = dieselIndex !== -1 ? parseFloat(item.row[dieselIndex]) || 0 : 0;
-      return sum + diesel * getOperationLiterPrice(item.row);
+      const literPriceForProject = projectFuelPrice > 0 ? projectFuelPrice : getOperationLiterPrice(item.row);
+      return sum + diesel * literPriceForProject;
     }, 0);
   };
 
@@ -15284,6 +15597,9 @@ function ProjectsPage({
         "Assigned Fuelers",
         "Direct Refuel Operations",
         "Diesel Qty",
+        "Fuel Price",
+        "Fuel Price Currency",
+        "Fuel Price Effective From",
         "Total Cost",
       ],
       filteredProjects.map((project, i) => [
@@ -15298,6 +15614,9 @@ function ProjectsPage({
         project.assignedFuelersCount,
         project.operationsCount,
         project.dieselQty,
+        project.currentFuelPrice || 0,
+        project.fuelPriceCurrency || currency,
+        project.fuelPriceEffectiveFrom || "",
         project.dieselCost,
       ])
     );
@@ -15522,6 +15841,40 @@ function ProjectsPage({
           </p>
         )}
       </div>
+
+      <button
+        type="button"
+        onClick={() => openFuelPriceModal(project)}
+        className={`mt-3 w-full cursor-pointer rounded-xl border px-3 py-2 text-left transition hover:-translate-y-0.5 ${
+          theme === "light"
+            ? "border-emerald-200 bg-emerald-50 text-slate-900 hover:border-emerald-400 hover:bg-emerald-100"
+            : "border-emerald-500/30 bg-emerald-500/10 text-slate-100 hover:border-emerald-300/70 hover:bg-emerald-500/15"
+        }`}
+        title="Update project fuel price"
+      >
+        <div className="flex items-center justify-between gap-3">
+          <div>
+            <p className={`text-[10px] font-bold uppercase tracking-[0.16em] ${
+              theme === "light" ? "text-emerald-700" : "text-emerald-300"
+            }`}>
+              Fuel Price
+            </p>
+            <p className="mt-1 text-lg font-extrabold">
+              {formatNumber(project.currentFuelPrice || 0)} {project.fuelPriceCurrency || currency}/L
+            </p>
+          </div>
+          <span className={`rounded-full px-2 py-1 text-[10px] font-bold ${
+            theme === "light"
+              ? "bg-white text-emerald-700 border border-emerald-200"
+              : "bg-slate-950/70 text-emerald-300 border border-emerald-500/30"
+          }`}>
+            Edit
+          </span>
+        </div>
+        <p className={`mt-1 text-[11px] ${theme === "light" ? "text-slate-500" : "text-slate-400"}`}>
+          Effective: {formatProjectFuelPriceDate(project.fuelPriceEffectiveFrom)}
+        </p>
+      </button>
     </div>
 
     <div className="flex items-center gap-2 shrink-0">
@@ -15680,6 +16033,145 @@ function ProjectsPage({
           </div>
         </div>
 
+        {fuelPriceModalOpen && selectedProjectForFuelPrice && (
+          <ModalPortal>
+            <div className="fixed inset-0 z-[10020] flex items-center justify-center bg-black/75 p-3 backdrop-blur-sm">
+              <div className={`w-full max-w-xl overflow-hidden rounded-3xl border shadow-2xl ${
+                theme === "light"
+                  ? "border-slate-300 bg-white text-slate-950 shadow-slate-300/70"
+                  : "border-emerald-500/30 bg-slate-950 text-white shadow-black/40"
+              }`}>
+                <div className={`flex items-start justify-between gap-3 border-b p-5 ${
+                  theme === "light" ? "border-slate-200 bg-slate-50" : "border-slate-800 bg-slate-900"
+                }`}>
+                  <div>
+                    <p className="text-xs font-bold uppercase tracking-[0.22em] text-emerald-400">
+                      Project fuel pricing
+                    </p>
+                    <h2 className="mt-1 text-xl font-extrabold">Update Fuel Price</h2>
+                    <p className={`mt-1 text-sm ${theme === "light" ? "text-slate-500" : "text-slate-400"}`}>
+                      {selectedProjectForFuelPrice.name || selectedProjectForFuelPrice.id}
+                    </p>
+                  </div>
+
+                  <button
+                    onClick={closeFuelPriceModal}
+                    className={`h-9 w-9 rounded-full text-xl transition ${
+                      theme === "light"
+                        ? "bg-slate-100 text-slate-500 hover:bg-red-50 hover:text-red-500"
+                        : "bg-slate-800 text-slate-400 hover:bg-red-500/20 hover:text-red-300"
+                    }`}
+                    disabled={fuelPriceSaving}
+                  >
+                    ×
+                  </button>
+                </div>
+
+                <div className="space-y-4 p-5">
+                  <div className={`rounded-2xl border p-4 ${
+                    theme === "light" ? "border-slate-200 bg-slate-50" : "border-slate-800 bg-slate-900/70"
+                  }`}>
+                    <p className={`text-xs ${theme === "light" ? "text-slate-500" : "text-slate-400"}`}>
+                      Current project fuel price
+                    </p>
+                    <p className="mt-1 text-2xl font-extrabold text-emerald-400">
+                      {formatNumber(selectedProjectForFuelPrice.currentFuelPrice || 0)} {selectedProjectForFuelPrice.fuelPriceCurrency || currency}/L
+                    </p>
+                    <p className={`mt-1 text-xs ${theme === "light" ? "text-slate-500" : "text-slate-400"}`}>
+                      Effective: {formatProjectFuelPriceDate(selectedProjectForFuelPrice.fuelPriceEffectiveFrom)}
+                    </p>
+                  </div>
+
+                  <div>
+                    <label className="text-sm font-bold">New Price Per Liter</label>
+                    <input
+                      type="number"
+                      step="0.01"
+                      min="0"
+                      value={fuelPriceForm.pricePerLiter}
+                      onChange={(event) =>
+                        setFuelPriceForm((prev) => ({
+                          ...prev,
+                          pricePerLiter: event.target.value,
+                        }))
+                      }
+                      className={`mt-2 w-full rounded-xl border px-4 py-3 outline-none transition ${
+                        theme === "light"
+                          ? "border-slate-300 bg-white text-slate-900 focus:border-emerald-500"
+                          : "border-slate-700 bg-slate-900 text-white focus:border-emerald-400"
+                      }`}
+                      placeholder="Example: 1.95"
+                    />
+                  </div>
+
+                  <div>
+                    <label className="text-sm font-bold">Effective From</label>
+                    <input
+                      type="datetime-local"
+                      value={fuelPriceForm.effectiveFrom}
+                      onChange={(event) =>
+                        setFuelPriceForm((prev) => ({
+                          ...prev,
+                          effectiveFrom: event.target.value,
+                        }))
+                      }
+                      className={`mt-2 w-full rounded-xl border px-4 py-3 outline-none transition ${
+                        theme === "light"
+                          ? "border-slate-300 bg-white text-slate-900 focus:border-emerald-500"
+                          : "border-slate-700 bg-slate-900 text-white focus:border-emerald-400"
+                      }`}
+                    />
+                  </div>
+
+                  <div>
+                    <label className="text-sm font-bold">Reason</label>
+                    <textarea
+                      rows={3}
+                      value={fuelPriceForm.reason}
+                      onChange={(event) =>
+                        setFuelPriceForm((prev) => ({
+                          ...prev,
+                          reason: event.target.value,
+                        }))
+                      }
+                      className={`mt-2 w-full resize-none rounded-xl border px-4 py-3 outline-none transition ${
+                        theme === "light"
+                          ? "border-slate-300 bg-white text-slate-900 focus:border-emerald-500"
+                          : "border-slate-700 bg-slate-900 text-white focus:border-emerald-400"
+                      }`}
+                      placeholder="Example: Fuel price with transport cost for this project"
+                    />
+                  </div>
+                </div>
+
+                <div className={`flex justify-end gap-3 border-t p-5 ${
+                  theme === "light" ? "border-slate-200 bg-slate-50" : "border-slate-800 bg-slate-900"
+                }`}>
+                  <button
+                    onClick={closeFuelPriceModal}
+                    disabled={fuelPriceSaving}
+                    className={`rounded-xl px-4 py-2 font-bold transition ${
+                      theme === "light"
+                        ? "bg-slate-200 text-slate-700 hover:bg-slate-300"
+                        : "bg-slate-800 text-slate-200 hover:bg-slate-700"
+                    }`}
+                  >
+                    Cancel
+                  </button>
+
+                  <button
+                    onClick={saveProjectFuelPrice}
+                    disabled={fuelPriceSaving}
+                    className="rounded-xl bg-emerald-500 px-4 py-2 font-extrabold text-white transition hover:bg-emerald-400 disabled:cursor-not-allowed disabled:opacity-60"
+                  >
+                    {fuelPriceSaving ? "Saving..." : "Save Fuel Price"}
+                  </button>
+                </div>
+              </div>
+            </div>
+          </ModalPortal>
+        )}
+
         {selectedProject && (
           <div className="fixed inset-0 bg-black/75 backdrop-blur-sm flex items-center justify-center z-[10000] p-3">
             <div className="bg-gray-900 text-white w-[1200px] max-h-[90vh] rounded-3xl shadow-2xl border border-gray-700 overflow-hidden">
@@ -15753,7 +16245,8 @@ function ProjectsPage({
                     {getFilteredProjectOperations(selectedProject).map((item, i) => {
                       const row = item.row;
                       const diesel = dieselIndex !== -1 ? parseFloat(row[dieselIndex]) || 0 : 0;
-                      const cost = diesel * getOperationLiterPrice(row);
+                      const selectedProjectFuelPrice = Number(selectedProject.currentFuelPrice || 0);
+                      const cost = diesel * (selectedProjectFuelPrice > 0 ? selectedProjectFuelPrice : getOperationLiterPrice(row));
 
                       return (
                         <tr key={item.originalIndex} className="hover:bg-slate-800/70 transition-colors duration-150">
@@ -18179,10 +18672,10 @@ function UsersPage({
   const [statusFilter, setStatusFilter] = useState("All");
   const [settingsOpen, setSettingsOpen] = useState(false);
   const [userModalMode, setUserModalMode] = useState(null);
-  const [selectedUserId, setSelectedUserId] = useState("");
   const [backendRoles, setBackendRoles] = useState([]);
   const [savingUser, setSavingUser] = useState(false);
   const [updatingUserStatusById, setUpdatingUserStatusById] = useState({});
+  const [updatingUserRoleById, setUpdatingUserRoleById] = useState({});
   const [resettingPassword, setResettingPassword] = useState(false);
   const [temporaryPasswordResult, setTemporaryPasswordResult] = useState(null);
   const [userConfirmModal, setUserConfirmModal] = useState({
@@ -18259,30 +18752,95 @@ function UsersPage({
 
   const buildRoleOptionsFromBackendRoles = (roles = []) => {
     return roles
+      .map((role) => {
+        const roleName = role.name || role.roleName || role.label || role.key || role.normalizedName || "";
+
+        return {
+          id: role.id || role.roleId || roleName,
+          name: roleName,
+          normalizedName: normalizeBackendRoleName(roleName),
+        };
+      })
       .filter((role) => {
         const normalized = normalizeScopeValue(role.name);
         return (
+          role.id &&
+          role.name &&
           normalized !== "platform user" &&
           normalized !== "platformadmin" &&
           normalized !== "platform admin"
         );
-      })
-      .map((role) => ({
-        id: role.id,
-        name: role.name,
-        normalizedName: normalizeBackendRoleName(role.name),
-      }));
+      });
+  };
+
+  const buildRoleOptionsFromUsers = (usersList = []) => {
+    const map = new Map();
+
+    usersList.forEach((user) => {
+      const roleName = user.roleName || user.role || "";
+      const roleId = user.roleId || "";
+      const normalizedName = normalizeBackendRoleName(roleName);
+
+      if (!roleId || !normalizedName) return;
+      if (normalizedName === "PlatformAdmin") return;
+
+      map.set(roleId, {
+        id: roleId,
+        name: roleName || normalizedName,
+        normalizedName,
+      });
+    });
+
+    return Array.from(map.values()).sort((a, b) =>
+      String(a.name).localeCompare(String(b.name))
+    );
+  };
+
+  const backendRoleOptions = buildRoleOptionsFromBackendRoles(backendRoles);
+  const userDerivedRoleOptions = buildRoleOptionsFromUsers(users);
+
+  const mergeRequiredRoleOptions = (roles = []) => {
+    const map = new Map();
+
+    roles.forEach((role) => {
+      const normalizedName = normalizeBackendRoleName(role.normalizedName || role.name || role.id);
+      if (!normalizedName || normalizedName === "PlatformAdmin") return;
+
+      map.set(normalizedName, {
+        ...role,
+        normalizedName,
+      });
+    });
+
+    [
+      { id: "Admin", name: "Admin", normalizedName: "Admin" },
+      { id: "Manager", name: "Manager", normalizedName: "Manager" },
+      { id: "Officer", name: "Officer", normalizedName: "Officer" },
+      { id: "Operator", name: "Operator", normalizedName: "Operator" },
+      { id: "Supervisor", name: "Supervisor", normalizedName: "Supervisor" },
+      { id: "Top Management", name: "Top Management", normalizedName: "TopManagement" },
+    ].forEach((role) => {
+      if (!map.has(role.normalizedName)) {
+        map.set(role.normalizedName, role);
+      }
+    });
+
+    return Array.from(map.values()).sort((a, b) =>
+      String(a.name).localeCompare(String(b.name))
+    );
   };
 
   const roleOptions = canUseBackendUsersApi
-    ? buildRoleOptionsFromBackendRoles(backendRoles)
-    : Object.keys(ROLE_PERMISSIONS)
-        .filter((role) => role !== "PlatformAdmin")
-        .map((role) => ({
-          id: role,
-          name: role,
-          normalizedName: role,
-        }));
+    ? mergeRequiredRoleOptions(backendRoleOptions.length ? backendRoleOptions : userDerivedRoleOptions)
+    : mergeRequiredRoleOptions(
+        Object.keys(ROLE_PERMISSIONS)
+          .filter((role) => role !== "PlatformAdmin")
+          .map((role) => ({
+            id: role === "TopManagement" ? "Top Management" : role,
+            name: role === "TopManagement" ? "Top Management" : role,
+            normalizedName: role,
+          }))
+      );
 
 
   const companyOptions = companies
@@ -18321,8 +18879,6 @@ function UsersPage({
     companyOptions.find((company) => companyMatches(company.id, effectiveUserFormCompanyId))?.name ||
     currentUserCompanyName;
 
-  const selectedUser = users.find((user) => user.id === selectedUserId) || null;
-  const canManageUsers = hasPermission("users", "add") || hasPermission("users", "edit");
 
   const getDefaultRoleIdFromRoles = (roles = []) => {
     const options = buildRoleOptionsFromBackendRoles(roles);
@@ -18424,11 +18980,10 @@ function UsersPage({
         );
       }
 
-      if (!isPlatformUserContext) {
-        await loadRolesForCompany(currentUser?.companyId || targetCompanyId);
-      } else {
-        setBackendRoles([]);
-      }
+      // Keep Users page fast: do not fetch roles on every users refresh.
+      // Inline role dropdown can use roles derived from loaded users.
+      // Full role lists are loaded on demand when an Add/Create User flow needs them.
+      setBackendRoles((prevRoles) => (Array.isArray(prevRoles) ? prevRoles : []));
     } catch (error) {
       console.error("Failed to load users and roles from backend:", error);
       notifyUser(showToast, "warning", "Failed to load users and roles from backend.");
@@ -18497,7 +19052,6 @@ function UsersPage({
       roleId: "",
       password: "User@12345",
     });
-    setSelectedUserId("");
     setUserModalMode("add");
     setSettingsOpen(false);
 
@@ -18510,52 +19064,9 @@ function UsersPage({
     }));
   };
 
-  const openEditUserModal = async (user) => {
-    if (!hasPermission("users", "edit")) {
-      notifyUser(showToast, "warning", "You do not have permission to edit users.");
-      return;
-    }
-
-    if (!user?.id) {
-      notifyUser(showToast, "warning", "Select a valid user first.");
-      return;
-    }
-
-    const formCompanyId =
-      user.companyId ||
-      activeContextCompanyId ||
-      (!isPlatformUserContext ? currentUser?.companyId || "" : "");
-
-    setSelectedUserId(user.id);
-    setUserForm({
-      fullName: user.fullName || "",
-      email: String(user.email || "").toLowerCase(),
-      phone: user.phone || user.mobile || "",
-      companyId: formCompanyId,
-      roleId: user.roleId || "",
-      password: "",
-    });
-
-    setUserModalMode("edit");
-
-    const roles = await loadRolesForCompany(formCompanyId);
-    const options = buildRoleOptionsFromBackendRoles(roles);
-    const matchedRoleId =
-      user.roleId ||
-      options.find((role) => role.normalizedName === normalizeBackendRoleName(user.roleName || user.role))?.id ||
-      options[0]?.id ||
-      "";
-
-    setUserForm((prev) => ({
-      ...prev,
-      roleId: matchedRoleId,
-    }));
-  };
-
   const closeUserModal = () => {
     if (savingUser) return;
     setUserModalMode(null);
-    setSelectedUserId("");
     setUserForm(emptyUserForm);
   };
 
@@ -18604,10 +19115,6 @@ function UsersPage({
       payload.companyId = resolvedCompanyId;
     }
 
-    if (userModalMode === "edit" && canChangeUserCompany && resolvedCompanyId) {
-      payload.companyId = resolvedCompanyId;
-    }
-
     if (!payload.fullName || !payload.email || !payload.roleId) {
       notifyUser(showToast, "warning", "Full name, email, and role are required.");
       return;
@@ -18639,21 +19146,8 @@ function UsersPage({
           ...prev.filter((user) => user.id !== savedUser.id),
         ]);
 
-        setSelectedUserId(savedUser.id);
-        trackActivity("Add User", "users", `${savedUser.fullName} created.`);
+        trackActivity("Add User", "users", `${savedUser.username || savedUser.fullName || "User"} created.`);
         notifyUser(showToast, "success", "User added successfully.");
-      }
-
-      if (userModalMode === "edit" && selectedUser?.id) {
-        const response = await api.patch(`/users/${selectedUser.id}`, payload);
-        const savedUser = normalizeBackendUserForState(response.data);
-
-        setUsers((prev) =>
-          prev.map((user) => (user.id === savedUser.id ? savedUser : user))
-        );
-
-        trackActivity("Update User", "users", `${savedUser.fullName} updated.`);
-        notifyUser(showToast, "success", "User updated successfully.");
       }
 
       closeUserModal();
@@ -18666,6 +19160,138 @@ function UsersPage({
       notifyUser(showToast, inferToastTypeFromMessage(message), message);
     } finally {
       setSavingUser(false);
+    }
+  };
+
+  const getUserRoleSelectValue = (user) => {
+    if (!user) return "";
+
+    if (user.roleId) return user.roleId;
+
+    const normalizedUserRole = normalizeBackendRoleName(user.roleName || user.role);
+    const matchedRole = roleOptions.find(
+      (role) => normalizeBackendRoleName(role.normalizedName || role.name) === normalizedUserRole
+    );
+
+    return matchedRole?.id || "";
+  };
+
+  const getRoleOptionByValue = (roleValue, options = roleOptions) => {
+    const normalizedRoleValue = normalizeScopeValue(roleValue);
+
+    return (options || []).find((role) =>
+      normalizeScopeValue(role.id) === normalizedRoleValue ||
+      normalizeScopeValue(role.normalizedName) === normalizedRoleValue ||
+      normalizeScopeValue(role.name) === normalizedRoleValue
+    );
+  };
+
+  const roleOptionNeedsBackendId = (roleOption, roleValue) => {
+    if (!roleOption?.id) return true;
+
+    const normalizedId = normalizeScopeValue(roleOption.id);
+    const normalizedName = normalizeScopeValue(roleOption.name);
+    const normalizedSystemName = normalizeScopeValue(roleOption.normalizedName);
+    const normalizedRoleValue = normalizeScopeValue(roleValue);
+
+    return (
+      normalizedId === normalizedName ||
+      normalizedId === normalizedSystemName ||
+      normalizedId === normalizedRoleValue
+    );
+  };
+
+  const resolveUserRoleForSave = async (roleValue, user = {}) => {
+    const selectedRole = getRoleOptionByValue(roleValue) || {
+      id: roleValue,
+      name: roleValue,
+      normalizedName: normalizeBackendRoleName(roleValue),
+    };
+
+    if (!roleOptionNeedsBackendId(selectedRole, roleValue)) {
+      return selectedRole;
+    }
+
+    const targetCompanyId =
+      user.companyId ||
+      activeContextCompanyId ||
+      currentUser?.companyId ||
+      contextCompanyId ||
+      "";
+
+    const roles = await loadRolesForCompany(targetCompanyId);
+    const backendRoleOptions = buildRoleOptionsFromBackendRoles(roles);
+    const targetNormalizedRole = normalizeBackendRoleName(
+      selectedRole.normalizedName || selectedRole.name || roleValue
+    );
+
+    const backendRole = backendRoleOptions.find((role) =>
+      normalizeBackendRoleName(role.normalizedName || role.name) === targetNormalizedRole
+    );
+
+    return backendRole || selectedRole;
+  };
+
+  const handleChangeUserRole = async (user, nextRoleId) => {
+    if (!user?.id || !nextRoleId) return;
+
+    if (!hasPermission("users", "edit") && !hasPermission("users", "assignRoles")) {
+      notifyUser(showToast, "warning", "You do not have permission to change user roles.");
+      return;
+    }
+
+    const currentRoleId = getUserRoleSelectValue(user);
+    if (String(currentRoleId) === String(nextRoleId)) return;
+
+    setUpdatingUserRoleById((prev) => ({
+      ...prev,
+      [user.id]: true,
+    }));
+
+    try {
+      const selectedRoleOption = await resolveUserRoleForSave(nextRoleId, user);
+
+      if (roleOptionNeedsBackendId(selectedRoleOption, nextRoleId)) {
+        notifyUser(showToast, "warning", "Selected role is not valid for this company.");
+        return;
+      }
+
+      const selectedRoleName = selectedRoleOption?.name || nextRoleId;
+      const selectedNormalizedRole = normalizeBackendRoleName(
+        selectedRoleOption?.normalizedName || selectedRoleName
+      );
+
+      const response = await api.patch(`/users/${user.id}`, {
+        roleId: selectedRoleOption.id,
+        role: selectedNormalizedRole,
+        roleName: selectedRoleName,
+      });
+
+      const savedUser = normalizeBackendUserForState(response.data);
+
+      setUsers((prev) =>
+        prev.map((item) => (item.id === savedUser.id ? savedUser : item))
+      );
+
+      trackActivity(
+        "Update User Role",
+        "users",
+        `${savedUser.username || savedUser.fullName || "User"} role updated to ${formatRoleLabel(savedUser)}.`
+      );
+      notifyUser(showToast, "success", "User role updated successfully.");
+    } catch (error) {
+      console.error("Failed to update user role:", error);
+      const message =
+        error?.response?.data?.message ||
+        error?.message ||
+        "Failed to update user role.";
+      notifyUser(showToast, inferToastTypeFromMessage(message), message);
+    } finally {
+      setUpdatingUserRoleById((prev) => {
+        const next = { ...prev };
+        delete next[user.id];
+        return next;
+      });
     }
   };
 
@@ -19062,10 +19688,7 @@ function UsersPage({
           </div>
         </div>
 
-        <div className="rounded-2xl border border-slate-800 bg-slate-950/40 px-4 py-3 text-xs text-slate-400 mb-4">
-          Click a username to open the edit screen. Status is changed directly from the badge. Password reset generates a one-time temporary password shown only once.
-        </div>
-
+        
         {usersLoading && (
           <div className="mb-4 flex items-center gap-3 rounded-2xl border border-amber-400/30 bg-amber-500/10 px-4 py-3 text-sm font-semibold text-amber-200">
             <span className="h-4 w-4 animate-spin rounded-full border-2 border-amber-200 border-t-transparent" />
@@ -19097,20 +19720,39 @@ function UsersPage({
                 {filteredUsers.map((user) => (
                   <tr key={user.id} className="border-t border-slate-800 hover:bg-slate-800/50 transition">
                     <td className="p-3">
-                      <button
-                        type="button"
-                        onClick={() => openEditUserModal(user)}
-                        className="font-black text-slate-100 hover:text-amber-300 transition cursor-pointer text-left"
-                      >
+                      <span className="block font-black text-slate-100 text-left">
                         {user.username || "-"}
-                      </button>
-                      <div className="text-xs text-slate-500">Access account</div>
+                      </span>
+                      <div className="text-xs text-slate-500">
+  			{user.fullName || "Unnamed User"}
+		      </div>
                     </td>
                     <td className="p-3 text-slate-300 font-semibold">{user.employeeId || "-"}</td>
                     <td className="p-3">
-                      <span className="block max-w-[170px] truncate whitespace-nowrap text-sm font-semibold text-slate-100">
-                        {formatRoleLabel(user)}
-                      </span>
+                      {updatingUserRoleById[user.id] ? (
+                        <span className="inline-flex items-center gap-2 rounded-xl border border-amber-400/40 bg-amber-500/10 px-3 py-2 text-xs font-black text-amber-200">
+                          <span className="h-3 w-3 animate-spin rounded-full border-2 border-amber-200 border-t-transparent" />
+                          Updating...
+                        </span>
+                      ) : (
+                        <select
+                          value={getUserRoleSelectValue(user)}
+                          onChange={(event) => handleChangeUserRole(user, event.target.value)}
+                          disabled={!hasPermission("users", "edit") && !hasPermission("users", "assignRoles")}
+                          className="min-w-[150px] max-w-[190px] rounded-xl border border-slate-700 bg-[#080d19] px-3 py-2 text-sm font-semibold text-slate-100 outline-none transition hover:border-amber-400 focus:border-amber-400 focus:ring-2 focus:ring-amber-400/20 disabled:cursor-not-allowed disabled:opacity-60"
+                        >
+                          {!getUserRoleSelectValue(user) && (
+                            <option value="" className="bg-slate-900 text-slate-100">
+                              Select role
+                            </option>
+                          )}
+                          {roleOptions.map((role) => (
+                            <option key={role.id} value={role.id} className="bg-slate-900 text-slate-100">
+                              {role.name}
+                            </option>
+                          ))}
+                        </select>
+                      )}
                     </td>
                     <td className="p-3">
                       {updatingUserStatusById[user.id] ? (
@@ -19165,17 +19807,15 @@ function UsersPage({
         </div>
       </div>
 
-      {userModalMode && (
+      {userModalMode === "add" && (
         <ModalPortal>
           <div className="fleet-modal-backdrop fixed inset-0 z-[9998] bg-black/70 backdrop-blur-sm flex items-center justify-center p-4">
             <div className="bg-slate-950 border border-slate-700 rounded-2xl shadow-2xl w-full max-w-2xl max-h-[90vh] overflow-y-auto text-slate-100">
               <div className="p-5 border-b border-slate-800 flex items-center justify-between">
                 <div>
-                  <h2 className="text-xl font-black text-slate-100">{userModalMode === "edit" ? "Edit User" : "Add User"}</h2>
+                  <h2 className="text-xl font-black text-slate-100">Add User</h2>
                   <p className="text-sm text-slate-400">
-                    {userModalMode === "edit"
-                      ? "Update backend user profile and assigned role."
-                      : isPlatformUserContext
+                    {isPlatformUserContext
                       ? "Create a backend user account inside the selected company."
                       : "Create a backend user account inside your company."}
                   </p>
@@ -19297,7 +19937,7 @@ function UsersPage({
                     disabled={savingUser}
                     className="px-4 py-2 rounded-xl bg-amber-400 hover:bg-amber-300 text-slate-950 font-black disabled:opacity-60 disabled:cursor-not-allowed"
                   >
-                    {savingUser ? "Saving..." : userModalMode === "edit" ? "Save Changes" : "Add User"}
+                    {savingUser ? "Saving..." : "Add User"}
                   </button>
                 </div>
               </form>
