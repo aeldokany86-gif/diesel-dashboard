@@ -760,26 +760,52 @@ function buildLegacyUserFromAuthUser(authUser) {
 
   const role = normalizeBackendRoleName(authUser.roleName);
   const companyId = authUser.companyId || "";
-  const assignedProjects = ["Admin", "PlatformAdmin", "TopManagement"].includes(role) ? ["All"] : [];
-  const managedProjects = ["Admin", "PlatformAdmin", "Manager"].includes(role) ? ["All"] : [];
+
+  const backendAssignedProjects = Array.isArray(authUser.assignedProjects)
+    ? authUser.assignedProjects.filter(Boolean)
+    : [];
+
+  const backendManagedProjects = Array.isArray(authUser.managedProjects)
+    ? authUser.managedProjects.filter(Boolean)
+    : [];
+
+  const assignedProjects = backendAssignedProjects.length
+    ? backendAssignedProjects
+    : ["Admin", "PlatformAdmin", "TopManagement"].includes(role)
+      ? ["All"]
+      : [];
+
+  const managedProjects = backendManagedProjects.length
+    ? backendManagedProjects
+    : ["Admin", "PlatformAdmin", "TopManagement"].includes(role)
+      ? ["All"]
+      : [];
+
+  const linkedEmployee = authUser.linkedEmployee || null;
 
   return {
     id: authUser.id,
     fullName: authUser.fullName,
-    username: makeUsernameFromUser({ id: authUser.id, fullName: authUser.fullName, email: authUser.email }),
+    username: authUser.username || makeUsernameFromUser({ id: authUser.id, fullName: authUser.fullName, email: authUser.email }),
     email: authUser.email,
     role,
     companyId,
     tenantKey: `${normalizeScopeValue(companyId) || "global"}::${normalizeScopeValue(authUser.id) || "no-id"}`,
     status: authUser.isActive === false ? "Inactive" : "Active",
-    fuelerId: authUser.id,
-    teamId: authUser.id,
+    fuelerId: authUser.fuelerId || authUser.employeeId || linkedEmployee?.employeeId || linkedEmployee?.id || authUser.id,
+    teamId: authUser.teamId || authUser.linkedEmployeeId || linkedEmployee?.id || authUser.id,
+    linkedEmployeeId: authUser.linkedEmployeeId || linkedEmployee?.id || "",
+    employeeId: authUser.employeeId || linkedEmployee?.employeeId || "",
+    linkedEmployee,
     assignedProjects,
     managedProjects,
-    reportingManagerId: "",
+    reportingManagerId: authUser.reportingManagerId || "",
     mobile: authUser.phone || "",
-    teamProject: role === "PlatformAdmin" ? "Platform Console" : authUser.companyName || "",
-    teamStatus: "",
+    teamProject:
+      role === "PlatformAdmin"
+        ? "Platform Console"
+        : authUser.teamProject || linkedEmployee?.projectName || authUser.companyName || "",
+    teamStatus: authUser.teamStatus || linkedEmployee?.status || "",
     passwordResetRequired: Boolean(authUser.mustChangePassword),
     lastLogin: "",
     createdAt: new Date().toISOString(),
@@ -1125,6 +1151,31 @@ function buildApprovalRoute({ requestedBy, users = [], projects = [], payload = 
   }
 
   const projectForApproval = destinationProject || sourceProject || payload?.project || payload?.projectName || "";
+
+  if (payload?.approvalRouteStrategy === "admin") {
+    const adminApprovers = (users || []).filter(
+      (user) =>
+        ["Admin", "PlatformAdmin"].includes(user?.role) &&
+        user?.status === "Active"
+    );
+
+    return {
+      routeType: "admin",
+      sourceProject: projectForApproval,
+      destinationProject: projectForApproval,
+      requiredApprovers: adminApprovers.map((admin) => ({
+        userId: admin.id,
+        userName: admin.fullName || admin.email || "Admin",
+        role: "Admin",
+        projectId: projectForApproval || "-",
+        approvalStage: "Admin Approval",
+        status: "Pending",
+        reviewedAt: "",
+        reviewNote: "",
+      })),
+      routeStatus: "Pending",
+    };
+  }
 
   // Some approvals must be routed to the manager responsible for a specific project,
   // not only to the requester's direct reporting manager.
@@ -1541,6 +1592,66 @@ function mapBackendAssetForState(asset = {}) {
   };
 }
 
+function normalizeBackendApprovalStatusForState(status) {
+  const normalized = String(status || "PENDING")
+    .trim()
+    .toUpperCase()
+    .replace(/[\s-]+/g, "_");
+
+  if (normalized === "APPROVED") return "Approved";
+  if (normalized === "REJECTED") return "Rejected";
+  return "Pending";
+}
+
+function normalizeBackendTransferStatusForState(status) {
+  const normalized = String(status || "PENDING")
+    .trim()
+    .toUpperCase()
+    .replace(/[\s-]+/g, "_");
+
+  if (normalized === "APPROVED") return "APPROVED";
+  if (normalized === "REJECTED") return "REJECTED";
+  if (normalized === "PARTIALLY_APPROVED") return "PARTIALLY_APPROVED";
+  return "PENDING";
+}
+
+function mapBackendAssetTransferForState(transfer = {}) {
+  const asset = transfer.asset || {};
+  const fromProject = transfer.fromProject || {};
+  const toProject = transfer.toProject || {};
+
+  return {
+    id: transfer.id || "",
+    backendId: transfer.id || "",
+    assetBackendId: transfer.assetId || asset.id || "",
+    assetId: asset.assetId || transfer.assetId || "",
+    assetName: asset.assetId || transfer.assetId || "Asset",
+    companyId: transfer.companyId || asset.companyId || "",
+    fromProjectId: transfer.fromProjectId || fromProject.id || "",
+    fromProjectName: fromProject.name || fromProject.code || transfer.fromProjectId || "-",
+    toProjectId: transfer.toProjectId || toProject.id || "",
+    toProjectName: toProject.name || toProject.code || transfer.toProjectId || "-",
+    requestedByUserId: transfer.requestedByUserId || "",
+    status: normalizeBackendTransferStatusForState(transfer.status),
+    reason: transfer.reason || "",
+    rejectionReason: transfer.rejectionReason || "",
+    createdAt: transfer.createdAt || "",
+    approvedAt: transfer.approvedAt || "",
+    appliedAt: transfer.appliedAt || "",
+    approvals: Array.isArray(transfer.approvals)
+      ? transfer.approvals.map((approval) => ({
+          id: approval.id || "",
+          approverUserId: approval.approverUserId || "",
+          projectId: approval.projectId || "",
+          approvalStage: approval.approvalStage || "Project Manager",
+          status: normalizeBackendApprovalStatusForState(approval.status),
+          reviewedAt: approval.reviewedAt || "",
+          note: approval.note || "",
+        }))
+      : [],
+  };
+}
+
 function userCanAccessAllProjects(user) {
   if (!user) return false;
 
@@ -1579,16 +1690,80 @@ function isProjectAllowedForUser(user, projectValue, projects = []) {
 }
 
 function getAssetProjectValue(assetId, assets = []) {
-  const asset = assets.find((item) => normalizeScopeValue(item.id) === normalizeScopeValue(assetId));
-  return asset?.project || "";
+  const normalizedAssetId = normalizeScopeValue(assetId);
+
+  if (!normalizedAssetId) return "";
+
+  const asset = assets.find((item) => {
+    const candidateIds = [
+      item?.id,
+      item?.assetId,
+      item?.backendId,
+      item?.assetBackendId,
+      item?.equipmentNo,
+      item?.equipmentNumber,
+      item?.equipment_no,
+      item?.equipment_number,
+    ]
+      .filter(Boolean)
+      .map(normalizeScopeValue);
+
+    return candidateIds.includes(normalizedAssetId);
+  });
+
+  return (
+    asset?.project ||
+    asset?.projectName ||
+    asset?.projectId ||
+    asset?.projectCode ||
+    ""
+  );
 }
 
 function getStationProjectValue(stationId, stations = []) {
-  const station = stations.find((item) => normalizeScopeValue(item.id) === normalizeScopeValue(stationId));
-  return station?.project || "";
+  const normalizedStationId = normalizeScopeValue(stationId);
+
+  if (!normalizedStationId) return "";
+
+  const station = stations.find((item) => {
+    const candidateIds = [
+      item?.id,
+      item?.stationId,
+      item?.station_id,
+      item?.backendId,
+      item?.stationBackendId,
+      item?.name,
+      item?.stationName,
+    ]
+      .filter(Boolean)
+      .map(normalizeScopeValue);
+
+    return candidateIds.includes(normalizedStationId);
+  });
+
+  return (
+    station?.project ||
+    station?.projectName ||
+    station?.projectId ||
+    station?.projectCode ||
+    ""
+  );
 }
 
 function getRowProjectValue(row, headers, assets = [], stations = []) {
+  const explicitProject = getValue(row, headers, [
+    "project",
+    "Project",
+    "project_id",
+    "Project ID",
+    "project name",
+    "Project Name",
+    "site",
+    "Site",
+  ]);
+
+  if (explicitProject) return explicitProject;
+
   const typeIndex = getHeaderIndex(headers, [
     "transaction_type",
     "Transaction type",
@@ -1612,17 +1787,37 @@ function getRowProjectValue(row, headers, assets = [], stations = []) {
     "destination",
   ]);
 
+  const assetIndex = getHeaderIndex(headers, [
+    "asset_id",
+    "Asset ID",
+    "asset id",
+    "equipment_no",
+    "Equipment No",
+    "equipment no",
+    "equipment_number",
+    "Equipment Number",
+    "machine_id",
+    "Machine ID",
+    "target_equipment",
+    "Target Equipment",
+  ]);
+
   const operationType = typeIndex !== -1 ? row[typeIndex] : "";
   const sourceStation = sourceIndex !== -1 ? row[sourceIndex] : "";
   const destination = destinationIndex !== -1 ? row[destinationIndex] : "";
+  const assetValue = assetIndex !== -1 ? row[assetIndex] : "";
 
   if (isSameText(operationType, "Direct_Refuel")) {
-    return getAssetProjectValue(destination, assets);
+    return (
+      getAssetProjectValue(assetValue, assets) ||
+      getAssetProjectValue(destination, assets)
+    );
   }
 
   return (
     getStationProjectValue(sourceStation, stations) ||
     getStationProjectValue(destination, stations) ||
+    getAssetProjectValue(assetValue, assets) ||
     getAssetProjectValue(destination, assets)
   );
 }
@@ -1873,6 +2068,7 @@ export default function Home() {
   const [activityLog, setActivityLog] = useState([]);
   const [pendingApprovals, setPendingApprovals] = useState([]);
   const [employeeTransferRequests, setEmployeeTransferRequests] = useState([]);
+  const [assetTransferRequests, setAssetTransferRequests] = useState([]);
   const [notificationReadMap, setNotificationReadMap] = useState({});
   const [loginPassword, setLoginPassword] = useState("Admin@12345");
   const [forcePasswordChangeOpen, setForcePasswordChangeOpen] = useState(false);
@@ -1881,6 +2077,60 @@ export default function Home() {
   const [forceConfirmPassword, setForceConfirmPassword] = useState("");
   const [forcePasswordError, setForcePasswordError] = useState("");
   const [forcePasswordLoading, setForcePasswordLoading] = useState(false);
+
+  const [actionLoading, setActionLoading] = useState({
+    active: false,
+    label: "",
+  });
+  const actionLoadingCounterRef = useRef(0);
+
+  const inferApiActionLabel = (config = {}) => {
+    const method = String(config.method || "GET").toUpperCase();
+    const url = String(config.url || "");
+
+    if (url.includes("/auth") || url.includes("/login")) return "Signing in...";
+    if (url.includes("/assets/transfers") && url.includes("/review")) {
+      return method === "PATCH" ? "Reviewing asset transfer..." : "Loading asset transfer...";
+    }
+    if (url.includes("/employee-transfers") && url.includes("/review")) {
+      return method === "PATCH" ? "Reviewing team transfer..." : "Loading team transfer...";
+    }
+    if (url.includes("/assets") && url.includes("/reset-odometer")) return "Submitting odometer reset...";
+    if (url.includes("/assets") && url.includes("/transfer")) return "Submitting asset transfer...";
+    if (method === "DELETE") return "Deleting...";
+    if (method === "POST") return "Saving...";
+    if (method === "PATCH" || method === "PUT") return "Updating...";
+    return "Loading data...";
+  };
+
+  const beginActionLoading = (label = "Working...") => {
+    actionLoadingCounterRef.current += 1;
+    setActionLoading({
+      active: true,
+      label,
+    });
+  };
+
+  const endActionLoading = () => {
+    actionLoadingCounterRef.current = Math.max(0, actionLoadingCounterRef.current - 1);
+
+    if (actionLoadingCounterRef.current === 0) {
+      setActionLoading({
+        active: false,
+        label: "",
+      });
+    }
+  };
+
+  const runWithActionLoading = async (label, actionFn) => {
+    beginActionLoading(label);
+
+    try {
+      return await actionFn();
+    } finally {
+      endActionLoading();
+    }
+  };
 
   const {
     currentUser: backendAuthUser,
@@ -1907,6 +2157,71 @@ export default function Home() {
     null;
 
   const currentUser = backendLegacyUser || localCurrentUser;
+
+
+  useEffect(() => {
+    const requestInterceptor = api.interceptors.request.use((config) => {
+      const method = String(config.method || "GET").toUpperCase();
+      const explicitLabel = config?.headers?.["X-Action-Loading-Label"];
+      const shouldTrackActionLoading = Boolean(explicitLabel) || method !== "GET";
+
+      if (explicitLabel) {
+        delete config.headers["X-Action-Loading-Label"];
+      }
+
+      if (shouldTrackActionLoading) {
+        const label = explicitLabel || inferApiActionLabel(config);
+        config.__fleetFuelActionLoading = true;
+        beginActionLoading(label);
+      }
+
+      return config;
+    });
+
+    const responseInterceptor = api.interceptors.response.use(
+      (response) => {
+        if (response?.config?.__fleetFuelActionLoading) {
+          endActionLoading();
+        }
+
+        return response;
+      },
+      (error) => {
+        if (error?.config?.__fleetFuelActionLoading) {
+          endActionLoading();
+        }
+
+        return Promise.reject(error);
+      }
+    );
+
+    return () => {
+      api.interceptors.request.eject(requestInterceptor);
+      api.interceptors.response.eject(responseInterceptor);
+    };
+  }, []);
+
+  useEffect(() => {
+    if (typeof document === "undefined") return undefined;
+
+    document.body.style.cursor = actionLoading.active ? "wait" : "";
+
+    return () => {
+      document.body.style.cursor = "";
+    };
+  }, [actionLoading.active]);
+
+
+  useEffect(() => {
+    if (!actionLoading.active) return undefined;
+
+    const safetyTimer = window.setTimeout(() => {
+      actionLoadingCounterRef.current = 0;
+      setActionLoading({ active: false, label: "" });
+    }, 45000);
+
+    return () => window.clearTimeout(safetyTimer);
+  }, [actionLoading.active]);
 
   useEffect(() => {
   async function fetchProtectedCompanies() {
@@ -1981,124 +2296,51 @@ useEffect(() => {
   const handleLogin = async (event) => {
     event?.preventDefault?.();
 
-    const rawLoginValue = String(loginIdentifier || "")
-      .trim()
-      .toLowerCase();
+    const rawLoginValue = String(loginIdentifier || "").trim().toLowerCase();
 
-    if (rawLoginValue.includes("@")) {
-      try {
-        const loggedUser = await backendLogin(rawLoginValue, loginPassword);
+    if (!rawLoginValue || !loginPassword) {
+      setLoginError("Username and password are required.");
+      return;
+    }
 
-        const normalizedSelectedCompany = normalizeScopeValue(selectedCompanyId);
-        const normalizedUserCompany = normalizeScopeValue(loggedUser.companyId);
-        const normalizedUserCompanyName = normalizeScopeValue(loggedUser.companyName);
-        const isPlatformUser =
-          normalizeBackendRoleName(loggedUser.roleName) === "PlatformAdmin";
+    try {
+      const loggedUser = await backendLogin(rawLoginValue, loginPassword, "");
+      const isPlatformUser = normalizeBackendRoleName(loggedUser.roleName) === "PlatformAdmin";
 
-        const selectedCompanyRecord = companies.find((company) => {
-          const companyId = normalizeScopeValue(company.id);
-          const companyName = normalizeScopeValue(company.name);
-          const companyCode = normalizeScopeValue(company.code);
+      await reloadBackendUser?.();
 
-          return (
-            companyId === normalizedSelectedCompany ||
-            companyName === normalizedSelectedCompany ||
-            companyCode === normalizedSelectedCompany
-          );
-        });
+      const finalCompanyId = isPlatformUser
+        ? loggedUser.companyId || getPlatformCompanyId(companies)
+        : loggedUser.companyId || "";
 
-        const normalizedSelectedCompanyName = normalizeScopeValue(
-          selectedCompanyRecord?.name
-        );
-        const normalizedSelectedCompanyCode = normalizeScopeValue(
-          selectedCompanyRecord?.code
-        );
+      startLocalSession(loggedUser.id, finalCompanyId, rememberSession);
+      setSelectedCompanyId(finalCompanyId);
 
-        const companyMatched =
-          !normalizedSelectedCompany ||
-          normalizedSelectedCompany === normalizedUserCompany ||
-          normalizedSelectedCompany === normalizedUserCompanyName ||
-          normalizedSelectedCompanyName === normalizedUserCompanyName ||
-          normalizedSelectedCompanyCode === normalizeScopeValue("FFP");
-
-        if (!isPlatformUser && !companyMatched) {
-          backendLogout?.();
-          localStorage.removeItem(AUTH_SESSION_KEY);
-          setCurrentUserId("");
-          setLoginError("This user does not belong to the selected company.");
-          return;
-        }
-
-       await reloadBackendUser();
-
-const finalCompanyId = isPlatformUser
-  ? selectedCompanyId || getPlatformCompanyId(companies)
-  : selectedCompanyId || loggedUser.companyId || "";
-
-startLocalSession(
-  loggedUser.id,
-  finalCompanyId,
-  rememberSession
-);
-
-setSelectedCompanyId(finalCompanyId);
-
-if (loggedUser.mustChangePassword) {
-  setForcePasswordChangeOpen(true);
-  setForceCurrentPassword(loginPassword || "");
-  setForceNewPassword("");
-  setForceConfirmPassword("");
-  setForcePasswordError("");
-}
-
-setLoginError("");
-setLoginIdentifier("");
-        trackActivity("Login", "auth", `${loggedUser.fullName} signed in using backend JWT session.`);
-        return;
-      } catch (error) {
-        console.error("Backend login failed:", error);
-        setLoginError("Backend login failed. Check email and password.");
-        return;
+      if (loggedUser.mustChangePassword) {
+        setForcePasswordChangeOpen(true);
+        setForceCurrentPassword(loginPassword || "");
+        setForceNewPassword("");
+        setForceConfirmPassword("");
+        setForcePasswordError("");
       }
-    }
 
-    const loginValue = normalizeScopeValue(loginIdentifier);
-    const selectedCompany = normalizeScopeValue(selectedCompanyId);
-
-    if (!selectedCompany) {
-      setLoginError("Please select your company first, or login by backend email.");
+      setLoginError("");
+      setLoginIdentifier("");
+      trackActivity(
+        "Login",
+        "auth",
+        `${loggedUser.fullName || loggedUser.username || "User"} signed in using username.`
+      );
       return;
+    } catch (error) {
+      console.error("Backend login failed:", error);
+      const backendMessage = error?.response?.data?.message;
+      setLoginError(
+        Array.isArray(backendMessage)
+          ? backendMessage.join(", ")
+          : backendMessage || "Login failed. Check username and password."
+      );
     }
-
-    const matchedUser = users.find((user) => {
-      const userCompany = normalizeScopeValue(user.companyId);
-      const isPlatformLogin = selectedCompany === "platform";
-
-      const companyMatch = isPlatformLogin
-        ? user.role === "PlatformAdmin"
-        : userCompany === selectedCompany;
-
-      const identityMatch = [user.id, user.username, user.email, user.fullName]
-        .filter(Boolean)
-        .some((value) => normalizeScopeValue(value) === loginValue);
-
-      return companyMatch && identityMatch;
-    });
-
-    if (!matchedUser) {
-      setLoginError("Invalid company or user. Check the selected company and login ID.");
-      return;
-    }
-
-    if (matchedUser.status !== "Active") {
-      setLoginError("This user is inactive and cannot access the system.");
-      return;
-    }
-
-    startLocalSession(matchedUser.id, selectedCompanyId, rememberSession);
-    setLoginError("");
-    setLoginIdentifier("");
-    trackActivity("Login", "auth", `${matchedUser.fullName} signed in using frontend session.`);
   };
 
   const handleForcedPasswordChange = async (event) => {
@@ -2236,19 +2478,25 @@ setLoginIdentifier("");
   };
 
   const submitApprovalRequest = (request) => {
-    const approvalRequest = createApprovalRequest({ ...request, requestedBy: currentUser, users, projects });
-    setPendingApprovals((prev) => [approvalRequest, ...prev]);
-    setActivityLog((prev) => [
-      createActivityRecord({
-        user: currentUser,
-        action: "Submit Approval Request",
-        module: request.module,
-        details: request.title || request.details || "Approval request submitted.",
-      }),
-      ...prev,
-    ]);
-    showToast?.("warning", "Request sent to Manager approval queue.");
-    return approvalRequest;
+    beginActionLoading("Submitting approval request...");
+
+    try {
+      const approvalRequest = createApprovalRequest({ ...request, requestedBy: currentUser, users, projects });
+      setPendingApprovals((prev) => [approvalRequest, ...prev]);
+      setActivityLog((prev) => [
+        createActivityRecord({
+          user: currentUser,
+          action: "Submit Approval Request",
+          module: request.module,
+          details: request.title || request.details || "Approval request submitted.",
+        }),
+        ...prev,
+      ]);
+      showToast?.("warning", "Request sent to Manager approval queue.");
+      return approvalRequest;
+    } finally {
+      window.setTimeout(() => endActionLoading(), 250);
+    }
   };
 
   const mapBackendProjectForState = (project = {}) => ({
@@ -2494,6 +2742,37 @@ setLoginIdentifier("");
     }
   };
 
+  const upsertAssetTransferRequest = (transfer) => {
+    const mappedTransfer = mapBackendAssetTransferForState(transfer);
+    if (!mappedTransfer.id) return mappedTransfer;
+
+    setAssetTransferRequests((prev) => [
+      mappedTransfer,
+      ...(prev || []).filter(
+        (item) => normalizeScopeValue(item.id) !== normalizeScopeValue(mappedTransfer.id)
+      ),
+    ]);
+
+    return mappedTransfer;
+  };
+
+  const refreshBackendAssetTransfers = async () => {
+    try {
+      const response = await api.get("/assets/transfers/pending");
+      const backendTransfers = Array.isArray(response.data) ? response.data : [];
+      const mappedTransfers = backendTransfers
+        .map(mapBackendAssetTransferForState)
+        .filter((transfer) => transfer.id);
+
+      setAssetTransferRequests(mappedTransfers);
+      return mappedTransfers;
+    } catch (error) {
+      console.warn("Asset transfers API is not available.", error);
+      setAssetTransferRequests([]);
+      return [];
+    }
+  };
+
   const handleCreateEmployee = async (payload) => {
     const response = await api.post("/employees", payload);
     const createdEmployee = mapBackendEmployeeForState(response.data);
@@ -2659,6 +2938,235 @@ setLoginIdentifier("");
     return reviewedTransfer;
   };
 
+  const refreshBackendAssets = async () => {
+    try {
+      const response = await api.get("/assets");
+      const backendAssets = Array.isArray(response.data) ? response.data : [];
+      const mappedAssets = backendAssets
+        .map(mapBackendAssetForState)
+        .filter((asset) => asset.id && !asset.deletedAt);
+
+      setAssets(mappedAssets);
+      return mappedAssets;
+    } catch (error) {
+      console.warn("Assets backend API is not available.", error);
+      showToast?.("warning", "Assets backend API is not available.");
+      return [];
+    }
+  };
+
+  const replaceBackendAssetInState = (asset) => {
+    const mappedAsset = mapBackendAssetForState(asset);
+    if (!mappedAsset.id) return mappedAsset;
+
+    setAssets((prev) => {
+      const next = [...(prev || [])];
+      const index = next.findIndex(
+        (item) =>
+          normalizeScopeValue(item.backendId || item.assetBackendId) === normalizeScopeValue(mappedAsset.backendId) ||
+          normalizeScopeValue(item.id) === normalizeScopeValue(mappedAsset.id)
+      );
+
+      if (index === -1) return [mappedAsset, ...next];
+
+      next[index] = { ...next[index], ...mappedAsset };
+      return next;
+    });
+
+    return mappedAsset;
+  };
+
+  const removeBackendAssetFromState = (assetOrId) => {
+    const backendId =
+      typeof assetOrId === "string"
+        ? assetOrId
+        : assetOrId?.backendId || assetOrId?.assetBackendId || assetOrId?.id || "";
+
+    setAssets((prev) =>
+      (prev || []).filter(
+        (item) =>
+          normalizeScopeValue(item.backendId || item.assetBackendId) !== normalizeScopeValue(backendId) &&
+          normalizeScopeValue(item.id) !== normalizeScopeValue(backendId)
+      )
+    );
+  };
+
+  const handleApproveAssetTransfer = async (transfer, reviewerUserId = "") => {
+    const transferId = transfer?.backendId || transfer?.id;
+    const managerUserId = reviewerUserId || backendAuthUser?.id || currentUser?.id || "";
+
+    if (!transferId) {
+      throw new Error("Asset transfer ID is required.");
+    }
+
+    if (!managerUserId) {
+      throw new Error("Approver user ID is required.");
+    }
+
+    const response = await api.patch(`/assets/transfers/${transferId}/review`, {
+      managerUserId,
+      approve: true,
+    });
+
+    const reviewedTransfer = mapBackendAssetTransferForState(response.data);
+
+    setAssetTransferRequests((prev) => {
+      if (String(reviewedTransfer.status || "").toUpperCase() === "APPROVED") {
+        return (prev || []).filter((item) => normalizeScopeValue(item.id) !== normalizeScopeValue(reviewedTransfer.id));
+      }
+
+      return (prev || []).map((item) =>
+        normalizeScopeValue(item.id) === normalizeScopeValue(reviewedTransfer.id)
+          ? reviewedTransfer
+          : item
+      );
+    });
+
+    if (String(reviewedTransfer.status || "").toUpperCase() === "APPROVED") {
+      try {
+        const assetResponse = await api.get(`/assets/${reviewedTransfer.assetBackendId}`);
+        replaceBackendAssetInState(assetResponse.data);
+      } catch (error) {
+        await refreshBackendAssets();
+      }
+    }
+
+    await refreshBackendAssetTransfers();
+
+    return reviewedTransfer;
+  };
+
+  const handleRejectAssetTransfer = async (transfer, reason = "", reviewerUserId = "") => {
+    const transferId = transfer?.backendId || transfer?.id;
+    const managerUserId = reviewerUserId || backendAuthUser?.id || currentUser?.id || "";
+
+    if (!transferId) {
+      throw new Error("Asset transfer ID is required.");
+    }
+
+    if (!managerUserId) {
+      throw new Error("Reviewer user ID is required.");
+    }
+
+    const response = await api.patch(`/assets/transfers/${transferId}/review`, {
+      managerUserId,
+      approve: false,
+      rejectionReason: reason || "Rejected",
+    });
+
+    const reviewedTransfer = mapBackendAssetTransferForState(response.data);
+
+    setAssetTransferRequests((prev) =>
+      (prev || []).filter((item) => normalizeScopeValue(item.id) !== normalizeScopeValue(reviewedTransfer.id))
+    );
+
+    await refreshBackendAssetTransfers();
+
+    return reviewedTransfer;
+  };
+
+  const handleApproveAssetAction = async (request) => {
+    const payload = request?.payload || {};
+    const action = payload.action || payload?.values?.action || "";
+    const values = payload.values || {};
+
+    // Add Asset approval:
+    // Officer request -> Admin approval -> create asset in backend.
+    // Admin-created assets are created directly from the Assets page and do not come here.
+    if (action === "add") {
+      const response = await api.post("/assets", values);
+      replaceBackendAssetInState(response.data);
+      await refreshBackendAssets();
+      return { action: "add", asset: response.data };
+    }
+
+    let backendAssetId =
+      payload.backendAssetId ||
+      payload.assetBackendId ||
+      values.backendAssetId ||
+      values.assetBackendId ||
+      "";
+
+    // Delete Asset approval:
+    // Officer request -> Admin approval -> soft delete from backend.
+    // Admin delete from the Assets page is direct and does not come here.
+    if (action === "delete") {
+      const requestedAssetId =
+        backendAssetId ||
+        payload.id ||
+        payload.assetId ||
+        payload.entityId ||
+        values.id ||
+        values.assetId ||
+        request?.entityId ||
+        "";
+
+      const matchedAsset = (assets || []).find((asset) => {
+        const candidates = [
+          asset.backendId,
+          asset.assetBackendId,
+          asset.id,
+          asset.assetId,
+        ].map(normalizeScopeValue);
+
+        return candidates.includes(normalizeScopeValue(requestedAssetId));
+      });
+
+      backendAssetId = backendAssetId || getBackendAssetId(matchedAsset);
+
+      if (!backendAssetId) {
+        throw new Error("Asset backend ID is required for delete approval.");
+      }
+
+      await api.delete(`/assets/${backendAssetId}`);
+      removeBackendAssetFromState(backendAssetId);
+      return { action: "delete", backendAssetId };
+    }
+
+    if (!backendAssetId) {
+      throw new Error("Asset backend ID is required.");
+    }
+
+    if (action === "odometer_reset") {
+      const response = await api.post(`/assets/${backendAssetId}/reset-odometer`, {
+        newOdometer:
+          Number(values.newOdometerAfterReset ?? values.newOdometer ?? values.newReading ?? 0) || 0,
+        reason: values.reason || payload.reason || request.details || "Odometer reset approved",
+        effectiveAt: values.effectiveDate || values.effectiveAt || undefined,
+        createdByUserId: backendAuthUser?.id || currentUser?.id || undefined,
+      });
+
+      if (response.data?.asset) {
+        replaceBackendAssetInState(response.data.asset);
+      }
+
+      if (response.data?.resetRecord && typeof setAssetOdometerHistory === "function") {
+        const record = response.data.resetRecord;
+        setAssetOdometerHistory((prev) => [
+          ...(prev || []),
+          {
+            assetId: values.assetId || payload.id || record.assetId,
+            entityId: values.assetId || payload.id || record.assetId,
+            companyId: record.companyId,
+            oldOdometerBeforeReset: record.oldOdometer,
+            newOdometerAfterReset: record.newOdometer,
+            newReading: record.newOdometer,
+            effectiveDate: record.effectiveAt,
+            effectiveFrom: record.effectiveAt,
+            reason: record.reason,
+            requestedBy: currentUser?.fullName || currentUser?.name || "System",
+            requestedAt: record.createdAt || new Date().toISOString(),
+            status: "Approved",
+          },
+        ]);
+      }
+
+      return response.data;
+    }
+
+    throw new Error("Unsupported asset approval action.");
+  };
+
   const mapBackendUserForState = (user = {}) => {
     const roleName =
       user.role?.name ||
@@ -2676,12 +3184,16 @@ setLoginIdentifier("");
     return {
       id: user.id,
       fullName: user.fullName || user.name || user.email || "",
-      username: makeUsernameFromUser({
-        id: user.id,
-        fullName: user.fullName,
-        email: user.email,
-      }),
+      username:
+        user.username ||
+        makeUsernameFromUser({
+          id: user.id,
+          fullName: user.fullName,
+          email: user.email,
+        }),
       email: String(user.email || "").toLowerCase(),
+      employeeId: user.employeeId || user.linkedEmployee?.employeeId || "",
+      linkedEmployeeId: user.linkedEmployeeId || user.linkedEmployee?.id || "",
       phone: user.phone || "",
       mobile: user.phone || user.mobile || "",
       role: normalizeBackendRoleName(roleName),
@@ -3109,6 +3621,7 @@ setLoginIdentifier("");
 
     refreshBackendEmployees(currentCompanyId, currentUser?.id || backendAuthUser?.id || "");
     refreshBackendEmployeeTransfers();
+    refreshBackendAssetTransfers();
   }, [
     backendIsLoggedIn,
     currentCompanyId,
@@ -3480,7 +3993,68 @@ setLoginIdentifier("");
       };
     });
 
-  const allApprovalRequests = [...pendingApprovals, ...employeeTransferApprovals];
+  const assetTransferApprovals = assetTransferRequests
+    .filter((transfer) => ["PENDING", "PARTIALLY_APPROVED"].includes(String(transfer.status || "").toUpperCase()))
+    .map((transfer) => {
+      const requestedBy = companyUsers.find((user) => user.id === transfer.requestedByUserId) || currentUser;
+      const requiredApprovers = (transfer.approvals || [])
+        .filter((approval) => ["Pending", "Approved"].includes(approval.status))
+        .map((approval) => {
+          const approverUser = companyUsers.find((user) => user.id === approval.approverUserId);
+          return {
+            userId: approval.approverUserId,
+            userName: approverUser?.fullName || approverUser?.email || approval.approverUserId,
+            role: "Manager",
+            projectId: approval.projectId || "-",
+            approvalStage: approval.approvalStage || "Project Manager",
+            status: approval.status || "Pending",
+            reviewedAt: approval.reviewedAt || "",
+            reviewNote: approval.note || "",
+          };
+        });
+
+      return {
+        id: `ASSET-TRANSFER-${transfer.id}`,
+        type: "asset_transfer",
+        module: "assets",
+        title: `Asset Transfer: ${transfer.assetName || transfer.assetId || "Asset"}`,
+        payload: {
+          transfer,
+          assetTransferId: transfer.id,
+        },
+        details: `Transfer ${transfer.assetName || transfer.assetId || "asset"} from ${transfer.fromProjectName || "-"} to ${transfer.toProjectName || "-"}.`,
+        status: "Pending",
+        changedFields: [
+          {
+            field: "project",
+            label: "Asset Project Transfer",
+            oldValue: transfer.fromProjectName || transfer.fromProjectId || "-",
+            newValue: transfer.toProjectName || transfer.toProjectId || "-",
+            sensitive: true,
+          },
+        ],
+        entityType: "Asset",
+        entityId: transfer.assetId || transfer.assetBackendId || "-",
+        sensitivity: "Sensitive",
+        riskLevel: "High",
+        approvalRoute: {
+          routeType: "dual_project_manager",
+          sourceProject: transfer.fromProjectName || transfer.fromProjectId || "-",
+          destinationProject: transfer.toProjectName || transfer.toProjectId || "-",
+          requiredApprovers,
+          routeStatus: "Pending",
+        },
+        requestedById: requestedBy?.id || transfer.requestedByUserId || "System",
+        requestedByName: requestedBy?.fullName || requestedBy?.name || "System",
+        requestedByRole: requestedBy?.role || "System",
+        requestedAt: transfer.createdAt || new Date().toISOString(),
+        reviewedBy: "",
+        reviewedAt: "",
+        reviewNote: "",
+      };
+    });
+
+  const allApprovalRequests = [...pendingApprovals, ...employeeTransferApprovals, ...assetTransferApprovals];
 
   const notifications = buildNotificationItems({
     approvals: allApprovalRequests,
@@ -3553,6 +4127,8 @@ setLoginIdentifier("");
           hasPermission={hasPermission}
           trackActivity={trackActivity}
           submitApprovalRequest={submitApprovalRequest}
+          onAssetTransferCreated={upsertAssetTransferRequest}
+          runWithActionLoading={runWithActionLoading}
         />
       );
     }
@@ -3602,6 +4178,7 @@ setLoginIdentifier("");
       onCreateUserFromEmployee={handleCreateUserFromEmployee}
       onUpdateUserStatus={handleUpdateUserStatusFromTeam}
       pendingEmployeeTransfers={employeeTransferRequests}
+      companies={companies}
     />
   );
 }
@@ -3671,6 +4248,10 @@ if (page === "approvals") {
       showToast={showToast}
       onApproveEmployeeTransfer={handleApproveEmployeeTransfer}
       onRejectEmployeeTransfer={handleRejectEmployeeTransfer}
+      onApproveAssetTransfer={handleApproveAssetTransfer}
+      onRejectAssetTransfer={handleRejectAssetTransfer}
+      onApproveAssetAction={handleApproveAssetAction}
+      runWithActionLoading={runWithActionLoading}
     />
   );
 }
@@ -3807,6 +4388,7 @@ if (!currentUser) {
       handleLogin={handleLogin}
       theme={theme}
       setTheme={setTheme}
+      actionLoading={actionLoading}
     />
   );
 }
@@ -4777,7 +5359,10 @@ const [showForm, setShowForm] = useState(false);
           row: newRow,
           project: destinationProjectForApproval,
           projectName: destinationProjectForApproval,
-          approvalRouteStrategy: "project_manager",
+          approvalRouteStrategy:
+          ["Admin","Manager"].includes(currentUser?.role)
+            ? "direct"
+            : "project_manager",
           approvalRouteReason: "External Supply approval is routed to the destination station project manager.",
         },
       });
@@ -6806,6 +7391,8 @@ function AssetsPage({
   hasPermission = () => false,
   trackActivity = () => {},
   submitApprovalRequest = () => {},
+  onAssetTransferCreated = () => {},
+  runWithActionLoading = async (_label, actionFn) => actionFn(),
 }) {
 
 
@@ -6994,18 +7581,59 @@ useOutsideClick(assetSettingsRef, () => {
     return mappedAsset;
   };
 
-  const removeAssetFromState = (asset) => {
-    const backendId = getBackendAssetId(asset);
-    if (typeof setAssets !== "function") return;
+  const removeAssetFromState = (assetOrId) => {
+    const backendId =
+      typeof assetOrId === "string"
+        ? assetOrId
+        : getBackendAssetId(assetOrId);
 
-    setAssets((prev) =>
-      (prev || []).filter((item) => {
-        return !(
-          normalizeScopeValue(item.backendId || item.assetBackendId) === normalizeScopeValue(backendId) ||
-          normalizeScopeValue(item.id) === normalizeScopeValue(asset?.id)
-        );
-      })
-    );
+    const assetId =
+      typeof assetOrId === "string"
+        ? ""
+        : assetOrId?.assetId || assetOrId?.id || "";
+
+    const normalizedBackendId = normalizeScopeValue(backendId);
+    const normalizedAssetId = normalizeScopeValue(assetId);
+
+    if (typeof setAssets === "function") {
+      setAssets((prev) =>
+        (prev || []).filter((item) => {
+          const candidates = [
+            item.backendId,
+            item.assetBackendId,
+            item.id,
+            item.assetId,
+          ]
+            .filter(Boolean)
+            .map(normalizeScopeValue);
+
+          return !(
+            (normalizedBackendId && candidates.includes(normalizedBackendId)) ||
+            (normalizedAssetId && candidates.includes(normalizedAssetId))
+          );
+        })
+      );
+    }
+
+    if (typeof setLocalAssets === "function") {
+      setLocalAssets((prev) =>
+        (prev || []).filter((item) => {
+          const candidates = [
+            item.backendId,
+            item.assetBackendId,
+            item.id,
+            item.assetId,
+          ]
+            .filter(Boolean)
+            .map(normalizeScopeValue);
+
+          return !(
+            (normalizedBackendId && candidates.includes(normalizedBackendId)) ||
+            (normalizedAssetId && candidates.includes(normalizedAssetId))
+          );
+        })
+      );
+    }
   };
 
   const [selectedAsset, setSelectedAsset] = useState(null);
@@ -7129,7 +7757,12 @@ useOutsideClick(assetSettingsRef, () => {
         module: "assets",
         title: `New asset ${payload.assetId}`,
         details: `Officer requested new asset ${payload.assetId}`,
-        payload: { entity: "asset", action: "add", values: payload },
+        payload: {
+          entity: "asset",
+          action: "add",
+          values: payload,
+          approvalRouteStrategy: "admin",
+        },
       });
       closeAddAsset();
       return;
@@ -7395,10 +8028,12 @@ useOutsideClick(assetSettingsRef, () => {
     }
 
     try {
-      await api.post(`/assets/${backendAssetId}/transfer`, {
+      const response = await api.post(`/assets/${backendAssetId}/transfer`, {
         toProjectId,
         requestedByUserId: currentUser?.id || "",
       });
+
+      onAssetTransferCreated?.(response.data);
 
       showToast?.("warning", "Asset transfer request submitted for project manager approval.");
       trackActivity?.(
@@ -7431,32 +8066,109 @@ useOutsideClick(assetSettingsRef, () => {
     confirmDeleteRequest();
   };
 
-  const confirmDeleteRequest = () => {
-    if (!hasPermission("assets", "delete")) {
-      showToast?.("warning", "Read-only access: you cannot request asset deletion.");
+  const confirmDeleteRequest = async () => {
+    const backendAssetId = getBackendAssetId(deleteTargetAsset);
+    const currentRole = String(currentUser?.role || "").trim();
+    const canDeleteDirectly = ["Admin", "PlatformAdmin"].includes(currentRole);
+
+    if (!backendAssetId) {
+      showToast?.("warning", "This asset is not linked to backend yet.");
       return;
     }
 
+    // Admin / PlatformAdmin delete directly from the Assets page.
+    // Officer submits an Admin approval request.
+    // Asset transfer remains a separate approval workflow regardless of role.
+    if (canDeleteDirectly) {
+      try {
+        await runWithActionLoading("Deleting asset...", async () => {
+          await api.delete(`/assets/${backendAssetId}`);
+        });
 
-    submitApprovalRequest({
-      type: "master_data_change",
-      module: "assets",
-      title: `Asset ${deleteTargetAsset?.id} deletion request`,
-      details: deleteReason,
-      payload: { entity: "asset", action: "delete", id: deleteTargetAsset?.id, reason: deleteReason },
+        // Close every UI layer related to the deleted asset immediately.
+        setShowDeleteConfirm(false);
+        setShowDeletePassword(false);
+        setDeleteTargetAsset(null);
+        setSelectedAsset(null);
+        setDeleteReason("");
+        setDeletePassword("");
+
+        // Remove it from local UI state first so the list updates without a page reload.
+        removeAssetFromState({
+          backendId: backendAssetId,
+          assetBackendId: backendAssetId,
+          id: deleteTargetAsset?.id || "",
+          assetId: deleteTargetAsset?.assetId || deleteTargetAsset?.id || "",
+        });
+
+        // Then sync the visible list with backend truth after soft delete.
+        try {
+          const response = await api.get("/assets");
+          const backendAssets = Array.isArray(response.data) ? response.data : [];
+          const mappedAssets = backendAssets
+            .map(mapBackendAssetForState)
+            .filter((asset) => asset.id && !asset.deletedAt);
+
+          setAssets(mappedAssets);
+        } catch (refreshError) {
+          console.warn("Failed to refresh assets after delete.", refreshError);
+        }
+
+        showToast?.("success", "Asset deleted successfully.");
+      } catch (error) {
+        showToast?.(
+          "warning",
+          error?.response?.data?.message || error?.message || "Failed to delete asset."
+        );
+      }
+      return;
+    }
+
+    if (!isOfficerUser(currentUser)) {
+      showToast?.("warning", "Only Admin can delete directly. Officer can submit a delete request.");
+      setShowDeleteConfirm(false);
+      return;
+    }
+
+    await runWithActionLoading("Submitting delete request...", async () => {
+      submitApprovalRequest({
+        type: "master_data_change",
+        module: "assets",
+        title: `Asset ${deleteTargetAsset?.id} deletion request`,
+        details: deleteReason,
+        payload: {
+          entity: "asset",
+          action: "delete",
+          id: deleteTargetAsset?.id,
+          assetId: deleteTargetAsset?.assetId || deleteTargetAsset?.id,
+          backendAssetId,
+          assetBackendId: backendAssetId,
+          approvalRouteStrategy: "admin",
+          reason: deleteReason,
+          changedFields: [
+            {
+              field: "delete",
+              label: "Soft Delete Request",
+              oldValue: deleteTargetAsset?.id || "-",
+              newValue: "Requested Deletion",
+              sensitive: true,
+            },
+          ],
+        },
+      });
     });
 
-    setDeleteTargetAsset(null);
-    setDeleteReason("");
     setShowDeleteConfirm(false);
     setShowDeletePassword(false);
+    setDeleteTargetAsset(null);
+    setDeleteReason("");
 
     showToast
       ? showToast(
           "success",
-          "Asset deletion request submitted for manager approval."
+          "Asset deletion request submitted for Admin approval."
         )
-      : notifyUser(typeof showToast !== "undefined" ? showToast : null, inferToastTypeFromMessage("Asset deletion request submitted for manager approval."), "Asset deletion request submitted for manager approval.");
+      : notifyUser(typeof showToast !== "undefined" ? showToast : null, inferToastTypeFromMessage("Asset deletion request submitted for Admin approval."), "Asset deletion request submitted for Admin approval.");
   };
 
   const proceedOdometerConfirm = () => {
@@ -7499,9 +8211,21 @@ useOutsideClick(assetSettingsRef, () => {
     confirmOdometerRequest();
   };
 
+// Odometer Reset Rules:
+// Officer -> Request to Project Manager
+// Manager/Admin -> Direct execute after confirmation
+
+
   const confirmOdometerRequest = async () => {
-    if (!hasPermission("assets", "edit")) {
-      showToast?.("warning", "Read-only access: you cannot reset odometer.");
+    const currentRole = String(currentUser?.role || "").trim();
+    const canResetDirectly = ["Admin", "Manager", "PlatformAdmin"].includes(currentRole);
+    const canSubmitOdometerRequest = isOfficerUser(currentUser) || canResetDirectly;
+
+    // Odometer Reset business rule:
+    // Officer -> approval request to Project Manager.
+    // Manager/Admin/PlatformAdmin -> direct execution after confirmation.
+    if (!canSubmitOdometerRequest) {
+      showToast?.("warning", "Read-only access: you cannot request odometer reset.");
       return;
     }
 
@@ -7511,47 +8235,36 @@ useOutsideClick(assetSettingsRef, () => {
       return;
     }
 
-    try {
-      const response = await api.post(`/assets/${backendAssetId}/reset-odometer`, {
-        newOdometer: Number(newOdometer) || 0,
-        reason: odometerReason,
-        effectiveAt: odometerEffectiveDate || undefined,
-        createdByUserId: currentUser?.id || undefined,
-      });
+    const oldReading = Number(oldOdometerBeforeReset) || 0;
+    const newReading = Number(newOdometer) || 0;
 
-      if (response.data?.asset) {
-        replaceAssetInState(response.data.asset);
-      }
+    const odometerHistoryRecord = {
+      assetId: odometerTargetAsset.id,
+      entityId: odometerTargetAsset.id,
+      backendAssetId,
+      companyId: odometerTargetAsset.companyId || currentUser?.companyId || "",
+      oldOdometerBeforeReset: oldReading,
+      newOdometerAfterReset: newReading,
+      newReading,
+      effectiveDate: odometerEffectiveDate,
+      effectiveFrom: odometerEffectiveDate,
+      odometerOffset: oldReading,
+      // Reset must not rewrite historical readings.
+      // The asset current odometer after reset is the new meter reading only.
+      // Future Operations distance can use:
+      // totalDistance = oldOdometerBeforeReset + (currentReading - newOdometerAfterReset)
+      actualOdometerAfterReset: newReading,
+      historicalDistanceBase: oldReading,
+      resetMeterStart: newReading,
+      reason: odometerReason,
+      project: odometerTargetAsset.project || "",
+      projectId: odometerTargetAsset.projectId || "",
+      requestedBy: currentUser?.fullName || currentUser?.name || "System",
+      requestedAt: new Date().toISOString(),
+      status: canResetDirectly ? "Approved" : "Pending Approval",
+    };
 
-      if (response.data?.resetRecord && setAssetOdometerHistory) {
-        const record = response.data.resetRecord;
-        setAssetOdometerHistory((prev) => [
-          ...prev,
-          {
-            assetId: odometerTargetAsset.id,
-            entityId: odometerTargetAsset.id,
-            companyId: record.companyId,
-            oldOdometerBeforeReset: record.oldOdometer,
-            newOdometerAfterReset: record.newOdometer,
-            newReading: record.newOdometer,
-            effectiveDate: record.effectiveAt,
-            effectiveFrom: record.effectiveAt,
-            reason: record.reason,
-            requestedBy: currentUser?.fullName || currentUser?.name || "System",
-            requestedAt: record.createdAt || new Date().toISOString(),
-            status: "Approved",
-          },
-        ]);
-      }
-
-      showToast?.("success", "Odometer reset saved successfully.");
-      trackActivity?.("Reset Asset Odometer", "assets", `${odometerTargetAsset.id} odometer reset to ${newOdometer}.`);
-    } catch (error) {
-      showToast?.(
-        "warning",
-        error?.response?.data?.message || error?.message || "Failed to reset odometer."
-      );
-    } finally {
+    const closeOdometerResetUi = () => {
       setOdometerTargetAsset(null);
       setOldOdometerBeforeReset("");
       setNewOdometer("");
@@ -7559,7 +8272,173 @@ useOutsideClick(assetSettingsRef, () => {
       setOdometerReason("");
       setShowOdometerConfirm(false);
       setShowOdometerPassword(false);
+      setOdometerPassword("");
+      setSelectedAsset(null);
+    };
+
+    const updateAssetOdometerLocally = (updatedAssetFromBackend = null) => {
+      const mappedBackendAsset = updatedAssetFromBackend
+        ? mapBackendAssetForState(updatedAssetFromBackend)
+        : null;
+
+      const patchAsset = (asset) => {
+        const candidates = [
+          asset?.backendId,
+          asset?.assetBackendId,
+          asset?.id,
+          asset?.assetId,
+        ]
+          .filter(Boolean)
+          .map(normalizeScopeValue);
+
+        const matches =
+          candidates.includes(normalizeScopeValue(backendAssetId)) ||
+          candidates.includes(normalizeScopeValue(odometerTargetAsset?.id));
+
+        if (!matches) return asset;
+
+        return {
+          ...asset,
+          ...(mappedBackendAsset?.id ? mappedBackendAsset : {}),
+          odometer: String(newReading),
+          currentOdometer: newReading,
+          updatedAt: new Date().toISOString(),
+        };
+      };
+
+      if (typeof setAssets === "function") {
+        setAssets((prev) => (prev || []).map(patchAsset));
+      }
+
+      if (typeof setLocalAssets === "function") {
+        setLocalAssets((prev) => (prev || []).map(patchAsset));
+      }
+
+      setSelectedAsset((prev) => (prev ? patchAsset(prev) : prev));
+    };
+
+    const syncBackendAssetsSafely = async () => {
+      try {
+        const response = await api.get("/assets");
+        const backendAssets = Array.isArray(response.data) ? response.data : [];
+        const mappedAssets = backendAssets
+          .map(mapBackendAssetForState)
+          .filter((asset) => asset.id && !asset.deletedAt);
+
+        if (typeof setAssets === "function") {
+          setAssets(mappedAssets);
+        }
+
+        return mappedAssets;
+      } catch (syncError) {
+        console.warn("Failed to refresh assets after odometer reset.", syncError);
+        return null;
+      }
+    };
+
+    if (canResetDirectly) {
+      try {
+        const response = await runWithActionLoading("Resetting odometer...", async () =>
+          api.post(`/assets/${backendAssetId}/reset-odometer`, {
+            newOdometer: newReading,
+            reason: odometerReason,
+            effectiveAt: odometerEffectiveDate || undefined,
+            createdByUserId: currentUser?.id || undefined,
+          })
+        );
+
+        const updatedAsset = response?.data?.asset || null;
+
+        // Update the visible table immediately.
+        // Do not call the global backend asset replacement helper here,
+        // because this AssetsPage scope uses its own local state helpers.
+        updateAssetOdometerLocally(updatedAsset);
+
+        if (typeof setAssetOdometerHistory === "function") {
+          const resetRecord = response?.data?.resetRecord;
+          setAssetOdometerHistory((prev) => [
+            ...(prev || []),
+            resetRecord
+              ? {
+                  assetId: odometerTargetAsset.id,
+                  entityId: odometerTargetAsset.id,
+                  backendAssetId,
+                  companyId: resetRecord.companyId || odometerTargetAsset.companyId || "",
+                  oldOdometerBeforeReset: resetRecord.oldOdometer ?? oldReading,
+                  newOdometerAfterReset: resetRecord.newOdometer ?? newReading,
+                  newReading: resetRecord.newOdometer ?? newReading,
+                  actualOdometerAfterReset: resetRecord.newOdometer ?? newReading,
+                  historicalDistanceBase: resetRecord.oldOdometer ?? oldReading,
+                  resetMeterStart: resetRecord.newOdometer ?? newReading,
+                  effectiveDate: resetRecord.effectiveAt || odometerEffectiveDate,
+                  effectiveFrom: resetRecord.effectiveAt || odometerEffectiveDate,
+                  reason: resetRecord.reason || odometerReason,
+                  requestedBy: currentUser?.fullName || currentUser?.name || "System",
+                  requestedAt: resetRecord.createdAt || new Date().toISOString(),
+                  status: "Approved",
+                }
+              : odometerHistoryRecord,
+          ]);
+        }
+
+        closeOdometerResetUi();
+
+        // Sync after React has committed the immediate local update.
+        window.setTimeout(() => {
+          syncBackendAssetsSafely();
+        }, 150);
+
+        showToast?.("success", "Odometer reset completed successfully.");
+      } catch (error) {
+        showToast?.(
+          "warning",
+          error?.response?.data?.message || error?.message || "Failed to reset odometer."
+        );
+      }
+
+      return;
     }
+
+    // Officer request only. No backend reset is executed here.
+    if (setAssetOdometerHistory) {
+      setAssetOdometerHistory((prev) => [...(prev || []), odometerHistoryRecord]);
+    }
+
+    await runWithActionLoading("Submitting odometer reset request...", async () => {
+      submitApprovalRequest({
+        type: "master_data_change",
+        module: "assets",
+        title: `Asset ${odometerTargetAsset?.id} odometer reset`,
+        details: odometerReason,
+        payload: {
+          entity: "asset",
+          action: "odometer_reset",
+          id: odometerTargetAsset?.id,
+          backendAssetId,
+          approvalRouteStrategy: "project_manager",
+          project: odometerTargetAsset?.project || odometerTargetAsset?.projectId || "",
+          values: odometerHistoryRecord,
+          changedFields: [
+            {
+              field: "currentOdometer",
+              label: "Odometer Reset",
+              oldValue: oldReading,
+              newValue: newReading,
+              sensitive: true,
+            },
+          ],
+        },
+      });
+    });
+
+    closeOdometerResetUi();
+
+    showToast
+      ? showToast(
+          "success",
+          "Odometer reset request submitted for project manager approval."
+        )
+      : notifyUser(typeof showToast !== "undefined" ? showToast : null, inferToastTypeFromMessage("Odometer reset request submitted for project manager approval."), "Odometer reset request submitted for project manager approval.");
   };
 
 const exportAssetsToCSV = () => {
@@ -8465,7 +9344,9 @@ const printAssetsReport = () => {
             </h2>
 
             <p className="mb-6">
-              Are you sure you want to submit deletion request for:
+              {currentUser?.role === "Admin" || currentUser?.role === "PlatformAdmin"
+                ? "Are you sure you want to delete asset:"
+                : "Are you sure you want to submit deletion request for:"}
               <strong> {deleteTargetAsset?.id}</strong> ?
             </p>
 
@@ -8585,7 +9466,7 @@ const printAssetsReport = () => {
                 <strong>Effective Date:</strong> {odometerEffectiveDate}
               </p>
               <p>
-                <strong>Actual Odometer After Reset:</strong> {formatNumber((Number(oldOdometerBeforeReset) || 0) + (Number(newOdometer) || 0))}
+                <strong>Actual Odometer After Reset:</strong> {formatNumber(Number(newOdometer) || 0)}
               </p>
             </div>
 
@@ -11234,6 +12115,7 @@ function TeamPage({
   onCreateUserFromEmployee,
   onUpdateUserStatus,
   pendingEmployeeTransfers = [],
+  companies = [],
 }) {
   const [localFuelers, setLocalFuelers] = useState([]);
   const [localFuelerUpdates, setLocalFuelerUpdates] = useState({});
@@ -11261,6 +12143,23 @@ function TeamPage({
   useOutsideClick(fuelersSettingsRef, () => {
     setShowFuelersSettings(false);
   });
+
+  const getCompanyCodeForFueler = (fueler = {}) => {
+    const matchedCompany = companies.find((company) =>
+      companyMatches(company.id, fueler.companyId || currentUser?.companyId)
+    );
+
+    return String(matchedCompany?.code || currentUser?.companyCode || "")
+      .trim()
+      .toLowerCase();
+  };
+
+  const getGeneratedUsernameForFueler = (fueler = {}) => {
+    const employeeId = String(fueler.employeeId || fueler.id || "").trim();
+    const companyCode = getCompanyCodeForFueler(fueler);
+
+    return companyCode && employeeId ? `${companyCode}.${employeeId}` : employeeId ? `company.${employeeId}` : "-";
+  };
 
   const [newFueler, setNewFueler] = useState({
     id: "",
@@ -12106,8 +13005,10 @@ function TeamPage({
   };
 
   const openCreateUserFromFueler = async (fueler) => {
-    if (!fueler?.email || fueler.email === "-") {
-      showToast?.("warning", "Employee email is required before creating a system user.");
+    const employeeId = String(fueler?.employeeId || fueler?.id || "").trim();
+
+    if (!employeeId) {
+      showToast?.("warning", "Employee ID is required before creating a system user.");
       return;
     }
 
@@ -12231,6 +13132,20 @@ function TeamPage({
     try {
       const fueler = linkUserModal.fueler;
       const fuelerId = fueler.id;
+      const employeeId = String(fueler.employeeId || fueler.id || "").trim();
+      const linkedEmployeeId = fueler.backendId || fueler.employeeBackendId || "";
+
+      if (!employeeId) {
+        showToast?.("warning", "Employee ID is required before creating a system user.");
+        setSavingLinkedUser(false);
+        return;
+      }
+
+      if (!linkedEmployeeId) {
+        showToast?.("warning", "Linked employee record is missing. Please refresh Team data and try again.");
+        setSavingLinkedUser(false);
+        return;
+      }
 
       setUpdatingUserStatusByFuelerId((prev) => ({
         ...prev,
@@ -12238,8 +13153,10 @@ function TeamPage({
       }));
 
       const createdUser = await onCreateUserFromEmployee({
-        fullName: fueler.name || fueler.id,
-        email: fueler.email,
+        employeeId,
+        linkedEmployeeId,
+        fullName: fueler.name || employeeId,
+        email: fueler.email && fueler.email !== "-" ? fueler.email : "",
         phone: fueler.mobile || fueler.phone || "",
         roleId: linkUserModal.roleId,
         companyId: fueler.companyId || currentUser?.companyId || "",
@@ -12255,7 +13172,7 @@ function TeamPage({
         [fuelerId]: {
           ...prev[fuelerId],
           linkedUserId: createdUser.id,
-          linkedUserName: createdUser.fullName || createdUser.email || "Linked User",
+          linkedUserName: createdUser.username || createdUser.fullName || createdUser.email || "Linked User",
           linkedUserIsActive: true,
           userStatus: "Linked",
         },
@@ -12273,7 +13190,7 @@ function TeamPage({
         [fuelerId]: {
           ...prev[fuelerId],
           linkedUserId: createdUser.id,
-          linkedUserName: createdUser.fullName || createdUser.email || "Linked User",
+          linkedUserName: createdUser.username || createdUser.fullName || createdUser.email || "Linked User",
           linkedUserIsActive: true,
           userStatus: "Linked",
         },
@@ -13081,12 +13998,17 @@ function TeamPage({
                   <div className="grid grid-cols-1 sm:grid-cols-2 gap-3 text-sm">
                     <div>
                       <p className="text-gray-500 text-xs">Employee ID</p>
-                      <p className="font-semibold text-blue-300">{linkUserModal.fueler.id}</p>
+                      <p className="font-semibold text-blue-300">{linkUserModal.fueler.employeeId || linkUserModal.fueler.id}</p>
                     </div>
 
                     <div>
                       <p className="text-gray-500 text-xs">Employee Name</p>
                       <p className="font-semibold">{linkUserModal.fueler.name || "-"}</p>
+                    </div>
+
+                    <div className="sm:col-span-2 rounded-2xl border border-amber-400/20 bg-amber-400/10 p-3">
+                      <p className="text-gray-400 text-xs">Generated Username</p>
+                      <p className="font-black text-amber-300 tracking-wide">{getGeneratedUsernameForFueler(linkUserModal.fueler)}</p>
                     </div>
 
                     <div>
@@ -16640,6 +17562,10 @@ function ApprovalsPage({
   showToast,
   onApproveEmployeeTransfer,
   onRejectEmployeeTransfer,
+  onApproveAssetTransfer,
+  onRejectAssetTransfer,
+  onApproveAssetAction,
+  runWithActionLoading = async (_label, actionFn) => actionFn(),
 }) {
   const [selectedStatus, setSelectedStatus] = useState("Pending");
   const [reviewNotes, setReviewNotes] = useState({});
@@ -16651,6 +17577,7 @@ function ApprovalsPage({
   });
 
   const approveRequest = async (request) => {
+    return runWithActionLoading("Approving request...", async () => {
     if (!canUserReviewApproval(currentUser, request)) return;
 
     if (request.status !== "Pending") {
@@ -16682,7 +17609,10 @@ function ApprovalsPage({
         : approver;
     });
 
-    let fullyApproved = updatedApprovers.length > 0 && updatedApprovers.every((approver) => approver.status === "Approved");
+    let fullyApproved =
+      updatedApprovers.length > 0
+        ? updatedApprovers.every((approver) => approver.status === "Approved")
+        : currentUser?.role === "Admin";
 
     if (fullyApproved && request.type === "operation_external_supply" && request.payload?.row) {
       setData?.((prev) => [...prev, request.payload.row]);
@@ -16718,6 +17648,53 @@ function ApprovalsPage({
       }
     }
 
+    if (request.type === "asset_transfer") {
+      try {
+        const pendingApprovers = routeApprovers.filter((approver) => approver.status === "Pending");
+        const approverIdsToSubmit =
+          currentUser?.role === "Admin"
+            ? pendingApprovers.map((approver) => approver.userId).filter(Boolean)
+            : [currentUser?.id].filter(Boolean);
+
+        let latestReviewResult = null;
+
+        for (const reviewerUserId of approverIdsToSubmit) {
+          latestReviewResult = await onApproveAssetTransfer?.(
+            request.payload?.transfer || request.payload,
+            reviewerUserId
+          );
+        }
+
+        if (String(latestReviewResult?.status || "").toUpperCase() === "APPROVED") {
+          fullyApproved = true;
+        }
+      } catch (error) {
+        const message =
+          error?.response?.data?.message ||
+          error?.message ||
+          "Failed to apply asset transfer.";
+        showToast?.("warning", message);
+        return;
+      }
+    }
+
+    if (
+      fullyApproved &&
+      request.module === "assets" &&
+      ["add", "delete", "odometer_reset"].includes(String(request.payload?.action || ""))
+    ) {
+      try {
+        await onApproveAssetAction?.(request);
+      } catch (error) {
+        const message =
+          error?.response?.data?.message ||
+          error?.message ||
+          "Failed to apply asset approval.";
+        showToast?.("warning", message);
+        return;
+      }
+    }
+
     setApprovals((prev) =>
       prev.map((item) =>
         item.id === request.id
@@ -16744,9 +17721,12 @@ function ApprovalsPage({
       `${request.title} (${currentStage?.approvalStage || "Approval Stage"})`
     );
     showToast?.("success", fullyApproved ? "Approval request fully approved." : "Approval stage approved. Waiting for remaining manager approval.");
+  
+    });
   };
 
   const rejectRequest = async (request) => {
+    return runWithActionLoading("Rejecting request...", async () => {
     if (!canUserReviewApproval(currentUser, request) && currentUser?.role !== "Admin") return;
 
     if (request.status !== "Pending") {
@@ -16776,6 +17756,30 @@ function ApprovalsPage({
           error?.response?.data?.message ||
           error?.message ||
           "Failed to reject employee transfer.";
+        showToast?.("warning", message);
+        return;
+      }
+    }
+
+    if (request.type === "asset_transfer") {
+      try {
+        const routeApprovers = request.approvalRoute?.requiredApprovers || [];
+        const firstPendingApprover = routeApprovers.find((approver) => approver.status === "Pending");
+        const reviewerUserId =
+          currentUser?.role === "Admin"
+            ? firstPendingApprover?.userId || currentUser?.id
+            : currentUser?.id;
+
+        await onRejectAssetTransfer?.(
+          request.payload?.transfer || request.payload,
+          note,
+          reviewerUserId
+        );
+      } catch (error) {
+        const message =
+          error?.response?.data?.message ||
+          error?.message ||
+          "Failed to reject asset transfer.";
         showToast?.("warning", message);
         return;
       }
@@ -16819,6 +17823,8 @@ function ApprovalsPage({
     setSelectedRequest(null);
     trackActivity("Reject Request", request.module, `${request.title} (${request.entityType || "Request"}: ${request.entityId || "-"})`);
     showToast?.("error", "Approval request rejected.");
+  
+    });
   };
 
   const pendingCount = visibleApprovals.filter((item) => item.status === "Pending").length;
@@ -17220,12 +18226,16 @@ function UsersPage({
     return {
       id: user.id,
       fullName: user.fullName || user.name || user.email || "",
-      username: makeUsernameFromUser({
-        id: user.id,
-        fullName: user.fullName,
-        email: user.email,
-      }),
+      username:
+        user.username ||
+        makeUsernameFromUser({
+          id: user.id,
+          fullName: user.fullName,
+          email: user.email,
+        }),
       email: String(user.email || "").toLowerCase(),
+      employeeId: user.employeeId || user.linkedEmployee?.employeeId || "",
+      linkedEmployeeId: user.linkedEmployeeId || user.linkedEmployee?.id || "",
       phone: user.phone || "",
       mobile: user.phone || user.mobile || "",
       role: normalizeBackendRoleName(roleName),
@@ -17444,11 +18454,12 @@ function UsersPage({
     const matchesSearch =
       !search ||
       [
-        user.fullName,
         user.username,
+        user.employeeId,
+        user.roleName,
+        user.role,
         user.email,
-        user.phone,
-        user.mobile,
+        user.fullName,
         userRoleName,
         user.status,
       ]
@@ -17679,7 +18690,7 @@ function UsersPage({
     setUserConfirmModal({
       open: true,
       title: `${nextStatus} User`,
-      message: `Are you sure you want to ${nextStatus.toLowerCase()} ${user.fullName}?`,
+      message: `Are you sure you want to ${nextStatus.toLowerCase()} ${user.username || user.fullName}?`,
       confirmLabel: nextStatus === "Active" ? "Activate" : "Deactivate",
       confirmTone: nextStatus === "Active" ? "emerald" : "red",
       onConfirm: async () => {
@@ -17725,7 +18736,7 @@ function UsersPage({
             })
           );
 
-          trackActivity("Change User Status", "users", `${updatedUser.fullName} changed to ${updatedUser.status}.`);
+          trackActivity("Change User Status", "users", `${updatedUser.username || updatedUser.fullName} changed to ${updatedUser.status}.`);
           notifyUser(showToast, "success", `User changed to ${updatedUser.status}.`);
         } catch (error) {
           console.error("Failed to change user status:", error);
@@ -17757,7 +18768,7 @@ function UsersPage({
     setUserConfirmModal({
       open: true,
       title: "Reset Password",
-      message: `Generate a temporary password for ${user.fullName}? The user must change it after next login.`,
+      message: `Generate a temporary password for ${user.username || user.fullName}? The user must change it after next login.`,
       confirmLabel: "Reset Password",
       confirmTone: "amber",
       onConfirm: async () => {
@@ -17781,11 +18792,11 @@ function UsersPage({
           );
 
           setTemporaryPasswordResult({
-            userName: user.fullName,
+            userName: user.username || user.fullName,
             temporaryPassword,
           });
 
-          trackActivity("Reset Password", "users", `${user.fullName} temporary password generated.`);
+          trackActivity("Reset Password", "users", `${user.username || user.fullName} temporary password generated.`);
           notifyUser(showToast, "success", "Temporary password generated.");
         } catch (error) {
           console.error("Failed to reset password:", error);
@@ -17815,10 +18826,8 @@ function UsersPage({
 
   const exportUsersCSV = () => {
     const headers = [
-      "Full Name",
-      "Email",
-      "Phone",
-      "Company",
+      "Username",
+      "Employee ID",
       "Role",
       "Status",
       "Password Reset Required",
@@ -17826,10 +18835,8 @@ function UsersPage({
     ];
 
     const rows = filteredUsers.map((user) => [
-      user.fullName || "",
-      user.email || "",
-      user.phone || user.mobile || "",
-      getUserCompanyName(user),
+      user.username || "",
+      user.employeeId || "",
       formatRoleLabel(user),
       user.status || "",
       user.passwordResetRequired || user.mustChangePassword ? "Yes" : "No",
@@ -17857,10 +18864,8 @@ function UsersPage({
       .map(
         (user) => `
           <tr>
-            <td>${user.fullName || "-"}</td>
-            <td>${user.email || "-"}</td>
-            <td>${user.phone || user.mobile || "-"}</td>
-            <td>${getUserCompanyName(user)}</td>
+            <td>${user.username || "-"}</td>
+            <td>${user.employeeId || "-"}</td>
             <td>${formatRoleLabel(user)}</td>
             <td>${user.status || "-"}</td>
             <td>${user.passwordResetRequired || user.mustChangePassword ? "Required" : "No"}</td>
@@ -17897,17 +18902,15 @@ function UsersPage({
           <table>
             <thead>
               <tr>
-                <th>Full Name</th>
-                <th>Email</th>
-                <th>Phone</th>
-                <th>Company</th>
+                <th>Username</th>
+                <th>Employee ID</th>
                 <th>Role</th>
                 <th>Status</th>
                 <th>Password Reset</th>
                 <th>Last Login</th>
               </tr>
             </thead>
-            <tbody>${rowsHtml || `<tr><td colspan="7">No users found.</td></tr>`}</tbody>
+            <tbody>${rowsHtml || `<tr><td colspan="6">No users found.</td></tr>`}</tbody>
           </table>
         </body>
       </html>
@@ -17970,14 +18973,16 @@ function UsersPage({
 
             {settingsOpen && (
               <div className="absolute right-0 mt-2 w-56 rounded-2xl border border-slate-700 bg-slate-950 shadow-2xl shadow-black/40 z-40 overflow-hidden">
-                <button
-                  onClick={openAddUserModal}
-                  className="w-full px-4 py-3 text-left text-sm font-bold text-slate-200 hover:bg-slate-800/80 hover:text-amber-300 transition flex items-center gap-3 disabled:opacity-40 disabled:cursor-not-allowed"
-                  disabled={!hasPermission("users", "add")}
-                >
-                  <span>＋</span>
-                  <span>Add User</span>
-                </button>
+                {isPlatformConsoleCompanyContext && (
+                  <button
+                    onClick={openAddUserModal}
+                    className="w-full px-4 py-3 text-left text-sm font-bold text-slate-200 hover:bg-slate-800/80 hover:text-amber-300 transition flex items-center gap-3 disabled:opacity-40 disabled:cursor-not-allowed"
+                    disabled={!hasPermission("users", "add")}
+                  >
+                    <span>＋</span>
+                    <span>Add User</span>
+                  </button>
+                )}
 
                 <button
                   onClick={exportUsersCSV}
@@ -18026,7 +19031,7 @@ function UsersPage({
             <input
               value={searchTerm}
               onChange={(e) => setSearchTerm(e.target.value)}
-              placeholder="Search user, email, phone, role..."
+              placeholder="Search username, employee ID, role..."
               className="bg-[#080d19] border border-slate-700 hover:border-amber-400 focus:border-amber-400 focus:ring-2 focus:ring-amber-400/20 text-slate-100 px-3 py-2.5 rounded-xl w-full outline-none"
             />
 
@@ -18052,13 +19057,13 @@ function UsersPage({
             </select>
 
             <div className="bg-slate-950 border border-slate-700 rounded-xl px-3 py-2.5 text-sm">
-              Current: <span className="text-amber-300 font-bold">{currentUser?.fullName || "-"}</span>
+              Current: <span className="text-amber-300 font-bold">{currentUser?.username || currentUser?.fullName || "-"}</span>
             </div>
           </div>
         </div>
 
         <div className="rounded-2xl border border-slate-800 bg-slate-950/40 px-4 py-3 text-xs text-slate-400 mb-4">
-          Click a user name to open the edit screen. Status is changed directly from the badge. Password reset generates a one-time temporary password shown only once.
+          Click a username to open the edit screen. Status is changed directly from the badge. Password reset generates a one-time temporary password shown only once.
         </div>
 
         {usersLoading && (
@@ -18076,13 +19081,11 @@ function UsersPage({
 
         <div className="bg-slate-900/80 border border-slate-700/80 rounded-2xl shadow-xl overflow-hidden">
           <div className="overflow-x-auto">
-            <table className="w-full text-left text-sm min-w-[1120px]">
+            <table className="w-full text-left text-sm min-w-[920px]">
               <thead className="bg-slate-950 sticky top-0 z-[5]">
                 <tr>
-                  <th className="p-3">User Name</th>
-                  <th className="p-3">Email</th>
-                  <th className="p-3">Phone</th>
-                  <th className="p-3">Company</th>
+                  <th className="p-3">Username</th>
+                  <th className="p-3">Employee ID</th>
                   <th className="p-3">Role</th>
                   <th className="p-3">Status</th>
                   <th className="p-3">Password Reset</th>
@@ -18099,17 +19102,11 @@ function UsersPage({
                         onClick={() => openEditUserModal(user)}
                         className="font-black text-slate-100 hover:text-amber-300 transition cursor-pointer text-left"
                       >
-                        {user.fullName || "-"}
+                        {user.username || "-"}
                       </button>
-                      <div className="text-xs text-slate-500">@{user.username || makeUsernameFromUser(user)}</div>
+                      <div className="text-xs text-slate-500">Access account</div>
                     </td>
-                    <td className="p-3 text-slate-300">{user.email || "-"}</td>
-                    <td className="p-3 text-slate-300">{user.phone || user.mobile || "-"}</td>
-                    <td className="p-3 text-slate-300">
-                      <span className="block max-w-[190px] truncate whitespace-nowrap" title={getUserCompanyName(user)}>
-                        {getUserCompanyName(user)}
-                      </span>
-                    </td>
+                    <td className="p-3 text-slate-300 font-semibold">{user.employeeId || "-"}</td>
                     <td className="p-3">
                       <span className="block max-w-[170px] truncate whitespace-nowrap text-sm font-semibold text-slate-100">
                         {formatRoleLabel(user)}
@@ -18157,7 +19154,7 @@ function UsersPage({
 
                 {!filteredUsers.length && (
                   <tr>
-                    <td colSpan={9} className="p-8 text-center text-slate-500">
+                    <td colSpan={7} className="p-8 text-center text-slate-500">
                       {usersLoading ? "Loading users..." : usersLoaded ? "No users found." : "Users are not loaded yet."}
                     </td>
                   </tr>
@@ -19316,6 +20313,7 @@ function LoginPage({
   handleLogin,
   theme,
   setTheme,
+  actionLoading = { active: false, label: "" },
 }) {
   const [loginCompanyInfo, setLoginCompanyInfo] = useState(null);
   const [loginCompanyLoading, setLoginCompanyLoading] = useState(false);
@@ -19331,16 +20329,7 @@ function LoginPage({
     [companies]
   );
 
-  const activeUsers = users.filter((user) => {
-    if (user.status !== "Active") return false;
-    if (!selectedCompanyId) return false;
-
-    if (isPlatformContextValue(selectedCompanyId)) {
-      return user.role === "PlatformAdmin";
-    }
-
-    return companyMatches(user.companyId, selectedCompanyId);
-  });
+  const activeUsers = users.filter((user) => user.status === "Active");
 
   const loginEmailValue = String(loginIdentifier || "")
     .trim()
@@ -19594,6 +20583,18 @@ function LoginPage({
         }
       `}</style>
 
+      {actionLoading.active && (
+        <div className="fixed inset-0 z-[99999] pointer-events-none flex items-start justify-center pt-5">
+          <div className="pointer-events-auto flex items-center gap-3 rounded-2xl border border-amber-300/40 bg-slate-950/95 px-5 py-3 shadow-2xl shadow-black/40 text-amber-200">
+            <span className="h-4 w-4 rounded-full border-2 border-amber-300/40 border-t-amber-300 animate-spin" />
+            <span className="text-sm font-black tracking-wide">
+              {actionLoading.label || "Working..."}
+            </span>
+          </div>
+        </div>
+      )}
+
+
       <div
         data-theme={theme}
         className="theme-main-bg min-h-screen bg-[#070b14] text-slate-100 flex items-center justify-center p-6"
@@ -19623,7 +20624,7 @@ function LoginPage({
               Sign in to Diesel Management System
             </h2>
             <p className="login-muted text-sm text-slate-400 leading-6 max-w-xl">
-              Enter your email first. The system will detect your company automatically. Platform users can select Platform Console or a specific customer company.
+              Enter your username and password. Company users sign in with company code plus employee ID, for example ffp.2062.
             </p>
           </div>
 
@@ -19666,47 +20667,16 @@ function LoginPage({
           </div>
 
           <label className="block mb-4">
-            <span className="login-muted text-xs font-bold text-slate-400">Email</span>
+            <span className="login-muted text-xs font-bold text-slate-400">Username</span>
             <input
               value={loginIdentifier}
               onChange={(e) => setLoginIdentifier(e.target.value.toLowerCase())}
-              placeholder="admin@fleetfuelpro.com"
+              placeholder="ffp.2062"
               className="login-input mt-2 w-full rounded-2xl border border-slate-700 bg-slate-950 px-4 py-3 text-sm text-white outline-none focus:border-amber-400 focus:ring-2 focus:ring-amber-400/20"
               autoFocus
             />
-          </label>
-
-          <label className="block mb-4">
-            <span className="login-muted text-xs font-bold text-slate-400">Company</span>
-
-            {isDetectedPlatformUser ? (
-              <select
-                value={selectedCompanyId || getPlatformCompanyId(loginCompanies)}
-                onChange={(e) => setSelectedCompanyId?.(e.target.value)}
-                className="login-input mt-2 w-full rounded-2xl border border-slate-700 bg-slate-950 px-4 py-3 text-sm text-white outline-none focus:border-amber-400 focus:ring-2 focus:ring-amber-400/20"
-              >
-                {loginCompanies.map((company) => (
-                  <option key={company.id} value={company.id}>
-                    {company.name || company.id}
-                  </option>
-                ))}
-              </select>
-            ) : (
-              <input
-                value={
-                  loginCompanyLoading
-                    ? "Detecting company..."
-                    : detectedCompanyName || (loginLooksLikeEmail ? "Company will appear here" : "Enter email first")
-                }
-                disabled
-                className="login-input mt-2 w-full cursor-not-allowed rounded-2xl border border-slate-700 bg-slate-950/70 px-4 py-3 text-sm text-slate-300 outline-none"
-              />
-            )}
-
             <p className="login-muted mt-2 text-[11px] text-slate-500">
-              {isDetectedPlatformUser
-                ? "Platform user can choose Platform Console or a specific active company."
-                : "Company is detected from the registered email and cannot be changed."}
+              Company users use companycode.employeeId. Platform Console users can use their platform email if configured.
             </p>
           </label>
 
@@ -19730,18 +20700,18 @@ function LoginPage({
             Remember me on this device
           </label>
 
-          {(loginError || loginCompanyMessage) && (
+          {loginError && (
             <div className="mb-5 rounded-2xl border border-red-500/30 bg-red-500/10 px-4 py-3 text-sm text-red-300">
-              {loginError || loginCompanyMessage}
+              {loginError}
             </div>
           )}
 
           <button
             type="submit"
-            disabled={loginLooksLikeEmail && (loginCompanyLoading || (!selectedCompanyId && !isDetectedPlatformUser))}
+            disabled={actionLoading.active}
             className="w-full rounded-2xl bg-amber-400 px-4 py-3 text-sm font-black text-slate-950 hover:bg-amber-300 transition shadow-lg shadow-amber-500/20 disabled:cursor-not-allowed disabled:opacity-60"
           >
-            {loginCompanyLoading ? "Detecting Company..." : "Sign In"}
+            {actionLoading.active ? "Signing In..." : "Sign In"}
           </button>
 
           <div className="login-soft mt-6 rounded-2xl border border-slate-800 bg-slate-950/40 p-4">
@@ -19751,16 +20721,16 @@ function LoginPage({
                 <button
                   key={makeTenantEntityKey(user)}
                   type="button"
-                  onClick={() => setLoginIdentifier(String(user.email || user.id || "").toLowerCase())}
+                  onClick={() => setLoginIdentifier(String(user.username || user.email || user.id || "").toLowerCase())}
                   className="login-card w-full text-left rounded-xl border border-slate-800 bg-slate-900 px-3 py-2 hover:border-amber-400 transition"
                 >
                   <div className="flex items-center justify-between gap-3">
-                    <span className="login-text text-sm font-bold text-slate-100 truncate">{user.fullName}</span>
+                    <span className="login-text text-sm font-bold text-slate-100 truncate">{user.username || user.fullName}</span>
                     <span className="text-[10px] rounded-full bg-amber-400/10 text-amber-300 px-2 py-0.5 border border-amber-400/20">
                       {user.role}
                     </span>
                   </div>
-                  <div className="login-muted text-xs text-slate-500 mt-1">{user.email || user.id} · {user.teamProject || "Global"}</div>
+                  <div className="login-muted text-xs text-slate-500 mt-1">{user.fullName || user.email || user.id} · {user.teamProject || "Global"}</div>
                 </button>
               ))}
             </div>
