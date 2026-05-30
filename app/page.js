@@ -486,6 +486,54 @@ function inferToastTypeFromMessage(message) {
   return "warning";
 }
 
+const NETWORK_OFFLINE_MESSAGE = "No internet connection. Please check your connection and try again.";
+const BACKEND_UNAVAILABLE_MESSAGE = "Connection to server is unavailable. Please try again.";
+
+function isBrowserOffline() {
+  return typeof navigator !== "undefined" && navigator.onLine === false;
+}
+
+function isNetworkConnectionError(error) {
+  if (isBrowserOffline()) return true;
+
+  const message = String(error?.message || "").toLowerCase();
+  const code = String(error?.code || "").toUpperCase();
+
+  return (
+    code === "ERR_NETWORK" ||
+    code === "ECONNABORTED" ||
+    message.includes("network error") ||
+    message.includes("failed to fetch") ||
+    (!error?.response && Boolean(error?.request))
+  );
+}
+
+function getFriendlyApiErrorMessage(error, fallbackMessage = BACKEND_UNAVAILABLE_MESSAGE) {
+  if (isNetworkConnectionError(error)) return NETWORK_OFFLINE_MESSAGE;
+
+  const backendMessage = error?.response?.data?.message || error?.response?.data?.error;
+
+  if (Array.isArray(backendMessage)) return backendMessage.join(" / ");
+  if (backendMessage) return String(backendMessage);
+
+  return fallbackMessage;
+}
+
+function canUseNetwork(showToastFn) {
+  if (!isBrowserOffline()) return true;
+
+  notifyUser(showToastFn, "warning", NETWORK_OFFLINE_MESSAGE);
+  return false;
+}
+
+function logHandledApiIssue(label, error) {
+  const safeLabel = String(label || "API request failed");
+  const safeMessage = getFriendlyApiErrorMessage(error, BACKEND_UNAVAILABLE_MESSAGE);
+
+  // Use warn instead of error for expected connection/backend failures so Next.js dev overlay does not block the UI.
+  console.warn(`${safeLabel}: ${safeMessage}`);
+}
+
 
 function cleanCsvCell(value) {
   return String(value ?? "")
@@ -1208,13 +1256,81 @@ function buildApprovalRoute({ requestedBy, users = [], projects = [], payload = 
   };
 }
 
+function normalizeApprovalStatus(value) {
+  return String(value || "")
+    .trim()
+    .toUpperCase()
+    .replace(/[\s-]+/g, "_");
+}
+
+function isPendingApprovalStatus(value) {
+  return normalizeApprovalStatus(value) === "PENDING";
+}
+
+function isApprovedApprovalStatus(value) {
+  return normalizeApprovalStatus(value) === "APPROVED";
+}
+
 function isApprovalFullyApproved(request) {
   const approvers = request?.approvalRoute?.requiredApprovers || [];
-  return approvers.length > 0 && approvers.every((approver) => approver.status === "Approved");
+  return approvers.length > 0 && approvers.every((approver) => isApprovedApprovalStatus(approver.status));
+}
+
+function isEmployeeTransferApproval(request) {
+  return String(request?.type || "") === "employee_transfer";
+}
+
+function isManagerEmployeeTransferApproval(request) {
+  if (!isEmployeeTransferApproval(request)) return false;
+
+  const approvers = request?.approvalRoute?.requiredApprovers || [];
+  const reason = String(request?.payload?.transfer?.reason || request?.payload?.reason || request?.reason || "").toUpperCase();
+
+  return Boolean(
+    request?.payload?.transfer?.isManagerTransfer ||
+      request?.payload?.isManagerTransfer ||
+      request?.approvalRoute?.routeType === "admin_manager_transfer" ||
+      request?.approvalRoute?.routeType === "admin" ||
+      reason.includes("MANAGER_TRANSFER_ADMIN_APPROVAL") ||
+      approvers.some((approver) =>
+        String(approver?.approvalStage || "").toUpperCase().includes("ADMIN") ||
+        ["Admin", "PlatformAdmin"].includes(approver?.role)
+      )
+  );
+}
+
+function getPendingApprovers(request) {
+  return (request?.approvalRoute?.requiredApprovers || []).filter((approver) =>
+    isPendingApprovalStatus(approver?.status)
+  );
+}
+
+function userHasPendingApproval(user, request) {
+  if (!user?.id) return false;
+  return getPendingApprovers(request).some((approver) => approver.userId === user.id);
 }
 
 function canUserViewApproval(user, request) {
   if (!user || !request) return false;
+
+  // Backend transfer requests must be shown only to the user who has a pending approval.
+  // Auto-approved managers and already-approved stages should not see the request as pending.
+  if (isEmployeeTransferApproval(request)) {
+    const isManagerTransfer = isManagerEmployeeTransferApproval(request);
+
+    if (isManagerTransfer) {
+      return ["PlatformAdmin", "Admin"].includes(user.role) && userHasPendingApproval(user, request);
+    }
+
+    if (["PlatformAdmin", "Admin"].includes(user.role)) return false;
+    return userHasPendingApproval(user, request);
+  }
+
+  if (["asset_transfer", "station_transfer"].includes(String(request?.type || ""))) {
+    if (["PlatformAdmin", "Admin"].includes(user.role)) return false;
+    return userHasPendingApproval(user, request);
+  }
+
   if (["PlatformAdmin", "Admin"].includes(user.role)) return true;
   if (request.requestedById === user.id) return true;
 
@@ -1224,10 +1340,27 @@ function canUserViewApproval(user, request) {
 
 function canUserReviewApproval(user, request) {
   if (!hasPermissionForUser(user, "approvals", "approve")) return false;
-  if (user?.role === "Admin") return true;
 
   const approvers = request?.approvalRoute?.requiredApprovers || [];
-  return approvers.some((approver) => approver.userId === user?.id && approver.status === "Pending");
+
+  if (isEmployeeTransferApproval(request)) {
+    // Admin approves only Manager Transfer requests.
+    // Normal Employee Transfer must be approved only by the listed pending project manager(s).
+    if (["PlatformAdmin", "Admin"].includes(user?.role)) {
+      return isManagerEmployeeTransferApproval(request) && userHasPendingApproval(user, request);
+    }
+
+    return approvers.some((approver) => approver.userId === user?.id && isPendingApprovalStatus(approver.status));
+  }
+
+  if (["asset_transfer", "station_transfer"].includes(String(request?.type || ""))) {
+    if (["PlatformAdmin", "Admin"].includes(user?.role)) return false;
+    return approvers.some((approver) => approver.userId === user?.id && isPendingApprovalStatus(approver.status));
+  }
+
+  if (user?.role === "Admin") return true;
+
+  return approvers.some((approver) => approver.userId === user?.id && isPendingApprovalStatus(approver.status));
 }
 
 function createApprovalRequest({ type, module, title, payload, requestedBy, details, users = [], projects = [] }) {
@@ -1309,7 +1442,7 @@ function buildNotificationItems({ approvals = [], activityLog = [], currentUser,
       const needsDecision = canUserReviewApproval(currentUser, item);
       const isOwnRequest = item.requestedById === currentUser?.id;
       const userIsApprover = item.approvalRoute?.requiredApprovers?.some(
-        (approver) => approver.userId === currentUser?.id
+        (approver) => approver.userId === currentUser?.id && isPendingApprovalStatus(approver.status)
       );
 
       const title = needsDecision
@@ -1605,6 +1738,79 @@ function mapBackendAssetForState(asset = {}) {
     source: "Backend",
     createdAt: asset.createdAt || "",
     updatedAt: asset.updatedAt || "",
+  };
+}
+
+function normalizeBackendStationStatusForState(status) {
+  const normalized = String(status || "ACTIVE")
+    .trim()
+    .toUpperCase()
+    .replace(/[\s-]+/g, "_");
+
+  if (normalized === "INACTIVE") return "Inactive";
+  return "Active";
+}
+
+function mapFrontendStationStatusForBackend(status) {
+  const normalized = String(status || "ACTIVE")
+    .trim()
+    .toUpperCase()
+    .replace(/[\s-]+/g, "_");
+
+  if (normalized === "INACTIVE") return "INACTIVE";
+  return "ACTIVE";
+}
+
+function mapBackendStationForState(station = {}) {
+  const projectName =
+    station.project?.name ||
+    station.project?.code ||
+    station.projectName ||
+    station.projectId ||
+    "-";
+
+  return {
+    backendId: station.id || "",
+    stationBackendId: station.id || "",
+    id: station.stationId || station.id || "",
+    stationId: station.stationId || station.id || "",
+    name: station.name || station.stationName || station.stationId || station.id || "",
+    type: station.type || "",
+    capacity:
+      station.capacity === undefined || station.capacity === null
+        ? 0
+        : Number(station.capacity) || 0,
+    openingBalance:
+      station.openingBalance === undefined || station.openingBalance === null
+        ? 0
+        : Number(station.openingBalance) || 0,
+    currentStock:
+      station.currentStock === undefined || station.currentStock === null
+        ? Number(station.openingBalance || 0)
+        : Number(station.currentStock) || 0,
+    currentCounter:
+      station.currentCounter === undefined || station.currentCounter === null
+        ? 0
+        : Number(station.currentCounter) || 0,
+    openingCounter:
+      station.currentCounter === undefined || station.currentCounter === null
+        ? 0
+        : Number(station.currentCounter) || 0,
+    counter:
+      station.currentCounter === undefined || station.currentCounter === null
+        ? 0
+        : Number(station.currentCounter) || 0,
+    project: projectName,
+    projectId: station.projectId || station.project?.id || "",
+    projectCode: station.project?.code || "",
+    projectName,
+    status: normalizeBackendStationStatusForState(station.status),
+    companyId: station.companyId || station.company?.id || "",
+    companyName: station.company?.name || "",
+    deletedAt: station.deletedAt || "",
+    source: "Backend",
+    createdAt: station.createdAt || "",
+    updatedAt: station.updatedAt || "",
   };
 }
 
@@ -2349,13 +2555,18 @@ useEffect(() => {
       );
       return;
     } catch (error) {
-      console.error("Backend login failed:", error);
+      logHandledApiIssue("Backend login failed", error);
       const backendMessage = error?.response?.data?.message;
       setLoginError(
-        Array.isArray(backendMessage)
+        isNetworkConnectionError(error)
+          ? NETWORK_OFFLINE_MESSAGE
+          : Array.isArray(backendMessage)
           ? backendMessage.join(", ")
           : backendMessage || "Login failed. Check username and password."
       );
+      if (isNetworkConnectionError(error)) {
+        showToast?.("warning", NETWORK_OFFLINE_MESSAGE);
+      }
     }
   };
 
@@ -2567,56 +2778,66 @@ useEffect(() => {
     return "ON_DUTY";
   };
 
-  const mapBackendEmployeeForState = (employee = {}) => ({
-    backendId: employee.id || "",
-    id: employee.employeeId || employee.id || "",
-    employeeId: employee.employeeId || employee.id || "",
-    name: employee.name || "",
-    mobile: employee.phone || "",
-    phone: employee.phone || "",
-    email: employee.email || "",
-    projectId: employee.projectId || employee.project?.id || "",
-    projectName:
-      employee.project?.name ||
-      employee.project?.code ||
-      employee.projectId ||
-      "-",
-    project: employee.project?.name || employee.projectId || "-",
-    companyId: employee.companyId || employee.company?.id || "",
-    linkedUserId: employee.linkedUserId || employee.linkedUser?.id || "",
-    linkedUserName: employee.linkedUser?.fullName || "",
-    linkedUserIsActive: employee.linkedUser?.isActive !== false,
-    role: employee.jobTitle || "Operator",
-    jobTitle: employee.jobTitle || "Operator",
-    status: mapBackendEmployeeStatusForState(employee.status),
-    userStatus:
-      (employee.linkedUserId || employee.linkedUser?.id) &&
-      employee.linkedUser?.isActive !== false
-        ? "Linked"
-        : "Not Linked",
-    source: "Backend",
-    createdAt: employee.createdAt || "",
-    updatedAt: employee.updatedAt || "",
-  });
+  const getLinkedUserRoleNameFromEmployee = (employee = {}) =>
+    normalizeBackendRoleName(
+      employee?.linkedUser?.role?.name ||
+        employee?.linkedUser?.roleName ||
+        employee?.linkedUser?.role ||
+        ""
+    );
 
-  const mapBackendEmployeeTransferForState = (transfer = {}) => ({
-    id: transfer.id || "",
-    employeeBackendId: transfer.employeeId || transfer.employee?.id || "",
-    employeeId: transfer.employee?.employeeId || transfer.employeeId || "",
-    employeeName: transfer.employee?.name || "",
-    employeeRole:
-      normalizeBackendRoleName(
-        transfer.employee?.linkedUser?.role?.name ||
-          transfer.employee?.jobTitle ||
-          ""
-      ) || "Operator",
-    isManagerTransfer:
-      String(transfer.reason || "").toUpperCase().includes("MANAGER_TRANSFER_ADMIN_APPROVAL") ||
-      normalizeBackendRoleName(
-        transfer.employee?.linkedUser?.role?.name ||
-          transfer.employee?.jobTitle ||
-          ""
-      ) === "Manager",
+  const mapBackendEmployeeForState = (employee = {}) => {
+    const linkedUserRole = getLinkedUserRoleNameFromEmployee(employee);
+
+    return {
+      backendId: employee.id || "",
+      id: employee.employeeId || employee.id || "",
+      employeeId: employee.employeeId || employee.id || "",
+      name: employee.name || "",
+      mobile: employee.phone || "",
+      phone: employee.phone || "",
+      email: employee.email || "",
+      projectId: employee.projectId || employee.project?.id || "",
+      projectName:
+        employee.project?.name ||
+        employee.project?.code ||
+        employee.projectId ||
+        "-",
+      project: employee.project?.name || employee.projectId || "-",
+      companyId: employee.companyId || employee.company?.id || "",
+      linkedUserId: employee.linkedUserId || employee.linkedUser?.id || "",
+      linkedUserName: employee.linkedUser?.fullName || "",
+      linkedUserIsActive: employee.linkedUser?.isActive !== false,
+      linkedUserRole,
+      linkedUserRoleName: employee.linkedUser?.role?.name || employee.linkedUser?.roleName || "",
+      systemRole: linkedUserRole,
+      role: employee.jobTitle || "Operator",
+      jobTitle: employee.jobTitle || "Operator",
+      status: mapBackendEmployeeStatusForState(employee.status),
+      userStatus:
+        (employee.linkedUserId || employee.linkedUser?.id) &&
+        employee.linkedUser?.isActive !== false
+          ? "Linked"
+          : "Not Linked",
+      source: "Backend",
+      createdAt: employee.createdAt || "",
+      updatedAt: employee.updatedAt || "",
+    };
+  };
+
+  const mapBackendEmployeeTransferForState = (transfer = {}) => {
+    const linkedEmployeeRole = getLinkedUserRoleNameFromEmployee(transfer.employee || {});
+
+    return {
+      id: transfer.id || "",
+      backendId: transfer.id || "",
+      employeeBackendId: transfer.employeeId || transfer.employee?.id || "",
+      employeeId: transfer.employee?.employeeId || transfer.employeeId || "",
+      employeeName: transfer.employee?.name || "",
+      employeeRole: linkedEmployeeRole || "Employee",
+      isManagerTransfer:
+        String(transfer.reason || "").toUpperCase().includes("MANAGER_TRANSFER_ADMIN_APPROVAL") ||
+        ["Manager", "TopManagement"].includes(linkedEmployeeRole),
     fromProjectId: transfer.fromProjectId || transfer.fromProject?.id || "",
     fromProjectName:
       transfer.fromProject?.name ||
@@ -2630,12 +2851,26 @@ useEffect(() => {
       transfer.toProjectId ||
       "-",
     requestedByUserId: transfer.requestedByUserId || "",
-    status: transfer.status || "PENDING",
+    status: normalizeBackendTransferStatusForState(transfer.status),
     reason: transfer.reason || "",
+    rejectionReason: transfer.rejectionReason || "",
     createdAt: transfer.createdAt || "",
     approvedAt: transfer.approvedAt || "",
     appliedAt: transfer.appliedAt || "",
-  });
+    effectiveDate: transfer.effectiveDate || "",
+      approvals: Array.isArray(transfer.approvals)
+        ? transfer.approvals.map((approval) => ({
+            id: approval.id || "",
+            approverUserId: approval.approverUserId || "",
+            projectId: approval.projectId || "",
+            approvalStage: approval.approvalStage || "Project Manager",
+            status: normalizeBackendApprovalStatusForState(approval.status),
+            reviewedAt: approval.reviewedAt || "",
+            note: approval.note || "",
+          }))
+        : [],
+    };
+  };
 
   const refreshBackendProjects = async (companyId = "") => {
     try {
@@ -2647,7 +2882,7 @@ useEffect(() => {
       setProjects(backendProjects.map(mapBackendProjectForState).filter((project) => project.id));
       return backendProjects;
     } catch (error) {
-      console.error("Failed to refresh projects from backend:", error);
+      logHandledApiIssue("Failed to refresh projects from backend", error);
       showToast?.("warning", "Projects backend API is not available.");
       return [];
     }
@@ -2830,7 +3065,7 @@ useEffect(() => {
     return updatedEmployee;
   };
 
-  const handleCreateEmployeeTransfer = async (employee, toProjectId) => {
+  const handleCreateEmployeeTransfer = async (employee, toProjectId, options = {}) => {
     const employeeBackendId = employee?.backendId || employee?.employeeBackendId || employee?.id;
     const requestedByUserId = backendAuthUser?.id || currentUser?.id || "";
 
@@ -2850,6 +3085,7 @@ useEffect(() => {
       employeeId: employeeBackendId,
       toProjectId,
       requestedByUserId,
+      effectiveDate: options?.effectiveDate || undefined,
     });
 
     const createdTransfer = mapBackendEmployeeTransferForState(response.data);
@@ -3368,11 +3604,27 @@ useEffect(() => {
 
         const fetchBackendAssets = async () => {
           try {
+            if (!canUseNetwork(showToast)) return [];
             const response = await api.get("/assets");
             return Array.isArray(response.data) ? response.data : [];
           } catch (error) {
-            console.error("Assets backend API is not available. Assets CSV fallback has been removed.", error);
-            throw error;
+            logHandledApiIssue("Assets backend API is not available", error);
+            if (isNetworkConnectionError(error)) {
+              showToast?.("warning", NETWORK_OFFLINE_MESSAGE);
+              return [];
+            }
+            showToast?.("warning", getFriendlyApiErrorMessage(error, "Assets backend API is not available."));
+            return [];
+          }
+        };
+
+        const fetchBackendStations = async () => {
+          try {
+            const response = await api.get("/stations");
+            return Array.isArray(response.data) ? response.data : [];
+          } catch (error) {
+            console.warn("Stations backend API is not available. Using CSV fallback.", error);
+            return null;
           }
         };
 
@@ -3385,6 +3637,7 @@ useEffect(() => {
           backendProjects,
           backendEmployees,
           backendAssets,
+          backendStations,
         ] = await Promise.all([
           fetchCsvText(TRANSACTIONS_CSV),
           fetchCsvText(STATIONS_CSV),
@@ -3394,6 +3647,7 @@ useEffect(() => {
           fetchBackendProjects(),
           fetchBackendEmployees(),
           fetchBackendAssets(),
+          fetchBackendStations(),
         ]);
 
         // TRANSACTIONS
@@ -3440,7 +3694,15 @@ useEffect(() => {
           }))
           .filter((station) => station.id);
 
-        setStations(mappedStations);
+        if (Array.isArray(backendStations)) {
+          setStations(
+            backendStations
+              .map(mapBackendStationForState)
+              .filter((station) => station.id)
+          );
+        } else {
+          setStations(mappedStations);
+        }
 
         // FUELERS
         const fuelerRows = parseCSV(fuelersText);
@@ -3524,7 +3786,8 @@ useEffect(() => {
 
         setCompanies(mappedCompanies);
       } catch (error) {
-        console.error("Failed to load Fleet Fuel PRO data:", error);
+        logHandledApiIssue("Failed to load Fleet Fuel PRO data", error);
+        showToast?.("warning", getFriendlyApiErrorMessage(error, "Failed to load Fleet Fuel PRO data."));
         setHeaders([]);
         setData([]);
         setAssets([]);
@@ -3854,8 +4117,7 @@ useEffect(() => {
   // Active projects with an assigned Project Manager.
   // Projects without a manager remain visible in Projects / Sites so Admin can assign a manager,
   // but they are hidden from operational transfer and assignment dropdowns.
-  const transferDestinationProjects =
-    currentUser?.role === "Officer" ? availableProjectsForTransfer : availableScopedProjects;
+  const transferDestinationProjects = availableProjectsForTransfer;
 
   const scopedAssets = currentUserCanAccessAllOperationalProjects
     ? companyAssets
@@ -3924,63 +4186,33 @@ useEffect(() => {
     .map((transfer) => {
       const requestedBy = companyUsers.find((user) => user.id === transfer.requestedByUserId) || currentUser;
       const isManagerTransfer = Boolean(transfer.isManagerTransfer);
-      const sourceManager = findManagerForProject(transfer.fromProjectName || transfer.fromProjectId, companyUsers, companyProjects);
-      const destinationManager = findManagerForProject(transfer.toProjectName || transfer.toProjectId, companyUsers, companyProjects);
-      const adminApprovers = companyUsers.filter((user) =>
-        ["Admin", "PlatformAdmin"].includes(user.role) && user.status === "Active"
-      );
 
-      const requiredApprovers = (isManagerTransfer
-        ? [
-            ...(adminApprovers.length ? adminApprovers : currentUser?.role === "Admin" ? [currentUser] : []),
-          ].map((admin) => ({
-            userId: admin.id,
-            userName: admin.fullName || admin.email || "Admin",
-            role: "Admin",
-            projectId: transfer.toProjectName || transfer.toProjectId || "-",
-            approvalStage: "Admin Approval",
-            status: "Pending",
-            reviewedAt: "",
-            reviewNote: "",
-          }))
-        : [
-            sourceManager && {
-              userId: sourceManager.id,
-              userName: sourceManager.fullName,
-              role: "Manager",
-              projectId: transfer.fromProjectName || transfer.fromProjectId || "-",
-              approvalStage: "Source Project Manager",
-              status: "Pending",
-              reviewedAt: "",
-              reviewNote: "",
-            },
-            destinationManager && {
-              userId: destinationManager.id,
-              userName: destinationManager.fullName,
-              role: "Manager",
-              projectId: transfer.toProjectName || transfer.toProjectId || "-",
-              approvalStage: "Destination Project Manager",
-              status: "Pending",
-              reviewedAt: "",
-              reviewNote: "",
-            },
-          ]
-      )
-        .filter(Boolean)
-        .filter((approver, index, list) =>
-          list.findIndex((item) => item.userId === approver.userId && item.approvalStage === approver.approvalStage) === index
-        );
+      const requiredApprovers = (transfer.approvals || [])
+        .filter((approval) => ["Pending", "Approved"].includes(approval.status))
+        .map((approval) => {
+          const approverUser = companyUsers.find((user) => user.id === approval.approverUserId);
+          return {
+            userId: approval.approverUserId,
+            userName: approverUser?.fullName || approverUser?.email || approval.approverUserId,
+            role: isManagerTransfer ? "Admin" : "Manager",
+            projectId: approval.projectId || "-",
+            approvalStage: approval.approvalStage || "Project Manager",
+            status: approval.status || "Pending",
+            reviewedAt: approval.reviewedAt || "",
+            reviewNote: approval.note || "",
+          };
+        });
 
       return {
         id: `EMP-TRANSFER-${transfer.id}`,
         type: "employee_transfer",
         module: "team",
-        title: `${isManagerTransfer ? "Manager Transfer" : "Team Transfer"}: ${transfer.employeeName || transfer.employeeId || "Team Member"}`,
+        title: `${isManagerTransfer ? "Manager / Top Management Transfer" : "Team Transfer"}: ${transfer.employeeName || transfer.employeeId || "Team Member"}`,
         payload: {
           transfer,
           employeeTransferId: transfer.id,
         },
-        details: `${isManagerTransfer ? "Manager transfer requiring Admin approval" : "Transfer"} ${transfer.employeeName || transfer.employeeId || "team member"} from ${transfer.fromProjectName || "-"} to ${transfer.toProjectName || "-"}.`,
+        details: `${isManagerTransfer ? "Manager / Top Management transfer requiring Admin approval" : "Transfer"} ${transfer.employeeName || transfer.employeeId || "team member"} from ${transfer.fromProjectName || "-"} to ${transfer.toProjectName || "-"}.`,
         status: "Pending",
         changedFields: [
           {
@@ -4156,6 +4388,7 @@ useEffect(() => {
       return (
       <StationsPage
   stations={scopedStations}
+  setStations={setStations}
   projects={scopedProjects}
   transferProjects={transferDestinationProjects}
   data={scopedData}
@@ -4328,6 +4561,36 @@ const showToast = (type, message) => {
   }, 3000);
 };
 
+const [isOnline, setIsOnline] = useState(() =>
+  typeof navigator === "undefined" ? true : navigator.onLine
+);
+
+useEffect(() => {
+  if (typeof window === "undefined") return undefined;
+
+  const handleOffline = () => {
+    setIsOnline(false);
+    showToast("warning", NETWORK_OFFLINE_MESSAGE);
+  };
+
+  const handleOnline = () => {
+    setIsOnline(true);
+    showToast("success", "Internet connection restored.");
+  };
+
+  window.addEventListener("offline", handleOffline);
+  window.addEventListener("online", handleOnline);
+
+  if (navigator.onLine === false) {
+    handleOffline();
+  }
+
+  return () => {
+    window.removeEventListener("offline", handleOffline);
+    window.removeEventListener("online", handleOnline);
+  };
+}, []);
+
 const sidebarItems = [
   { key: "operations", label: "Operations", Icon: LayoutDashboard },
   { key: "assets", label: "Assets", Icon: Truck },
@@ -4392,23 +4655,31 @@ if (!authLoaded || backendAuthLoading) {
 
 if (!currentUser) {
   return (
-    <LoginPage
-      users={users}
-      companies={companies}
-      selectedCompanyId={selectedCompanyId}
-      setSelectedCompanyId={setSelectedCompanyId}
-      loginIdentifier={loginIdentifier}
-      setLoginIdentifier={setLoginIdentifier}
-      loginPassword={loginPassword}
-      setLoginPassword={setLoginPassword}
-      rememberSession={rememberSession}
-      setRememberSession={setRememberSession}
-      loginError={loginError}
-      handleLogin={handleLogin}
-      theme={theme}
-      setTheme={setTheme}
-      actionLoading={actionLoading}
-    />
+    <>
+      {!isOnline && (
+        <div className="fixed top-0 left-0 right-0 z-[999998] bg-red-600 text-white text-center text-sm font-semibold py-2 shadow-lg">
+          {NETWORK_OFFLINE_MESSAGE}
+        </div>
+      )}
+      <LoginPage
+        users={users}
+        companies={companies}
+        selectedCompanyId={selectedCompanyId}
+        setSelectedCompanyId={setSelectedCompanyId}
+        loginIdentifier={loginIdentifier}
+        setLoginIdentifier={setLoginIdentifier}
+        loginPassword={loginPassword}
+        setLoginPassword={setLoginPassword}
+        rememberSession={rememberSession}
+        setRememberSession={setRememberSession}
+        loginError={loginError}
+        handleLogin={handleLogin}
+        theme={theme}
+        setTheme={setTheme}
+        actionLoading={actionLoading}
+      />
+      {toast && <Toast type={toast.type} message={toast.message} />}
+    </>
   );
 }
 
@@ -4899,7 +5170,7 @@ if (currentUser?.passwordResetRequired || forcePasswordChangeOpen) {
             </button>
 
             {showThemeSettings && (
-              <div className="absolute left-0 bottom-full mb-2 w-full bg-slate-950 border border-slate-700 rounded-2xl shadow-2xl overflow-hidden z-[9999]">
+              <div className="absolute left-0 bottom-full mb-2 w-full bg-slate-950 border border-slate-700 rounded-2xl shadow-2xl overflow-hidden z-[999999]">
                 <button
                   onClick={() => {
                     setTheme("dark");
@@ -5002,7 +5273,12 @@ if (currentUser?.passwordResetRequired || forcePasswordChangeOpen) {
         )}
 
         {renderPage()}
-	{toast && <Toast type={toast.type} message={toast.message} />}
+	{!isOnline && (
+        <div className="fixed top-0 left-0 right-0 z-[999998] bg-red-600 text-white text-center text-sm font-semibold py-2 shadow-lg">
+          {NETWORK_OFFLINE_MESSAGE}
+        </div>
+      )}
+      {toast && <Toast type={toast.type} message={toast.message} />}
       </div>
     </div>
     </>
@@ -8119,9 +8395,12 @@ useOutsideClick(assetSettingsRef, () => {
     }
   };
 
+  const canCurrentUserCreateAssetTransfer = () =>
+    currentUser?.status === "Active" && ["Officer", "Manager"].includes(currentUser?.role);
+
   const openProjectChange = (asset) => {
-    if (!hasPermission("assets", "edit")) {
-      showToast?.("warning", "Read-only access: you cannot change asset project.");
+    if (!canCurrentUserCreateAssetTransfer()) {
+      showToast?.("warning", "Only Officer or Manager can request asset transfer.");
       return;
     }
 
@@ -8161,8 +8440,8 @@ useOutsideClick(assetSettingsRef, () => {
   };
 
   const confirmProjectUpdate = async () => {
-    if (!hasPermission("assets", "edit")) {
-      showToast?.("warning", "Read-only access: you cannot update asset project.");
+    if (!canCurrentUserCreateAssetTransfer()) {
+      showToast?.("warning", "Only Officer or Manager can request asset transfer.");
       resetProjectWorkflow();
       return;
     }
@@ -8185,6 +8464,7 @@ useOutsideClick(assetSettingsRef, () => {
       const response = await api.post(`/assets/${backendAssetId}/transfer`, {
         toProjectId,
         requestedByUserId: currentUser?.id || "",
+        effectiveDate: projectEffectiveDate || undefined,
       });
 
       onAssetTransferCreated?.(response.data);
@@ -8994,7 +9274,7 @@ const printAssetsReport = () => {
                   </Td>
 
                   <Td>
-                    {hasPermission("assets", "edit") ? (
+                    {canCurrentUserCreateAssetTransfer() ? (
                       <button
                         onClick={() => openProjectChange(asset)}
                         className="hover:text-yellow-400 transition cursor-pointer"
@@ -9651,6 +9931,7 @@ const printAssetsReport = () => {
 }
 function StationsPage({
   stations,
+  setStations = () => {},
   projects = [],
   transferProjects = projects,
   data,
@@ -9866,6 +10147,7 @@ const [showConfirm, setShowConfirm] = useState(false);
   const [stationProjectHistory, setStationProjectHistory] = useState([]);
   const [localStationStatusUpdates, setLocalStationStatusUpdates] = useState({});
   const [localStations, setLocalStations] = useState([]);
+  const [stationSaveLoading, setStationSaveLoading] = useState(false);
   const [newStation, setNewStation] = useState({
     id: "",
     type: "Main",
@@ -9880,6 +10162,10 @@ const [showConfirm, setShowConfirm] = useState(false);
 
   const [statusEditStation, setStatusEditStation] = useState(null);
   const [newStationStatus, setNewStationStatus] = useState("");
+  const [capacityEditStation, setCapacityEditStation] = useState(null);
+  const [capacityDraftValue, setCapacityDraftValue] = useState("");
+  const [capacitySaveLoading, setCapacitySaveLoading] = useState(false);
+  const [stationDeleteLoading, setStationDeleteLoading] = useState(false);
 
   const [showStockCountAdjustment, setShowStockCountAdjustment] = useState(false);
   const [stockCountStation, setStockCountStation] = useState(null);
@@ -9923,6 +10209,7 @@ const [showConfirm, setShowConfirm] = useState(false);
       openingBalance: "",
       status: "Active",
     });
+    setNewStationOpeningCounter("0");
   };
 
   const closeAddStation = () => {
@@ -9930,13 +10217,17 @@ const [showConfirm, setShowConfirm] = useState(false);
     resetNewStation();
   };
 
-  const saveNewStation = () => {
+  const saveNewStation = async () => {
     if (!hasPermission("stations", "add")) {
       showToast?.("warning", "Read-only access: you cannot add stations.");
       return;
     }
 
-    if (!newStation.id.trim()) {
+    if (stationSaveLoading) return;
+
+    const stationId = newStation.id.trim();
+
+    if (!stationId) {
       showToast?.("warning", "Please enter Station ID.");
       return;
     }
@@ -9946,14 +10237,80 @@ const [showConfirm, setShowConfirm] = useState(false);
       return;
     }
 
+    const selectedProjectValue = newStation.project || "";
+    const projectLookupList = [
+      ...(Array.isArray(projects) ? projects : []),
+      ...(Array.isArray(transferProjects) ? transferProjects : []),
+    ];
+    const matchedProject = projectLookupList.find((project) =>
+      normalizeScopeValue(project.id) === normalizeScopeValue(selectedProjectValue) ||
+      normalizeScopeValue(project.backendId) === normalizeScopeValue(selectedProjectValue) ||
+      normalizeScopeValue(project.projectBackendId) === normalizeScopeValue(selectedProjectValue) ||
+      normalizeScopeValue(project.databaseId) === normalizeScopeValue(selectedProjectValue) ||
+      normalizeScopeValue(project.name) === normalizeScopeValue(selectedProjectValue) ||
+      normalizeScopeValue(project.code) === normalizeScopeValue(selectedProjectValue)
+    );
+
+    if (selectedProjectValue && !matchedProject) {
+      showToast?.("warning", "Selected project was not found in backend projects list.");
+      return;
+    }
+
+    const matchedProjectBackendId =
+      matchedProject?.backendId ||
+      matchedProject?.projectBackendId ||
+      matchedProject?.databaseId ||
+      matchedProject?.prismaId ||
+      matchedProject?.originalId ||
+      matchedProject?.id ||
+      "";
+
+    const stationCompanyId =
+      matchedProject?.companyId ||
+      (!isPlatformContextValue(currentUser?.companyId) ? currentUser?.companyId : "") ||
+      (!isPlatformContextValue(currentCompanyId) ? currentCompanyId : "") ||
+      (!isPlatformContextValue(selectedCompanyId) ? selectedCompanyId : "") ||
+      "";
+
+    if (!stationCompanyId || isPlatformContextValue(stationCompanyId)) {
+      showToast?.("warning", "Please select a company before adding a station.");
+      return;
+    }
+
+    const capacity = Number(newStation.capacity || 0);
+    const openingBalance = Number(newStation.openingBalance || 0);
+    const openingCounter = Number(newStationOpeningCounter || 0);
+
+    if (!Number.isFinite(capacity) || capacity < 0) {
+      showToast?.("warning", "Capacity must be a valid zero or positive number.");
+      return;
+    }
+
+    if (!Number.isFinite(openingBalance) || openingBalance < 0) {
+      showToast?.("warning", "Opening balance must be a valid zero or positive number.");
+      return;
+    }
+
+    if (!Number.isFinite(openingCounter) || openingCounter < 0) {
+      showToast?.("warning", "Opening counter must be a valid zero or positive number.");
+      return;
+    }
+
     const cleanStation = {
-      id: newStation.id.trim(),
+      id: stationId,
+      stationId,
+      name: stationId,
       type: newStation.type || "Main",
-      project: newStation.project || "-",
-      capacity: Number(newStation.capacity) || 0,
-      openingBalance: Number(newStation.openingBalance) || 0,
+      project: matchedProject?.name || selectedProjectValue || "-",
+      projectId: matchedProjectBackendId,
+      capacity,
+      openingBalance,
+      currentStock: openingBalance,
+      currentCounter: openingCounter,
+      openingCounter,
+      counter: openingCounter,
       status: newStation.status || "Active",
-      createdLocally: true,
+      companyId: stationCompanyId,
     };
 
     if (isOfficerUser(currentUser)) {
@@ -9968,10 +10325,83 @@ const [showConfirm, setShowConfirm] = useState(false);
       return;
     }
 
-    setLocalStations((prev) => [...prev, cleanStation]);
-    trackActivity?.("Add Station", "stations", `${cleanStation.id} added locally.`);
-    showToast?.("success", "Station added locally.");
+    if (!canUseNetwork(showToast)) return;
+
+    setStationSaveLoading(true);
+
+    let createdStation = null;
+
+    // Important: this try/catch is for the backend create request only.
+    // Any UI refresh/activity error after a successful POST must not turn the save into a false failure.
+    try {
+      const response = await api.post("/stations", {
+        companyId: stationCompanyId,
+        stationId: cleanStation.stationId,
+        name: cleanStation.name,
+        type: cleanStation.type,
+        capacity: cleanStation.capacity,
+        openingBalance: cleanStation.openingBalance,
+        currentCounter: cleanStation.currentCounter,
+        projectId: cleanStation.projectId || undefined,
+        status: mapFrontendStationStatusForBackend(cleanStation.status),
+        createdById: currentUser?.id || undefined,
+      });
+
+      createdStation = mapBackendStationForState(response.data);
+    } catch (error) {
+      const backendMessage = getFriendlyApiErrorMessage(error, "Failed to add station.");
+
+      showToast?.("warning", backendMessage);
+      setStationSaveLoading(false);
+      return;
+    }
+
+    showToast?.("success", "Station added successfully.");
     closeAddStation();
+
+    try {
+      const refreshResponse = await api.get("/stations", {
+        params: { companyId: stationCompanyId },
+      });
+      const backendStations = Array.isArray(refreshResponse.data) ? refreshResponse.data : [];
+      const mappedStations = backendStations.map(mapBackendStationForState);
+
+      setStations((prev) => {
+        const otherCompanies = prev.filter(
+          (station) => !companyMatches(getItemCompanyId(station), stationCompanyId)
+        );
+        return filterDuplicateTenantEntities([...mappedStations, ...otherCompanies]);
+      });
+    } catch (refreshError) {
+      console.warn("Station was created, but stations refresh failed. Applying local fallback.", refreshError);
+
+      if (createdStation) {
+        setStations((prev) => [
+          createdStation,
+          ...prev.filter((station) =>
+            !tenantEntityMatches(
+              station,
+              createdStation.id,
+              createdStation.companyId || stationCompanyId
+            ) &&
+            normalizeScopeValue(station.backendId || station.stationBackendId) !==
+              normalizeScopeValue(createdStation.backendId || createdStation.stationBackendId)
+          ),
+        ]);
+      }
+    }
+
+    try {
+      trackActivity?.(
+        "Add Station",
+        "stations",
+        `${createdStation?.id || cleanStation.id} added from backend.`
+      );
+    } catch (activityError) {
+      console.warn("Station was created, but activity tracking failed.", activityError);
+    }
+
+    setStationSaveLoading(false);
   };
 
   const countryFlag = "🇸🇦";
@@ -10143,6 +10573,27 @@ const [showConfirm, setShowConfirm] = useState(false);
     return localStationStatusUpdates[station.id]?.status || station.status || "Active";
   };
 
+  const getStationBackendId = (station) =>
+    station?.backendId || station?.stationBackendId || station?.databaseId || station?.prismaId || "";
+
+  const refreshBackendStationsForCompany = async (companyId) => {
+    if (!companyId || isPlatformContextValue(companyId)) return;
+
+    const response = await api.get("/stations", {
+      params: { companyId },
+    });
+
+    const backendStations = Array.isArray(response.data) ? response.data : [];
+    const mappedStations = backendStations.map(mapBackendStationForState);
+
+    setStations((prev) => {
+      const otherCompanies = prev.filter(
+        (station) => !companyMatches(getItemCompanyId(station), companyId)
+      );
+      return filterDuplicateTenantEntities([...mappedStations, ...otherCompanies]);
+    });
+  };
+
   const openProjectChange = (station) => {
     if (!hasPermission("stations", "edit")) {
       showToast?.("warning", "Read-only access: you cannot change station project.");
@@ -10228,11 +10679,14 @@ const [showConfirm, setShowConfirm] = useState(false);
       return;
     }
 
+    const currentStatus = getCurrentStationStatus(station);
+    const nextStatus = isSameText(currentStatus, "Active") ? "Inactive" : "Active";
+
     setStatusEditStation(station);
-    setNewStationStatus(getCurrentStationStatus(station));
+    setNewStationStatus(nextStatus);
   };
 
-  const confirmStationStatusChange = () => {
+  const confirmStationStatusChange = async () => {
     if (!statusEditStation) return;
 
     if (!newStationStatus) {
@@ -10240,28 +10694,175 @@ const [showConfirm, setShowConfirm] = useState(false);
       return;
     }
 
+    const backendId = getStationBackendId(statusEditStation);
+    if (!backendId) {
+      showToast?.("warning", "This station is not linked to backend yet. Refresh and try again.");
+      return;
+    }
+
     const oldStatus = getCurrentStationStatus(statusEditStation);
 
-    setLocalStationStatusUpdates((prev) => ({
-      ...prev,
-      [statusEditStation.id]: {
-        oldStatus,
-        status: newStationStatus,
-        changedBy: currentUser?.fullName || currentUser?.name || "System",
-        changedAt: new Date().toISOString(),
-      },
-    }));
+    try {
+      const response = await api.patch(`/stations/${backendId}`, {
+        status: mapFrontendStationStatusForBackend(newStationStatus),
+      });
 
-    trackActivity?.(
-      "Station Status Change",
-      "stations",
-      `${statusEditStation.id} status changed from ${oldStatus || "-"} to ${newStationStatus}.`
+      const updatedStation = mapBackendStationForState(response.data);
+
+      setStations((prev) =>
+        prev.map((station) =>
+          normalizeScopeValue(getStationBackendId(station)) === normalizeScopeValue(backendId) ||
+          tenantEntityMatches(station, statusEditStation.id, statusEditStation.companyId)
+            ? { ...station, ...updatedStation }
+            : station
+        )
+      );
+
+      setLocalStationStatusUpdates((prev) => {
+        const next = { ...prev };
+        delete next[statusEditStation.id];
+        return next;
+      });
+
+      trackActivity?.(
+        "Station Status Change",
+        "stations",
+        `${statusEditStation.id} status changed from ${oldStatus || "-"} to ${newStationStatus}.`
+      );
+
+      setStatusEditStation(null);
+      setNewStationStatus("");
+
+      showToast?.("success", "Station status updated successfully.");
+    } catch (error) {
+      const backendMessage =
+        error?.response?.data?.message ||
+        error?.response?.data?.error ||
+        "Failed to update station status.";
+
+      showToast?.(
+        "warning",
+        Array.isArray(backendMessage) ? backendMessage.join(" / ") : backendMessage
+      );
+    }
+  };
+
+  const startCapacityInlineEdit = (station) => {
+    if (!hasPermission("stations", "edit")) {
+      showToast?.("warning", "Read-only access: you cannot edit station capacity.");
+      return;
+    }
+
+    setCapacityEditStation(station);
+    setCapacityDraftValue(String(station.capacity ?? 0));
+  };
+
+  const cancelCapacityInlineEdit = () => {
+    if (capacitySaveLoading) return;
+    setCapacityEditStation(null);
+    setCapacityDraftValue("");
+  };
+
+  const saveCapacityInlineEdit = async () => {
+    if (!capacityEditStation || capacitySaveLoading) return;
+
+    const nextCapacity = Number(capacityDraftValue);
+    const oldCapacity = Number(capacityEditStation.capacity || 0);
+
+    if (capacityDraftValue === "" || !Number.isFinite(nextCapacity) || nextCapacity < 0) {
+      showToast?.("warning", "Capacity must be a valid zero or positive number.");
+      return;
+    }
+
+    if (nextCapacity === oldCapacity) {
+      cancelCapacityInlineEdit();
+      return;
+    }
+
+    if (isOfficerUser(currentUser)) {
+      submitApprovalRequest?.({
+        type: "master_data_change",
+        module: "stations",
+        title: `Station ${capacityEditStation.id} capacity change`,
+        details: `Officer requested station capacity change from ${formatNumber(oldCapacity)} L to ${formatNumber(nextCapacity)} L.`,
+        payload: {
+          entity: "station",
+          id: capacityEditStation.id,
+          backendId: getStationBackendId(capacityEditStation),
+          field: "capacity",
+          oldValue: oldCapacity,
+          newValue: nextCapacity,
+          project: capacityEditStation.project,
+          changedFields: [
+            {
+              field: "capacity",
+              label: "Station Capacity",
+              oldValue: `${formatNumber(oldCapacity)} L`,
+              newValue: `${formatNumber(nextCapacity)} L`,
+              sensitive: true,
+            },
+          ],
+        },
+      });
+
+      setCapacityEditStation(null);
+      setCapacityDraftValue("");
+      showToast?.("warning", "Station capacity change sent for manager approval.");
+      return;
+    }
+
+    const confirmed = window.confirm(
+      `Update station ${capacityEditStation.id} capacity from ${formatNumber(oldCapacity)} L to ${formatNumber(nextCapacity)} L?`
     );
 
-    setStatusEditStation(null);
-    setNewStationStatus("");
+    if (!confirmed) return;
 
-    showToast?.("success", "Station status updated successfully.");
+    const backendId = getStationBackendId(capacityEditStation);
+    if (!backendId) {
+      showToast?.("warning", "This station is not linked to backend yet. Refresh and try again.");
+      return;
+    }
+
+    setCapacitySaveLoading(true);
+
+    try {
+      const response = await api.patch(`/stations/${backendId}`, {
+        capacity: nextCapacity,
+      });
+
+      const updatedStation = mapBackendStationForState(response.data);
+
+      setStations((prev) =>
+        prev.map((station) =>
+          normalizeScopeValue(getStationBackendId(station)) === normalizeScopeValue(backendId) ||
+          tenantEntityMatches(station, capacityEditStation.id, capacityEditStation.companyId)
+            ? { ...station, ...updatedStation }
+            : station
+        )
+      );
+
+      trackActivity?.(
+        "Station Capacity Change",
+        "stations",
+        `${capacityEditStation.id} capacity changed from ${formatNumber(oldCapacity)} L to ${formatNumber(nextCapacity)} L.`
+      );
+
+      setCapacityEditStation(null);
+      setCapacityDraftValue("");
+      showToast?.("success", "Station capacity updated successfully.");
+    } catch (error) {
+      const backendMessage =
+        error?.response?.data?.message ||
+        error?.response?.data?.error ||
+        "Failed to update station capacity.";
+
+      showToast?.(
+        "warning",
+        Array.isArray(backendMessage) ? backendMessage.join(" / ") : backendMessage
+      );
+    } finally {
+      setCapacitySaveLoading(false);
+    }
   };
 
   const getCurrentStationCounter = (station) => {
@@ -10296,42 +10897,60 @@ const [showConfirm, setShowConfirm] = useState(false);
     confirmStationDeleteRequest();
   };
 
-  const confirmStationDeleteRequest = () => {
+  const confirmStationDeleteRequest = async () => {
+    if (!deleteTargetStation || stationDeleteLoading) return;
+
     if (!hasPermission("stations", "delete")) {
-      showToast?.("warning", "Read-only access: you cannot request station deletion.");
+      showToast?.("warning", "Read-only access: you cannot delete stations.");
       return;
     }
 
-    submitApprovalRequest({
-      type: "master_data_change",
-      module: "stations",
-      title: `Station ${deleteTargetStation?.id} deletion request`,
-      details: stationDeleteReason,
-      payload: {
-        entity: "station",
-        action: "delete",
-        id: deleteTargetStation?.id,
-        reason: stationDeleteReason,
-        project: deleteTargetStation?.project,
-      },
-    });
+    const backendId = getStationBackendId(deleteTargetStation);
+    if (!backendId) {
+      showToast?.("warning", "This station is not linked to backend yet. Refresh and try again.");
+      return;
+    }
 
-    setDeleteTargetStation(null);
-    setStationDeleteReason("");
-    setShowStationDeleteConfirm(false);
-    setShowStationDeletePassword(false);
-    setStationDeletePassword("");
+    setStationDeleteLoading(true);
 
-    showToast
-      ? showToast(
-          "success",
-          "Station deletion request submitted for manager approval."
+    try {
+      await api.delete(`/stations/${backendId}`);
+
+      setStations((prev) =>
+        prev.filter((station) =>
+          !(
+            normalizeScopeValue(getStationBackendId(station)) === normalizeScopeValue(backendId) ||
+            tenantEntityMatches(station, deleteTargetStation.id, deleteTargetStation.companyId)
+          )
         )
-      : notifyUser(
-          typeof showToast !== "undefined" ? showToast : null,
-          inferToastTypeFromMessage("Station deletion request submitted for manager approval."),
-          "Station deletion request submitted for manager approval."
-        );
+      );
+
+      trackActivity?.(
+        "Delete Station",
+        "stations",
+        `${deleteTargetStation.id} was soft deleted.${stationDeleteReason ? ` Reason: ${stationDeleteReason}` : ""}`
+      );
+
+      setDeleteTargetStation(null);
+      setStationDeleteReason("");
+      setShowStationDeleteConfirm(false);
+      setShowStationDeletePassword(false);
+      setStationDeletePassword("");
+
+      showToast?.("success", "Station soft deleted successfully.");
+    } catch (error) {
+      const backendMessage =
+        error?.response?.data?.message ||
+        error?.response?.data?.error ||
+        "Failed to delete station.";
+
+      showToast?.(
+        "warning",
+        Array.isArray(backendMessage) ? backendMessage.join(" / ") : backendMessage
+      );
+    } finally {
+      setStationDeleteLoading(false);
+    }
   };
 
   const proceedStationCounterConfirm = () => {
@@ -11073,21 +11692,6 @@ const getLatestStationCounter = (stationId, fallbackValue = 0) => {
                       {station.id}
                     </button>
 
-                  <div className="flex items-center gap-2 min-w-0 overflow-hidden">
-
-                    <button
-                      onClick={(e) => {
-                        e.stopPropagation();
-                        setDeletingStation(station);
-                      }}
-                      title="Delete Station"
-                      className="w-8 h-8 flex items-center justify-center rounded-full border border-slate-700 bg-slate-900/80 text-red-300 hover:border-red-400 hover:bg-red-500/10 transition cursor-pointer"
-                    >
-                      🗑️
-                    </button>
-                  </div>
-
-
                     {hasPermission("stations", "delete") && (
                       <button
                         onClick={(e) => {
@@ -11152,9 +11756,30 @@ const getLatestStationCounter = (stationId, fallbackValue = 0) => {
               <div className="grid grid-cols-1 sm:grid-cols-3 gap-3 mb-5">
                 <div>
                   <p className="text-[11px] text-slate-400 whitespace-nowrap">Capacity</p>
-                  <p className="text-lg font-semibold">
-                    {formatNumber(station.capacity)} L
-                  </p>
+                  {capacityEditStation && tenantEntityMatches(capacityEditStation, station.id, station.companyId) ? (
+                    <input
+                      type="number"
+                      min="0"
+                      value={capacityDraftValue}
+                      autoFocus
+                      disabled={capacitySaveLoading}
+                      onChange={(e) => setCapacityDraftValue(e.target.value)}
+                      onBlur={saveCapacityInlineEdit}
+                      onKeyDown={(e) => {
+                        if (e.key === "Enter") saveCapacityInlineEdit();
+                        if (e.key === "Escape") cancelCapacityInlineEdit();
+                      }}
+                      className="w-full max-w-[140px] rounded-lg border border-yellow-400 bg-slate-950 px-2 py-1 text-lg font-semibold text-white outline-none"
+                    />
+                  ) : (
+                    <p
+                      onDoubleClick={() => startCapacityInlineEdit(station)}
+                      title="Double click to edit capacity"
+                      className="text-lg font-semibold cursor-pointer hover:text-yellow-300 transition"
+                    >
+                      {formatNumber(station.capacity)} L
+                    </p>
+                  )}
                 </div>
 
                 <div>
@@ -11673,14 +12298,14 @@ const getLatestStationCounter = (stationId, fallbackValue = 0) => {
 
               <button
                 onClick={saveNewStation}
-                disabled={Boolean(stationIdDuplicateError) || !newStation.id.trim()}
+                disabled={stationSaveLoading || Boolean(stationIdDuplicateError) || !newStation.id.trim()}
                 className={`px-3 lg:px-4 py-2 rounded-lg ${
-                  stationIdDuplicateError || !newStation.id.trim()
+                  stationSaveLoading || stationIdDuplicateError || !newStation.id.trim()
                     ? "bg-gray-300 text-gray-500 cursor-not-allowed"
                     : "bg-green-600 text-white hover:bg-green-700"
                 }`}
               >
-                Save Station
+                {stationSaveLoading ? "Saving..." : "Save Station"}
               </button>
             </div>
           </div>
@@ -11760,37 +12385,23 @@ const getLatestStationCounter = (stationId, fallbackValue = 0) => {
       )}
 
       {statusEditStation && (
-        <div className="fleet-modal-backdrop fixed inset-0 z-[9998] bg-black/60 flex items-center justify-center z-50">
+        <div className="fleet-modal-backdrop fixed inset-0 z-[9998] bg-black/60 flex items-center justify-center">
           <div className="bg-white text-black w-[520px] rounded-xl shadow-xl p-6">
             <div className="flex justify-between items-center mb-6 border-b pb-3">
-              <h2 className="text-xl sm:text-2xl font-bold">Change Station Status</h2>
+              <h2 className="text-xl sm:text-2xl font-bold">Confirm Station Status Change</h2>
               <button onClick={() => setStatusEditStation(null)}>×</button>
             </div>
 
-            <div className="grid grid-cols-1 gap-4">
-              <div className="bg-gray-100 p-4 rounded-lg">
-                <p>
-                  <strong>Station:</strong> {statusEditStation.id}
-                </p>
-                <p>
-                  <strong>Current Status:</strong>{" "}
-                  {getCurrentStationStatus(statusEditStation) || "-"}
-                </p>
-              </div>
-
-              <div className="grid grid-cols-1 sm:grid-cols-3 items-start sm:items-center gap-2 sm:gap-4">
-                <label className="font-medium text-gray-700">New Status</label>
-                <select
-                  value={newStationStatus}
-                  onChange={(e) => setNewStationStatus(e.target.value)}
-                  className="col-span-2 border rounded-lg p-2"
-                >
-                  <option value="">Select Status</option>
-                  <option>Active</option>
-                  <option>Inactive</option>
-                </select>
-              </div>
-
+            <div className="bg-gray-100 p-4 rounded-lg space-y-2">
+              <p>
+                <strong>Station:</strong> {statusEditStation.id}
+              </p>
+              <p>
+                <strong>Current Status:</strong> {getCurrentStationStatus(statusEditStation) || "-"}
+              </p>
+              <p>
+                <strong>New Status:</strong> {newStationStatus || "-"}
+              </p>
             </div>
 
             <div className="flex justify-end gap-3 mt-6 border-t pt-4">
@@ -11805,7 +12416,7 @@ const getLatestStationCounter = (stationId, fallbackValue = 0) => {
                 onClick={confirmStationStatusChange}
                 className="bg-amber-500 hover:bg-amber-400 text-black px-4 py-2 rounded-lg font-bold"
               >
-                Save Status
+                Confirm Change
               </button>
             </div>
           </div>
@@ -11880,9 +12491,10 @@ const getLatestStationCounter = (stationId, fallbackValue = 0) => {
 
               <button
                 onClick={proceedStationDeletePassword}
-                className="bg-red-600 text-white px-3 lg:px-4 py-2 rounded-lg"
+                disabled={stationDeleteLoading}
+                className={`bg-red-600 text-white px-3 lg:px-4 py-2 rounded-lg ${stationDeleteLoading ? "opacity-60 cursor-not-allowed" : ""}`}
               >
-                Yes, Continue
+                {stationDeleteLoading ? "Deleting..." : "Yes, Delete"}
               </button>
             </div>
           </div>
@@ -12278,6 +12890,8 @@ function TeamPage({
   const [bulkTransferModalOpen, setBulkTransferModalOpen] = useState(false);
   const [bulkTransferProjectId, setBulkTransferProjectId] = useState("");
   const [savingBulkTransfer, setSavingBulkTransfer] = useState(false);
+
+  const getTodayDateInputValue = () => new Date().toISOString().slice(0, 10);
 
   const fuelersSettingsRef = useRef(null);
 
@@ -13044,6 +13658,75 @@ function TeamPage({
     return project?.name || projectId || "-";
   };
 
+  const getFuelerLinkedSystemRole = (fueler) => {
+    if (!fueler) return "";
+
+    const directRole = normalizeBackendRoleName(
+      fueler.linkedUserRole ||
+        fueler.linkedUserRoleName ||
+        fueler.systemRole ||
+        fueler.systemRoleName ||
+        fueler.userRole ||
+        fueler.userRoleName ||
+        ""
+    );
+
+    if (directRole) return directRole;
+
+    const linkedUserId = normalizeText(
+      fueler.linkedUserId ||
+        fueler.userId ||
+        fueler.user?.id ||
+        fueler.systemUserId ||
+        ""
+    );
+
+    const employeeBackendId = normalizeText(fueler.backendId || fueler.employeeBackendId || "");
+    const employeeId = normalizeText(fueler.employeeId || fueler.id || "");
+    const employeeEmail = normalizeText(fueler.email || "");
+
+    const matchedUser = users.find((user) => {
+      const userId = normalizeText(user.id || "");
+      const userLinkedEmployeeId = normalizeText(user.linkedEmployeeId || "");
+      const userEmployeeId = normalizeText(user.employeeId || "");
+      const userEmail = normalizeText(user.email || "");
+
+      return (
+        (linkedUserId && userId === linkedUserId) ||
+        (employeeBackendId && userLinkedEmployeeId === employeeBackendId) ||
+        (employeeId && userEmployeeId === employeeId) ||
+        (employeeEmail && userEmail === employeeEmail)
+      );
+    });
+
+    return normalizeBackendRoleName(
+      matchedUser?.role ||
+        matchedUser?.roleName ||
+        matchedUser?.normalizedRole ||
+        ""
+    );
+  };
+
+  const isFuelerManagerSystemRole = (fueler) =>
+    ["Manager", "TopManagement"].includes(getFuelerLinkedSystemRole(fueler));
+
+  const canRequestTeamProjectTransfer = (fueler) => {
+    if (!currentUser || currentUser.status !== "Active") return false;
+    if (!fueler || fueler.pendingTransfer) return false;
+
+    const currentRole = normalizeBackendRoleName(currentUser.role || currentUser.roleName || "");
+
+    if (["Admin", "PlatformAdmin", "TopManagement", "Supervisor", "Operator"].includes(currentRole)) {
+      return false;
+    }
+
+    if (isFuelerManagerSystemRole(fueler)) {
+      return currentRole === "Officer";
+    }
+
+    return currentRole === "Officer" || currentRole === "Manager";
+  };
+
   const isEmployeeCurrentProjectManager = (fueler) => {
     if (!fueler) return false;
 
@@ -13401,7 +14084,17 @@ function TeamPage({
   };
 
   const requestTeamChange = ({ fueler, field, newValue }) => {
-    if (!hasPermission("team", "edit")) {
+    if (field === "project") {
+      if (!canRequestTeamProjectTransfer(fueler)) {
+        showToast?.(
+          "warning",
+          isFuelerManagerSystemRole(fueler)
+            ? "Only Officer can request transferring a Manager user."
+            : "Read-only access: you cannot transfer this team member."
+        );
+        return;
+      }
+    } else if (!hasPermission("team", "edit")) {
       showToast?.("warning", "Read-only access: you cannot edit team members.");
       return;
     }
@@ -13439,9 +14132,10 @@ function TeamPage({
       newValue,
       oldDisplayValue,
       newDisplayValue,
+      effectiveDate: field === "project" ? "" : undefined,
       message:
-        field === "project" && isEmployeeCurrentProjectManager(fueler)
-          ? `Are you sure you want to submit a Manager transfer request from ${oldDisplayValue || "-"} to ${newDisplayValue || "-"}? This transfer requires Admin approval and will only change the Team assignment, not Project Manager authority.`
+        field === "project" && isFuelerManagerSystemRole(fueler)
+          ? `Are you sure you want to submit a Manager / Top Management transfer request from ${oldDisplayValue || "-"} to ${newDisplayValue || "-"}? This transfer requires Admin approval.`
           : buildTeamChangeMessage({ field, oldDisplayValue, newDisplayValue }),
     });
   };
@@ -13593,12 +14287,14 @@ function TeamPage({
           throw new Error("Employee transfer API is not configured.");
         }
 
-        await onCreateEmployeeTransfer(fueler, newValue);
+        await onCreateEmployeeTransfer(fueler, newValue, {
+          effectiveDate: pendingTeamChange.effectiveDate || undefined,
+        });
 
         showToast?.(
           "success",
-          isEmployeeCurrentProjectManager(fueler)
-            ? "Manager transfer request submitted for Admin approval. Project Manager authority will not change."
+          isFuelerManagerSystemRole(fueler)
+            ? "Manager transfer request submitted for Admin approval."
             : "Transfer request submitted for approval. The current project will remain unchanged until approval is completed."
         );
 
@@ -14044,7 +14740,7 @@ function TeamPage({
 
                     <Td>
                       <div className="flex flex-col gap-1">
-                        {hasPermission("team", "edit") ? (
+                        {canRequestTeamProjectTransfer(fueler) ? (
                           <select
                             value={fueler.projectId || ""}
                             onChange={(e) => requestTeamChange({ fueler, field: "project", newValue: e.target.value })}
@@ -14632,6 +15328,33 @@ function TeamPage({
                     <div className="mt-1 font-bold text-emerald-100">{pendingTeamChange.newDisplayValue || "-"}</div>
                   </div>
                 </div>
+
+                {pendingTeamChange.field === "project" && (
+                  <div className="rounded-xl border border-amber-400/30 bg-amber-500/10 p-3">
+                    <label className="block text-xs font-semibold uppercase tracking-[0.18em] text-amber-200">
+                      Effective Date
+                    </label>
+                    <input
+                      type="date"
+                      value={pendingTeamChange.effectiveDate || ""}
+                      onChange={(event) =>
+                        setPendingTeamChange((prev) =>
+                          prev
+                            ? {
+                                ...prev,
+                                effectiveDate: event.target.value,
+                              }
+                            : prev
+                        )
+                      }
+                      max={getTodayDateInputValue()}
+                      className="mt-2 w-full rounded-xl border border-slate-700 bg-slate-950 px-3 py-2 text-sm text-white outline-none focus:border-amber-400"
+                    />
+                    <p className="mt-2 text-xs text-slate-400">
+                      Optional. Leave it empty to use the final approval date as the transfer effective date.
+                    </p>
+                  </div>
+                )}
               </div>
 
               <div className="flex justify-end gap-3 border-t border-slate-700 bg-slate-900 px-6 py-4">
@@ -18064,16 +18787,26 @@ function ApprovalsPage({
   const [reviewNotes, setReviewNotes] = useState({});
   const [selectedRequest, setSelectedRequest] = useState(null);
 
+  const isBackendTransferRequest = (request) =>
+    ["employee_transfer", "asset_transfer", "station_transfer"].includes(
+      String(request?.type || "").trim()
+    );
+
   const visibleApprovals = approvals.filter((item) => {
     if (!canUserViewApproval(currentUser, item)) return false;
-    return selectedStatus === "All" ? true : item.status === selectedStatus;
+    return selectedStatus === "All"
+      ? true
+      : normalizeApprovalStatus(item.status) === normalizeApprovalStatus(selectedStatus);
   });
 
   const approveRequest = async (request) => {
     return runWithActionLoading("Approving request...", async () => {
-    if (!canUserReviewApproval(currentUser, request)) return;
+    if (!canUserReviewApproval(currentUser, request)) {
+      showToast?.("warning", "You are not allowed to review this request.");
+      return;
+    }
 
-    if (request.status !== "Pending") {
+    if (!isPendingApprovalStatus(request.status)) {
       showToast?.("warning", "This request has already been reviewed.");
       return;
     }
@@ -18081,15 +18814,12 @@ function ApprovalsPage({
     const reviewedAt = new Date().toISOString();
     const note = reviewNotes[request.id] || "Approved";
     const routeApprovers = request.approvalRoute?.requiredApprovers || [];
-    const currentStage =
-      currentUser?.role === "Admin"
-        ? routeApprovers.find((approver) => approver.status === "Pending")
-        : routeApprovers.find((approver) => approver.userId === currentUser?.id && approver.status === "Pending");
+    const currentStage = routeApprovers.find(
+      (approver) => approver.userId === currentUser?.id && isPendingApprovalStatus(approver.status)
+    );
 
     const updatedApprovers = routeApprovers.map((approver) => {
-      const shouldApprove = currentUser?.role === "Admin"
-        ? approver.status === "Pending"
-        : approver.userId === currentUser?.id && approver.status === "Pending";
+      const shouldApprove = approver.userId === currentUser?.id && isPendingApprovalStatus(approver.status);
 
       return shouldApprove
         ? {
@@ -18104,7 +18834,7 @@ function ApprovalsPage({
 
     let fullyApproved =
       updatedApprovers.length > 0
-        ? updatedApprovers.every((approver) => approver.status === "Approved")
+        ? updatedApprovers.every((approver) => isApprovedApprovalStatus(approver.status))
         : currentUser?.role === "Admin";
 
     if (fullyApproved && request.type === "operation_external_supply" && request.payload?.row) {
@@ -18113,20 +18843,22 @@ function ApprovalsPage({
 
     if (request.type === "employee_transfer") {
       try {
-        const pendingApprovers = routeApprovers.filter((approver) => approver.status === "Pending");
-        const approverIdsToSubmit =
-          currentUser?.role === "Admin"
-            ? pendingApprovers.map((approver) => approver.userId).filter(Boolean)
-            : [currentUser?.id].filter(Boolean);
-
-        let latestReviewResult = null;
-
-        for (const reviewerUserId of approverIdsToSubmit) {
-          latestReviewResult = await onApproveEmployeeTransfer?.(
-            request.payload?.transfer || request.payload,
-            reviewerUserId
-          );
+        if (["Admin", "PlatformAdmin"].includes(currentUser?.role) && !isManagerEmployeeTransferApproval(request)) {
+          showToast?.("warning", "Admin can approve manager transfers only.");
+          return;
         }
+
+        const reviewerUserId = currentUser?.id || "";
+
+        if (!reviewerUserId) {
+          showToast?.("warning", "Approver user ID is required.");
+          return;
+        }
+
+        const latestReviewResult = await onApproveEmployeeTransfer?.(
+          request.payload?.transfer || request.payload,
+          reviewerUserId
+        );
 
         if (String(latestReviewResult?.status || "").toUpperCase() === "APPROVED") {
           fullyApproved = true;
@@ -18220,7 +18952,10 @@ function ApprovalsPage({
 
   const rejectRequest = async (request) => {
     return runWithActionLoading("Rejecting request...", async () => {
-    if (!canUserReviewApproval(currentUser, request) && currentUser?.role !== "Admin") return;
+    if (!isBackendTransferRequest(request) && !canUserReviewApproval(currentUser, request) && currentUser?.role !== "Admin") {
+      showToast?.("warning", "You are not allowed to review this request.");
+      return;
+    }
 
     if (request.status !== "Pending") {
       showToast?.("warning", "This request has already been reviewed.");
@@ -18936,7 +19671,7 @@ function UsersPage({
       setBackendRoles(roles);
       return roles;
     } catch (error) {
-      console.error("Failed to load roles from backend:", error);
+      logHandledApiIssue("Failed to load roles from backend", error);
       setBackendRoles([]);
       notifyUser(showToast, "warning", "Failed to load roles for the selected company.");
       return [];
@@ -18985,7 +19720,7 @@ function UsersPage({
       // Full role lists are loaded on demand when an Add/Create User flow needs them.
       setBackendRoles((prevRoles) => (Array.isArray(prevRoles) ? prevRoles : []));
     } catch (error) {
-      console.error("Failed to load users and roles from backend:", error);
+      logHandledApiIssue("Failed to load users and roles from backend", error);
       notifyUser(showToast, "warning", "Failed to load users and roles from backend.");
     }
   };
@@ -19152,7 +19887,7 @@ function UsersPage({
 
       closeUserModal();
     } catch (error) {
-      console.error("Failed to save user:", error);
+      logHandledApiIssue("Failed to save user", error);
       const message =
         error?.response?.data?.message ||
         error?.message ||
@@ -19251,18 +19986,17 @@ function UsersPage({
     try {
       const selectedRoleOption = await resolveUserRoleForSave(nextRoleId, user);
 
-      if (roleOptionNeedsBackendId(selectedRoleOption, nextRoleId)) {
-        notifyUser(showToast, "warning", "Selected role is not valid for this company.");
-        return;
-      }
-
       const selectedRoleName = selectedRoleOption?.name || nextRoleId;
       const selectedNormalizedRole = normalizeBackendRoleName(
         selectedRoleOption?.normalizedName || selectedRoleName
       );
 
+      const roleValueForBackend = roleOptionNeedsBackendId(selectedRoleOption, nextRoleId)
+        ? selectedRoleName
+        : selectedRoleOption.id;
+
       const response = await api.patch(`/users/${user.id}`, {
-        roleId: selectedRoleOption.id,
+        roleId: roleValueForBackend,
         role: selectedNormalizedRole,
         roleName: selectedRoleName,
       });
@@ -19280,7 +20014,7 @@ function UsersPage({
       );
       notifyUser(showToast, "success", "User role updated successfully.");
     } catch (error) {
-      console.error("Failed to update user role:", error);
+      logHandledApiIssue("Failed to update user role", error);
       const message =
         error?.response?.data?.message ||
         error?.message ||
@@ -19365,7 +20099,7 @@ function UsersPage({
           trackActivity("Change User Status", "users", `${updatedUser.username || updatedUser.fullName} changed to ${updatedUser.status}.`);
           notifyUser(showToast, "success", `User changed to ${updatedUser.status}.`);
         } catch (error) {
-          console.error("Failed to change user status:", error);
+          logHandledApiIssue("Failed to change user status", error);
 
           setUsers((prev) =>
             prev.map((item) => (item.id === previousUser.id ? previousUser : item))
@@ -19425,7 +20159,7 @@ function UsersPage({
           trackActivity("Reset Password", "users", `${user.username || user.fullName} temporary password generated.`);
           notifyUser(showToast, "success", "Temporary password generated.");
         } catch (error) {
-          console.error("Failed to reset password:", error);
+          logHandledApiIssue("Failed to reset password", error);
           notifyUser(showToast, "warning", "Failed to reset password.");
         } finally {
           setResettingPassword(false);
@@ -20112,7 +20846,7 @@ function CompaniesPage({ companies = [], setCompanies, currentUser, contextCompa
           .filter((company) => company.id)
       );
     } catch (error) {
-      console.error("Failed to refresh companies from backend:", error);
+      logHandledApiIssue("Failed to refresh companies from backend", error);
       notifyUser(showToast, "warning", "Failed to refresh companies from backend.");
     }
   };
@@ -20239,7 +20973,7 @@ function CompaniesPage({ companies = [], setCompanies, currentUser, contextCompa
       setCompanyModalMode(null);
       await refreshCompaniesFromBackend();
     } catch (error) {
-      console.error("Failed to save company:", error);
+      logHandledApiIssue("Failed to save company", error);
       notifyUser(
         showToast,
         "warning",
@@ -20274,7 +21008,7 @@ function CompaniesPage({ companies = [], setCompanies, currentUser, contextCompa
         `Company ${nextIsActive ? "activated" : "deactivated"} successfully.`
       );
     } catch (error) {
-      console.error("Failed to update company status:", error);
+      logHandledApiIssue("Failed to update company status", error);
       notifyUser(
         showToast,
         "warning",
@@ -21395,15 +22129,18 @@ function Toast({ type, message }) {
     warning: "⚠️",
   };
 
-  return (
+  if (typeof document === "undefined") return null;
+
+  return createPortal(
     <div
-      className={`fixed top-6 right-6 z-[9999] px-5 py-3 rounded-xl shadow-xl text-white font-medium transition-all duration-300 ${
+      className={`fixed top-6 right-6 z-[999999] px-5 py-3 rounded-xl shadow-2xl text-white font-medium transition-all duration-300 ${
         styles[type] || "bg-gray-700"
       }`}
     >
       <span className="mr-2">{icons[type]}</span>
       {message}
-    </div>
+    </div>,
+    document.body
   );
 }
 function StatusBadge({ status }) {
