@@ -154,17 +154,304 @@ function Bell({ size = 18, className = "" }) {
     </SidebarSvgIcon>
   );
 }
-const TRANSACTIONS_CSV =
-  "https://docs.google.com/spreadsheets/d/e/2PACX-1vRX0JNF_J9UzMQ5lyr7pxPrdL0GeLD8TkCf4MPNGdyOPT9rATlsmUnBQjx0MVoNy4nPHiRKc7jtmeku/pub?gid=836310880&single=true&output=csv";
- 
-const STATIONS_CSV =
-  "https://docs.google.com/spreadsheets/d/e/2PACX-1vRX0JNF_J9UzMQ5lyr7pxPrdL0GeLD8TkCf4MPNGdyOPT9rATlsmUnBQjx0MVoNy4nPHiRKc7jtmeku/pub?gid=123801173&single=true&output=csv";
- 
-const FUELERS_CSV =
-  "https://docs.google.com/spreadsheets/d/e/2PACX-1vRX0JNF_J9UzMQ5lyr7pxPrdL0GeLD8TkCf4MPNGdyOPT9rATlsmUnBQjx0MVoNy4nPHiRKc7jtmeku/pub?gid=1883723917&single=true&output=csv";
- 
-const PROJECTS_CSV =
-  "https://docs.google.com/spreadsheets/d/e/2PACX-1vRX0JNF_J9UzMQ5lyr7pxPrdL0GeLD8TkCf4MPNGdyOPT9rATlsmUnBQjx0MVoNy4nPHiRKc7jtmeku/pub?gid=2050998594&single=true&output=csv";
+const OPERATION_HEADERS = [
+  "operation_id",
+  "transaction_datetime",
+  "transaction_type",
+  "source_station",
+  "fueler_id",
+  "destination_id",
+  "diesel_quantity",
+  "odometer_at_fueling",
+  "station_counter",
+  "external_station_name",
+  "invoice_number",
+  "operation_status",
+  "backend_operation_id",
+];
+
+function toFrontendOperationType(value) {
+  return String(value || "")
+    .trim()
+    .toUpperCase()
+    .replace(/[\s-]+/g, "_")
+    .toLowerCase()
+    .split("_")
+    .map((part, index) =>
+      index === 0 ? part.charAt(0).toUpperCase() + part.slice(1) : part.charAt(0).toUpperCase() + part.slice(1)
+    )
+    .join("_");
+}
+
+function isBackendStationOperationType(value) {
+  const normalized = String(value || "").trim().toUpperCase().replace(/[\s-]+/g, "_");
+  return ["INTERNAL_TRANSFER", "EXTERNAL_SUPPLY", "EXTERNAL_TRANSFER"].includes(normalized);
+}
+
+function mapBackendOperationForState(operation = {}) {
+  const type = toFrontendOperationType(operation.type);
+  const destinationId = operation.assetId || operation.destinationStationId || "";
+  const stationCounterValue =
+    operation.stationCounter === undefined || operation.stationCounter === null
+      ? ""
+      : String(operation.stationCounter);
+  const odometerValue =
+    operation.odometer === undefined || operation.odometer === null
+      ? ""
+      : String(operation.odometer);
+
+  return [
+    operation.operationNo || operation.id || "",
+    operation.completedAt || operation.createdAt || "",
+    type,
+    operation.sourceStationId || "",
+    operation.requestedBy?.fullName || operation.requestedByUserId || "",
+    destinationId,
+    operation.quantity === undefined || operation.quantity === null ? "" : String(operation.quantity),
+    isBackendStationOperationType(operation.type) ? stationCounterValue || odometerValue : odometerValue,
+    stationCounterValue,
+    operation.externalStationName || "",
+    operation.invoiceNumber || "",
+    operation.status || "",
+    operation.id || "",
+  ];
+}
+
+function mapFrontendOperationToBackendPayload(operation = {}) {
+  const normalizedType = String(operation.transactionType || "")
+    .trim()
+    .toUpperCase()
+    .replace(/[\s-]+/g, "_");
+
+  const payload = {
+    type: normalizedType,
+    quantity: Number(operation.dieselQuantity || 0),
+    notes: operation.notes || undefined,
+    externalStationName: operation.externalStationName || undefined,
+    invoiceNumber: operation.invoiceNumber || undefined,
+    attachments: operation.photos || undefined,
+  };
+
+  if (["DIRECT_REFUEL", "INTERNAL_TRANSFER", "EXTERNAL_TRANSFER"].includes(normalizedType)) {
+    payload.sourceStationId = operation.sourceStation || undefined;
+  }
+
+  if (["INTERNAL_TRANSFER", "EXTERNAL_SUPPLY", "EXTERNAL_TRANSFER"].includes(normalizedType)) {
+    payload.destinationStationId = operation.destinationId || undefined;
+    payload.stationCounter =
+      operation.odometer === undefined || operation.odometer === null
+        ? undefined
+        : Number(operation.odometer);
+  }
+
+  if (["DIRECT_REFUEL", "EXTERNAL_DIRECT_REFUEL"].includes(normalizedType)) {
+    payload.assetId = operation.destinationId || undefined;
+    payload.odometer =
+      operation.odometer === undefined || operation.odometer === null
+        ? undefined
+        : Number(operation.odometer);
+  }
+
+  return payload;
+}
+
+function buildOperationRequestHeaders(currentUser = {}) {
+  return {
+    "x-user-id": currentUser?.id || "",
+    "x-user-role": currentUser?.role || currentUser?.roleName || "",
+    "x-user-name": currentUser?.fullName || currentUser?.username || currentUser?.email || "",
+  };
+}
+
+
+function mapBackendOperationApprovalForFrontend(item = {}, currentUser = {}) {
+  const operation = item.operation || item;
+  const operationId = operation.id || item.operationId || item.id || "";
+
+  if (!operationId) return null;
+
+  const normalizedType = String(operation.type || item.type || "")
+    .trim()
+    .toUpperCase()
+    .replace(/[\s-]+/g, "_");
+
+  const frontendType = toFrontendOperationType(normalizedType);
+  const requestType = getOperationApprovalType(frontendType);
+  const operationNo = operation.operationNo || item.operationNo || operationId;
+  const quantity = operation.quantity ?? item.quantity ?? "";
+  const sourceStationId = operation.sourceStationId || item.sourceStationId || "";
+  const destinationStationId = operation.destinationStationId || item.destinationStationId || "";
+  const assetId = operation.assetId || item.assetId || "";
+  const destinationId = assetId || destinationStationId || "-";
+  const requestedBy = operation.requestedBy || item.requestedBy || {};
+  const rawApprovals = Array.isArray(operation.approvals)
+    ? operation.approvals
+    : Array.isArray(item.approvals)
+    ? item.approvals
+    : item.approverUserId
+    ? [item]
+    : [];
+
+  const approvalStatusToFrontend = (value) => {
+    const status = normalizeApprovalStatus(value);
+    if (status === "APPROVED") return "Approved";
+    if (status === "REJECTED") return "Rejected";
+    return "Pending";
+  };
+
+  let requiredApprovers = rawApprovals.map((approval) => {
+    const approverId = approval.approverUserId || approval.userId || approval.approver?.id || "";
+    return {
+      userId: approverId,
+      userName:
+        approval.approver?.fullName ||
+        approval.approver?.name ||
+        (approverId === currentUser?.id ? currentUser?.fullName : "") ||
+        approval.approverName ||
+        "Project Manager",
+      role: "Manager",
+      projectId: approval.projectId || operation.projectId || item.projectId || "-",
+      approvalStage: approval.approvalStage || "Project Manager",
+      status: approvalStatusToFrontend(approval.status),
+      reviewedAt: approval.reviewedAt || "",
+      reviewNote: approval.note || approval.reviewNote || "",
+    };
+  });
+
+  if (!requiredApprovers.length && currentUser?.id && normalizeApprovalStatus(operation.status || item.status) === "PENDING") {
+    requiredApprovers = [
+      {
+        userId: currentUser.id,
+        userName: currentUser.fullName || currentUser.email || "Project Manager",
+        role: "Manager",
+        projectId: operation.projectId || item.projectId || "-",
+        approvalStage: "Project Manager",
+        status: "Pending",
+        reviewedAt: "",
+        reviewNote: "",
+      },
+    ];
+  }
+
+  const hasPendingStageForCurrentUser = requiredApprovers.some(
+    (approver) => approver.userId === currentUser?.id && isPendingApprovalStatus(approver.status)
+  );
+
+  const requestStatus = hasPendingStageForCurrentUser
+    ? "Pending"
+    : requiredApprovers.length && requiredApprovers.every((approver) => isApprovedApprovalStatus(approver.status))
+    ? "Approved"
+    : normalizeApprovalStatus(operation.status) === "REJECTED"
+    ? "Rejected"
+    : "Pending";
+
+  const changedFields = [
+    {
+      field: "transactionType",
+      label: "Operation Type",
+      oldValue: "-",
+      newValue: frontendType || normalizedType || "Operation",
+      sensitive: true,
+    },
+    {
+      field: "sourceStation",
+      label: "Source Station",
+      oldValue: "-",
+      newValue: sourceStationId || operation.externalStationName || "-",
+      sensitive: true,
+    },
+    {
+      field: "destinationId",
+      label: assetId ? "Asset" : "Destination Station",
+      oldValue: "-",
+      newValue: destinationId,
+      sensitive: true,
+    },
+    {
+      field: "dieselQuantity",
+      label: "Diesel Quantity",
+      oldValue: "-",
+      newValue: quantity === "" ? "-" : `${quantity} L`,
+      sensitive: true,
+    },
+  ];
+
+  if (operation.odometer !== undefined && operation.odometer !== null) {
+    changedFields.push({
+      field: "odometer",
+      label: "Odometer / Hour Meter",
+      oldValue: "-",
+      newValue: operation.odometer,
+      sensitive: true,
+    });
+  }
+
+  if (operation.stationCounter !== undefined && operation.stationCounter !== null) {
+    changedFields.push({
+      field: "stationCounter",
+      label: "Station Counter",
+      oldValue: "-",
+      newValue: operation.stationCounter,
+      sensitive: true,
+    });
+  }
+
+  if (operation.externalStationName) {
+    changedFields.push({
+      field: "externalStationName",
+      label: normalizedType === "EXTERNAL_SUPPLY" ? "External Supplier" : "External Station",
+      oldValue: "-",
+      newValue: operation.externalStationName,
+      sensitive: false,
+    });
+  }
+
+  if (operation.invoiceNumber) {
+    changedFields.push({
+      field: "invoiceNumber",
+      label: "Invoice / Receipt Number",
+      oldValue: "-",
+      newValue: operation.invoiceNumber,
+      sensitive: false,
+    });
+  }
+
+  return {
+    id: `BACKEND-OPERATION-${operationId}`,
+    backendOperationId: operationId,
+    isBackendOperationApproval: true,
+    type: requestType,
+    module: "operations",
+    title: getOperationApprovalTitle(frontendType, operationNo),
+    payload: {
+      operation,
+      backendOperationId: operationId,
+    },
+    details: `${quantity || "-"} L - ${frontendType || normalizedType || "Operation"} - ${destinationId}`,
+    status: requestStatus,
+    changedFields,
+    entityType: "Operation",
+    entityId: operationNo,
+    sensitivity: "Sensitive",
+    riskLevel: "High",
+    approvalRoute: {
+      routeType: normalizedType === "EXTERNAL_TRANSFER" ? "dual_project_manager" : "single_project_manager",
+      sourceProject: sourceStationId || "-",
+      destinationProject: destinationId || "-",
+      requiredApprovers,
+      routeStatus: requestStatus,
+    },
+    requestedById: requestedBy.id || operation.requestedByUserId || item.requestedByUserId || "System",
+    requestedByName: requestedBy.fullName || requestedBy.name || operation.requestedByUserId || "System",
+    requestedByRole: requestedBy.role?.name || requestedBy.roleName || "System",
+    requestedAt: operation.createdAt || item.createdAt || new Date().toISOString(),
+    reviewedBy: "",
+    reviewedAt: "",
+    reviewNote: "",
+  };
+}
+
+// Operations are now backend-only. Google Sheets CSV source was removed in Phase 3.2.
 
 
 
@@ -678,7 +965,9 @@ const ROLE_PERMISSIONS = {
   },
 
   Admin: {
-    operations: { view: true, add: true, edit: true, delete: true, approve: true, export: true, print: true },
+    // Admin is system administration only for Operations.
+    // He can monitor operations, export, and print, but cannot create, edit, delete, or approve fuel operations.
+    operations: { view: true, add: false, edit: false, delete: false, approve: false, export: true, print: true },
     assets: { view: true, add: true, edit: true, delete: true, approve: true, export: true, print: true },
     stations: { view: true, add: true, edit: true, delete: true, approve: true, adjustInventory: true, updatePrice: true, export: true, print: true },
     team: { view: true, add: true, edit: true, delete: true, approve: true, export: true, print: true },
@@ -694,7 +983,7 @@ const ROLE_PERMISSIONS = {
   Manager: {
     operations: { view: true, add: true, edit: true, delete: false, approve: true, export: true, print: true },
     assets: { view: true, add: true, edit: true, delete: false, approve: true, export: true, print: true },
-    stations: { view: true, add: true, edit: true, delete: false, approve: true, adjustInventory: true, updatePrice: false, export: true, print: true },
+    stations: { view: true, add: false, edit: true, delete: false, approve: true, adjustInventory: true, updatePrice: false, export: true, print: true },
     team: { view: true, add: true, edit: true, delete: false, approve: true, export: true, print: true },
     projects: { view: true, add: true, edit: true, delete: false, approve: true, export: true, print: true },
     reports: { view: true, export: true, print: true },
@@ -711,8 +1000,8 @@ const ROLE_PERMISSIONS = {
     // Officer can view Operations as read-only.
     // Officer can propose changes on master-data pages; non-status changes go to Manager approval.
     operations: { view: true, add: false, edit: false, delete: false, approve: false, export: true, print: true },
-    assets: { view: true, add: true, edit: true, delete: false, approve: false, export: true, print: true },
-    stations: { view: true, add: true, edit: true, delete: false, approve: false, adjustInventory: true, updatePrice: false, export: true, print: true },
+    assets: { view: true, add: false, edit: true, delete: false, approve: false, export: true, print: true },
+    stations: { view: true, add: false, edit: true, delete: false, approve: false, adjustInventory: false, updatePrice: false, export: true, print: true },
     team: { view: true, add: true, edit: true, delete: false, approve: false, export: true, print: true },
     projects: { view: true, add: true, edit: true, delete: false, approve: false, export: true, print: true },
     reports: { view: true, export: true, print: true },
@@ -1053,6 +1342,55 @@ function buildApprovalChangedFields({ type, payload = {} }) {
     ];
   }
 
+  if (
+    ["operation_external_direct_refuel", "operation_external_supply", "operation_external_transfer"].includes(type) &&
+    payload.operation
+  ) {
+    const operation = payload.operation;
+    const changedFields = [
+      {
+        field: "transactionType",
+        label: "Operation Type",
+        oldValue: "-",
+        newValue: normalizeApprovalValue(operation.transactionType),
+        sensitive: true,
+      },
+      {
+        field: "sourceStation",
+        label: "Source Station",
+        oldValue: "-",
+        newValue: normalizeApprovalValue(operation.sourceStation),
+        sensitive: true,
+      },
+      {
+        field: "destinationId",
+        label: "Destination",
+        oldValue: "-",
+        newValue: normalizeApprovalValue(operation.destinationId),
+        sensitive: true,
+      },
+      {
+        field: "dieselQuantity",
+        label: "Diesel Quantity",
+        oldValue: "-",
+        newValue: `${normalizeApprovalValue(operation.dieselQuantity)} L`,
+        sensitive: true,
+      },
+    ];
+
+    if (type === "operation_external_transfer") {
+      changedFields.push({
+        field: "project",
+        label: "Project Transfer",
+        oldValue: normalizeApprovalValue(payload.sourceProject || operation.sourceProject),
+        newValue: normalizeApprovalValue(payload.destinationProject || operation.destinationProject),
+        sensitive: true,
+      });
+    }
+
+    return changedFields;
+  }
+
   return [];
 }
 
@@ -1064,7 +1402,10 @@ function inferApprovalEntity({ type, payload = {} }) {
     };
   }
 
-  if (type === "operation_external_supply" && payload.operation) {
+  if (
+    ["operation_external_direct_refuel", "operation_external_supply", "operation_external_transfer"].includes(type) &&
+    payload.operation
+  ) {
     return {
       entityType: "Operation",
       entityId: payload.operation.operationId || "New Operation",
@@ -1092,17 +1433,28 @@ function projectMatchesScope(projectValue, scopeValue, projects = []) {
   if (normalizedProjectValue === normalizedScopeValue) return true;
 
   const matchedProject = projects.find((project) => {
-    const projectId = normalizeScopeValue(project.id);
-    const projectName = normalizeScopeValue(project.name);
-    return projectId === normalizedProjectValue || projectName === normalizedProjectValue;
+    const projectCandidates = [
+      project?.id,
+      project?.name,
+      project?.code,
+      project?.projectId,
+      project?.projectName,
+    ].map(normalizeScopeValue);
+
+    return projectCandidates.includes(normalizedProjectValue);
   });
 
   if (!matchedProject) return false;
 
-  return (
-    normalizeScopeValue(matchedProject.id) === normalizedScopeValue ||
-    normalizeScopeValue(matchedProject.name) === normalizedScopeValue
-  );
+  const matchedProjectCandidates = [
+    matchedProject?.id,
+    matchedProject?.name,
+    matchedProject?.code,
+    matchedProject?.projectId,
+    matchedProject?.projectName,
+  ].map(normalizeScopeValue);
+
+  return matchedProjectCandidates.includes(normalizedScopeValue);
 }
 
 function findManagerForProject(projectValue, users = [], projects = []) {
@@ -1123,6 +1475,62 @@ function findManagerForProject(projectValue, users = [], projects = []) {
     activeManagers.find((user) => getProjectScopeValues(user).includes("All")) ||
     activeManagers[0]
   );
+}
+
+function findStrictProjectManagerForProject(projectValue, users = [], projects = []) {
+  if (!projectValue || projectValue === "-") return null;
+
+  const normalizedProjectValue = normalizeScopeValue(projectValue);
+
+  const matchedProject = (projects || []).find((project) => {
+    const candidates = [
+      project?.backendId,
+      project?.id,
+      project?.name,
+      project?.code,
+      project?.projectId,
+      project?.projectName,
+    ].map(normalizeScopeValue);
+
+    return candidates.includes(normalizedProjectValue);
+  });
+
+  if (!matchedProject) return null;
+
+  const explicitManagerId =
+    matchedProject?.projectManagerId ||
+    matchedProject?.managerUserId ||
+    matchedProject?.managerId ||
+    matchedProject?.projectManager?.id ||
+    "";
+
+  if (explicitManagerId) {
+    const explicitManager = (users || []).find(
+      (user) =>
+        normalizeScopeValue(user?.id) === normalizeScopeValue(explicitManagerId) &&
+        user?.role === "Manager" &&
+        user?.status === "Active"
+    );
+
+    if (explicitManager) return explicitManager;
+
+    return {
+      id: explicitManagerId,
+      fullName:
+        matchedProject?.projectManagerName ||
+        matchedProject?.managerName ||
+        matchedProject?.projectManager?.fullName ||
+        "Project Manager",
+      email:
+        matchedProject?.projectManagerEmail ||
+        matchedProject?.projectManager?.email ||
+        "",
+      role: "Manager",
+      status: "Active",
+    };
+  }
+
+  return null;
 }
 
 function getReportingManagerForUser(user, users = [], projects = [], fallbackProject = "") {
@@ -1146,7 +1554,14 @@ function extractApprovalProjects({ payload = {}, changedFields = [] }) {
     };
   }
 
-  const valuesProject = payload?.values?.project || payload?.values?.projectName || payload?.project || payload?.projectName || "";
+  const valuesProject =
+    payload?.values?.projectId ||
+    payload?.values?.project ||
+    payload?.values?.projectName ||
+    payload?.projectId ||
+    payload?.project ||
+    payload?.projectName ||
+    "";
 
   return {
     sourceProject: valuesProject,
@@ -1198,7 +1613,13 @@ function buildApprovalRoute({ requestedBy, users = [], projects = [], payload = 
     };
   }
 
-  const projectForApproval = destinationProject || sourceProject || payload?.project || payload?.projectName || "";
+  const projectForApproval =
+    destinationProject ||
+    sourceProject ||
+    payload?.projectId ||
+    payload?.project ||
+    payload?.projectName ||
+    "";
 
   if (payload?.approvalRouteStrategy === "admin") {
     const adminApprovers = (users || []).filter(
@@ -1231,7 +1652,7 @@ function buildApprovalRoute({ requestedBy, users = [], projects = [], payload = 
   // so the approval must go to the destination station project manager.
   const manager =
     payload?.approvalRouteStrategy === "project_manager"
-      ? findManagerForProject(projectForApproval, users, projects)
+      ? findStrictProjectManagerForProject(projectForApproval, users, projects)
       : getReportingManagerForUser(requestedBy, users, projects, projectForApproval);
 
   return {
@@ -1313,8 +1734,18 @@ function userHasPendingApproval(user, request) {
 function canUserViewApproval(user, request) {
   if (!user || !request) return false;
 
-  // Backend transfer requests must be shown only to the user who has a pending approval.
-  // Auto-approved managers and already-approved stages should not see the request as pending.
+  const requestType = String(request?.type || "");
+  const requestAction = String(request?.payload?.action || "");
+
+  const isInventoryAdjustment =
+    requestType === "station_stock_count_adjustment" ||
+    requestType === "inventory_adjustment" ||
+    requestAction === "stock_count_adjustment";
+
+  if (isInventoryAdjustment) {
+    return ["PlatformAdmin", "Admin"].includes(user.role);
+  }
+
   if (isEmployeeTransferApproval(request)) {
     const isManagerTransfer = isManagerEmployeeTransferApproval(request);
 
@@ -1326,7 +1757,7 @@ function canUserViewApproval(user, request) {
     return userHasPendingApproval(user, request);
   }
 
-  if (["asset_transfer", "station_transfer"].includes(String(request?.type || ""))) {
+  if (["asset_transfer", "station_transfer"].includes(requestType)) {
     if (["PlatformAdmin", "Admin"].includes(user.role)) return false;
     return userHasPendingApproval(user, request);
   }
@@ -1341,11 +1772,21 @@ function canUserViewApproval(user, request) {
 function canUserReviewApproval(user, request) {
   if (!hasPermissionForUser(user, "approvals", "approve")) return false;
 
+  const requestType = String(request?.type || "");
+  const requestAction = String(request?.payload?.action || "");
+
+  const isInventoryAdjustment =
+    requestType === "station_stock_count_adjustment" ||
+    requestType === "inventory_adjustment" ||
+    requestAction === "stock_count_adjustment";
+
+  if (isInventoryAdjustment) {
+    return ["PlatformAdmin", "Admin"].includes(user?.role);
+  }
+
   const approvers = request?.approvalRoute?.requiredApprovers || [];
 
   if (isEmployeeTransferApproval(request)) {
-    // Admin approves only Manager Transfer requests.
-    // Normal Employee Transfer must be approved only by the listed pending project manager(s).
     if (["PlatformAdmin", "Admin"].includes(user?.role)) {
       return isManagerEmployeeTransferApproval(request) && userHasPendingApproval(user, request);
     }
@@ -1353,7 +1794,7 @@ function canUserReviewApproval(user, request) {
     return approvers.some((approver) => approver.userId === user?.id && isPendingApprovalStatus(approver.status));
   }
 
-  if (["asset_transfer", "station_transfer"].includes(String(request?.type || ""))) {
+  if (["asset_transfer", "station_transfer"].includes(requestType)) {
     if (["PlatformAdmin", "Admin"].includes(user?.role)) return false;
     return approvers.some((approver) => approver.userId === user?.id && isPendingApprovalStatus(approver.status));
   }
@@ -1625,25 +2066,119 @@ function exportAuditTimelineCSV(timelineItems = []) {
 
 function getAllowedTransactionTypesForUser(user) {
   if (!user || user.status !== "Active") return [];
-  if (user.role === "Operator") return ["Direct_Refuel"];
-  if (["Officer", "TopManagement"].includes(user.role)) return [];
 
-  // External_Transfer is a cross-project diesel transfer.
-  // It must be available only for Manager and Admin.
-  if (["Admin", "Manager"].includes(user.role)) {
-    return ["Direct_Refuel", "Internal_Transfer", "External_Supply", "External_Transfer"];
+  if (user.role === "Operator") {
+    return ["Direct_Refuel"];
   }
 
-  if (user.role === "Supervisor") {
-    return ["Direct_Refuel", "Internal_Transfer", "External_Supply"];
+  if (user.role === "Supervisor" || user.role === "Manager") {
+    return [
+      "Direct_Refuel",
+      "External_Direct_Refuel",
+      "Internal_Transfer",
+      "External_Supply",
+      "External_Transfer",
+    ];
   }
 
-  return ["Direct_Refuel"];
+  // Admin, Officer, TopManagement, and PlatformAdmin are view-only in Operations.
+  return [];
+}
+
+function isAssetRefuelTransactionType(transactionType) {
+  return ["Direct_Refuel", "External_Direct_Refuel"].some((type) =>
+    isSameText(transactionType, type)
+  );
+}
+
+function isExternalDirectRefuelTransactionType(transactionType) {
+  return isSameText(transactionType, "External_Direct_Refuel");
+}
+
+function isExternalSupplyTransactionType(transactionType) {
+  return isSameText(transactionType, "External_Supply");
+}
+
+function isExternalTransferTransactionType(transactionType) {
+  return isSameText(transactionType, "External_Transfer");
+}
+
+function isExternalSourceOperation(transactionType) {
+  return (
+    isExternalSupplyTransactionType(transactionType) ||
+    isExternalDirectRefuelTransactionType(transactionType)
+  );
+}
+
+function isStationCounterTransactionType(transactionType) {
+  return (
+    isSameText(transactionType, "Internal_Transfer") ||
+    isExternalSupplyTransactionType(transactionType) ||
+    isExternalTransferTransactionType(transactionType)
+  );
+}
+
+function shouldOperationRequireManagerApproval(transactionType, user) {
+  if (!user || user.status !== "Active") return true;
+
+  if (isExternalTransferTransactionType(transactionType)) {
+    // Cross-project diesel transfer needs the two project managers.
+    // If a Manager creates it, backend will later treat him as the first approval.
+    return user.role === "Supervisor" || user.role === "Manager";
+  }
+
+  if (
+    isExternalDirectRefuelTransactionType(transactionType) ||
+    isExternalSupplyTransactionType(transactionType)
+  ) {
+    // Supervisor submits a request. Manager executes immediately.
+    return user.role === "Supervisor";
+  }
+
+  return false;
+}
+
+function getOperationApprovalType(transactionType) {
+  if (isExternalDirectRefuelTransactionType(transactionType)) return "operation_external_direct_refuel";
+  if (isExternalSupplyTransactionType(transactionType)) return "operation_external_supply";
+  if (isExternalTransferTransactionType(transactionType)) return "operation_external_transfer";
+  return "operation";
+}
+
+function getOperationApprovalTitle(transactionType, operationId) {
+  if (isExternalDirectRefuelTransactionType(transactionType)) {
+    return `External Direct Refuel ${operationId} pending approval`;
+  }
+
+  if (isExternalSupplyTransactionType(transactionType)) {
+    return `External Supply ${operationId} pending approval`;
+  }
+
+  if (isExternalTransferTransactionType(transactionType)) {
+    return `External Transfer ${operationId} pending approval`;
+  }
+
+  return `Operation ${operationId} pending approval`;
+}
+
+function getOperationApprovalSuccessMessage(transactionType) {
+  if (isExternalDirectRefuelTransactionType(transactionType)) {
+    return "External Direct Refuel saved as Pending Manager Approval.";
+  }
+
+  if (isExternalSupplyTransactionType(transactionType)) {
+    return "External Supply saved as Pending Manager Approval.";
+  }
+
+  if (isExternalTransferTransactionType(transactionType)) {
+    return "External Transfer saved as Pending Project Managers Approval.";
+  }
+
+  return "Operation saved as Pending Manager Approval.";
 }
 
 function shouldExternalSupplyRequireApproval(user) {
-  if (!user) return true;
-  return !["Admin", "Manager"].includes(user.role);
+  return shouldOperationRequireManagerApproval("External_Supply", user);
 }
 
 function isOfficerUser(user) {
@@ -1874,6 +2409,44 @@ function mapBackendAssetTransferForState(transfer = {}) {
   };
 }
 
+function mapBackendStationTransferForState(transfer = {}) {
+  const station = transfer.station || {};
+  const fromProject = transfer.fromProject || {};
+  const toProject = transfer.toProject || {};
+
+  return {
+    id: transfer.id || "",
+    backendId: transfer.id || "",
+    stationBackendId: transfer.stationId || station.id || "",
+    stationId: station.stationId || transfer.stationId || "",
+    stationName: station.stationId || station.name || transfer.stationId || "Station",
+    companyId: transfer.companyId || station.companyId || "",
+    fromProjectId: transfer.fromProjectId || fromProject.id || "",
+    fromProjectName: fromProject.name || fromProject.code || transfer.fromProjectId || "-",
+    toProjectId: transfer.toProjectId || toProject.id || "",
+    toProjectName: toProject.name || toProject.code || transfer.toProjectId || "-",
+    requestedByUserId: transfer.requestedByUserId || "",
+    status: normalizeBackendTransferStatusForState(transfer.status),
+    effectiveDate: transfer.effectiveDate || "",
+    reason: transfer.reason || "",
+    rejectionReason: transfer.rejectionReason || "",
+    createdAt: transfer.createdAt || "",
+    approvedAt: transfer.approvedAt || "",
+    appliedAt: transfer.appliedAt || "",
+    approvals: Array.isArray(transfer.approvals)
+      ? transfer.approvals.map((approval) => ({
+          id: approval.id || "",
+          approverUserId: approval.approverUserId || "",
+          projectId: approval.projectId || "",
+          approvalStage: approval.approvalStage || "Project Manager",
+          status: normalizeBackendApprovalStatusForState(approval.status),
+          reviewedAt: approval.reviewedAt || "",
+          note: approval.note || "",
+        }))
+      : [],
+  };
+}
+
 function userCanAccessAllProjects(user) {
   if (!user) return false;
 
@@ -2029,7 +2602,7 @@ function getRowProjectValue(row, headers, assets = [], stations = []) {
   const destination = destinationIndex !== -1 ? row[destinationIndex] : "";
   const assetValue = assetIndex !== -1 ? row[assetIndex] : "";
 
-  if (isSameText(operationType, "Direct_Refuel")) {
+  if (isAssetRefuelTransactionType(operationType)) {
     return (
       getAssetProjectValue(assetValue, assets) ||
       getAssetProjectValue(destination, assets)
@@ -2289,8 +2862,11 @@ export default function Home() {
   const [loginError, setLoginError] = useState("");
   const [activityLog, setActivityLog] = useState([]);
   const [pendingApprovals, setPendingApprovals] = useState([]);
+  const [backendOperationApprovals, setBackendOperationApprovals] = useState([]);
   const [employeeTransferRequests, setEmployeeTransferRequests] = useState([]);
   const [assetTransferRequests, setAssetTransferRequests] = useState([]);
+  const [stationTransferRequests, setStationTransferRequests] = useState([]);
+  const [approvedStationStockAdjustments, setApprovedStationStockAdjustments] = useState([]);
   const [notificationReadMap, setNotificationReadMap] = useState({});
   const [loginPassword, setLoginPassword] = useState("Admin@12345");
   const [forcePasswordChangeOpen, setForcePasswordChangeOpen] = useState(false);
@@ -2314,11 +2890,15 @@ export default function Home() {
     if (url.includes("/assets/transfers") && url.includes("/review")) {
       return method === "PATCH" ? "Reviewing asset transfer..." : "Loading asset transfer...";
     }
+    if (url.includes("/stations/transfers") && url.includes("/review")) {
+      return method === "PATCH" ? "Reviewing station transfer..." : "Loading station transfer...";
+    }
     if (url.includes("/employee-transfers") && url.includes("/review")) {
       return method === "PATCH" ? "Reviewing team transfer..." : "Loading team transfer...";
     }
     if (url.includes("/assets") && url.includes("/reset-odometer")) return "Submitting odometer reset...";
     if (url.includes("/assets") && url.includes("/transfer")) return "Submitting asset transfer...";
+    if (url.includes("/stations") && url.includes("/transfer")) return "Submitting station transfer...";
     if (method === "DELETE") return "Deleting...";
     if (method === "POST") return "Saving...";
     if (method === "PATCH" || method === "PUT") return "Updating...";
@@ -2709,6 +3289,15 @@ useEffect(() => {
 
     try {
       const approvalRequest = createApprovalRequest({ ...request, requestedBy: currentUser, users, projects });
+
+      if (
+        approvalRequest?.payload?.approvalRouteStrategy === "project_manager" &&
+        !(approvalRequest?.approvalRoute?.requiredApprovers || []).length
+      ) {
+        showToast?.("warning", "No active project manager found for this project. Request was not submitted.");
+        return null;
+      }
+
       setPendingApprovals((prev) => [approvalRequest, ...prev]);
       setActivityLog((prev) => [
         createActivityRecord({
@@ -2719,7 +3308,12 @@ useEffect(() => {
         }),
         ...prev,
       ]);
-      showToast?.("warning", "Request sent to Manager approval queue.");
+      showToast?.(
+        "warning",
+        approvalRequest?.payload?.approvalRouteStrategy === "admin"
+          ? "Request sent to Admin approval queue."
+          : "Request sent to Manager approval queue."
+      );
       return approvalRequest;
     } finally {
       window.setTimeout(() => endActionLoading(), 250);
@@ -3027,6 +3621,37 @@ useEffect(() => {
     }
   };
 
+  const upsertStationTransferRequest = (transfer) => {
+    const mappedTransfer = mapBackendStationTransferForState(transfer);
+    if (!mappedTransfer.id) return mappedTransfer;
+
+    setStationTransferRequests((prev) => [
+      mappedTransfer,
+      ...(prev || []).filter(
+        (item) => normalizeScopeValue(item.id) !== normalizeScopeValue(mappedTransfer.id)
+      ),
+    ]);
+
+    return mappedTransfer;
+  };
+
+  const refreshBackendStationTransfers = async () => {
+    try {
+      const response = await api.get("/stations/transfers/pending");
+      const backendTransfers = Array.isArray(response.data) ? response.data : [];
+      const mappedTransfers = backendTransfers
+        .map(mapBackendStationTransferForState)
+        .filter((transfer) => transfer.id);
+
+      setStationTransferRequests(mappedTransfers);
+      return mappedTransfers;
+    } catch (error) {
+      console.warn("Station transfers API is not available.", error);
+      setStationTransferRequests([]);
+      return [];
+    }
+  };
+
   const handleCreateEmployee = async (payload) => {
     const response = await api.post("/employees", payload);
     const createdEmployee = mapBackendEmployeeForState(response.data);
@@ -3320,6 +3945,103 @@ useEffect(() => {
     return reviewedTransfer;
   };
 
+  const handleApproveStationTransfer = async (transfer, reviewerUserId = "") => {
+    const transferId = transfer?.backendId || transfer?.id;
+    const managerUserId = reviewerUserId || backendAuthUser?.id || currentUser?.id || "";
+
+    if (!transferId) {
+      throw new Error("Station transfer ID is required.");
+    }
+
+    if (!managerUserId) {
+      throw new Error("Approver user ID is required.");
+    }
+
+    const response = await api.patch(`/stations/transfers/${transferId}/review`, {
+      managerUserId,
+      approve: true,
+    });
+
+    const reviewedTransfer = mapBackendStationTransferForState(response.data);
+
+    setStationTransferRequests((prev) => {
+      if (String(reviewedTransfer.status || "").toUpperCase() === "APPROVED") {
+        return (prev || []).filter((item) => normalizeScopeValue(item.id) !== normalizeScopeValue(reviewedTransfer.id));
+      }
+
+      return (prev || []).map((item) =>
+        normalizeScopeValue(item.id) === normalizeScopeValue(reviewedTransfer.id)
+          ? reviewedTransfer
+          : item
+      );
+    });
+
+    if (String(reviewedTransfer.status || "").toUpperCase() === "APPROVED") {
+      try {
+        const stationResponse = await api.get(`/stations/${reviewedTransfer.stationBackendId}`);
+        const mappedStation = mapBackendStationForState(stationResponse.data);
+        setStations((prev) =>
+          (prev || []).map((station) =>
+            normalizeScopeValue(station.backendId || station.stationBackendId) ===
+              normalizeScopeValue(mappedStation.backendId || mappedStation.stationBackendId) ||
+            tenantEntityMatches(station, mappedStation.id, mappedStation.companyId)
+              ? { ...station, ...mappedStation }
+              : station
+          )
+        );
+      } catch (error) {
+        try {
+          const stationsResponse = await api.get("/stations", {
+            params: currentCompanyId && !isPlatformContextValue(currentCompanyId) ? { companyId: currentCompanyId } : {},
+          });
+          const mappedStations = (Array.isArray(stationsResponse.data) ? stationsResponse.data : [])
+            .map(mapBackendStationForState);
+          setStations((prev) => {
+            const otherCompanies = (prev || []).filter(
+              (station) => !companyMatches(getItemCompanyId(station), currentCompanyId)
+            );
+            return filterDuplicateTenantEntities([...mappedStations, ...otherCompanies]);
+          });
+        } catch (_refreshError) {
+          // Keep the approval flow resilient; the next page refresh will reload stations.
+        }
+      }
+    }
+
+    await refreshBackendStationTransfers();
+
+    return reviewedTransfer;
+  };
+
+  const handleRejectStationTransfer = async (transfer, reason = "", reviewerUserId = "") => {
+    const transferId = transfer?.backendId || transfer?.id;
+    const managerUserId = reviewerUserId || backendAuthUser?.id || currentUser?.id || "";
+
+    if (!transferId) {
+      throw new Error("Station transfer ID is required.");
+    }
+
+    if (!managerUserId) {
+      throw new Error("Reviewer user ID is required.");
+    }
+
+    const response = await api.patch(`/stations/transfers/${transferId}/review`, {
+      managerUserId,
+      approve: false,
+      rejectionReason: reason || "Rejected",
+    });
+
+    const reviewedTransfer = mapBackendStationTransferForState(response.data);
+
+    setStationTransferRequests((prev) =>
+      (prev || []).filter((item) => normalizeScopeValue(item.id) !== normalizeScopeValue(reviewedTransfer.id))
+    );
+
+    await refreshBackendStationTransfers();
+
+    return reviewedTransfer;
+  };
+
   const handleApproveAssetAction = async (request) => {
     const payload = request?.payload || {};
     const action = payload.action || payload?.values?.action || "";
@@ -3420,6 +4142,166 @@ useEffect(() => {
     }
 
     throw new Error("Unsupported asset approval action.");
+  };
+
+  const handleApproveStationAction = async (request) => {
+    const payload = request?.payload || {};
+    const values = payload.values || {};
+    const action = payload.action || values.action || "";
+
+    if (!["zero_balance_adjustment", "stock_count_adjustment"].includes(action)) {
+      throw new Error("Unsupported station approval action.");
+    }
+
+    let backendStationId =
+      payload.backendStationId ||
+      payload.stationBackendId ||
+      values.backendStationId ||
+      values.stationBackendId ||
+      "";
+
+    const requestedStationId =
+      payload.stationId ||
+      payload.id ||
+      values.stationId ||
+      values.id ||
+      request?.entityId ||
+      "";
+
+    const matchedStation = (stations || []).find((station) => {
+      const candidates = [
+        station.backendId,
+        station.stationBackendId,
+        station.id,
+        station.stationId,
+      ].map(normalizeScopeValue);
+
+      return candidates.includes(normalizeScopeValue(requestedStationId));
+    });
+
+    backendStationId =
+      backendStationId ||
+      matchedStation?.backendId ||
+      matchedStation?.stationBackendId ||
+      "";
+
+    if (!backendStationId && action === "zero_balance_adjustment") {
+      throw new Error("Station backend ID is required for zero balance approval.");
+    }
+
+    const reason =
+      payload.reason ||
+      values.reason ||
+      request.details ||
+      (action === "zero_balance_adjustment"
+        ? "Daily reconciliation after station emptying"
+        : "Inventory adjustment approved by Admin");
+
+    if (action === "zero_balance_adjustment") {
+      const response = await api.post(`/stations/${backendStationId}/zero-balance`, {
+        reason,
+        createdByUserId: backendAuthUser?.id || currentUser?.id || undefined,
+      });
+
+      if (response.data?.station) {
+        const mappedStation = mapBackendStationForState(response.data.station);
+        setStations((prev) =>
+          (prev || []).map((station) =>
+            normalizeScopeValue(station.backendId || station.stationBackendId) ===
+              normalizeScopeValue(mappedStation.backendId || mappedStation.stationBackendId) ||
+            tenantEntityMatches(station, mappedStation.id, mappedStation.companyId)
+              ? { ...station, ...mappedStation }
+              : station
+          )
+        );
+      }
+
+      const balanceBefore =
+        Number(payload.oldValue ?? values.oldValue ?? payload.systemStockBefore ?? 0) || 0;
+
+      setApprovedStationStockAdjustments((prev) => [
+        ...prev,
+        {
+          stationId: requestedStationId,
+          backendStationId,
+          adjustmentQty: -balanceBefore,
+          systemQty: balanceBefore,
+          actualQty: 0,
+          reason,
+          adjustmentType: "ZERO_BALANCE_ADJUSTMENT",
+          createdBy: currentUser?.fullName || currentUser?.name || "Manager",
+          createdAt: new Date().toISOString(),
+          source: "manager_approved_zero_balance",
+        },
+      ]);
+
+      return response.data;
+    }
+
+    if (!backendStationId && action === "stock_count_adjustment") {
+      throw new Error("Station backend ID is required for inventory adjustment approval.");
+    }
+
+    const systemQty = Number(payload.oldValue ?? values.oldValue ?? 0) || 0;
+    const actualQty = Number(payload.newValue ?? values.newValue ?? 0) || 0;
+
+    const response = await api.post(`/stations/${backendStationId}/adjust-inventory`, {
+      actualStock: actualQty,
+      reason,
+      createdByUserId: backendAuthUser?.id || currentUser?.id || undefined,
+    });
+
+    const confirmedSystemQty =
+      response.data?.balanceBefore !== undefined && response.data?.balanceBefore !== null
+        ? Number(response.data.balanceBefore) || 0
+        : systemQty;
+
+    const confirmedActualQty =
+      response.data?.actualStock !== undefined && response.data?.actualStock !== null
+        ? Number(response.data.actualStock) || 0
+        : actualQty;
+
+    const adjustmentQty =
+      response.data?.adjustmentQuantity !== undefined && response.data?.adjustmentQuantity !== null
+        ? Number(response.data.adjustmentQuantity) || 0
+        : confirmedActualQty - confirmedSystemQty;
+
+    if (response.data?.station) {
+      const mappedStation = mapBackendStationForState(response.data.station);
+      setStations((prev) =>
+        (prev || []).map((station) =>
+          normalizeScopeValue(station.backendId || station.stationBackendId) ===
+            normalizeScopeValue(mappedStation.backendId || mappedStation.stationBackendId) ||
+          tenantEntityMatches(station, mappedStation.id, mappedStation.companyId)
+            ? { ...station, ...mappedStation }
+            : station
+        )
+      );
+    }
+
+    setApprovedStationStockAdjustments((prev) => [
+      ...prev,
+      {
+        stationId: requestedStationId,
+        backendStationId,
+        adjustmentQty,
+        systemQty: confirmedSystemQty,
+        actualQty: confirmedActualQty,
+        reason,
+        adjustmentType: "INVENTORY_ADJUSTMENT",
+        createdBy: currentUser?.fullName || currentUser?.name || "Admin",
+        createdAt: new Date().toISOString(),
+        source: "admin_approved_inventory_adjustment",
+      },
+    ]);
+
+    trackActivity?.(
+      "Inventory Adjustment Approved",
+      "stations",
+      `${requestedStationId} adjusted from ${formatNumber(confirmedSystemQty)} L to ${formatNumber(confirmedActualQty)} L. Difference: ${formatNumber(adjustmentQty)} L.`
+    );
+
+    return response.data;
   };
 
   const mapBackendUserForState = (user = {}) => {
@@ -3587,8 +4469,9 @@ useEffect(() => {
             const response = await api.get("/projects");
             return Array.isArray(response.data) ? response.data : [];
           } catch (error) {
-            console.warn("Projects backend API is not available. Using CSV fallback.", error);
-            return null;
+            console.warn("Projects backend API is not available.", error);
+            showToast?.("warning", "Projects backend API is not available.");
+            return [];
           }
         };
 
@@ -3597,8 +4480,9 @@ useEffect(() => {
             const response = await api.get("/employees");
             return Array.isArray(response.data) ? response.data : [];
           } catch (error) {
-            console.warn("Employees backend API is not available. Using CSV fallback.", error);
-            return null;
+            console.warn("Employees backend API is not available.", error);
+            showToast?.("warning", "Employees backend API is not available.");
+            return [];
           }
         };
 
@@ -3623,26 +4507,37 @@ useEffect(() => {
             const response = await api.get("/stations");
             return Array.isArray(response.data) ? response.data : [];
           } catch (error) {
-            console.warn("Stations backend API is not available. Using CSV fallback.", error);
-            return null;
+            console.warn("Stations backend API is not available.", error);
+            showToast?.("warning", "Stations backend API is not available.");
+            return [];
+          }
+        };
+
+        const fetchBackendOperations = async () => {
+          try {
+            if (!canUseNetwork(showToast)) return [];
+            const response = await api.get("/operations");
+            return Array.isArray(response.data) ? response.data : [];
+          } catch (error) {
+            logHandledApiIssue("Operations backend API is not available", error);
+            if (isNetworkConnectionError(error)) {
+              showToast?.("warning", NETWORK_OFFLINE_MESSAGE);
+              return [];
+            }
+            showToast?.("warning", getFriendlyApiErrorMessage(error, "Operations backend API is not available."));
+            return [];
           }
         };
 
         const [
-          trxText,
-          stationsText,
-          fuelersText,
-          projectsText,
+          backendOperations,
           backendCompanies,
           backendProjects,
           backendEmployees,
           backendAssets,
           backendStations,
         ] = await Promise.all([
-          fetchCsvText(TRANSACTIONS_CSV),
-          fetchCsvText(STATIONS_CSV),
-          fetchCsvText(FUELERS_CSV),
-          fetchCsvText(PROJECTS_CSV),
+          fetchBackendOperations(),
           fetchBackendCompanies(),
           fetchBackendProjects(),
           fetchBackendEmployees(),
@@ -3650,10 +4545,13 @@ useEffect(() => {
           fetchBackendStations(),
         ]);
 
-        // TRANSACTIONS
-        const trxRows = parseCSV(trxText);
-        setHeaders(trxRows[0] || []);
-        setData(trxRows.slice(1));
+        // OPERATIONS - backend only. No CSV fallback.
+        setHeaders(OPERATION_HEADERS);
+        setData(
+          backendOperations
+            .filter((operation) => String(operation.status || "").toUpperCase() === "COMPLETED")
+            .map(mapBackendOperationForState)
+        );
 
         // ASSETS - backend only. No CSV fallback.
         setAssets(
@@ -3663,105 +4561,26 @@ useEffect(() => {
             .filter((asset) => asset.id)
         );
 
-        // STATIONS
-        const stationRows = parseCSV(stationsText);
-        const stationHeaders = stationRows[0] || [];
+        // STATIONS - backend only. No CSV fallback.
+        setStations(
+          backendStations
+            .map(mapBackendStationForState)
+            .filter((station) => station.id)
+        );
 
-        const mappedStations = stationRows
-          .slice(1)
-          .map((row) => ({
-            id: getValue(row, stationHeaders, ["station_id"]),
-            type: getValue(row, stationHeaders, ["station_type"]),
-            capacity: parseFloat(
-              getValue(row, stationHeaders, ["station_capacity"])
-            ),
-            project: getValue(row, stationHeaders, ["project_id"]),
-            status: getValue(row, stationHeaders, ["status"]),
-            openingBalance: parseFloat(
-              getValue(row, stationHeaders, ["opening_balance", "Opening Balance", "opening balance"])
-            ) || 0,
-            openingCounter: parseFloat(
-              getValue(row, stationHeaders, [
-                "opening_counter",
-                "Opening Counter",
-                "opening counter",
-                "initial_counter",
-                "Initial Counter",
-                "station_opening_counter",
-              ])
-            ) || 0,
-            companyId: getValue(row, stationHeaders, ["company_id", "Company ID", "company id", "company"]),
-          }))
-          .filter((station) => station.id);
+        // TEAM - backend only. No CSV fallback.
+        setFuelers(
+          backendEmployees
+            .map(mapBackendEmployeeForState)
+            .filter((employee) => employee.id)
+        );
 
-        if (Array.isArray(backendStations)) {
-          setStations(
-            backendStations
-              .map(mapBackendStationForState)
-              .filter((station) => station.id)
-          );
-        } else {
-          setStations(mappedStations);
-        }
-
-        // FUELERS
-        const fuelerRows = parseCSV(fuelersText);
-        const fuelerHeaders = fuelerRows[0] || [];
-
-        const mappedFuelers = fuelerRows
-          .slice(1)
-          .map((row) => ({
-            id: getValue(row, fuelerHeaders, ["team_id", "Team_id", "team id", "fueler_id", "id"]),
-            name: getValue(row, fuelerHeaders, ["team_name", "Team_name", "team name", "fueler_name", "name"]),
-            email: getValue(row, fuelerHeaders, ["email", "Email", "user_email", "operator_email"]),
-            mobile: getValue(row, fuelerHeaders, ["mobile", "Mobile", "phone", "mobile_no"]),
-            projectName: getValue(row, fuelerHeaders, [
-              "project_name",
-              "Project Name",
-              "project",
-              "project name",
-            ]),
-            status: getValue(row, fuelerHeaders, ["status", "Status"]) || "On Duty",
-            companyId: getValue(row, fuelerHeaders, ["company_id", "Company ID", "company id", "company"]),
-          }))
-          .filter((fueler) => fueler.id);
-
-        if (Array.isArray(backendEmployees)) {
-          setFuelers(
-            backendEmployees
-              .map(mapBackendEmployeeForState)
-              .filter((employee) => employee.id)
-          );
-        } else {
-          setFuelers(mappedFuelers);
-        }
-
-        // PROJECTS - prefer NestJS/PostgreSQL backend, keep CSV only as a temporary fallback.
-        if (Array.isArray(backendProjects)) {
-          setProjects(
-            backendProjects
-              .map(mapBackendProjectForState)
-              .filter((project) => project.id)
-          );
-        } else {
-          const projectRows = parseCSV(projectsText);
-          const projectHeaders = projectRows[0] || [];
-
-          const mappedProjects = projectRows
-            .slice(1)
-            .map((row) => ({
-              id: getValue(row, projectHeaders, ["project_id", "id"]),
-              code: getValue(row, projectHeaders, ["project_id", "id"]),
-              name: getValue(row, projectHeaders, ["project_name", "name"]),
-              status: getValue(row, projectHeaders, ["status"]),
-              location: getValue(row, projectHeaders, ["location", "Location"]),
-              companyId: getValue(row, projectHeaders, ["company_id", "Company ID", "company id", "company"]),
-              source: "CSV Fallback",
-            }))
-            .filter((project) => project.id);
-
-          setProjects(mappedProjects);
-        }
+        // PROJECTS - backend only. No CSV fallback.
+        setProjects(
+          backendProjects
+            .map(mapBackendProjectForState)
+            .filter((project) => project.id)
+        );
 
         // COMPANIES - now loaded from NestJS/PostgreSQL public endpoint only.
         // Platform Console is a frontend tenant context option, not customer operational data.
@@ -3904,6 +4723,7 @@ useEffect(() => {
     refreshBackendEmployees(currentCompanyId, currentUser?.id || backendAuthUser?.id || "");
     refreshBackendEmployeeTransfers();
     refreshBackendAssetTransfers();
+    refreshBackendStationTransfers();
   }, [
     backendIsLoggedIn,
     currentCompanyId,
@@ -4181,6 +5001,37 @@ useEffect(() => {
         )
       );
 
+  const loadPendingBackendOperationApprovals = async () => {
+    if (!currentUser?.id || currentUser.status !== "Active") {
+      setBackendOperationApprovals([]);
+      return;
+    }
+
+    if (!["Manager", "Admin", "PlatformAdmin"].includes(currentUser.role)) {
+      setBackendOperationApprovals([]);
+      return;
+    }
+
+    try {
+      const response = await api.get("/operations/pending-approvals", {
+        headers: buildOperationRequestHeaders(currentUser),
+      });
+
+      setBackendOperationApprovals(Array.isArray(response.data) ? response.data : []);
+    } catch (error) {
+      setBackendOperationApprovals([]);
+      console.warn("Failed to load backend operation approvals.", error);
+    }
+  };
+
+  useEffect(() => {
+    loadPendingBackendOperationApprovals();
+  }, [currentUser?.id, currentUser?.role, currentUser?.status]);
+
+  const backendOperationApprovalRequests = backendOperationApprovals
+    .map((item) => mapBackendOperationApprovalForFrontend(item, currentUser))
+    .filter(Boolean);
+
   const employeeTransferApprovals = employeeTransferRequests
     .filter((transfer) => ["PENDING", "PARTIALLY_APPROVED"].includes(String(transfer.status || "").toUpperCase()))
     .map((transfer) => {
@@ -4305,7 +5156,68 @@ useEffect(() => {
       };
     });
 
-  const allApprovalRequests = [...pendingApprovals, ...employeeTransferApprovals, ...assetTransferApprovals];
+  const stationTransferApprovals = stationTransferRequests
+    .filter((transfer) => ["PENDING", "PARTIALLY_APPROVED"].includes(String(transfer.status || "").toUpperCase()))
+    .map((transfer) => {
+      const requestedBy = companyUsers.find((user) => user.id === transfer.requestedByUserId) || currentUser;
+      const requiredApprovers = (transfer.approvals || [])
+        .filter((approval) => ["Pending", "Approved"].includes(approval.status))
+        .map((approval) => {
+          const approverUser = companyUsers.find((user) => user.id === approval.approverUserId);
+          return {
+            userId: approval.approverUserId,
+            userName: approverUser?.fullName || approverUser?.email || approval.approverUserId,
+            role: "Manager",
+            projectId: approval.projectId || "-",
+            approvalStage: approval.approvalStage || "Project Manager",
+            status: approval.status || "Pending",
+            reviewedAt: approval.reviewedAt || "",
+            reviewNote: approval.note || "",
+          };
+        });
+
+      return {
+        id: `STATION-TRANSFER-${transfer.id}`,
+        type: "station_transfer",
+        module: "stations",
+        title: `Station Transfer: ${transfer.stationName || transfer.stationId || "Station"}`,
+        payload: {
+          transfer,
+          stationTransferId: transfer.id,
+        },
+        details: `Transfer ${transfer.stationName || transfer.stationId || "station"} from ${transfer.fromProjectName || "-"} to ${transfer.toProjectName || "-"}.`,
+        status: "Pending",
+        changedFields: [
+          {
+            field: "project",
+            label: "Station Project Transfer",
+            oldValue: transfer.fromProjectName || transfer.fromProjectId || "-",
+            newValue: transfer.toProjectName || transfer.toProjectId || "-",
+            sensitive: true,
+          },
+        ],
+        entityType: "Station",
+        entityId: transfer.stationId || transfer.stationBackendId || "-",
+        sensitivity: "Sensitive",
+        riskLevel: "High",
+        approvalRoute: {
+          routeType: "dual_project_manager",
+          sourceProject: transfer.fromProjectName || transfer.fromProjectId || "-",
+          destinationProject: transfer.toProjectName || transfer.toProjectId || "-",
+          requiredApprovers,
+          routeStatus: "Pending",
+        },
+        requestedById: requestedBy?.id || transfer.requestedByUserId || "System",
+        requestedByName: requestedBy?.fullName || requestedBy?.name || "System",
+        requestedByRole: requestedBy?.role || "System",
+        requestedAt: transfer.createdAt || new Date().toISOString(),
+        reviewedBy: "",
+        reviewedAt: "",
+        reviewNote: "",
+      };
+    });
+
+  const allApprovalRequests = [...pendingApprovals, ...backendOperationApprovalRequests, ...employeeTransferApprovals, ...assetTransferApprovals, ...stationTransferApprovals];
 
   const notifications = buildNotificationItems({
     approvals: allApprovalRequests,
@@ -4405,6 +5317,8 @@ useEffect(() => {
   hasPermission={hasPermission}
   trackActivity={trackActivity}
   submitApprovalRequest={submitApprovalRequest}
+  onStationTransferCreated={upsertStationTransferRequest}
+  externalStockAdjustments={approvedStationStockAdjustments}
 />
       );
     }
@@ -4502,7 +5416,11 @@ if (page === "approvals") {
       onRejectEmployeeTransfer={handleRejectEmployeeTransfer}
       onApproveAssetTransfer={handleApproveAssetTransfer}
       onRejectAssetTransfer={handleRejectAssetTransfer}
+      onApproveStationTransfer={handleApproveStationTransfer}
+      onRejectStationTransfer={handleRejectStationTransfer}
       onApproveAssetAction={handleApproveAssetAction}
+      onApproveStationAction={handleApproveStationAction}
+      onOperationApprovalReviewed={loadPendingBackendOperationApprovals}
       runWithActionLoading={runWithActionLoading}
     />
   );
@@ -5342,7 +6260,7 @@ function OperationsPage({
       .filter(({ row }) => {
         if (typeIndexLocal === -1 || destinationIndexLocal === -1 || odometerIndexLocal === -1) return false;
         const rowTime = dateIndexLocal !== -1 ? new Date(row[dateIndexLocal]).getTime() || 0 : 0;
-        return rowTime >= resetTime && isSameText(row[typeIndexLocal], "Direct_Refuel") && isSameText(row[destinationIndexLocal], assetId) && !Number.isNaN(parseFloat(row[odometerIndexLocal]));
+        return rowTime >= resetTime && isAssetRefuelTransactionType(row[typeIndexLocal]) && isSameText(row[destinationIndexLocal], assetId) && !Number.isNaN(parseFloat(row[odometerIndexLocal]));
       })
       .sort((a, b) => {
         const da = dateIndexLocal !== -1 ? new Date(a.row[dateIndexLocal]).getTime() || 0 : 0;
@@ -5449,6 +6367,7 @@ const [showForm, setShowForm] = useState(false);
   const [stationMeterPhoto, setStationMeterPhoto] = useState(null);
   const [assetPhoto, setAssetPhoto] = useState(null);
   const [assetMeterPhoto, setAssetMeterPhoto] = useState(null);
+  const [invoicePhoto, setInvoicePhoto] = useState(null);
 
   // Filters
   const [fromDate, setFromDate] = useState("");
@@ -5549,6 +6468,39 @@ const [showForm, setShowForm] = useState(false);
     "transaction datetime",
     "date",
   ]);
+
+  const externalStationNameIndex = getHeaderIndex(headers, [
+    "external_station_name",
+    "External station name",
+    "external station name",
+    "externalStationName",
+    "supplier",
+    "supplier_name",
+  ]);
+
+  const buildExternalSourceHistory = (targetTransactionType) => {
+    if (externalStationNameIndex === -1) return [];
+
+    const seen = new Set();
+
+    return data
+      .filter((row) => {
+        if (typeIndex === -1) return true;
+        return isSameText(row[typeIndex], targetTransactionType);
+      })
+      .map((row) => String(row[externalStationNameIndex] || "").trim())
+      .filter((name) => {
+        if (!name) return false;
+        const key = name.toLowerCase();
+        if (seen.has(key)) return false;
+        seen.add(key);
+        return true;
+      })
+      .sort((a, b) => a.localeCompare(b));
+  };
+
+  const externalStationHistory = buildExternalSourceHistory("External_Direct_Refuel");
+  const externalSupplierHistory = buildExternalSourceHistory("External_Supply");
 
   const fuelerIndex = getHeaderIndex(headers, [
     "fueler_id",
@@ -5743,11 +6695,11 @@ const [showForm, setShowForm] = useState(false);
   };
 
   const destinationOptions =
-    transactionType === "Direct_Refuel"
+    isAssetRefuelTransactionType(transactionType)
       ? assets.map((a) => a.id)
       : transactionType === "Internal_Transfer"
       ? stations.map((s) => s.id)
-      : transactionType === "External_Supply"
+      : transactionType === "External_Supply" || transactionType === "External_Transfer"
       ? stations.map((s) => s.id)
       : [];
 
@@ -5757,60 +6709,90 @@ const [showForm, setShowForm] = useState(false);
     setStationMeterPhoto(null);
     setAssetPhoto(null);
     setAssetMeterPhoto(null);
+    setInvoicePhoto(null);
   };
 
-  const saveNewOperation = (operation) => {
-    const newRow = Array(headers.length).fill("");
+  const saveNewOperation = async (operation) => {
+    if (!canUseNetwork(showToast)) return;
 
-    if (operationIdIndex !== -1) newRow[operationIdIndex] = operation.operationId;
-    if (dateIndex !== -1) newRow[dateIndex] = operation.transactionDate;
-    if (typeIndex !== -1) newRow[typeIndex] = operation.transactionType;
-    if (sourceIndex !== -1) newRow[sourceIndex] = operation.sourceStation;
-    if (fuelerIndex !== -1) newRow[fuelerIndex] = operation.fuelerId;
-    if (destinationIndex !== -1) newRow[destinationIndex] = operation.destinationId;
-    if (dieselIndex !== -1) newRow[dieselIndex] = String(operation.dieselQuantity);
-    if (odometerIndex !== -1) newRow[odometerIndex] = String(operation.odometer || "");
+    try {
+      const selectedSourceStation = stations.find(
+  (station) =>
+    station.id === operation.sourceStation ||
+    station.stationId === operation.sourceStation ||
+    station.backendId === operation.sourceStation
+);
 
-    const requiresApproval =
-      isSameText(operation.transactionType, "External_Supply") &&
-      shouldExternalSupplyRequireApproval(currentUser);
+const selectedDestinationStation = allStations.find(
+  (station) =>
+    station.id === operation.destinationId ||
+    station.stationId === operation.destinationId ||
+    station.backendId === operation.destinationId
+);
 
-    if (requiresApproval) {
-      const destinationStationForApproval = getStation(operation.destinationId);
-      const destinationProjectForApproval = destinationStationForApproval?.project || "";
+const selectedAsset = assets.find(
+  (asset) =>
+    asset.id === operation.destinationId ||
+    asset.assetId === operation.destinationId ||
+    asset.backendId === operation.destinationId ||
+    asset.assetBackendId === operation.destinationId
+);
 
-      submitApprovalRequest({
-        type: "operation_external_supply",
-        module: "operations",
-        title: `External Supply ${operation.operationId} pending approval`,
-        details: `${operation.dieselQuantity} L from external supplier to ${operation.destinationId}`,
-        payload: {
-          operation,
-          row: newRow,
-          project: destinationProjectForApproval,
-          projectName: destinationProjectForApproval,
-          approvalRouteStrategy:
-          ["Admin","Manager"].includes(currentUser?.role)
-            ? "direct"
-            : "project_manager",
-          approvalRouteReason: "External Supply approval is routed to the destination station project manager.",
-        },
+const payload = mapFrontendOperationToBackendPayload({
+  ...operation,
+  sourceStation:
+    selectedSourceStation?.backendId ||
+    selectedSourceStation?.id ||
+    operation.sourceStation,
+  destinationId:
+    selectedAsset?.backendId ||
+    selectedAsset?.assetBackendId ||
+    selectedDestinationStation?.backendId ||
+    selectedDestinationStation?.id ||
+    operation.destinationId,
+});
+
+      const response = await api.post("/operations", payload, {
+        headers: buildOperationRequestHeaders(currentUser),
       });
-      showToast?.("warning", "External Supply saved as Pending Manager Approval.");
+
+      const backendMessage = response?.data?.message || "Operation saved successfully.";
+      const backendStatus = String(response?.data?.status || "").toUpperCase();
+      const toastType = backendStatus === "COMPLETED" ? "success" : "warning";
+
+      showToast?.(toastType, backendMessage);
+
+      const operationsResponse = await api.get("/operations", {
+        headers: buildOperationRequestHeaders(currentUser),
+      });
+
+      const backendOperations = Array.isArray(operationsResponse.data)
+        ? operationsResponse.data
+        : [];
+
+      if (typeof setData === "function") {
+        setData(
+          backendOperations
+            .filter((item) => String(item.status || "").toUpperCase() === "COMPLETED")
+            .map(mapBackendOperationForState)
+        );
+      }
+
+      setLocalAddedRows([]);
+
+      trackActivity(
+        "Add Operation",
+        "operations",
+        `${operation.transactionType} ${response?.data?.operationNo || response?.data?.operationId || operation.operationId} saved through backend.`
+      );
+
       closeForm();
-      return;
+    } catch (error) {
+      showToast?.(
+        "warning",
+        getFriendlyApiErrorMessage(error, "Failed to save operation.")
+      );
     }
-
-    if (typeof setData === "function") {
-      setData((prev) => [...prev, newRow]);
-    } else {
-      setLocalAddedRows((prev) => [...prev, newRow]);
-    }
-
-    trackActivity("Add Operation", "operations", `${operation.transactionType} ${operation.operationId} added.`);
-    showToast?.("success", "Operation added successfully.");
-
-    closeForm();
   };
 
   const deleteProject = async (project) => {
@@ -6158,7 +7140,7 @@ const [showForm, setShowForm] = useState(false);
   }));
 
   const directRefuelData = workingData.filter(
-    (item) => isSameText(item.row[typeIndex], "Direct_Refuel")
+    (item) => isAssetRefuelTransactionType(item.row[typeIndex])
   );
 
   const dateFilteredData = directRefuelData.filter((item) => {
@@ -6534,18 +7516,39 @@ const [showForm, setShowForm] = useState(false);
   };
 
   const getLastOdometerForEquipment = (equipmentNo, excludeOriginalIndex = null) => {
-    const readings = directRefuelData
-      .filter((item) => {
-        if (item.originalIndex === excludeOriginalIndex) return false;
-        return item.row[destinationIndex] === equipmentNo;
-      })
-      .map((item) => parseFloat(item.row[odometerIndex]) || 0)
-      .filter((value) => value > 0);
+  const selectedAsset = assets.find(
+    (asset) =>
+      isSameText(asset.id, equipmentNo) ||
+      isSameText(asset.assetId, equipmentNo) ||
+      isSameText(asset.backendId, equipmentNo) ||
+      isSameText(asset.assetBackendId, equipmentNo)
+  );
 
-    if (readings.length === 0) return 0;
+  const assetKeys = [
+    equipmentNo,
+    selectedAsset?.id,
+    selectedAsset?.assetId,
+    selectedAsset?.backendId,
+    selectedAsset?.assetBackendId,
+  ]
+    .filter(Boolean)
+    .map((value) => String(value).trim());
 
-    return Math.max(...readings);
-  };
+  const readings = directRefuelData
+    .filter((item) => {
+      if (item.originalIndex === excludeOriginalIndex) return false;
+
+      const destinationValue = String(item.row[destinationIndex] || "").trim();
+
+      return assetKeys.some((key) => isSameText(destinationValue, key));
+    })
+    .map((item) => parseFloat(item.row[odometerIndex]) || 0)
+    .filter((value) => value > 0);
+
+  if (readings.length === 0) return Number(selectedAsset?.currentOdometer || selectedAsset?.odometer || 0);
+
+  return Math.max(...readings);
+};
 
   const getLastStationCounter = (stationId) => {
     if (!stationId || odometerIndex === -1 || dateIndex === -1) return 0;
@@ -6775,7 +7778,7 @@ const [showForm, setShowForm] = useState(false);
           )}
         </div>
 
-        {hasPermission("operations", "add") && (
+        {getAllowedTransactionTypesForUser(currentUser).length > 0 && (
           <button
             onClick={() => setShowForm(true)}
             className="bg-amber-400 hover:bg-amber-300 text-slate-950 px-4 py-2.5 rounded-xl font-bold shadow-lg shadow-amber-500/20 transition-all duration-200 active:scale-[0.98]"
@@ -7795,8 +8798,12 @@ const [showForm, setShowForm] = useState(false);
           setAssetPhoto={setAssetPhoto}
           assetMeterPhoto={assetMeterPhoto}
           setAssetMeterPhoto={setAssetMeterPhoto}
+          invoicePhoto={invoicePhoto}
+          setInvoicePhoto={setInvoicePhoto}
           getLastOdometerForEquipment={getLastOdometerForEquipment}
           getLastStationCounter={getLastStationCounter}
+          externalStationHistory={externalStationHistory}
+          externalSupplierHistory={externalSupplierHistory}
           onSaveOperation={saveNewOperation}
           showToast={showToast}
         />
@@ -7910,7 +8917,7 @@ const assetCurrentOdometerMap = useMemo(() => {
       if (
         !assetId ||
         Number.isNaN(odometerValue) ||
-        !isSameText(type, "Direct_Refuel")
+        !isAssetRefuelTransactionType(type)
       ) {
         return;
       }
@@ -8181,23 +9188,7 @@ useOutsideClick(assetSettingsRef, () => {
       createdById: currentUser?.id || undefined,
     };
 
-    if (isOfficerUser(currentUser)) {
-      submitApprovalRequest?.({
-        type: "master_data_change",
-        module: "assets",
-        title: `New asset ${payload.assetId}`,
-        details: `Officer requested new asset ${payload.assetId}`,
-        payload: {
-          entity: "asset",
-          action: "add",
-          values: payload,
-          approvalRouteStrategy: "admin",
-        },
-      });
-      closeAddAsset();
-      return;
-    }
-
+    
     try {
       const response = await api.post("/assets", payload);
       replaceAssetInState(response.data);
@@ -8315,7 +9306,7 @@ useOutsideClick(assetSettingsRef, () => {
       return acc;
     }
 
-    if (!isSameText(row[typeIndex], "Direct_Refuel")) {
+    if (!isAssetRefuelTransactionType(row[typeIndex])) {
       return acc;
     }
 
@@ -9946,6 +10937,8 @@ function StationsPage({
   hasPermission = () => false,
   trackActivity = () => {},
   submitApprovalRequest = () => {},
+  onStationTransferCreated = () => {},
+  externalStockAdjustments = [],
 
   stationCounterResetHistory,
   setStationCounterResetHistory,}) {
@@ -10135,6 +11128,7 @@ const [showForm, setShowForm] = useState(false);
   });
 
   const [selectedStation, setSelectedStation] = useState(null);
+  const [zeroBalanceReason, setZeroBalanceReason] = useState("Daily reconciliation after station emptying");
   const [selectedStationHistory, setSelectedStationHistory] = useState(null);
     const [editingProjectStation, setEditingProjectStation] = useState(null);
   const [newStationProject, setNewStationProject] = useState("");
@@ -10170,6 +11164,7 @@ const [showConfirm, setShowConfirm] = useState(false);
   const [showStockCountAdjustment, setShowStockCountAdjustment] = useState(false);
   const [stockCountStation, setStockCountStation] = useState(null);
   const [actualStockQty, setActualStockQty] = useState("");
+  const [stockCountReason, setStockCountReason] = useState("");
 
   const [deleteTargetStation, setDeleteTargetStation] = useState(null);
   const [stationDeleteReason, setStationDeleteReason] = useState("");
@@ -10218,8 +11213,8 @@ const [showConfirm, setShowConfirm] = useState(false);
   };
 
   const saveNewStation = async () => {
-    if (!hasPermission("stations", "add")) {
-      showToast?.("warning", "Read-only access: you cannot add stations.");
+    if (currentUser?.role !== "Admin") {
+      showToast?.("warning", "Only Admin can add stations.");
       return;
     }
 
@@ -10575,6 +11570,96 @@ const [showConfirm, setShowConfirm] = useState(false);
 
   const getStationBackendId = (station) =>
     station?.backendId || station?.stationBackendId || station?.databaseId || station?.prismaId || "";
+
+  const canCurrentUserCreateStationTransfer = () =>
+    currentUser?.status === "Active" && ["Officer", "Manager"].includes(currentUser?.role);
+
+  const canCurrentUserRequestZeroBalance = () =>
+    currentUser?.status === "Active" && ["Officer", "Manager"].includes(currentUser?.role);
+
+  const resolveStationProjectId = (projectValue) => {
+    const normalized = normalizeScopeValue(projectValue);
+    const matchedProject = (transferProjects || projects || []).find((project) => {
+      return (
+        normalizeScopeValue(project.id) === normalized ||
+        normalizeScopeValue(project.backendId) === normalized ||
+        normalizeScopeValue(project.name) === normalized ||
+        normalizeScopeValue(project.code) === normalized
+      );
+    });
+
+    return matchedProject?.backendId || matchedProject?.id || projectValue || "";
+  };
+
+  const closeStationProjectTransferModal = () => {
+    setEditingProjectStation(null);
+    setNewStationProject("");
+    setStationProjectEffectiveDate("");
+    setStationProjectReason("");
+  };
+
+  const submitStationProjectTransferRequest = async () => {
+    if (!editingProjectStation) return;
+
+    if (!canCurrentUserCreateStationTransfer()) {
+      closeStationProjectTransferModal();
+      return;
+    }
+
+    if (!newStationProject) {
+      showToast?.("warning", "Please select a new project.");
+      return;
+    }
+
+    if (!stationProjectEffectiveDate) {
+      showToast?.("warning", "Please select effective date and time.");
+      return;
+    }
+
+    const backendId = getStationBackendId(editingProjectStation);
+    const toProjectId = resolveStationProjectId(newStationProject);
+
+    if (!backendId) {
+      showToast?.("warning", "This station is not linked to backend yet. Refresh and try again.");
+      closeStationProjectTransferModal();
+      return;
+    }
+
+    if (!toProjectId) {
+      showToast?.("warning", "Please select a valid project.");
+      return;
+    }
+
+    try {
+      const response = await api.post(`/stations/${backendId}/transfer`, {
+        toProjectId,
+        requestedByUserId: currentUser?.id || "",
+        effectiveDate: stationProjectEffectiveDate || undefined,
+      });
+
+      onStationTransferCreated?.(response.data);
+
+      trackActivity?.(
+        "Request Station Transfer",
+        "stations",
+        `${editingProjectStation.id} transfer requested from ${editingProjectStation.project || "-"} to ${newStationProject}.`
+      );
+
+      showToast?.("warning", "Station transfer request submitted for project manager approval.");
+      closeStationProjectTransferModal();
+    } catch (error) {
+      const backendMessage =
+        error?.response?.data?.message ||
+        error?.response?.data?.error ||
+        error?.message ||
+        "Failed to submit station transfer request.";
+
+      showToast?.(
+        "warning",
+        Array.isArray(backendMessage) ? backendMessage.join(" / ") : backendMessage
+      );
+    }
+  };
 
   const refreshBackendStationsForCompany = async (companyId) => {
     if (!companyId || isPlatformContextValue(companyId)) return;
@@ -11131,7 +12216,13 @@ const getLatestStationCounter = (stationId, fallbackValue = 0) => {
   };
 
   const calculateStationBalance = (station) => {
-    // Current stock always starts from the station Opening Balance, then adds/subtracts all related operations.
+    // Backend stations use database currentStock as the source of truth.
+    // Operations are backend-only; station stock is updated by NestJS/Supabase operations logic.
+    if (station?.source === "Backend" || station?.backendId || station?.stationBackendId) {
+      return Number(station.currentStock) || 0;
+    }
+
+    // Legacy/local fallback only. This path is kept for unsaved local rows, not for backend stations.
     let currentStock = station.openingBalance || 0;
 
     data.forEach((row) => {
@@ -11148,9 +12239,13 @@ const getLatestStationCounter = (stationId, fallbackValue = 0) => {
       if (isSameText(type, "External_Supply") && isSameText(destination, station.id)) currentStock += qty;
     });
 
-    localAdjustments.forEach((adj) => {
-      if (isSameText(adj.stationId, station.id)) {
-        currentStock += adj.adjustmentQty;
+    [...externalStockAdjustments, ...localAdjustments].forEach((adj) => {
+      const sameStation =
+        isSameText(adj.stationId, station.id) ||
+        isSameText(adj.backendStationId, station.backendId || station.stationBackendId);
+
+      if (sameStation) {
+        currentStock += Number(adj.adjustmentQty) || 0;
       }
     });
 
@@ -11219,20 +12314,20 @@ const getLatestStationCounter = (stationId, fallbackValue = 0) => {
     .sort((a, b) => b.qtyLiters - a.qtyLiters);
 
   const openInventoryAdjustment = () => {
-    if (!hasPermission("stations", "adjustInventory")) {
-      showToast?.("warning", "Read-only access: you cannot adjust station inventory.");
+    if (!canCurrentUserRequestZeroBalance()) {
       return;
     }
 
     setShowSettings(false);
     setShowExportMenu(false);
     setSelectedStation(null);
+    setZeroBalanceReason("Daily reconciliation after station emptying");
     setShowConfirm(true);
   };
 
   const openStockCountAdjustment = () => {
-    if (!hasPermission("stations", "adjustInventory")) {
-      showToast?.("warning", "Read-only access: you cannot adjust station inventory.");
+    if (currentUser?.role !== "Manager") {
+      showToast?.("warning", "Inventory adjustment can only be requested by Project Manager.");
       return;
     }
 
@@ -11240,10 +12335,16 @@ const getLatestStationCounter = (stationId, fallbackValue = 0) => {
     setShowExportMenu(false);
     setStockCountStation(null);
     setActualStockQty("");
+    setStockCountReason("");
     setShowStockCountAdjustment(true);
   };
 
   const confirmStockCountAdjustment = () => {
+    if (currentUser?.role !== "Manager") {
+      showToast?.("warning", "Inventory adjustment can only be requested by Project Manager.");
+      return;
+    }
+
     if (!stockCountStation) {
       showToast?.("warning", "Please select a station first.");
       return;
@@ -11256,63 +12357,73 @@ const getLatestStationCounter = (stationId, fallbackValue = 0) => {
       return;
     }
 
+    const reason = String(stockCountReason || "").trim();
 
-    const systemQty = Number(stockCountStation.currentStock) || 0;
-    const adjustmentQty = actualQty - systemQty;
-
-    if (isOfficerUser(currentUser)) {
-      submitApprovalRequest?.({
-        type: "station_stock_count_adjustment",
-        module: "stations",
-        title: `Stock Count Adjustment - ${stockCountStation.id}`,
-        details: `${currentUser?.fullName || currentUser?.name || "Officer"} requested stock count adjustment for station ${stockCountStation.id}.`,
-        payload: {
-          entity: "station",
-          id: stockCountStation.id,
-          action: "stock_count_adjustment",
-          stationId: stockCountStation.id,
-          field: "currentStock",
-          oldValue: systemQty,
-          newValue: actualQty,
-          project: stockCountStation.project,
-          changedFields: [
-            { field: "currentStock", label: "Stock Count", oldValue: `${systemQty} L`, newValue: `${actualQty} L`, sensitive: true },
-          ],
-        },
-      });
-
-      setShowStockCountAdjustment(false);
-      setStockCountStation(null);
-      setActualStockQty("");
-      showToast?.("warning", "Stock count adjustment sent for manager approval.");
+    if (!reason) {
+      showToast?.("warning", "Please enter the inventory adjustment reason.");
       return;
     }
 
-    setLocalAdjustments((prev) => [
-      ...prev,
-      {
-        stationId: stockCountStation.id,
-        adjustmentQty,
-        systemQty,
-        actualQty,
-        reason: "Stock Count Adjustment",
-        adjustmentType: "STOCK_COUNT_ADJUSTMENT",
-        createdBy: currentUser?.fullName || currentUser?.name || "System",
-        createdAt: new Date().toISOString(),
-      },
-    ]);
+    const systemQty = Number(stockCountStation.currentStock) || 0;
+    const adjustmentQty = actualQty - systemQty;
+    const backendId = getStationBackendId(stockCountStation);
 
-    trackActivity?.(
-      "Stock Count Adjustment",
-      "stations",
-      `${stockCountStation.id} adjusted from ${formatNumber(systemQty)} L to actual ${formatNumber(actualQty)} L. Difference: ${formatNumber(adjustmentQty)} L.`
-    );
+    const approvalRequest = submitApprovalRequest?.({
+      type: "station_stock_count_adjustment",
+      module: "stations",
+      title: `Inventory Adjustment - ${stockCountStation.id}`,
+      details: `${currentUser?.fullName || currentUser?.name || "Manager"} requested inventory adjustment for station ${stockCountStation.id}.`,
+      payload: {
+        entity: "station",
+        id: stockCountStation.id,
+        backendStationId: backendId,
+        stationBackendId: backendId,
+        action: "stock_count_adjustment",
+        stationId: stockCountStation.id,
+        field: "currentStock",
+        oldValue: systemQty,
+        newValue: actualQty,
+        adjustmentQty,
+        reason,
+        project: stockCountStation.projectId || stockCountStation.project,
+        projectId: stockCountStation.projectId || "",
+        projectName: stockCountStation.projectName || stockCountStation.project || "",
+        approvalRouteStrategy: "admin",
+        changedFields: [
+          {
+            field: "currentStock",
+            label: "Inventory Adjustment",
+            oldValue: `${systemQty} L`,
+            newValue: `${actualQty} L`,
+            sensitive: true,
+          },
+          {
+            field: "adjustmentQty",
+            label: "Adjustment Quantity",
+            oldValue: "-",
+            newValue: `${adjustmentQty} L`,
+            sensitive: true,
+          },
+          {
+            field: "reason",
+            label: "Reason",
+            oldValue: "-",
+            newValue: reason,
+            sensitive: true,
+          },
+        ],
+      },
+    });
+
+    if (!approvalRequest) {
+      return;
+    }
 
     setShowStockCountAdjustment(false);
     setStockCountStation(null);
     setActualStockQty("");
-
-    showToast?.("success", "Stock count adjustment completed successfully.");
+    setStockCountReason("");
+    showToast?.("warning", "Inventory adjustment request sent for Admin approval.");
   };
 
   const proceedToPassword = () => {
@@ -11327,12 +12438,33 @@ const getLatestStationCounter = (stationId, fallbackValue = 0) => {
     confirmZeroBalance();
   };
 
-  const confirmZeroBalance = () => {
+  const confirmZeroBalance = async () => {
+    if (!selectedStation) {
+      showToast?.("warning", "Please select a station first.");
+      return;
+    }
 
-    const adjustmentQty = -selectedStation.currentStock;
+    if (!canCurrentUserRequestZeroBalance()) {
+      setShowConfirm(false);
+      setSelectedStation(null);
+      setZeroBalanceReason("Daily reconciliation after station emptying");
+      return;
+    }
 
-    if (isOfficerUser(currentUser)) {
-      submitApprovalRequest?.({
+    const currentStock = Number(selectedStation.currentStock) || 0;
+
+    if (currentStock <= 0) {
+      showToast?.("warning", "Current station stock is already zero.");
+      return;
+    }
+
+    const adjustmentQty = -currentStock;
+    const reason =
+      zeroBalanceReason?.trim() || "Daily reconciliation after station emptying";
+    const backendId = getStationBackendId(selectedStation);
+
+    if (currentUser?.role === "Officer") {
+      const approvalRequest = submitApprovalRequest?.({
         type: "station_zero_balance_adjustment",
         module: "stations",
         title: `Zero Balance Adjustment - ${selectedStation.id}`,
@@ -11340,46 +12472,99 @@ const getLatestStationCounter = (stationId, fallbackValue = 0) => {
         payload: {
           entity: "station",
           id: selectedStation.id,
+          backendStationId: backendId,
+          stationBackendId: backendId,
           action: "zero_balance_adjustment",
           stationId: selectedStation.id,
           field: "currentStock",
-          oldValue: selectedStation.currentStock,
+          oldValue: currentStock,
           newValue: 0,
-          project: selectedStation.project,
+          reason,
+          project: selectedStation.projectId || selectedStation.project,
+          projectId: selectedStation.projectId || "",
+          projectName: selectedStation.projectName || selectedStation.project || "",
+          approvalRouteStrategy: "project_manager",
           changedFields: [
-            { field: "currentStock", label: "Zero Balance", oldValue: `${selectedStation.currentStock} L`, newValue: "0 L", sensitive: true },
+            {
+              field: "currentStock",
+              label: "Zero Balance",
+              oldValue: `${currentStock} L`,
+              newValue: "0 L",
+              sensitive: true,
+            },
           ],
         },
       });
 
-            setSelectedStation(null);
-      showToast?.("warning", "Zero balance adjustment sent for manager approval.");
+      if (!approvalRequest) {
+        return;
+      }
+
+      setShowConfirm(false);
+      setSelectedStation(null);
+      setZeroBalanceReason("Daily reconciliation after station emptying");
+      showToast?.("warning", "Zero balance adjustment sent for project manager approval.");
       return;
     }
 
-    setLocalAdjustments([
-      ...localAdjustments,
-      {
-        stationId: selectedStation.id,
-        adjustmentQty,
-        reason: "Zero Balance Adjustment",
-        adjustmentType: "ZERO_BALANCE_ADJUSTMENT",
-        createdBy: currentUser?.fullName || currentUser?.name || "System",
-        createdAt: new Date().toISOString(),
-      },
-    ]);
+    if (!backendId) {
+      showToast?.("warning", "This station is not linked to backend yet. Refresh and try again.");
+      return;
+    }
 
-        setSelectedStation(null);
+    try {
+      const response = await api.post(`/stations/${backendId}/zero-balance`, {
+        reason,
+        createdByUserId: currentUser?.id || undefined,
+      });
 
-    trackActivity?.(
-      "Zero Balance Adjustment",
-      "stations",
-      `${selectedStation.id} balance zeroed. Adjustment: ${formatNumber(adjustmentQty)} L.`
-    );
+      if (response.data?.station) {
+        const mappedStation = mapBackendStationForState(response.data.station);
+        setStations((prev) =>
+          (prev || []).map((station) =>
+            normalizeScopeValue(station.backendId || station.stationBackendId) ===
+              normalizeScopeValue(mappedStation.backendId || mappedStation.stationBackendId) ||
+            tenantEntityMatches(station, mappedStation.id, mappedStation.companyId)
+              ? { ...station, ...mappedStation }
+              : station
+          )
+        );
+      }
 
-    showToast
-      ? showToast("success", "Zero balance adjustment completed successfully.")
-      : notifyUser(typeof showToast !== "undefined" ? showToast : null, inferToastTypeFromMessage("Zero balance adjustment completed successfully."), "Zero balance adjustment completed successfully.");
+      setLocalAdjustments((prev) => [
+        ...prev,
+        {
+          stationId: selectedStation.id,
+          backendStationId: backendId,
+          adjustmentQty,
+          systemQty: currentStock,
+          actualQty: 0,
+          reason,
+          adjustmentType: "ZERO_BALANCE_ADJUSTMENT",
+          createdBy: currentUser?.fullName || currentUser?.name || "Manager",
+          createdAt: new Date().toISOString(),
+          source: "manager_zero_balance",
+        },
+      ]);
+
+      trackActivity?.(
+        "Zero Balance Adjustment",
+        "stations",
+        `${selectedStation.id} balance zeroed. Adjustment: ${formatNumber(adjustmentQty)} L.`
+      );
+
+      setShowConfirm(false);
+      setSelectedStation(null);
+      setZeroBalanceReason("Daily reconciliation after station emptying");
+      showToast?.("success", "Zero balance adjustment completed successfully.");
+    } catch (error) {
+      const message =
+        error?.response?.data?.message ||
+        error?.response?.data?.error ||
+        error?.message ||
+        "Failed to apply zero balance adjustment.";
+      showToast?.("warning", message);
+    }
   };
 
   const proceedLiterPriceConfirm = () => {
@@ -11482,9 +12667,140 @@ const getLatestStationCounter = (stationId, fallbackValue = 0) => {
   };
 
   const exportStationsToPDF = () => {
-    showToast
-      ? showToast("warning", "PDF export will be added later.")
-      : notifyUser(typeof showToast !== "undefined" ? showToast : null, inferToastTypeFromMessage("PDF export will be added later."), "PDF export will be added later.");
+    const escapePrintValue = (value) =>
+      String(value ?? "")
+        .replace(/&/g, "&amp;")
+        .replace(/</g, "&lt;")
+        .replace(/>/g, "&gt;")
+        .replace(/"/g, "&quot;")
+        .replace(/'/g, "&#039;");
+
+    const reportDate = new Date().toLocaleString();
+
+    const getStationTankLevel = (station) => {
+      const capacity = Number(station?.capacity || 0);
+      const currentStock = Number(station?.currentStock || 0);
+      if (!capacity) return 0;
+      return (currentStock / capacity) * 100;
+    };
+
+    const tableRowsHtml = filteredStations
+      .map(
+        (station, i) => `
+          <tr>
+            <td>${i + 1}</td>
+            <td>${escapePrintValue(station.id || station.stationId || "-")}</td>
+            <td>${escapePrintValue(station.project || station.projectName || "-")}</td>
+            <td>${escapePrintValue(station.type || "-")}</td>
+            <td>${escapePrintValue(formatNumber(station.capacity || 0))} L</td>
+            <td>${escapePrintValue(formatNumber(station.currentCounter || station.counter || 0))}</td>
+            <td>${escapePrintValue(formatNumber(station.openingBalance || 0))} L</td>
+            <td>${escapePrintValue(formatNumber(station.currentStock || 0))} L</td>
+            <td>${escapePrintValue(getStationTankLevel(station).toFixed(1))}%</td>
+            <td>${escapePrintValue(station.status || "-")}</td>
+          </tr>
+        `
+      )
+      .join("");
+
+    const printWindow = window.open("", "", "width=1400,height=900");
+
+    if (!printWindow) return;
+
+    printWindow.document.write(`
+      <html>
+        <head>
+          <title>Stations Report</title>
+          <style>
+            @page {
+              size: A4 landscape;
+              margin: 12mm;
+            }
+
+            body {
+              font-family: Arial, sans-serif;
+              color: #111;
+              padding: 10px;
+            }
+
+            h1 {
+              margin: 0 0 6px;
+              font-size: 24px;
+            }
+
+            h2 {
+              margin: 26px 0 12px;
+              font-size: 18px;
+            }
+
+            .meta {
+              margin-bottom: 18px;
+              font-size: 12px;
+              color: #555;
+            }
+
+            table {
+              width: 100%;
+              border-collapse: collapse;
+              font-size: 11px;
+            }
+
+            th, td {
+              border: 1px solid #bbb;
+              padding: 6px 8px;
+              text-align: left;
+            }
+
+            th {
+              background: #f0f0f0;
+              font-weight: bold;
+            }
+
+            tr:nth-child(even) {
+              background: #fafafa;
+            }
+
+            @media print {
+              body {
+                padding: 0;
+              }
+            }
+          </style>
+        </head>
+
+        <body>
+          <h1>Stations Report</h1>
+          <div class="meta">
+            Generated at: ${reportDate} | Total Stations: ${filteredStations.length}
+          </div>
+
+          <h2>Stations List</h2>
+          <table>
+            <thead>
+              <tr>
+                <th>#</th>
+                <th>Station ID</th>
+                <th>Project</th>
+                <th>Type</th>
+                <th>Capacity</th>
+                <th>Current Counter</th>
+                <th>Opening Balance</th>
+                <th>Current Stock</th>
+                <th>Tank Level</th>
+                <th>Status</th>
+              </tr>
+            </thead>
+            <tbody>
+              ${tableRowsHtml}
+            </tbody>
+          </table>
+        </body>
+      </html>
+    `);
+
+    printWindow.document.close();
+    printWindow.focus();
+    printWindow.print();
   };
 
   return (
@@ -11495,19 +12811,6 @@ const getLatestStationCounter = (stationId, fallbackValue = 0) => {
           <h1 className="text-xl sm:text-2xl font-bold">Fuel Stations</h1>
           <p className="text-gray-400">Fuel stock management</p>
         </div>
-
-                <div>
-                  <label className="text-sm font-semibold text-slate-300">
-                    Opening Counter
-                  </label>
-                  <input
-                    type="number"
-                    value={newStationOpeningCounter}
-                    onChange={(e) => setNewStationOpeningCounter(e.target.value)}
-                    className="w-full mt-2 rounded-xl border border-slate-700 bg-slate-900 p-3 text-white"
-                    placeholder="Initial station meter reading"
-                  />
-                </div>
 
         <div ref={stationSettingsRef} className="relative settings-layer-safe">
          <button
@@ -11529,7 +12832,7 @@ const getLatestStationCounter = (stationId, fallbackValue = 0) => {
               onClick={(e) => e.stopPropagation()}
               className={`${getSmartDropdownClass(stationSettingsMenuAlign, "w-64")} bg-gray-900 border border-gray-700 rounded-2xl shadow-2xl overflow-visible z-[10020] backdrop-blur-xl`}
             >
-              {hasPermission("stations", "add") && (
+              {currentUser?.role === "Admin" && (
                 <button
                   onClick={() => {
                     setShowSettings(false);
@@ -11543,24 +12846,24 @@ const getLatestStationCounter = (stationId, fallbackValue = 0) => {
                 </button>
               )}
 
-              {hasPermission("stations", "adjustInventory") && (
-                <>
-                  <button
-                    onClick={openInventoryAdjustment}
-                    className="flex items-center gap-3 w-full cursor-pointer text-left px-5 py-4 hover:bg-red-900/30 transition text-red-400"
-                  >
-                    <span className="text-lg">⚠</span>
-                    Zero Balance
-                  </button>
+              {canCurrentUserRequestZeroBalance() && (
+                <button
+                  onClick={openInventoryAdjustment}
+                  className="flex items-center gap-3 w-full cursor-pointer text-left px-5 py-4 hover:bg-red-900/30 transition text-red-400"
+                >
+                  <span className="text-lg">⚠</span>
+                  Zero Balance
+                </button>
+              )}
 
-                  <button
-                    onClick={openStockCountAdjustment}
-                    className="flex items-center gap-3 w-full cursor-pointer text-left px-5 py-4 hover:bg-amber-500/10 transition text-amber-300 border-t border-gray-700"
-                  >
-                    <span className="text-lg">≋</span>
-                    Stock Count Adjustment
-                  </button>
-                </>
+              {currentUser?.role === "Manager" && (
+                <button
+                  onClick={openStockCountAdjustment}
+                  className="flex items-center gap-3 w-full cursor-pointer text-left px-5 py-4 hover:bg-amber-500/10 transition text-amber-300 border-t border-gray-700"
+                >
+                  <span className="text-lg">≋</span>
+                  Inventory Adjustment
+                </button>
               )}
 
               <div className="border-t border-gray-700">
@@ -11605,7 +12908,7 @@ const getLatestStationCounter = (stationId, fallbackValue = 0) => {
                       }}
                       className="block w-full text-left px-10 py-3 hover:bg-gray-800 transition text-gray-200"
                     >
-                      Export PDF
+                      Print Stations Report
                     </button>
                   </div>
                 )}
@@ -11710,12 +13013,21 @@ const getLatestStationCounter = (stationId, fallbackValue = 0) => {
                   <button
                     onClick={(e) => {
                       e.stopPropagation();
+
+                      if (!canCurrentUserCreateStationTransfer()) {
+                        return;
+                      }
+
                       setEditingProjectStation(station);
                       setNewStationProject(station.project || "");
                       setStationProjectEffectiveDate("");
                       setStationProjectReason("");
                     }}
-                    className="mt-3 border border-slate-700/80 rounded-2xl bg-slate-950/50 px-4 py-3 min-w-[170px] shadow-lg hover:border-yellow-400 hover:bg-slate-900 transition-all duration-300 text-left cursor-pointer"
+                    className={`mt-3 border border-slate-700/80 rounded-2xl bg-slate-950/50 px-4 py-3 min-w-[170px] shadow-lg transition-all duration-300 text-left ${
+                      canCurrentUserCreateStationTransfer()
+                        ? "hover:border-yellow-400 hover:bg-slate-900 cursor-pointer"
+                        : "cursor-default"
+                    }`}
                   >
                     <p className="text-[9px] uppercase tracking-[0.22em] text-slate-500">
                       Project
@@ -11969,7 +13281,7 @@ const getLatestStationCounter = (stationId, fallbackValue = 0) => {
               </div>
 
               <button
-                onClick={() => setEditingProjectStation(null)}
+                onClick={closeStationProjectTransferModal}
                 className="text-gray-500 hover:text-black text-xl"
               >
                 ×
@@ -12021,24 +13333,17 @@ const getLatestStationCounter = (stationId, fallbackValue = 0) => {
 
             <div className="flex justify-end gap-3 border-t border-slate-700/80 px-6 py-5 bg-slate-950/90">
               <button
-                onClick={() => setEditingProjectStation(null)}
+                onClick={closeStationProjectTransferModal}
                 className="rounded-xl border border-slate-600 bg-slate-900 px-5 py-2.5 font-bold text-slate-200 hover:bg-slate-800 transition"
               >
                 Cancel
               </button>
 
               <button
-                onClick={() => {
-                  showToast?.(
-                    "success",
-                    "Station project change saved locally."
-                  );
-
-                  setEditingProjectStation(null);
-                }}
+                onClick={submitStationProjectTransferRequest}
                 className="bg-yellow-500 text-black px-4 py-2 rounded-lg font-semibold"
               >
-                Save Change
+                Submit Transfer Request
               </button>
             </div>
           </div>
@@ -12273,6 +13578,13 @@ const getLatestStationCounter = (stationId, fallbackValue = 0) => {
                 type="number"
                 value={newStation.openingBalance}
                 onChange={(e) => setNewStation({ ...newStation, openingBalance: e.target.value })}
+              />
+              <Field
+                label="Current Station Counter"
+                placeholder="Current station meter reading"
+                type="number"
+                value={newStationOpeningCounter}
+                onChange={(e) => setNewStationOpeningCounter(e.target.value)}
               />
 
               <div className="grid grid-cols-1 sm:grid-cols-3 items-start sm:items-center gap-2 sm:gap-4">
@@ -12624,7 +13936,7 @@ const getLatestStationCounter = (stationId, fallbackValue = 0) => {
         <div className="fleet-modal-backdrop fixed inset-0 z-[9998] bg-black/60 flex items-center justify-center z-50">
           <div className="bg-white text-black w-[580px] rounded-xl shadow-xl p-6">
             <h2 className="text-xl font-bold mb-4 text-amber-600">
-              Stock Count Adjustment
+              Inventory Adjustment Request
             </h2>
 
             <div className="grid grid-cols-1 gap-4">
@@ -12639,6 +13951,7 @@ const getLatestStationCounter = (stationId, fallbackValue = 0) => {
                     );
                     setStockCountStation(station || null);
                     setActualStockQty("");
+                    setStockCountReason("");
                   }}
                 >
                   <option value="">Select Station</option>
@@ -12688,7 +14001,13 @@ const getLatestStationCounter = (stationId, fallbackValue = 0) => {
               )}
 
               <div>
-
+                <label className="font-medium">Reason</label>
+                <textarea
+                  value={stockCountReason}
+                  onChange={(e) => setStockCountReason(e.target.value)}
+                  className="border rounded-lg p-2 w-full mt-2 min-h-[80px]"
+                  placeholder="Enter stock count variance reason"
+                />
               </div>
             </div>
 
@@ -12698,6 +14017,7 @@ const getLatestStationCounter = (stationId, fallbackValue = 0) => {
                   setShowStockCountAdjustment(false);
                   setStockCountStation(null);
                   setActualStockQty("");
+                  setStockCountReason("");
                               }}
                 className="bg-gray-200 px-4 py-2 rounded"
               >
@@ -12708,7 +14028,7 @@ const getLatestStationCounter = (stationId, fallbackValue = 0) => {
                 onClick={confirmStockCountAdjustment}
                 className="bg-red-600 text-white px-4 py-2 rounded"
               >
-                Confirm Adjustment
+                Submit for Admin Approval
               </button>
             </div>
           </div>
@@ -12759,11 +14079,22 @@ const getLatestStationCounter = (stationId, fallbackValue = 0) => {
               </div>
             )}
 
+            <div className="mb-4">
+              <label className="font-medium">Reason</label>
+              <textarea
+                value={zeroBalanceReason}
+                onChange={(e) => setZeroBalanceReason(e.target.value)}
+                className="border rounded-lg p-2 w-full mt-2 min-h-[80px]"
+                placeholder="Daily reconciliation after station emptying"
+              />
+            </div>
+
             <div className="flex justify-end gap-3">
               <button
                 onClick={() => {
                   setShowConfirm(false);
                   setSelectedStation(null);
+                  setZeroBalanceReason("Daily reconciliation after station emptying");
                 }}
                 className="bg-gray-200 px-4 py-2 rounded"
               >
@@ -17416,23 +18747,27 @@ function AddOperationModal({
   setAssetPhoto,
   assetMeterPhoto,
   setAssetMeterPhoto,
+  invoicePhoto,
+  setInvoicePhoto,
   getLastOdometerForEquipment,
   getLastStationCounter,
+  externalStationHistory = [],
+  externalSupplierHistory = [],
   onSaveOperation,
   showToast,
 }) {
   const [sourceStation, setSourceStation] = useState("");
-  const [fuelerId, setFuelerId] = useState("");
   const [destinationId, setDestinationId] = useState("");
   const [dieselQuantity, setDieselQuantity] = useState("");
   const [odometer, setOdometer] = useState("");
+  const [externalStationName, setExternalStationName] = useState("");
+  const [invoiceNumber, setInvoiceNumber] = useState("");
+  const [operationNotes, setOperationNotes] = useState("");
 
   const [transactionTypeSearch, setTransactionTypeSearch] = useState("");
   const [sourceStationSearch, setSourceStationSearch] = useState("");
-  const [fuelerSearch, setFuelerSearch] = useState("");
   const [destinationSearch, setDestinationSearch] = useState("");
 
-  const isOperator = currentUser?.role === "Operator";
   const userProjectScope = getUserProjectScope(currentUser);
   const isAllProjectsUser = userCanAccessAllProjects(currentUser);
 
@@ -17441,11 +18776,24 @@ function AddOperationModal({
   };
 
   const allowedTransactionTypes = getAllowedTransactionTypesForUser(currentUser);
-  const transactionTypesForAdd = allowedTransactionTypes.includes("External_Transfer")
-    ? allowedTransactionTypes
-    : ["Admin", "Manager"].includes(currentUser?.role)
-    ? [...allowedTransactionTypes, "External_Transfer"]
-    : allowedTransactionTypes;
+  const transactionTypesForAdd = allowedTransactionTypes;
+
+  const isAssetRefuel = isAssetRefuelTransactionType(transactionType);
+  const isExternalDirectRefuel = isExternalDirectRefuelTransactionType(transactionType);
+  const isExternalSupply = isExternalSupplyTransactionType(transactionType);
+  const isExternalTransfer = isExternalTransferTransactionType(transactionType);
+  const isInternalTransfer = isSameText(transactionType, "Internal_Transfer");
+  const isDirectRefuel = isSameText(transactionType, "Direct_Refuel");
+  const isExternalSource = isExternalSourceOperation(transactionType);
+  const isStationCounterOperation = isStationCounterTransactionType(transactionType);
+  const externalSourceHistoryOptions = isExternalSupply
+    ? externalSupplierHistory
+    : isExternalDirectRefuel
+    ? externalStationHistory
+    : [];
+  const externalSourceDatalistId = isExternalSupply
+    ? "external-supplier-history-options"
+    : "external-station-history-options";
 
   const currentProjectStations = stations.filter((station) => {
     const status = String(station.status || "Active").trim().toLowerCase();
@@ -17474,101 +18822,74 @@ function AddOperationModal({
     return asset.id && isItemInUserProject(asset.project) && status === "active";
   });
 
-  const currentProjectFuelers = fuelers.filter((fueler) => {
-    const status = String(fueler.status || "On Duty").trim().toLowerCase();
-    const role = String(fueler.role || "Operator").trim().toLowerCase();
-    const userStatus = String(fueler.userStatus || "Active").trim().toLowerCase();
+  const sourceStationOptions = isExternalSource
+    ? []
+    : currentProjectStations.map((station) => station.id);
 
-    return (
-      fueler.id &&
-      isItemInUserProject(fueler.projectName) &&
-      role === "operator" &&
-      userStatus === "active" &&
-      (status === "on duty" || status === "active")
-    );
-  });
+  const destinationOptions = isAssetRefuel
+    ? currentProjectAssets.map((asset) => asset.id)
+    : isInternalTransfer
+    ? currentProjectStations
+        .filter((station) => !sourceStation || !isSameText(station.id, sourceStation))
+        .map((station) => station.id)
+    : isExternalSupply
+    ? currentProjectStations.map((station) => station.id)
+    : isExternalTransfer
+    ? otherProjectStations.map((station) => station.id)
+    : [];
 
-  const operatorFueler =
-    currentProjectFuelers.find((fueler) =>
-      normalizeScopeValue(fueler.id) === normalizeScopeValue(currentUser?.fuelerId)
-    ) ||
-    currentProjectFuelers.find((fueler) =>
-      normalizeScopeValue(fueler.name) === normalizeScopeValue(currentUser?.fullName)
-    ) ||
-    currentProjectFuelers[0];
-
-  useEffect(() => {
-    if (isOperator && operatorFueler?.id) {
-      setFuelerId(operatorFueler.id);
-    }
-  }, [isOperator, operatorFueler?.id]);
-
-  const sourceStationDisabled = transactionType === "External_Supply";
-
-  const sourceStationOptions =
-    transactionType === "External_Supply"
-      ? []
-      : currentProjectStations.map((station) => station.id);
-
-  const destinationOptions =
-    transactionType === "Direct_Refuel"
-      ? currentProjectAssets.map((asset) => asset.id)
-      : transactionType === "Internal_Transfer"
-      ? currentProjectStations
-          .filter((station) => station.id !== sourceStation)
-          .map((station) => station.id)
-      : transactionType === "External_Supply"
-      ? currentProjectStations.map((station) => station.id)
-      : transactionType === "External_Transfer"
-      ? otherProjectStations.map((station) => station.id)
-      : [];
-
-  const selectedAsset = assets.find((asset) => asset.id === destinationId);
+  const selectedAsset = assets.find((asset) => isSameText(asset.id, destinationId));
   const tankCapacity = Number(selectedAsset?.fuelTank) || 0;
-  const selectedSourceStation = stations.find((station) => station.id === sourceStation);
+  const selectedSourceStation = stations.find((station) => isSameText(station.id, sourceStation));
   const selectedDestinationStation = (allStations.length ? allStations : stations).find(
-    (station) => station.id === destinationId
+    (station) => isSameText(station.id, destinationId)
   );
 
   const lastOdometer =
-    transactionType === "Direct_Refuel" && destinationId
+    isAssetRefuel && destinationId
       ? getLastOdometerForEquipment?.(destinationId) || 0
       : 0;
 
   const lastStationCounter =
-    transactionType !== "Direct_Refuel" && destinationId
+    isStationCounterOperation && destinationId
       ? getLastStationCounter?.(destinationId) || 0
       : 0;
+
+  const resetPhotos = () => {
+    setStationMeterPhoto?.(null);
+    setAssetPhoto?.(null);
+    setAssetMeterPhoto?.(null);
+    setInvoicePhoto?.(null);
+  };
 
   const resetAfterTransactionTypeChange = (nextType) => {
     setSourceStation("");
     setDestinationId("");
     setDieselQuantity("");
     setOdometer("");
+    setExternalStationName("");
+    setInvoiceNumber("");
+    setOperationNotes("");
     setSourceStationSearch("");
     setDestinationSearch("");
+    resetPhotos();
 
-    if (!isOperator) {
-      setFuelerId("");
-      setFuelerSearch("");
-    }
-
-    if (nextType === "External_Supply") {
+    if (isExternalSourceOperation(nextType)) {
       setSourceStation("");
     }
   };
 
   const resetAfterSourceStationChange = () => {
-    setDestinationId("");
-    setDieselQuantity("");
-    setOdometer("");
-    setDestinationSearch("");
+    if (isInternalTransfer && destinationId && isSameText(destinationId, sourceStation)) {
+      setDestinationId("");
+    }
+    resetPhotos();
   };
 
   const handleDestinationChange = (value) => {
     setDestinationId(value);
 
-    if (transactionType === "Direct_Refuel") {
+    if (isAssetRefuel) {
       const lastReading = getLastOdometerForEquipment?.(value) || 0;
       setOdometer(lastReading ? String(lastReading) : "");
     } else {
@@ -17577,143 +18898,215 @@ function AddOperationModal({
     }
   };
 
-  const handleSave = () => {
+  const getRequiredPhotoConfigs = () => {
+    if (isDirectRefuel) {
+      return [
+        { key: "stationMeterPhoto", label: "Odometer Photo *", value: stationMeterPhoto, setValue: setStationMeterPhoto },
+        { key: "assetPhoto", label: "Asset Photo *", value: assetPhoto, setValue: setAssetPhoto },
+        { key: "assetMeterPhoto", label: "Fuel Quantity Photo *", value: assetMeterPhoto, setValue: setAssetMeterPhoto },
+      ];
+    }
+
+    if (isExternalDirectRefuel) {
+      return [
+        { key: "invoicePhoto", label: "Invoice Photo *", value: invoicePhoto, setValue: setInvoicePhoto },
+        { key: "stationMeterPhoto", label: "Meter Photo *", value: stationMeterPhoto, setValue: setStationMeterPhoto },
+        { key: "assetPhoto", label: "Asset Photo *", value: assetPhoto, setValue: setAssetPhoto },
+      ];
+    }
+
+    if (isInternalTransfer) {
+      return [
+        { key: "stationMeterPhoto", label: "Destination Station Counter Photo *", value: stationMeterPhoto, setValue: setStationMeterPhoto },
+        { key: "assetPhoto", label: "Station Number Photo *", value: assetPhoto, setValue: setAssetPhoto },
+        { key: "assetMeterPhoto", label: "Fuel Quantity Photo *", value: assetMeterPhoto, setValue: setAssetMeterPhoto },
+      ];
+    }
+
+    if (isExternalSupply) {
+      return [
+        { key: "stationMeterPhoto", label: "Destination Station Counter Photo *", value: stationMeterPhoto, setValue: setStationMeterPhoto },
+        { key: "assetPhoto", label: "Station Number Photo *", value: assetPhoto, setValue: setAssetPhoto },
+        { key: "invoicePhoto", label: "Invoice Photo *", value: invoicePhoto, setValue: setInvoicePhoto },
+      ];
+    }
+
+    if (isExternalTransfer) {
+      return [
+        { key: "stationMeterPhoto", label: "Source Station Counter Photo *", value: stationMeterPhoto, setValue: setStationMeterPhoto },
+        { key: "assetPhoto", label: "Destination Station Counter Photo *", value: assetPhoto, setValue: setAssetPhoto },
+        { key: "assetMeterPhoto", label: "Fuel Quantity Photo *", value: assetMeterPhoto, setValue: setAssetMeterPhoto },
+      ];
+    }
+
+    return [];
+  };
+
+  const requiredPhotoConfigs = getRequiredPhotoConfigs();
+  const requiredPhotosComplete =
+    requiredPhotoConfigs.length === 3 &&
+    requiredPhotoConfigs.every((photo) => Boolean(photo.value));
+
+  const destinationLabel = isAssetRefuel ? "Asset" : "Destination Station";
+  const readingLabel = isAssetRefuel
+    ? "Odometer / Hour Meter"
+    : isExternalTransfer
+    ? "Destination Station Counter"
+    : "Station Meter / Counter";
+
+  const readingPlaceholder = isAssetRefuel
+    ? "Previous reading is filled automatically; replace it with the new reading"
+    : "Previous counter is filled automatically; replace it with the new counter";
+
+  const needsSourceStation = Boolean(transactionType) && !isExternalSource;
+  const needsExternalSourceDetails = isExternalDirectRefuel || isExternalSupply;
+  const needsInvoiceNumber = isExternalDirectRefuel || isExternalSupply;
+  const needsReading = Boolean(transactionType);
+  const isDieselQuantityOverTankCapacity =
+    isAssetRefuel &&
+    tankCapacity > 0 &&
+    Number(dieselQuantity || 0) > tankCapacity;
+  const dieselQuantityError = isDieselQuantityOverTankCapacity
+    ? `Diesel quantity cannot exceed tank capacity (${formatNumber(tankCapacity)} L).`
+    : "";
+
+  const validateBeforeSave = () => {
     if (!transactionType) {
       notifyUser(typeof showToast !== "undefined" ? showToast : null, inferToastTypeFromMessage("Please select transaction type."), "Please select transaction type.");
-      return;
+      return false;
     }
 
     if (!transactionTypesForAdd.includes(transactionType)) {
       notifyUser(typeof showToast !== "undefined" ? showToast : null, inferToastTypeFromMessage("You are not allowed to add this transaction type."), "You are not allowed to add this transaction type.");
-      return;
+      return false;
     }
 
-    if (transactionType !== "External_Supply" && !sourceStation) {
+    if (needsSourceStation && !sourceStation) {
       notifyUser(typeof showToast !== "undefined" ? showToast : null, inferToastTypeFromMessage("Please select source station."), "Please select source station.");
-      return;
-    }
-
-    if (!fuelerId) {
-      notifyUser(typeof showToast !== "undefined" ? showToast : null, inferToastTypeFromMessage("Please select operator."), "Please select operator.");
-      return;
+      return false;
     }
 
     if (!destinationId) {
       notifyUser(typeof showToast !== "undefined" ? showToast : null, inferToastTypeFromMessage("Please select destination."), "Please select destination.");
-      return;
+      return false;
+    }
+
+    if (isInternalTransfer && sourceStation && isSameText(sourceStation, destinationId)) {
+      notifyUser(typeof showToast !== "undefined" ? showToast : null, inferToastTypeFromMessage("Source station and destination station cannot be the same."), "Source station and destination station cannot be the same.");
+      return false;
+    }
+
+    if (needsExternalSourceDetails && !externalStationName.trim()) {
+      notifyUser(
+        typeof showToast !== "undefined" ? showToast : null,
+        inferToastTypeFromMessage(isExternalSupply ? "Please enter supplier / external source." : "Please enter external station name."),
+        isExternalSupply ? "Please enter supplier / external source." : "Please enter external station name."
+      );
+      return false;
+    }
+
+    if (needsInvoiceNumber && !invoiceNumber.trim()) {
+      notifyUser(typeof showToast !== "undefined" ? showToast : null, inferToastTypeFromMessage("Please enter invoice / receipt number."), "Please enter invoice / receipt number.");
+      return false;
     }
 
     const qty = Number(dieselQuantity);
 
     if (!qty || qty <= 0) {
       notifyUser(typeof showToast !== "undefined" ? showToast : null, inferToastTypeFromMessage("Diesel quantity must be greater than 0."), "Diesel quantity must be greater than 0.");
-      return;
+      return false;
     }
 
-    if (
-      transactionType === "Direct_Refuel" &&
-      tankCapacity > 0 &&
-      qty > tankCapacity
-    ) {
+    if (isAssetRefuel && tankCapacity > 0 && qty > tankCapacity) {
       notifyUser(typeof showToast !== "undefined" ? showToast : null, inferToastTypeFromMessage(`Diesel quantity cannot exceed tank capacity (${formatNumber(tankCapacity)} L).`), `Diesel quantity cannot exceed tank capacity (${formatNumber(tankCapacity)} L).`);
-      return;
+      return false;
     }
 
-    const newOdometer = Number(odometer);
+    const newReading = Number(odometer);
 
-    if (!newOdometer || newOdometer <= 0) {
-      notifyUser(typeof showToast !== "undefined" ? showToast : null, inferToastTypeFromMessage(transactionType === "Direct_Refuel"
-          ? "Please enter valid odometer / hour meter."
-          : "Please enter valid station counter."), transactionType === "Direct_Refuel"
-          ? "Please enter valid odometer / hour meter."
-          : "Please enter valid station counter.");
-      return;
+    if (needsReading && (!newReading || newReading <= 0)) {
+      notifyUser(
+        typeof showToast !== "undefined" ? showToast : null,
+        inferToastTypeFromMessage(isAssetRefuel ? "Please enter valid odometer / hour meter." : "Please enter valid station counter."),
+        isAssetRefuel ? "Please enter valid odometer / hour meter." : "Please enter valid station counter."
+      );
+      return false;
     }
 
-    if (
-      transactionType === "Direct_Refuel" &&
-      lastOdometer > 0 &&
-      newOdometer < lastOdometer
-    ) {
+    if (isAssetRefuel && lastOdometer > 0 && newReading < lastOdometer) {
       notifyUser(typeof showToast !== "undefined" ? showToast : null, inferToastTypeFromMessage(`Odometer / hour meter cannot be less than last reading (${formatNumber(lastOdometer)}).`), `Odometer / hour meter cannot be less than last reading (${formatNumber(lastOdometer)}).`);
-      return;
+      return false;
     }
 
-    if (
-      transactionType !== "Direct_Refuel" &&
-      lastStationCounter > 0 &&
-      newOdometer < lastStationCounter
-    ) {
-      notifyUser(typeof showToast !== "undefined" ? showToast : null, inferToastTypeFromMessage(`Station meter / counter cannot be less than last reading (${formatNumber(
-          lastStationCounter
-        )}).`), `Station meter / counter cannot be less than last reading (${formatNumber(
-          lastStationCounter
-        )}).`);
-      return;
+    if (isStationCounterOperation && lastStationCounter > 0 && newReading < lastStationCounter) {
+      notifyUser(typeof showToast !== "undefined" ? showToast : null, inferToastTypeFromMessage(`Station meter / counter cannot be less than last reading (${formatNumber(lastStationCounter)}).`), `Station meter / counter cannot be less than last reading (${formatNumber(lastStationCounter)}).`);
+      return false;
     }
 
-    if (!stationMeterPhoto || !assetPhoto || !assetMeterPhoto) {
-      notifyUser(typeof showToast !== "undefined" ? showToast : null, inferToastTypeFromMessage("All 3 photos are required."), "All 3 photos are required.");
-      return;
+    if (!requiredPhotosComplete) {
+      notifyUser(typeof showToast !== "undefined" ? showToast : null, inferToastTypeFromMessage("The 3 required photos are mandatory for this operation."), "The 3 required photos are mandatory for this operation.");
+      return false;
     }
+
+    return true;
+  };
+
+  const handleSave = () => {
+    if (!validateBeforeSave()) return;
+
+    const qty = Number(dieselQuantity);
+    const createdByName = currentUser?.fullName || currentUser?.username || currentUser?.email || currentUser?.id || "System";
 
     onSaveOperation?.({
       operationId: `OP-${Date.now()}`,
       transactionDate: new Date().toISOString(),
       transactionType,
-      sourceStation: transactionType === "External_Supply" ? "" : sourceStation,
-      fuelerId,
+      sourceStation: isExternalSource ? "" : sourceStation,
+      fuelerId: currentUser?.id || createdByName,
+      createdByUserId: currentUser?.id || "",
+      createdByName,
+      createdByRole: currentUser?.role || "",
       destinationId,
       dieselQuantity: qty,
       odometer: Number(odometer),
+      externalStationName: externalStationName.trim(),
+      invoiceNumber: invoiceNumber.trim(),
+      notes: operationNotes.trim(),
       photos: {
         stationMeterPhoto,
         assetPhoto,
         assetMeterPhoto,
+        invoicePhoto,
       },
+      requiredPhotos: requiredPhotoConfigs.map((photo) => ({
+        key: photo.key,
+        label: photo.label.replace(" *", ""),
+        fileName: photo.value?.fileName || photo.value?.file?.name || "",
+      })),
     });
   };
 
-  const sourceStationStepComplete =
-    transactionType === "External_Supply" || Boolean(sourceStation);
-
-  const fuelerStepComplete = Boolean(fuelerId);
-  const destinationStepComplete = Boolean(destinationId);
-  const quantityStepComplete = Boolean(dieselQuantity) && Number(dieselQuantity) > 0;
-
-  const odometerStepRequired = Boolean(transactionType);
-  const odometerStepComplete =
-    !odometerStepRequired || (Boolean(odometer) && Number(odometer) > 0);
-
-  const showSourceStationStep =
-    Boolean(transactionType) && transactionType !== "External_Supply";
-
-  const showFuelerStep = Boolean(transactionType) && sourceStationStepComplete;
-  const showDestinationStep = showFuelerStep && fuelerStepComplete;
-  const showQuantityStep = showDestinationStep && destinationStepComplete;
-  const showOdometerStep = showQuantityStep && odometerStepRequired;
-  const showPhotosStep =
-    showQuantityStep && quantityStepComplete && odometerStepComplete;
-
-  const canSaveProgressiveOperation =
+  const canSaveOperation =
     Boolean(transactionType) &&
-    sourceStationStepComplete &&
-    fuelerStepComplete &&
-    destinationStepComplete &&
-    quantityStepComplete &&
-    odometerStepComplete &&
-    Boolean(stationMeterPhoto) &&
-    Boolean(assetPhoto) &&
-    Boolean(assetMeterPhoto);
+    (!needsSourceStation || Boolean(sourceStation)) &&
+    Boolean(destinationId) &&
+    Boolean(dieselQuantity) &&
+    Number(dieselQuantity) > 0 &&
+    !isDieselQuantityOverTankCapacity &&
+    (!needsExternalSourceDetails || Boolean(externalStationName.trim())) &&
+    (!needsInvoiceNumber || Boolean(invoiceNumber.trim())) &&
+    Boolean(odometer) &&
+    Number(odometer) > 0 &&
+    requiredPhotosComplete;
 
   return (
     <div className="fleet-modal-backdrop fixed inset-0 z-[9998] bg-black/70 flex items-center justify-center p-4">
       <div className="bg-white text-black w-full max-w-3xl rounded-2xl shadow-2xl overflow-hidden">
         <div className="flex justify-between items-center p-5 border-b">
           <div>
-            <h2 className="text-2xl font-extrabold text-white">Add Diesel Operation</h2>
+            <h2 className="text-2xl font-extrabold text-slate-900">Add Diesel Operation</h2>
             <p className="text-sm text-gray-500 mt-1">
-              User project scope controls stations, fuelers, and destinations
+              Select the operation type first, then complete all required fields and the 3 mandatory photos.
             </p>
           </div>
 
@@ -17733,6 +19126,13 @@ function AddOperationModal({
             </span>
           </div>
 
+          <div className="bg-slate-50 border border-slate-200 rounded-xl p-3 text-sm text-slate-700">
+            Created By:{" "}
+            <span className="font-bold">
+              {currentUser?.fullName || currentUser?.username || currentUser?.email || currentUser?.id || "-"}
+            </span>
+          </div>
+
           <SearchableSelectField
             label="Transaction Type"
             value={transactionType}
@@ -17746,182 +19146,132 @@ function AddOperationModal({
             setSearchValue={setTransactionTypeSearch}
           />
 
-          {showSourceStationStep && (
+          {transactionType && (
             <>
+              {needsSourceStation && (
+                <>
+                  <SearchableSelectField
+                    label="Source Station"
+                    value={sourceStation}
+                    onChange={(value) => {
+                      setSourceStation(value);
+                      setDestinationId("");
+                      setOdometer("");
+                      setDestinationSearch("");
+                      resetPhotos();
+                    }}
+                    options={sourceStationOptions}
+                    placeholder="Search / Select Source Station"
+                    searchValue={sourceStationSearch}
+                    setSearchValue={setSourceStationSearch}
+                  />
+
+                  {sourceStation && (
+                    <div className="grid grid-cols-1 sm:grid-cols-3 items-start sm:items-center gap-2 sm:gap-4">
+                      <label className="font-medium text-gray-700">Source Project</label>
+                      <div className="col-span-2 bg-yellow-100 border border-yellow-300 rounded-lg p-2 text-gray-800 font-semibold">
+                        {selectedSourceStation?.project || "-"}
+                      </div>
+                    </div>
+                  )}
+                </>
+              )}
+
               <SearchableSelectField
-                label="Source Station"
-                value={transactionType === "External_Supply" ? "" : sourceStation}
-                onChange={(value) => {
-                  setSourceStation(value);
-                  resetAfterSourceStationChange();
-                }}
-                options={sourceStationOptions}
+                label={destinationLabel}
+                value={destinationId}
+                onChange={(value) => handleDestinationChange(value)}
+                options={destinationOptions}
                 placeholder={
-                  transactionType === "External_Supply"
-                    ? "External Supply - No source station"
-                    : transactionType
-                    ? "Select Source Station"
-                    : "Select Transaction Type First"
+                  isAssetRefuel
+                    ? "Search / Select Active Asset in Your Project"
+                    : isExternalTransfer
+                    ? "Search / Select Station from Other Projects"
+                    : "Search / Select Destination Station"
                 }
-                searchValue={sourceStationSearch}
-                setSearchValue={setSourceStationSearch}
-                disabled={!transactionType || sourceStationDisabled}
+                searchValue={destinationSearch}
+                setSearchValue={setDestinationSearch}
               />
 
-              {transactionType !== "External_Supply" && sourceStation && (
+              {isExternalTransfer && destinationId && (
                 <div className="grid grid-cols-1 sm:grid-cols-3 items-start sm:items-center gap-2 sm:gap-4">
-                  <label className="font-medium text-gray-700">Source Project</label>
-                  <div className="col-span-2 bg-yellow-100 border border-yellow-300 rounded-lg p-2 text-gray-800 font-semibold">
-                    {selectedSourceStation?.project || "-"}
+                  <label className="font-medium text-gray-700">Destination Project</label>
+                  <div className="col-span-2 bg-blue-50 border border-blue-200 rounded-lg p-2 text-gray-800 font-semibold">
+                    {selectedDestinationStation?.project || "-"}
                   </div>
                 </div>
               )}
-            </>
-          )}
 
-          {showFuelerStep && (
-            <SearchableSelectField
-              label="Operator"
-              value={fuelerId}
-              onChange={(value) => setFuelerId(value)}
-              options={currentProjectFuelers.map((fueler) => fueler.id)}
-              placeholder={
-                isOperator
-                  ? operatorFueler?.id || "Operator is not linked"
-                  : "Select Operator"
-              }
-              searchValue={fuelerSearch}
-              setSearchValue={setFuelerSearch}
-              disabled={isOperator}
-            />
-          )}
-
-          {showDestinationStep && (
-            <SearchableSelectField
-              label="Destination"
-              value={destinationId}
-              onChange={(value) => handleDestinationChange(value)}
-              options={destinationOptions}
-              placeholder={
-                !transactionType
-                  ? "Select Transaction Type First"
-                  : transactionType === "Direct_Refuel"
-                  ? "Search / Select Active Asset in Your Project"
-                  : transactionType === "External_Transfer"
-                  ? "Search / Select Station from Other Projects"
-                  : "Search / Select Destination Station"
-              }
-              searchValue={destinationSearch}
-              setSearchValue={setDestinationSearch}
-              disabled={
-                !transactionType ||
-                (transactionType !== "External_Supply" && !sourceStation)
-              }
-            />
-          )}
-
-          {transactionType === "External_Transfer" && destinationId && (
-            <div className="grid grid-cols-1 sm:grid-cols-3 items-start sm:items-center gap-2 sm:gap-4">
-              <label className="font-medium text-gray-700">Destination Project</label>
-              <div className="col-span-2 bg-blue-50 border border-blue-200 rounded-lg p-2 text-gray-800 font-semibold">
-                {selectedDestinationStation?.project || "-"}
-              </div>
-            </div>
-          )}
-
-          {transactionType === "Direct_Refuel" && destinationId && (
-            <>
-              <div className="grid grid-cols-1 sm:grid-cols-3 items-start sm:items-center gap-2 sm:gap-4">
-                <label className="font-medium text-gray-700">
-                  Last Odometer / Hour Meter
-                </label>
-                <div className="col-span-2 bg-gray-100 border rounded-lg p-2 text-gray-700">
-                  {lastOdometer > 0 ? formatNumber(lastOdometer) : "-"}
+              {isAssetRefuel && destinationId && (
+                <div className="grid grid-cols-1 sm:grid-cols-3 items-start sm:items-center gap-2 sm:gap-4">
+                  <label className="font-medium text-gray-700">Tank Capacity</label>
+                  <div className="col-span-2 bg-gray-100 border rounded-lg p-2 text-gray-700">
+                    {tankCapacity > 0 ? `${formatNumber(tankCapacity)} L` : "-"}
+                  </div>
                 </div>
-              </div>
+              )}
 
-              <div className="grid grid-cols-1 sm:grid-cols-3 items-start sm:items-center gap-2 sm:gap-4">
-                <label className="font-medium text-gray-700">Tank Capacity</label>
-                <div className="col-span-2 bg-gray-100 border rounded-lg p-2 text-gray-700">
-                  {tankCapacity > 0 ? `${formatNumber(tankCapacity)} L` : "-"}
+              {needsExternalSourceDetails && (
+                <>
+                  <Field
+                    label={isExternalSupply ? "Supplier / External Source" : "External Station Name"}
+                    value={externalStationName}
+                    onChange={(e) => setExternalStationName(e.target.value)}
+                    placeholder={isExternalSupply ? "Enter supplier or external source" : "Enter external fuel station name"}
+                    list={externalSourceDatalistId}
+                    datalistOptions={externalSourceHistoryOptions}
+                  />
+
+                  <Field
+                    label="Invoice / Receipt Number"
+                    value={invoiceNumber}
+                    onChange={(e) => setInvoiceNumber(e.target.value)}
+                    placeholder="Enter invoice or receipt number"
+                  />
+                </>
+              )}
+
+              <Field
+                label="Diesel Quantity"
+                value={dieselQuantity}
+                onChange={(e) => setDieselQuantity(e.target.value)}
+                type="number"
+                placeholder="Enter quantity in liters"
+                error={dieselQuantityError}
+              />
+
+              <Field
+                label={readingLabel}
+                value={odometer}
+                onChange={(e) => setOdometer(e.target.value)}
+                type="number"
+                placeholder={readingPlaceholder}
+              />
+
+              <Field
+                label="Notes"
+                value={operationNotes}
+                onChange={(e) => setOperationNotes(e.target.value)}
+                placeholder="Optional notes"
+              />
+
+              <div className="border-t pt-4">
+                <h3 className="text-lg font-bold italic underline mb-3">Required Photos - 3 Mandatory Photos</h3>
+
+                <div className="bg-red-50 border border-red-200 rounded-xl p-3 text-sm text-red-700 mb-4">
+                  All three photos below are required before saving this operation.
                 </div>
+
+                {requiredPhotoConfigs.map((photo) => (
+                  <ImageField
+                    key={photo.key}
+                    label={photo.label}
+                    preview={photo.value}
+                    setPreview={photo.setValue}
+                  />
+                ))}
               </div>
             </>
-          )}
-
-          {showQuantityStep && (
-            <Field
-              label="Diesel Quantity"
-              value={dieselQuantity}
-              onChange={(e) => setDieselQuantity(e.target.value)}
-              type="number"
-              placeholder="Enter quantity in liters"
-            />
-          )}
-
-          {showOdometerStep && destinationId && (
-  <div className="grid grid-cols-1 sm:grid-cols-3 items-start sm:items-center gap-2 sm:gap-4">
-    <label className="font-medium text-gray-700">
-      {transactionType === "Direct_Refuel"
-        ? "Last Odometer / Hour Meter"
-        : "Last Station Meter / Counter"}
-    </label>
-
-    <div className="col-span-2 bg-gray-100 border rounded-lg p-2 text-gray-700">
-      {transactionType === "Direct_Refuel"
-        ? lastOdometer > 0
-          ? formatNumber(lastOdometer)
-          : "-"
-        : lastStationCounter > 0
-        ? formatNumber(lastStationCounter)
-        : "-"}
-    </div>
-  </div>
-)}
-
-{showOdometerStep && (
-  <Field
-    label={
-      transactionType === "Direct_Refuel"
-        ? "Odometer / Hour Meter"
-        : "Station Meter / Counter"
-    }
-    value={odometer}
-    onChange={(e) => setOdometer(e.target.value)}
-    type="number"
-    placeholder={
-      transactionType === "Direct_Refuel"
-        ? "New reading must be >= last reading"
-        : "Enter station meter / counter reading"
-    }
-  />
-)}
-          
-
-          {showPhotosStep && (
-            <div className="border-t pt-4">
-              <h3 className="text-lg font-bold italic underline mb-3">
-                Required Photos
-              </h3>
-
-              <ImageField
-                label="Station Meter Photo *"
-                preview={stationMeterPhoto}
-                setPreview={setStationMeterPhoto}
-              />
-
-              <ImageField
-                label="Equipment / Destination Photo *"
-                preview={assetPhoto}
-                setPreview={setAssetPhoto}
-              />
-
-              <ImageField
-                label="Equipment Meter Photo *"
-                preview={assetMeterPhoto}
-                setPreview={setAssetMeterPhoto}
-              />
-            </div>
           )}
         </div>
 
@@ -17935,9 +19285,9 @@ function AddOperationModal({
 
           <button
             onClick={handleSave}
-            disabled={!canSaveProgressiveOperation}
+            disabled={!canSaveOperation}
             className={`px-5 py-2 rounded-xl font-semibold transition-all ${
-              canSaveProgressiveOperation
+              canSaveOperation
                 ? "bg-green-600 hover:bg-green-700 text-white cursor-pointer"
                 : "bg-gray-300 text-gray-500 cursor-not-allowed"
             }`}
@@ -18152,8 +19502,8 @@ function SelectField({
 }
  
 function ImageField({ label, preview, setPreview }) {
-  const isMobile =
-    /Android|iPhone|iPad|iPod/i.test(navigator.userAgent);
+  const isMobile = /Android|iPhone|iPad|iPod/i.test(navigator.userAgent);
+  const previewUrl = typeof preview === "string" ? preview : preview?.previewUrl;
 
   return (
     <div className="grid grid-cols-1 sm:grid-cols-3 items-start gap-2 sm:gap-4 mb-4">
@@ -18166,17 +19516,23 @@ function ImageField({ label, preview, setPreview }) {
           capture={isMobile ? "environment" : undefined}
           className="w-full rounded-xl border border-slate-600 bg-slate-900 px-3 py-2.5 text-slate-100 outline-none transition placeholder:text-slate-500 focus:border-amber-400 focus:ring-2 focus:ring-amber-400/20"
           onChange={(e) => {
-            const file = e.target.files[0];
+            const file = e.target.files?.[0];
 
             if (file) {
-              setPreview(URL.createObjectURL(file));
+              setPreview({
+                file,
+                previewUrl: URL.createObjectURL(file),
+                fileName: file.name,
+                mimeType: file.type,
+                sizeBytes: file.size,
+              });
             }
           }}
         />
 
-        {preview && (
+        {previewUrl && (
           <img
-            src={preview}
+            src={previewUrl}
             alt={label}
             className="mt-3 w-32 h-32 object-cover rounded-lg border"
           />
@@ -18274,6 +19630,8 @@ function Field({
   onChange,
   error = "",
   disabled = false,
+  list = "",
+  datalistOptions = [],
 }) {
   return (
     <div className="grid grid-cols-1 sm:grid-cols-3 items-start gap-2 sm:gap-4">
@@ -18287,6 +19645,7 @@ function Field({
           value={value}
           onChange={onChange}
           disabled={disabled}
+          list={list || undefined}
           className={`w-full border rounded-lg p-2 ${
             error
               ? "border-red-500 bg-red-50 focus:outline-none focus:ring-2 focus:ring-red-200"
@@ -18294,6 +19653,13 @@ function Field({
           } ${disabled ? "bg-gray-100 text-gray-400 cursor-not-allowed" : ""}`}
           placeholder={placeholder}
         />
+        {list && Array.isArray(datalistOptions) && datalistOptions.length > 0 && (
+          <datalist id={list}>
+            {datalistOptions.map((option) => (
+              <option key={option} value={option} />
+            ))}
+          </datalist>
+        )}
         {error && (
           <p className="mt-1 text-xs font-semibold text-red-600">
             {error}
@@ -18780,7 +20146,11 @@ function ApprovalsPage({
   onRejectEmployeeTransfer,
   onApproveAssetTransfer,
   onRejectAssetTransfer,
+  onApproveStationTransfer,
+  onRejectStationTransfer,
   onApproveAssetAction,
+  onApproveStationAction,
+  onOperationApprovalReviewed,
   runWithActionLoading = async (_label, actionFn) => actionFn(),
 }) {
   const [selectedStatus, setSelectedStatus] = useState("Pending");
@@ -18791,6 +20161,9 @@ function ApprovalsPage({
     ["employee_transfer", "asset_transfer", "station_transfer"].includes(
       String(request?.type || "").trim()
     );
+
+  const isBackendOperationRequest = (request) =>
+    Boolean(request?.isBackendOperationApproval || request?.backendOperationId);
 
   const visibleApprovals = approvals.filter((item) => {
     if (!canUserViewApproval(currentUser, item)) return false;
@@ -18813,6 +20186,30 @@ function ApprovalsPage({
 
     const reviewedAt = new Date().toISOString();
     const note = reviewNotes[request.id] || "Approved";
+
+    if (isBackendOperationRequest(request)) {
+      if (currentUser?.role !== "Manager") {
+        showToast?.("warning", "Only the assigned project manager can approve operation requests.");
+        return;
+      }
+
+      try {
+        await api.patch(
+          `/operations/${request.backendOperationId}/review`,
+          { action: "APPROVE", note },
+          { headers: buildOperationRequestHeaders(currentUser) }
+        );
+
+        await onOperationApprovalReviewed?.();
+        setSelectedRequest(null);
+        trackActivity("Approve Operation Request", "operations", request.title);
+        showToast?.("success", "Operation request approved successfully.");
+      } catch (error) {
+        showToast?.("warning", getFriendlyApiErrorMessage(error, "Failed to approve operation request."));
+      }
+      return;
+    }
+
     const routeApprovers = request.approvalRoute?.requiredApprovers || [];
     const currentStage = routeApprovers.find(
       (approver) => approver.userId === currentUser?.id && isPendingApprovalStatus(approver.status)
@@ -18903,6 +20300,36 @@ function ApprovalsPage({
       }
     }
 
+    if (request.type === "station_transfer") {
+      try {
+        const pendingApprovers = routeApprovers.filter((approver) => approver.status === "Pending");
+        const approverIdsToSubmit =
+          currentUser?.role === "Admin"
+            ? pendingApprovers.map((approver) => approver.userId).filter(Boolean)
+            : [currentUser?.id].filter(Boolean);
+
+        let latestReviewResult = null;
+
+        for (const reviewerUserId of approverIdsToSubmit) {
+          latestReviewResult = await onApproveStationTransfer?.(
+            request.payload?.transfer || request.payload,
+            reviewerUserId
+          );
+        }
+
+        if (String(latestReviewResult?.status || "").toUpperCase() === "APPROVED") {
+          fullyApproved = true;
+        }
+      } catch (error) {
+        const message =
+          error?.response?.data?.message ||
+          error?.message ||
+          "Failed to apply station transfer.";
+        showToast?.("warning", message);
+        return;
+      }
+    }
+
     if (
       fullyApproved &&
       request.module === "assets" &&
@@ -18915,6 +20342,25 @@ function ApprovalsPage({
           error?.response?.data?.message ||
           error?.message ||
           "Failed to apply asset approval.";
+        showToast?.("warning", message);
+        return;
+      }
+    }
+
+    if (
+      fullyApproved &&
+      request.module === "stations" &&
+      ["zero_balance_adjustment", "stock_count_adjustment"].includes(
+        String(request.payload?.action || "")
+      )
+    ) {
+      try {
+        await onApproveStationAction?.(request);
+      } catch (error) {
+        const message =
+          error?.response?.data?.message ||
+          error?.message ||
+          "Failed to apply station approval.";
         showToast?.("warning", message);
         return;
       }
@@ -18965,6 +20411,29 @@ function ApprovalsPage({
     const reviewedAt = new Date().toISOString();
     const note = reviewNotes[request.id] || "Rejected";
 
+    if (isBackendOperationRequest(request)) {
+      if (currentUser?.role !== "Manager") {
+        showToast?.("warning", "Only the assigned project manager can reject operation requests.");
+        return;
+      }
+
+      try {
+        await api.patch(
+          `/operations/${request.backendOperationId}/review`,
+          { action: "REJECT", note },
+          { headers: buildOperationRequestHeaders(currentUser) }
+        );
+
+        await onOperationApprovalReviewed?.();
+        setSelectedRequest(null);
+        trackActivity("Reject Operation Request", "operations", request.title);
+        showToast?.("success", "Operation request rejected.");
+      } catch (error) {
+        showToast?.("warning", getFriendlyApiErrorMessage(error, "Failed to reject operation request."));
+      }
+      return;
+    }
+
     if (request.type === "employee_transfer") {
       try {
         const routeApprovers = request.approvalRoute?.requiredApprovers || [];
@@ -19008,6 +20477,30 @@ function ApprovalsPage({
           error?.response?.data?.message ||
           error?.message ||
           "Failed to reject asset transfer.";
+        showToast?.("warning", message);
+        return;
+      }
+    }
+
+    if (request.type === "station_transfer") {
+      try {
+        const routeApprovers = request.approvalRoute?.requiredApprovers || [];
+        const firstPendingApprover = routeApprovers.find((approver) => approver.status === "Pending");
+        const reviewerUserId =
+          currentUser?.role === "Admin"
+            ? firstPendingApprover?.userId || currentUser?.id
+            : currentUser?.id;
+
+        await onRejectStationTransfer?.(
+          request.payload?.transfer || request.payload,
+          note,
+          reviewerUserId
+        );
+      } catch (error) {
+        const message =
+          error?.response?.data?.message ||
+          error?.message ||
+          "Failed to reject station transfer.";
         showToast?.("warning", message);
         return;
       }

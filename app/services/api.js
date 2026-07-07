@@ -14,4 +14,20 @@ api.interceptors.request.use((config) => {
   return config;
 });
 
+export function getOperations(config = {}) {
+  return api.get("/operations", config);
+}
+
+export function getPendingOperationApprovals(config = {}) {
+  return api.get("/operations/pending-approvals", config);
+}
+
+export function createOperation(payload, config = {}) {
+  return api.post("/operations", payload, config);
+}
+
+export function reviewOperation(operationId, payload, config = {}) {
+  return api.patch(`/operations/${operationId}/review`, payload, config);
+}
+
 export default api;
