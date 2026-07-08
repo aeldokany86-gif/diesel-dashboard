@@ -200,7 +200,7 @@ function mapBackendOperationForState(operation = {}) {
       ? ""
       : String(operation.odometer);
 
-  return [
+  const row = [
     operation.operationNo || operation.id || "",
     operation.completedAt || operation.createdAt || "",
     type,
@@ -215,6 +215,13 @@ function mapBackendOperationForState(operation = {}) {
     operation.status || "",
     operation.id || "",
   ];
+
+  // Keep the full backend operation hidden on the row so detail modals can access
+  // non-table fields such as attachments without adding noisy columns to the UI.
+  row.__operation = operation;
+  row.__attachments = operation.attachments || [];
+
+  return row;
 }
 
 function mapFrontendOperationToBackendPayload(operation = {}) {
@@ -229,7 +236,13 @@ function mapFrontendOperationToBackendPayload(operation = {}) {
     notes: operation.notes || undefined,
     externalStationName: operation.externalStationName || undefined,
     invoiceNumber: operation.invoiceNumber || undefined,
-    attachments: operation.photos || undefined,
+    externalInvoiceAmount:
+      operation.externalInvoiceAmount === undefined ||
+      operation.externalInvoiceAmount === null ||
+      operation.externalInvoiceAmount === ""
+        ? undefined
+        : Number(operation.externalInvoiceAmount),
+    attachments: operation.requiredPhotos || operation.photos || undefined,
   };
 
   if (["DIRECT_REFUEL", "INTERNAL_TRANSFER", "EXTERNAL_TRANSFER"].includes(normalizedType)) {
@@ -261,6 +274,183 @@ function buildOperationRequestHeaders(currentUser = {}) {
     "x-user-role": currentUser?.role || currentUser?.roleName || "",
     "x-user-name": currentUser?.fullName || currentUser?.username || currentUser?.email || "",
   };
+}
+
+function mergeOperationRequestHeaders(config = {}, currentUser = {}) {
+  const authHeaders = buildOperationRequestHeaders(currentUser);
+
+  if (!authHeaders["x-user-id"]) return config;
+
+  const headers = config.headers || {};
+
+  if (typeof headers.set === "function") {
+    Object.entries(authHeaders).forEach(([key, value]) => {
+      if (!value) return;
+      const currentValue = headers.get?.(key);
+      if (!currentValue) headers.set(key, value);
+    });
+    config.headers = headers;
+    return config;
+  }
+
+  config.headers = {
+    ...authHeaders,
+    ...headers,
+  };
+
+  return config;
+}
+
+async function uploadOperationPhotoFile({
+  file,
+  companyId,
+  ownerType,
+  ownerCode,
+  operationNo,
+  photoType,
+  currentUser,
+}) {
+  const formData = new FormData();
+
+  formData.append("file", file);
+  formData.append("companyId", companyId);
+  formData.append("ownerType", ownerType);
+  formData.append("ownerCode", ownerCode);
+  formData.append("operationNo", operationNo);
+  formData.append("photoType", photoType);
+
+  const rawBaseUrl =
+    process.env.NEXT_PUBLIC_API_URL ||
+    api?.defaults?.baseURL ||
+    "http://localhost:4000";
+
+  const baseUrl = String(rawBaseUrl).replace(/\/+$/, "");
+  const response = await fetch(`${baseUrl}/uploads/operation-photo`, {
+    method: "POST",
+    headers: buildOperationRequestHeaders(currentUser),
+    body: formData,
+  });
+
+  const contentType = response.headers.get("content-type") || "";
+  const responseBody = contentType.includes("application/json")
+    ? await response.json()
+    : await response.text();
+
+  if (!response.ok) {
+    const message =
+      typeof responseBody === "string"
+        ? responseBody
+        : responseBody?.message || responseBody?.error || "Failed to upload operation photo.";
+
+    throw new Error(message);
+  }
+
+  return responseBody;
+}
+
+
+async function getUploadSignedUrl(path, currentUser, expiresIn = 300) {
+  const rawBaseUrl =
+    process.env.NEXT_PUBLIC_API_URL ||
+    api?.defaults?.baseURL ||
+    "http://localhost:4000";
+
+  const baseUrl = String(rawBaseUrl).replace(/\/+$/, "");
+  const url = `${baseUrl}/uploads/signed-url?path=${encodeURIComponent(path)}&expiresIn=${encodeURIComponent(expiresIn)}`;
+
+  const response = await fetch(url, {
+    method: "GET",
+    headers: buildOperationRequestHeaders(currentUser),
+  });
+
+  const contentType = response.headers.get("content-type") || "";
+  const responseBody = contentType.includes("application/json")
+    ? await response.json()
+    : await response.text();
+
+  if (!response.ok) {
+    const message =
+      typeof responseBody === "string"
+        ? responseBody
+        : responseBody?.message || responseBody?.error || "Failed to load operation photo.";
+
+    throw new Error(message);
+  }
+
+  return responseBody?.signedUrl || responseBody?.url || responseBody?.publicUrl || "";
+}
+
+function normalizeOperationAttachments(value) {
+  if (!value) return [];
+
+  if (typeof value === "string") {
+    try {
+      return normalizeOperationAttachments(JSON.parse(value));
+    } catch {
+      const trimmed = value.trim();
+      return trimmed ? [{ type: "photo", key: "photo", path: trimmed }] : [];
+    }
+  }
+
+  if (Array.isArray(value)) {
+    return value
+      .flatMap((item) => normalizeOperationAttachments(item))
+      .filter((item) => item?.path);
+  }
+
+  if (typeof value === "object") {
+    const directPath =
+      value.path ||
+      value.storagePath ||
+      value.filePath ||
+      value.objectPath ||
+      value.signedPath ||
+      "";
+
+    if (directPath) {
+      return [
+        {
+          ...value,
+          key: value.key || value.type || value.photoType || value.name || "photo",
+          type: value.type || value.photoType || value.key || "photo",
+          path: directPath,
+        },
+      ];
+    }
+
+    // Backward/alternate JSON support:
+    // { stationMeterPhoto: { path: "..." }, assetPhoto: { path: "..." } }
+    return Object.entries(value)
+      .flatMap(([key, child]) =>
+        normalizeOperationAttachments(child).map((attachment) => ({
+          ...attachment,
+          key: attachment.key || key,
+          type: attachment.type || attachment.photoType || key,
+        }))
+      )
+      .filter((item) => item?.path);
+  }
+
+  return [];
+}
+
+function getPhotoLabel(type) {
+  const normalized = String(type || "photo")
+    .replace(/[\s_]+/g, "-")
+    .toLowerCase();
+
+  const labels = {
+    "source-meter": "Source Meter",
+    "station-meter": "Station Meter",
+    "asset-meter": "Asset Meter",
+    "odometer": "Odometer",
+    "asset": "Asset Photo",
+    "asset-photo": "Asset Photo",
+    "equipment": "Equipment Photo",
+    "invoice": "Invoice / Receipt",
+  };
+
+  return labels[normalized] || normalized.split("-").map((part) => part.charAt(0).toUpperCase() + part.slice(1)).join(" ");
 }
 
 
@@ -2959,6 +3149,8 @@ export default function Home() {
     null;
 
   const currentUser = backendLegacyUser || localCurrentUser;
+  const currentUserRef = useRef(null);
+  currentUserRef.current = currentUser;
 
 
   useEffect(() => {
@@ -2976,6 +3168,8 @@ export default function Home() {
         config.__fleetFuelActionLoading = true;
         beginActionLoading(label);
       }
+
+      mergeOperationRequestHeaders(config, currentUserRef.current);
 
       return config;
     });
@@ -4440,6 +4634,9 @@ useEffect(() => {
 
  
   useEffect(() => {
+    if (backendAuthLoading) return;
+    if (!currentUser?.id) return;
+
     async function fetchData() {
       try {
         const fetchCsvText = async (url) => {
@@ -4516,7 +4713,9 @@ useEffect(() => {
         const fetchBackendOperations = async () => {
           try {
             if (!canUseNetwork(showToast)) return [];
-            const response = await api.get("/operations");
+            const response = await api.get("/operations", {
+              headers: buildOperationRequestHeaders(currentUserRef.current || currentUser),
+            });
             return Array.isArray(response.data) ? response.data : [];
           } catch (error) {
             logHandledApiIssue("Operations backend API is not available", error);
@@ -4619,7 +4818,7 @@ useEffect(() => {
     }
 
     fetchData();
-  }, []);
+  }, [backendAuthLoading, currentUser?.id, currentUser?.role, currentUser?.fullName]);
 
   useEffect(() => {
     const firstAllowedPage = getPreferredPageOrder().find((pageKey) =>
@@ -6423,6 +6622,8 @@ const [showForm, setShowForm] = useState(false);
 
   // Operation review / edit
   const [selectedEquipmentHistory, setSelectedEquipmentHistory] = useState(null);
+  const [operationPhotoViewer, setOperationPhotoViewer] = useState(null);
+  const [operationPhotoViewerLoading, setOperationPhotoViewerLoading] = useState(false);
   const [editedRows, setEditedRows] = useState({});
   const [localAddedRows, setLocalAddedRows] = useState([]);
   const [auditLog, setAuditLog] = useState([]);
@@ -6654,8 +6855,95 @@ const [showForm, setShowForm] = useState(false);
     "id",
   ]);
 
-  const getAsset = (assetId) => assets.find((a) => a.id === assetId);
-  const getStation = (stationId) => stations.find((s) => s.id === stationId);
+  const buildLookupCandidates = (...values) =>
+    values
+      .flatMap((value) => (Array.isArray(value) ? value : [value]))
+      .filter((value) => value !== undefined && value !== null && String(value).trim() !== "")
+      .map(normalizeScopeValue);
+
+  const getAsset = (assetId) => {
+    const candidates = buildLookupCandidates(assetId);
+    if (!candidates.length) return null;
+
+    return assets.find((asset) => {
+      const assetCandidates = buildLookupCandidates(
+        asset?.id,
+        asset?.assetId,
+        asset?.backendId,
+        asset?.assetBackendId,
+        asset?.equipmentNo,
+        asset?.equipmentNumber,
+        asset?.equipment_no,
+        asset?.equipment_number
+      );
+
+      return assetCandidates.some((candidate) => candidates.includes(candidate));
+    }) || null;
+  };
+
+  const getStation = (stationId) => {
+    const candidates = buildLookupCandidates(stationId);
+    if (!candidates.length) return null;
+
+    return stations.find((station) => {
+      const stationCandidates = buildLookupCandidates(
+        station?.id,
+        station?.stationId,
+        station?.backendId,
+        station?.stationBackendId,
+        station?.stationCode,
+        station?.code,
+        station?.name
+      );
+
+      return stationCandidates.some((candidate) => candidates.includes(candidate));
+    }) || null;
+  };
+
+  const getProject = (projectValue) => {
+    const candidates = buildLookupCandidates(projectValue);
+    if (!candidates.length) return null;
+
+    return projects.find((project) => {
+      const projectCandidates = buildLookupCandidates(
+        project?.id,
+        project?.backendId,
+        project?.code,
+        project?.name,
+        project?.projectId,
+        project?.projectName
+      );
+
+      return projectCandidates.some((candidate) => candidates.includes(candidate));
+    }) || null;
+  };
+
+  const getAssetDisplayCode = (assetId) => {
+    const asset = getAsset(assetId);
+    return asset?.assetId || asset?.equipmentNo || asset?.equipmentNumber || asset?.id || assetId || "-";
+  };
+
+  const getStationDisplayCode = (stationId) => {
+    const station = getStation(stationId);
+    return station?.stationId || station?.code || station?.id || stationId || "-";
+  };
+
+  const getProjectDisplayName = (projectValue) => {
+    const project = getProject(projectValue);
+    return project?.name || project?.code || projectValue || "-";
+  };
+
+  const getProjectFuelPriceValue = (projectValue, transactionDate) => {
+    const project = getProject(projectValue);
+    const projectPrice = Number(project?.currentFuelPrice || 0);
+
+    if (projectPrice > 0) return projectPrice;
+
+    return getLiterPriceByDate
+      ? getLiterPriceByDate(transactionDate)
+      : literPrice;
+  };
+
   const getFueler = (fuelerId) => fuelers.find((f) => f.id === fuelerId);
 
   const getAssetProjectByDate = (assetId, transactionDate) => {
@@ -6668,7 +6956,11 @@ const [showForm, setShowForm] = useState(false);
     }
 
     const history = assetProjectHistory
-      .filter((item) => item.assetId === assetId)
+      .filter((item) => {
+        const historyCandidates = buildLookupCandidates(item.assetId, item.assetBackendId, item.backendId);
+        const assetCandidates = buildLookupCandidates(assetId, asset?.id, asset?.assetId, asset?.backendId, asset?.assetBackendId);
+        return historyCandidates.some((candidate) => assetCandidates.includes(candidate));
+      })
       .filter((item) => item.effectiveDate)
       .sort(
         (a, b) => new Date(a.effectiveDate) - new Date(b.effectiveDate)
@@ -7109,6 +7401,11 @@ const payload = mapFrontendOperationToBackendPayload({
 
     const newRow = [...row];
 
+    // Preserve hidden backend fields attached to the row array.
+    // Spreading an array drops custom properties like __operation / __attachments.
+    newRow.__operation = row.__operation;
+    newRow.__attachments = row.__attachments;
+
     if (updates.destinationId !== undefined && destinationIndex !== -1) {
       newRow[destinationIndex] = updates.destinationId;
     }
@@ -7166,12 +7463,24 @@ const payload = mapFrontendOperationToBackendPayload({
     return true;
   });
 
+  const getOperationProjectName = (item) => {
+    const row = item?.row || [];
+    const rawProject = getAssetProjectByDate(row[destinationIndex], row[dateIndex]);
+    return getProjectDisplayName(rawProject);
+  };
+
+  const getOperationLiterPrice = (item) => {
+    const row = item?.row || [];
+    const rawProject = getAssetProjectByDate(row[destinationIndex], row[dateIndex]);
+    return getProjectFuelPriceValue(rawProject, row[dateIndex]);
+  };
+
   const equipmentTypeOptions = [
     ...new Set(
       dateFilteredData
         .filter((item) => {
           const equipmentNo = item.row[destinationIndex];
-          const project = getAssetProjectByDate(equipmentNo, item.row[dateIndex]);
+          const project = getOperationProjectName(item);
 
           if (
             selectedProject.length > 0 &&
@@ -7206,7 +7515,7 @@ const payload = mapFrontendOperationToBackendPayload({
             return false;
           }
 
-          const project = getAssetProjectByDate(equipmentNo, item.row[dateIndex]);
+          const project = getOperationProjectName(item);
 
           if (
             selectedProject.length > 0 &&
@@ -7247,7 +7556,7 @@ const payload = mapFrontendOperationToBackendPayload({
           return true;
         })
         .map((item) =>
-          getAssetProjectByDate(item.row[destinationIndex], item.row[dateIndex])
+          getOperationProjectName(item)
         )
         .filter((project) => project && project !== "-")
     ),
@@ -7326,7 +7635,7 @@ const payload = mapFrontendOperationToBackendPayload({
     )
       return false;
 
-    const project = getAssetProjectByDate(equipmentNo, item.row[dateIndex]);
+    const project = getOperationProjectName(item);
 
     if (
       selectedProject.length > 0 &&
@@ -7341,31 +7650,31 @@ const payload = mapFrontendOperationToBackendPayload({
     return sum + (parseFloat(item.row[dieselIndex]) || 0);
   }, 0);
 
-  const getOperationLiterPrice = (item) => {
-    return getLiterPriceByDate
-      ? getLiterPriceByDate(item.row[dateIndex])
-      : literPrice;
-  };
-
   const totalCost = filteredDirectRefuelData.reduce((sum, item) => {
     const diesel = parseFloat(item.row[dieselIndex]) || 0;
     return sum + diesel * getOperationLiterPrice(item);
   }, 0);
 
-  const dailyData = filteredDirectRefuelData.reduce((acc, item) => {
-    const operationDate = parseOperationDate(item.row[dateIndex]);
-    const date = operationDate
-      ? operationDate.toISOString().split("T")[0]
-      : "No Date";
+  const dailyData = filteredDirectRefuelData
+    .reduce((acc, item) => {
+      const operationDate = parseOperationDate(item.row[dateIndex]);
+      const date = operationDate
+        ? operationDate.toISOString().split("T")[0]
+        : "No Date";
 
-    const diesel = parseFloat(item.row[dieselIndex]) || 0;
-    const found = acc.find((d) => d.date === date);
+      const diesel = parseFloat(item.row[dieselIndex]) || 0;
+      const found = acc.find((d) => d.date === date);
 
-    if (found) found.value += diesel;
-    else acc.push({ date, value: diesel });
+      if (found) found.value += diesel;
+      else acc.push({ date, value: diesel });
 
-    return acc;
-  }, []);
+      return acc;
+    }, [])
+    .sort((a, b) => {
+      if (a.date === "No Date") return 1;
+      if (b.date === "No Date") return -1;
+      return new Date(a.date) - new Date(b.date);
+    });
 
   const dailyConsumptionSummary = Object.values(
     filteredDirectRefuelData.reduce((acc, item) => {
@@ -7427,13 +7736,17 @@ const payload = mapFrontendOperationToBackendPayload({
       if (!equipmentNo) return acc;
 
       const asset = getAsset(equipmentNo);
+      const assetDisplayCode = getAssetDisplayCode(equipmentNo);
+      const operationProject = getOperationProjectName(item);
       const diesel = parseFloat(row[dieselIndex]) || 0;
       const odometer = parseFloat(row[odometerIndex]) || 0;
 
       if (!acc[equipmentNo]) {
         acc[equipmentNo] = {
-          equipmentNo,
-          project: getAssetProjectByDate(equipmentNo, row[dateIndex]),
+          equipmentNo: assetDisplayCode,
+          equipmentBackendId: equipmentNo,
+          project: operationProject,
+          projectsSet: new Set(),
           equipmentType: asset?.type || "-",
           fuelConsumption: 0,
           totalCost: 0,
@@ -7441,6 +7754,11 @@ const payload = mapFrontendOperationToBackendPayload({
           lastOdometer: odometer,
         };
       }
+
+      if (operationProject && operationProject !== "-") {
+        acc[equipmentNo].projectsSet.add(operationProject);
+      }
+
 
       acc[equipmentNo].fuelConsumption += diesel;
       acc[equipmentNo].totalCost += diesel * getOperationLiterPrice(item);
@@ -7463,6 +7781,7 @@ const payload = mapFrontendOperationToBackendPayload({
 
     return {
       ...item,
+      project: item.projectsSet?.size ? Array.from(item.projectsSet).join(", ") : item.project,
       distance,
       efficiency,
       totalCost: item.totalCost,
@@ -7507,12 +7826,95 @@ const payload = mapFrontendOperationToBackendPayload({
 
   const getEquipmentHistory = (equipmentNo) => {
     return filteredDirectRefuelData
-      .filter((item) => item.row[destinationIndex] === equipmentNo)
+      .filter((item) => {
+        const rowEquipment = item.row[destinationIndex];
+        return rowEquipment === equipmentNo || getAssetDisplayCode(rowEquipment) === equipmentNo;
+      })
       .sort((a, b) => {
         const da = parseOperationDate(a.row[dateIndex])?.getTime() || 0;
         const db = parseOperationDate(b.row[dateIndex])?.getTime() || 0;
         return db - da;
       });
+  };
+
+  const getOperationAttachmentsFromRow = (row) => {
+    const directAttachments = normalizeOperationAttachments(
+      row?.__attachments ||
+        row?.__operation?.attachments ||
+        row?.__operation?.requiredPhotos ||
+        row?.__operation?.photos
+    );
+
+    if (directAttachments.length) return directAttachments;
+
+    const backendOperationIdIndexSafe = headers?.indexOf?.("backend_operation_id") ?? -1;
+    const operationNoIndexSafe = operationIdIndex !== -1 ? operationIdIndex : headers?.indexOf?.("operation_id") ?? -1;
+
+    const backendOperationId =
+      backendOperationIdIndexSafe !== -1 ? row?.[backendOperationIdIndexSafe] : row?.__operation?.id || "";
+
+    const operationNo =
+      operationNoIndexSafe !== -1
+        ? row?.[operationNoIndexSafe]
+        : row?.__operation?.operationNo || row?.__operation?.id || "";
+
+    const matchedBackendRow = (data || []).find((candidateRow) => {
+      const candidateBackendId =
+        backendOperationIdIndexSafe !== -1
+          ? candidateRow?.[backendOperationIdIndexSafe]
+          : candidateRow?.__operation?.id || "";
+
+      const candidateOperationNo =
+        operationNoIndexSafe !== -1
+          ? candidateRow?.[operationNoIndexSafe]
+          : candidateRow?.__operation?.operationNo || candidateRow?.__operation?.id || "";
+
+      return (
+        (backendOperationId && String(candidateBackendId) === String(backendOperationId)) ||
+        (operationNo && String(candidateOperationNo) === String(operationNo))
+      );
+    });
+
+    return normalizeOperationAttachments(
+      matchedBackendRow?.__attachments ||
+        matchedBackendRow?.__operation?.attachments ||
+        matchedBackendRow?.__operation?.requiredPhotos ||
+        matchedBackendRow?.__operation?.photos
+    );
+  };
+
+  const openOperationPhotoViewer = async (row) => {
+    const attachments = getOperationAttachmentsFromRow(row);
+    const operationNo =
+      operationIdIndex !== -1
+        ? row?.[operationIdIndex]
+        : row?.__operation?.operationNo || row?.__operation?.id || "Operation";
+
+    if (!attachments.length) {
+      showToast?.("warning", "No photos attached to this operation.");
+      return;
+    }
+
+    setOperationPhotoViewer({
+      operationNo,
+      photos: attachments.map((attachment) => ({ ...attachment, signedUrl: "" })),
+    });
+    setOperationPhotoViewerLoading(true);
+
+    try {
+      const photos = await Promise.all(
+        attachments.map(async (attachment) => ({
+          ...attachment,
+          signedUrl: await getUploadSignedUrl(attachment.path, currentUser),
+        }))
+      );
+
+      setOperationPhotoViewer({ operationNo, photos });
+    } catch (error) {
+      showToast?.("warning", getFriendlyApiErrorMessage(error, "Failed to load operation photos."));
+    } finally {
+      setOperationPhotoViewerLoading(false);
+    }
   };
 
   const getLastOdometerForEquipment = (equipmentNo, excludeOriginalIndex = null) => {
@@ -8526,7 +8928,7 @@ const payload = mapFrontendOperationToBackendPayload({
             </div>
 
             <div className="p-3 sm:p-5 overflow-auto max-h-[68vh]">
-              <table className="min-w-[850px] lg:min-w-[980px] xl:min-w-[1100px] 2xl:min-w-[1180px] w-full border-collapse text-[11px] sm:text-xs lg:text-sm">
+              <table className="min-w-[950px] lg:min-w-[1080px] xl:min-w-[1220px] 2xl:min-w-[1300px] w-full border-collapse text-[11px] sm:text-xs lg:text-sm">
                 <thead className="bg-slate-800 sticky top-0 z-[1] shadow-sm">
                   <tr>
                     <Th>#</Th>
@@ -8538,6 +8940,7 @@ const payload = mapFrontendOperationToBackendPayload({
                     <Th>Equipment</Th>
                     <Th>Liters</Th>
                     <Th>Odometer</Th>
+                    <Th>Photos</Th>
                   </tr>
                 </thead>
 
@@ -8572,7 +8975,7 @@ const payload = mapFrontendOperationToBackendPayload({
                               onClick={() => openCellEdit(item, "station")}
                               className="text-blue-300 hover:text-yellow-400 font-semibold cursor-pointer"
                             >
-                              {row[sourceIndex] || "-"}
+                              {getStationDisplayCode(row[sourceIndex])}
                             </button>
                           </Td>
 
@@ -8590,7 +8993,7 @@ const payload = mapFrontendOperationToBackendPayload({
                               onClick={() => openCellEdit(item, "equipment")}
                               className="text-blue-300 hover:text-yellow-400 font-semibold cursor-pointer"
                             >
-                              {row[destinationIndex] || "-"}
+                              {getAssetDisplayCode(row[destinationIndex])}
                             </button>
                           </Td>
 
@@ -8610,6 +9013,19 @@ const payload = mapFrontendOperationToBackendPayload({
                             >
                               {formatNumber(row[odometerIndex])}
                             </button>
+                          </Td>
+
+                          <Td>
+                            {getOperationAttachmentsFromRow(row).length ? (
+                              <button
+                                onClick={() => openOperationPhotoViewer(row)}
+                                className="bg-amber-400 hover:bg-amber-300 text-slate-950 font-bold px-3 py-1 rounded-lg text-[11px] transition"
+                              >
+                                📷 View
+                              </button>
+                            ) : (
+                              <span className="text-slate-500">-</span>
+                            )}
                           </Td>
                         </tr>
                       );
@@ -8645,6 +9061,69 @@ const payload = mapFrontendOperationToBackendPayload({
                       ))}
                   </div>
                 </div>
+              )}
+            </div>
+          </div>
+        </div>
+      )}
+
+      {operationPhotoViewer && (
+        <div className="fixed inset-0 bg-black/80 backdrop-blur-sm flex items-center justify-center z-[10020] p-3">
+          <div className="bg-slate-950 text-white w-full max-w-[min(980px,calc(100vw-2rem))] max-h-[92vh] rounded-3xl shadow-2xl border border-slate-700 overflow-hidden">
+            <div className="p-4 border-b border-slate-700 flex items-start justify-between gap-3">
+              <div>
+                <h2 className="text-xl font-bold text-yellow-400 italic underline">
+                  Operation Photos
+                </h2>
+                <p className="text-gray-400 mt-1">
+                  Operation: <span className="text-blue-300 font-semibold">{operationPhotoViewer.operationNo}</span>
+                </p>
+              </div>
+
+              <button
+                onClick={() => setOperationPhotoViewer(null)}
+                className="text-gray-400 hover:text-red-400 text-2xl"
+              >
+                ×
+              </button>
+            </div>
+
+            <div className="p-4 overflow-auto max-h-[75vh]">
+              {operationPhotoViewerLoading ? (
+                <div className="text-center text-slate-300 py-10">Loading photos...</div>
+              ) : operationPhotoViewer.photos?.length ? (
+                <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-4">
+                  {operationPhotoViewer.photos.map((photo, index) => (
+                    <div
+                      key={`${photo.path}-${index}`}
+                      className="bg-slate-900 border border-slate-700 rounded-2xl overflow-hidden"
+                    >
+                      <div className="px-3 py-2 border-b border-slate-700 text-sm font-bold text-amber-300">
+                        {getPhotoLabel(photo.type || photo.photoType)}
+                      </div>
+
+                      {photo.signedUrl ? (
+                        <a href={photo.signedUrl} target="_blank" rel="noreferrer">
+                          <img
+                            src={photo.signedUrl}
+                            alt={getPhotoLabel(photo.type || photo.photoType)}
+                            className="w-full h-64 object-contain bg-black"
+                          />
+                        </a>
+                      ) : (
+                        <div className="h-64 flex items-center justify-center text-red-300 bg-black/40">
+                          Photo could not be loaded
+                        </div>
+                      )}
+
+                      <div className="p-3 text-[11px] text-slate-400 break-all">
+                        {photo.path}
+                      </div>
+                    </div>
+                  ))}
+                </div>
+              ) : (
+                <div className="text-center text-slate-400 py-10">No photos attached.</div>
               )}
             </div>
           </div>
@@ -16755,6 +17234,7 @@ function ProjectsPage({
     name: "",
     status: "Active",
     location: "",
+    initialFuelPrice: "",
     approvalStatus: "Pending Approval",
   });
 
@@ -17362,6 +17842,7 @@ function ProjectsPage({
       name: "",
       status: "Active",
       location: "",
+      initialFuelPrice: "",
       approvalStatus: "Pending Approval",
     });
   };
@@ -17423,6 +17904,17 @@ function ProjectsPage({
       return;
     }
 
+    const initialFuelPrice = Number(newProject.initialFuelPrice);
+
+    if (!Number.isFinite(initialFuelPrice) || initialFuelPrice <= 0) {
+      showProjectRejection({
+        title: "Initial fuel price is required",
+        message: "Please enter an initial fuel price per liter greater than zero.",
+        hint: "This price will be saved as the first effective fuel price for the project.",
+      });
+      return;
+    }
+
     const duplicatedProject = allProjects.find((project) => isSameText(project.id, newProject.id));
     if (duplicatedProject) {
       const duplicateStatus = duplicatedProject.status || "Existing";
@@ -17441,6 +17933,7 @@ function ProjectsPage({
       status: newProject.status || "Active",
       location: newProject.location || "",
       description: newProject.description || "",
+      initialFuelPrice,
     });
   };
 
@@ -17455,6 +17948,7 @@ function ProjectsPage({
           name: pendingProjectConfirmation.name,
           location: pendingProjectConfirmation.location || "",
           description: pendingProjectConfirmation.description || "",
+          initialFuelPrice: Number(pendingProjectConfirmation.initialFuelPrice),
           isActive: isSameText(pendingProjectConfirmation.status, "Active"),
         });
 
@@ -18704,6 +19198,23 @@ function ProjectsPage({
                         />
                       )}
                     </div>
+
+                    <div className="grid grid-cols-1 gap-2 sm:grid-cols-3 sm:items-center sm:gap-4">
+                      <label className="font-semibold text-slate-300">
+                        Initial Fuel Price (SAR/L)
+                      </label>
+                      <input
+                        type="number"
+                        min="0.01"
+                        step="0.01"
+                        value={newProject.initialFuelPrice}
+                        onChange={(e) =>
+                          setNewProject({ ...newProject, initialFuelPrice: e.target.value })
+                        }
+                        placeholder="Example: 1.20"
+                        className="col-span-2 w-full rounded-xl border border-slate-600 bg-slate-900 px-3 py-2.5 text-slate-100 outline-none transition placeholder:text-slate-500 focus:border-amber-400 focus:ring-2 focus:ring-amber-400/20"
+                      />
+                    </div>
                   </div>
                 </div>
 
@@ -18762,7 +19273,9 @@ function AddOperationModal({
   const [odometer, setOdometer] = useState("");
   const [externalStationName, setExternalStationName] = useState("");
   const [invoiceNumber, setInvoiceNumber] = useState("");
+  const [externalInvoiceAmount, setExternalInvoiceAmount] = useState("");
   const [operationNotes, setOperationNotes] = useState("");
+  const uploadDraftOperationNoRef = useRef(`DRAFT-${Date.now()}`);
 
   const [transactionTypeSearch, setTransactionTypeSearch] = useState("");
   const [sourceStationSearch, setSourceStationSearch] = useState("");
@@ -18844,6 +19357,18 @@ function AddOperationModal({
   const selectedDestinationStation = (allStations.length ? allStations : stations).find(
     (station) => isSameText(station.id, destinationId)
   );
+  const operationCompanyId =
+    currentUser?.companyId ||
+    selectedSourceStation?.companyId ||
+    selectedDestinationStation?.companyId ||
+    selectedAsset?.companyId ||
+    "";
+
+  const getDisplayStationCode = (station) =>
+    station?.stationId || station?.stationCode || station?.code || station?.id || "";
+
+  const getDisplayAssetCode = (asset) =>
+    asset?.assetId || asset?.assetCode || asset?.code || asset?.id || "";
 
   const lastOdometer =
     isAssetRefuel && destinationId
@@ -18869,6 +19394,7 @@ function AddOperationModal({
     setOdometer("");
     setExternalStationName("");
     setInvoiceNumber("");
+    setExternalInvoiceAmount("");
     setOperationNotes("");
     setSourceStationSearch("");
     setDestinationSearch("");
@@ -18899,53 +19425,93 @@ function AddOperationModal({
   };
 
   const getRequiredPhotoConfigs = () => {
+    const destinationStationCode = getDisplayStationCode(selectedDestinationStation) || destinationId;
+    const assetCode = getDisplayAssetCode(selectedAsset) || destinationId;
+
+    const destinationOwnerType = isAssetRefuel ? "asset" : "station";
+    const destinationOwnerCode = isAssetRefuel ? assetCode : destinationStationCode;
+
+    const withDestinationOwner = (items = []) =>
+      items.map((item) => ({
+        ...item,
+        ownerType: destinationOwnerType,
+        ownerCode: destinationOwnerCode,
+      }));
+
     if (isDirectRefuel) {
-      return [
-        { key: "stationMeterPhoto", label: "Odometer Photo *", value: stationMeterPhoto, setValue: setStationMeterPhoto },
-        { key: "assetPhoto", label: "Asset Photo *", value: assetPhoto, setValue: setAssetPhoto },
-        { key: "assetMeterPhoto", label: "Fuel Quantity Photo *", value: assetMeterPhoto, setValue: setAssetMeterPhoto },
-      ];
+      return withDestinationOwner([
+        { key: "stationMeterPhoto", label: "Odometer Photo *", value: stationMeterPhoto, setValue: setStationMeterPhoto, photoType: "odometer" },
+        { key: "assetPhoto", label: "Asset Photo *", value: assetPhoto, setValue: setAssetPhoto, photoType: "asset" },
+        { key: "assetMeterPhoto", label: "Fuel Quantity Photo *", value: assetMeterPhoto, setValue: setAssetMeterPhoto, photoType: "asset-meter" },
+      ]);
     }
 
     if (isExternalDirectRefuel) {
-      return [
-        { key: "invoicePhoto", label: "Invoice Photo *", value: invoicePhoto, setValue: setInvoicePhoto },
-        { key: "stationMeterPhoto", label: "Meter Photo *", value: stationMeterPhoto, setValue: setStationMeterPhoto },
-        { key: "assetPhoto", label: "Asset Photo *", value: assetPhoto, setValue: setAssetPhoto },
-      ];
+      return withDestinationOwner([
+        { key: "invoicePhoto", label: "Invoice Photo *", value: invoicePhoto, setValue: setInvoicePhoto, photoType: "invoice" },
+        { key: "stationMeterPhoto", label: "Meter Photo *", value: stationMeterPhoto, setValue: setStationMeterPhoto, photoType: "asset-meter" },
+        { key: "assetPhoto", label: "Asset Photo *", value: assetPhoto, setValue: setAssetPhoto, photoType: "asset" },
+      ]);
     }
 
     if (isInternalTransfer) {
-      return [
-        { key: "stationMeterPhoto", label: "Destination Station Counter Photo *", value: stationMeterPhoto, setValue: setStationMeterPhoto },
-        { key: "assetPhoto", label: "Station Number Photo *", value: assetPhoto, setValue: setAssetPhoto },
-        { key: "assetMeterPhoto", label: "Fuel Quantity Photo *", value: assetMeterPhoto, setValue: setAssetMeterPhoto },
-      ];
+      return withDestinationOwner([
+        { key: "stationMeterPhoto", label: "Destination Station Counter Photo *", value: stationMeterPhoto, setValue: setStationMeterPhoto, photoType: "destination-meter" },
+        { key: "assetPhoto", label: "Station Number Photo *", value: assetPhoto, setValue: setAssetPhoto, photoType: "station-number" },
+        { key: "assetMeterPhoto", label: "Fuel Quantity Photo *", value: assetMeterPhoto, setValue: setAssetMeterPhoto, photoType: "fuel-quantity" },
+      ]);
     }
 
     if (isExternalSupply) {
-      return [
-        { key: "stationMeterPhoto", label: "Destination Station Counter Photo *", value: stationMeterPhoto, setValue: setStationMeterPhoto },
-        { key: "assetPhoto", label: "Station Number Photo *", value: assetPhoto, setValue: setAssetPhoto },
-        { key: "invoicePhoto", label: "Invoice Photo *", value: invoicePhoto, setValue: setInvoicePhoto },
-      ];
+      return withDestinationOwner([
+        { key: "stationMeterPhoto", label: "Destination Station Counter Photo *", value: stationMeterPhoto, setValue: setStationMeterPhoto, photoType: "destination-meter" },
+        { key: "assetPhoto", label: "Station Number Photo *", value: assetPhoto, setValue: setAssetPhoto, photoType: "station-number" },
+        { key: "invoicePhoto", label: "Invoice Photo *", value: invoicePhoto, setValue: setInvoicePhoto, photoType: "invoice" },
+      ]);
     }
 
     if (isExternalTransfer) {
-      return [
-        { key: "stationMeterPhoto", label: "Source Station Counter Photo *", value: stationMeterPhoto, setValue: setStationMeterPhoto },
-        { key: "assetPhoto", label: "Destination Station Counter Photo *", value: assetPhoto, setValue: setAssetPhoto },
-        { key: "assetMeterPhoto", label: "Fuel Quantity Photo *", value: assetMeterPhoto, setValue: setAssetMeterPhoto },
-      ];
+      return withDestinationOwner([
+        { key: "stationMeterPhoto", label: "Source Station Counter Photo *", value: stationMeterPhoto, setValue: setStationMeterPhoto, photoType: "source-meter" },
+        { key: "assetPhoto", label: "Destination Station Counter Photo *", value: assetPhoto, setValue: setAssetPhoto, photoType: "destination-meter" },
+        { key: "assetMeterPhoto", label: "Fuel Quantity Photo *", value: assetMeterPhoto, setValue: setAssetMeterPhoto, photoType: "fuel-quantity" },
+      ]);
     }
 
     return [];
   };
 
   const requiredPhotoConfigs = getRequiredPhotoConfigs();
+  const requiredPhotosUploading = requiredPhotoConfigs.some((photo) => photo.value?.uploading);
   const requiredPhotosComplete =
     requiredPhotoConfigs.length === 3 &&
-    requiredPhotoConfigs.every((photo) => Boolean(photo.value));
+    requiredPhotoConfigs.every((photo) => Boolean(photo.value?.file || photo.value?.path) && !photo.value?.uploading && !photo.value?.uploadError);
+
+  const uploadRequiredOperationPhoto = async (file, photoConfig) => {
+    if (!file) return null;
+
+    if (!operationCompanyId) {
+      throw new Error("Company ID is required before uploading photos.");
+    }
+
+    if (!photoConfig?.ownerType || !photoConfig?.ownerCode) {
+      throw new Error("Please select the related station, asset, or supplier before uploading this photo.");
+    }
+
+    if (!photoConfig?.photoType) {
+      throw new Error("Photo type is missing.");
+    }
+
+    return uploadOperationPhotoFile({
+      file,
+      companyId: operationCompanyId,
+      ownerType: photoConfig.ownerType,
+      ownerCode: photoConfig.ownerCode,
+      operationNo: uploadDraftOperationNoRef.current,
+      photoType: photoConfig.photoType,
+      currentUser,
+    });
+  };
 
   const destinationLabel = isAssetRefuel ? "Asset" : "Destination Station";
   const readingLabel = isAssetRefuel
@@ -19010,6 +19576,15 @@ function AddOperationModal({
       return false;
     }
 
+    if (isExternalDirectRefuel) {
+      const invoiceAmount = Number(externalInvoiceAmount);
+
+      if (!Number.isFinite(invoiceAmount) || invoiceAmount <= 0) {
+        notifyUser(typeof showToast !== "undefined" ? showToast : null, inferToastTypeFromMessage("Please enter invoice amount greater than zero."), "Please enter invoice amount greater than zero.");
+        return false;
+      }
+    }
+
     const qty = Number(dieselQuantity);
 
     if (!qty || qty <= 0) {
@@ -19051,14 +19626,89 @@ function AddOperationModal({
     return true;
   };
 
-  const handleSave = () => {
+  const handleSave = async () => {
     if (!validateBeforeSave()) return;
 
     const qty = Number(dieselQuantity);
     const createdByName = currentUser?.fullName || currentUser?.username || currentUser?.email || currentUser?.id || "System";
+    const operationId = `OP-${Date.now()}`;
+
+    const uploadedPhotosByKey = {};
+    let uploadedRequiredPhotos = [];
+
+    try {
+      uploadedRequiredPhotos = await Promise.all(
+        requiredPhotoConfigs.map(async (photo) => {
+          const file = photo.value?.file;
+
+          if (!file) {
+            throw new Error(`${photo.label.replace(" *", "")} is required.`);
+          }
+
+          if (!operationCompanyId) {
+            throw new Error("Company ID is required before saving operation photos.");
+          }
+
+          if (!photo.ownerType || !photo.ownerCode) {
+            throw new Error("Please select the destination asset or station before saving photos.");
+          }
+
+          photo.setValue?.({
+            ...photo.value,
+            uploading: true,
+            uploaded: false,
+            uploadError: "",
+          });
+
+          const uploaded = await uploadOperationPhotoFile({
+            file,
+            companyId: operationCompanyId,
+            ownerType: photo.ownerType,
+            ownerCode: photo.ownerCode,
+            operationNo: operationId,
+            photoType: photo.photoType,
+            currentUser,
+          });
+
+          const uploadedValue = {
+            ...photo.value,
+            ...uploaded,
+            uploaded: true,
+            uploading: false,
+            uploadError: "",
+            fileName: uploaded?.fileName || photo.value?.fileName || file.name,
+            mimeType: uploaded?.mimeType || photo.value?.mimeType || file.type,
+            sizeBytes: uploaded?.size || photo.value?.sizeBytes || file.size,
+            photoType: uploaded?.photoType || photo.photoType || "",
+            ownerType: uploaded?.ownerType || photo.ownerType || "",
+            ownerCode: uploaded?.ownerCode || photo.ownerCode || "",
+          };
+
+          uploadedPhotosByKey[photo.key] = uploadedValue;
+          photo.setValue?.(uploadedValue);
+
+          return {
+            key: photo.key,
+            label: photo.label.replace(" *", ""),
+            fileName: uploadedValue.fileName || "",
+            path: uploadedValue.path || "",
+            bucket: uploadedValue.bucket || "",
+            photoType: uploadedValue.photoType || "",
+            ownerType: uploadedValue.ownerType || "",
+            ownerCode: uploadedValue.ownerCode || "",
+            mimeType: uploadedValue.mimeType || "",
+            size: uploadedValue.size || uploadedValue.sizeBytes || "",
+          };
+        })
+      );
+    } catch (error) {
+      const message = getFriendlyApiErrorMessage(error, "Photo upload failed. Operation was not saved.");
+      notifyUser(typeof showToast !== "undefined" ? showToast : null, "warning", message);
+      return;
+    }
 
     onSaveOperation?.({
-      operationId: `OP-${Date.now()}`,
+      operationId,
       transactionDate: new Date().toISOString(),
       transactionType,
       sourceStation: isExternalSource ? "" : sourceStation,
@@ -19071,18 +19721,15 @@ function AddOperationModal({
       odometer: Number(odometer),
       externalStationName: externalStationName.trim(),
       invoiceNumber: invoiceNumber.trim(),
+      externalInvoiceAmount: isExternalDirectRefuel ? Number(externalInvoiceAmount) : undefined,
       notes: operationNotes.trim(),
       photos: {
-        stationMeterPhoto,
-        assetPhoto,
-        assetMeterPhoto,
-        invoicePhoto,
+        stationMeterPhoto: uploadedPhotosByKey.stationMeterPhoto || stationMeterPhoto,
+        assetPhoto: uploadedPhotosByKey.assetPhoto || assetPhoto,
+        assetMeterPhoto: uploadedPhotosByKey.assetMeterPhoto || assetMeterPhoto,
+        invoicePhoto: uploadedPhotosByKey.invoicePhoto || invoicePhoto,
       },
-      requiredPhotos: requiredPhotoConfigs.map((photo) => ({
-        key: photo.key,
-        label: photo.label.replace(" *", ""),
-        fileName: photo.value?.fileName || photo.value?.file?.name || "",
-      })),
+      requiredPhotos: uploadedRequiredPhotos,
     });
   };
 
@@ -19095,8 +19742,10 @@ function AddOperationModal({
     !isDieselQuantityOverTankCapacity &&
     (!needsExternalSourceDetails || Boolean(externalStationName.trim())) &&
     (!needsInvoiceNumber || Boolean(invoiceNumber.trim())) &&
+    (!isExternalDirectRefuel || Number(externalInvoiceAmount) > 0) &&
     Boolean(odometer) &&
     Number(odometer) > 0 &&
+    !requiredPhotosUploading &&
     requiredPhotosComplete;
 
   return (
@@ -19228,6 +19877,16 @@ function AddOperationModal({
                     onChange={(e) => setInvoiceNumber(e.target.value)}
                     placeholder="Enter invoice or receipt number"
                   />
+
+                  {isExternalDirectRefuel && (
+                    <Field
+                      label="Invoice Amount (SAR)"
+                      type="number"
+                      value={externalInvoiceAmount}
+                      onChange={(e) => setExternalInvoiceAmount(e.target.value)}
+                      placeholder="Enter total invoice amount"
+                    />
+                  )}
                 </>
               )}
 
@@ -19268,6 +19927,7 @@ function AddOperationModal({
                     label={photo.label}
                     preview={photo.value}
                     setPreview={photo.setValue}
+                    showToast={showToast}
                   />
                 ))}
               </div>
@@ -19501,9 +20161,12 @@ function SelectField({
   );
 }
  
-function ImageField({ label, preview, setPreview }) {
+function ImageField({ label, preview, setPreview, onUpload, showToast }) {
   const isMobile = /Android|iPhone|iPad|iPod/i.test(navigator.userAgent);
   const previewUrl = typeof preview === "string" ? preview : preview?.previewUrl;
+  const isUploading = Boolean(preview?.uploading);
+  const uploadError = preview?.uploadError || "";
+  const uploadedPath = preview?.path || "";
 
   return (
     <div className="grid grid-cols-1 sm:grid-cols-3 items-start gap-2 sm:gap-4 mb-4">
@@ -19514,21 +20177,77 @@ function ImageField({ label, preview, setPreview }) {
           type="file"
           accept="image/*"
           capture={isMobile ? "environment" : undefined}
-          className="w-full rounded-xl border border-slate-600 bg-slate-900 px-3 py-2.5 text-slate-100 outline-none transition placeholder:text-slate-500 focus:border-amber-400 focus:ring-2 focus:ring-amber-400/20"
-          onChange={(e) => {
+          disabled={isUploading}
+          className={`w-full rounded-xl border border-slate-600 bg-slate-900 px-3 py-2.5 text-slate-100 outline-none transition placeholder:text-slate-500 focus:border-amber-400 focus:ring-2 focus:ring-amber-400/20 ${
+            isUploading ? "opacity-60 cursor-wait" : ""
+          }`}
+          onChange={async (e) => {
             const file = e.target.files?.[0];
 
-            if (file) {
+            if (!file) return;
+
+            const localPreview = {
+              file,
+              previewUrl: URL.createObjectURL(file),
+              fileName: file.name,
+              mimeType: file.type,
+              sizeBytes: file.size,
+              uploading: Boolean(onUpload),
+              uploaded: false,
+              uploadError: "",
+            };
+
+            setPreview(localPreview);
+
+            if (!onUpload) return;
+
+            try {
+              const uploaded = await onUpload(file);
+
               setPreview({
-                file,
-                previewUrl: URL.createObjectURL(file),
-                fileName: file.name,
-                mimeType: file.type,
-                sizeBytes: file.size,
+                ...localPreview,
+                ...uploaded,
+                uploaded: true,
+                uploading: false,
+                uploadError: "",
+                fileName: uploaded?.fileName || localPreview.fileName,
+                mimeType: uploaded?.mimeType || localPreview.mimeType,
+                sizeBytes: uploaded?.size || localPreview.sizeBytes,
               });
+
+              notifyUser(showToast, "success", `${label.replace(" *", "")} uploaded successfully.`);
+            } catch (error) {
+              const message = getFriendlyApiErrorMessage(error, "Photo upload failed.");
+
+              setPreview({
+                ...localPreview,
+                uploaded: false,
+                uploading: false,
+                uploadError: message,
+              });
+
+              notifyUser(showToast, "warning", message);
             }
           }}
         />
+
+        {isUploading && (
+          <div className="mt-2 text-sm text-amber-700 font-semibold">
+            Uploading photo...
+          </div>
+        )}
+
+        {uploadedPath && !isUploading && !uploadError && (
+          <div className="mt-2 text-sm text-green-700 font-semibold break-all">
+            ✅ Uploaded: {uploadedPath}
+          </div>
+        )}
+
+        {uploadError && (
+          <div className="mt-2 text-sm text-red-700 font-semibold">
+            ❌ {uploadError}
+          </div>
+        )}
 
         {previewUrl && (
           <img
