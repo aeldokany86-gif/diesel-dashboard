@@ -453,6 +453,53 @@ function getPhotoLabel(type) {
   return labels[normalized] || normalized.split("-").map((part) => part.charAt(0).toUpperCase() + part.slice(1)).join(" ");
 }
 
+function getOperationTypeDisplay(value) {
+  const normalized = String(value || "")
+    .trim()
+    .toUpperCase()
+    .replace(/[\s-]+/g, "_");
+
+  const labels = {
+    DIRECT_REFUEL: "Direct Refuel",
+    EXTERNAL_DIRECT_REFUEL: "External Direct Refuel",
+    INTERNAL_TRANSFER: "Internal Transfer",
+    EXTERNAL_SUPPLY: "External Supply",
+    EXTERNAL_TRANSFER: "External Transfer",
+  };
+
+  return labels[normalized] || String(value || "-").replace(/_/g, " ");
+}
+
+function getOperationTypeBadgeClass(value) {
+  const normalized = String(value || "")
+    .trim()
+    .toUpperCase()
+    .replace(/[\s-]+/g, "_");
+
+  if (normalized === "EXTERNAL_DIRECT_REFUEL") {
+    return "bg-purple-500/15 text-purple-200 border border-purple-400/40";
+  }
+
+  if (normalized === "DIRECT_REFUEL") {
+    return "bg-emerald-500/15 text-emerald-200 border border-emerald-400/40";
+  }
+
+  return "bg-slate-700 text-slate-200 border border-slate-600";
+}
+
+function getOperationTotalCostAtOperation(rowOrItem = {}) {
+  const backendOperation =
+    rowOrItem?.row?.__operation ||
+    rowOrItem?.__operation ||
+    {};
+
+  const totalCostAtOperation = Number(backendOperation.totalCostAtOperation || 0);
+
+  return Number.isFinite(totalCostAtOperation) && totalCostAtOperation > 0
+    ? totalCostAtOperation
+    : 0;
+}
+
 
 function mapBackendOperationApprovalForFrontend(item = {}, currentUser = {}) {
   const operation = item.operation || item;
@@ -638,6 +685,174 @@ function mapBackendOperationApprovalForFrontend(item = {}, currentUser = {}) {
     reviewedBy: "",
     reviewedAt: "",
     reviewNote: "",
+  };
+
+}
+
+function normalizeOperationCorrectionFieldName(value) {
+  const normalized = String(value || "")
+    .trim()
+    .toUpperCase()
+    .replace(/[\s-]+/g, "_");
+
+  const map = {
+    ASSET: "ASSET_ID",
+    ASSET_ID: "ASSET_ID",
+    EQUIPMENT: "ASSET_ID",
+    EQUIPMENT_ID: "ASSET_ID",
+    SOURCE_STATION: "SOURCE_STATION_ID",
+    SOURCE_STATION_ID: "SOURCE_STATION_ID",
+    STATION: "SOURCE_STATION_ID",
+    STATION_ID: "SOURCE_STATION_ID",
+    QUANTITY: "QUANTITY",
+    DIESEL: "QUANTITY",
+    DIESEL_QUANTITY: "QUANTITY",
+    ODOMETER: "ODOMETER",
+    ODOMETER_AT_FUELING: "ODOMETER",
+    NOTES: "NOTES",
+    NOTE: "NOTES",
+    INVOICE_NUMBER: "INVOICE_NUMBER",
+    INVOICE: "INVOICE_NUMBER",
+  };
+
+  return map[normalized] || normalized;
+}
+
+function getOperationCorrectionFieldLabel(fieldName) {
+  const normalized = normalizeOperationCorrectionFieldName(fieldName);
+  const labels = {
+    ASSET_ID: "Equipment",
+    SOURCE_STATION_ID: "Source Station",
+    QUANTITY: "Diesel Quantity",
+    ODOMETER: "Odometer / Hour Meter",
+    NOTES: "Notes",
+    INVOICE_NUMBER: "Invoice / Receipt Number",
+  };
+
+  return labels[normalized] || makeFieldLabel(normalized);
+}
+
+function findApprovalEntityByAnyId(items = [], value) {
+  const normalizedValue = normalizeScopeValue(value);
+  if (!normalizedValue) return null;
+
+  return (items || []).find((item) => {
+    const candidates = [
+      item?.backendId,
+      item?.assetBackendId,
+      item?.stationBackendId,
+      item?.id,
+      item?.assetId,
+      item?.stationId,
+      item?.equipmentNo,
+      item?.equipmentNumber,
+      item?.code,
+      item?.name,
+    ].map(normalizeScopeValue);
+
+    return candidates.includes(normalizedValue);
+  }) || null;
+}
+
+function getAssetApprovalDisplayValue(value, assets = []) {
+  const asset = findApprovalEntityByAnyId(assets, value);
+  return (
+    asset?.assetId ||
+    asset?.equipmentNo ||
+    asset?.equipmentNumber ||
+    asset?.name ||
+    value ||
+    "-"
+  );
+}
+
+function getStationApprovalDisplayValue(value, stations = []) {
+  const station = findApprovalEntityByAnyId(stations, value);
+  return station?.stationId || station?.code || station?.name || value || "-";
+}
+
+function getOperationCorrectionApprovalDisplayValue(fieldName, value, assets = [], stations = []) {
+  if (value === undefined || value === null || value === "") return "-";
+
+  const normalized = normalizeOperationCorrectionFieldName(fieldName);
+
+  if (normalized === "ASSET_ID") return getAssetApprovalDisplayValue(value, assets);
+  if (normalized === "SOURCE_STATION_ID") return getStationApprovalDisplayValue(value, stations);
+  if (normalized === "QUANTITY") return `${value} L`;
+
+  return String(value);
+}
+
+function mapBackendOperationCorrectionForFrontend(item = {}, currentUser = {}, assets = [], stations = []) {
+  const correctionId = item.id || "";
+  const operation = item.operation || {};
+  const operationId = item.operationId || operation.id || "";
+
+  if (!correctionId || !operationId) return null;
+
+  const fieldName = normalizeOperationCorrectionFieldName(item.fieldName);
+  const operationNo = operation.operationNo || operationId;
+  const requestedBy = item.requestedBy || {};
+  const status = normalizeApprovalStatus(item.status);
+  const isPending = status === "PENDING";
+  const fieldLabel = getOperationCorrectionFieldLabel(fieldName);
+
+  return {
+    id: `BACKEND-OPERATION-CORRECTION-${correctionId}`,
+    backendCorrectionId: correctionId,
+    backendOperationId: operationId,
+    isBackendOperationCorrection: true,
+    type: "operation_correction",
+    module: "operations",
+    title: `Operation Correction - ${operationNo}`,
+    payload: {
+      correction: item,
+      operation,
+      backendCorrectionId: correctionId,
+      backendOperationId: operationId,
+    },
+    details: `${fieldLabel} correction for ${operationNo}`,
+    status: isPending ? "Pending" : status === "APPROVED" ? "Approved" : "Rejected",
+    changedFields: [
+      {
+        field: fieldName,
+        label: fieldLabel,
+        oldValue: getOperationCorrectionApprovalDisplayValue(fieldName, item.oldValue, assets, stations),
+        newValue: getOperationCorrectionApprovalDisplayValue(fieldName, item.newValue, assets, stations),
+        sensitive: ["ASSET_ID", "SOURCE_STATION_ID", "QUANTITY", "ODOMETER"].includes(fieldName),
+      },
+    ],
+    entityType: "Operation",
+    entityId: operationNo,
+    sensitivity: "Sensitive",
+    riskLevel: "High",
+    approvalRoute: {
+      routeType: "operation_correction_manager",
+      sourceProject: operation.projectId || operation.sourceProjectId || "-",
+      destinationProject: operation.projectId || operation.destinationProjectId || "-",
+      requiredApprovers: isPending && ["Manager", "Admin", "PlatformAdmin"].includes(currentUser?.role)
+        ? [
+            {
+              userId: currentUser.id,
+              userName: currentUser.fullName || currentUser.email || "Manager",
+              role: currentUser.role || "Manager",
+              projectId: operation.projectId || "-",
+              approvalStage: "Manager Review",
+              status: "Pending",
+              reviewedAt: "",
+              reviewNote: "",
+            },
+          ]
+        : [],
+      routeStatus: isPending ? "Pending" : status,
+    },
+    requestedById: requestedBy.id || item.requestedByUserId || "System",
+    requestedByName: requestedBy.fullName || requestedBy.name || item.requestedByUserId || "System",
+    requestedByRole: requestedBy.role?.name || requestedBy.roleName || "Supervisor",
+    requestedAt: item.createdAt || new Date().toISOString(),
+    reviewedBy: item.reviewedBy?.fullName || "",
+    reviewedAt: item.reviewedAt || "",
+    reviewNote: item.reviewNote || "",
   };
 }
 
@@ -3053,6 +3268,7 @@ export default function Home() {
   const [activityLog, setActivityLog] = useState([]);
   const [pendingApprovals, setPendingApprovals] = useState([]);
   const [backendOperationApprovals, setBackendOperationApprovals] = useState([]);
+  const [backendOperationCorrections, setBackendOperationCorrections] = useState([]);
   const [employeeTransferRequests, setEmployeeTransferRequests] = useState([]);
   const [assetTransferRequests, setAssetTransferRequests] = useState([]);
   const [stationTransferRequests, setStationTransferRequests] = useState([]);
@@ -5227,8 +5443,59 @@ useEffect(() => {
     loadPendingBackendOperationApprovals();
   }, [currentUser?.id, currentUser?.role, currentUser?.status]);
 
+  const loadPendingBackendOperationCorrections = async () => {
+    if (!currentUser?.id || currentUser.status !== "Active") {
+      setBackendOperationCorrections([]);
+      return;
+    }
+
+    if (!["Manager", "Admin", "PlatformAdmin"].includes(currentUser.role)) {
+      setBackendOperationCorrections([]);
+      return;
+    }
+
+    try {
+      const rawBaseUrl =
+        process.env.NEXT_PUBLIC_API_URL ||
+        api?.defaults?.baseURL ||
+        "http://localhost:4000";
+
+      const baseUrl = String(rawBaseUrl).replace(/\/+$/, "");
+      const response = await fetch(`${baseUrl}/operation-corrections/pending`, {
+        method: "GET",
+        headers: buildOperationRequestHeaders(currentUser),
+      });
+
+      const contentType = response.headers.get("content-type") || "";
+      const responseBody = contentType.includes("application/json")
+        ? await response.json()
+        : await response.text();
+
+      if (!response.ok) {
+        const message =
+          typeof responseBody === "string"
+            ? responseBody
+            : responseBody?.message || responseBody?.error || "Failed to load operation corrections.";
+        throw new Error(message);
+      }
+
+      setBackendOperationCorrections(Array.isArray(responseBody) ? responseBody : []);
+    } catch (error) {
+      setBackendOperationCorrections([]);
+      console.warn("Failed to load backend operation corrections.", error);
+    }
+  };
+
+  useEffect(() => {
+    loadPendingBackendOperationCorrections();
+  }, [currentUser?.id, currentUser?.role, currentUser?.status]);
+
   const backendOperationApprovalRequests = backendOperationApprovals
     .map((item) => mapBackendOperationApprovalForFrontend(item, currentUser))
+    .filter(Boolean);
+
+  const backendOperationCorrectionRequests = backendOperationCorrections
+    .map((item) => mapBackendOperationCorrectionForFrontend(item, currentUser, companyAssets, companyStations))
     .filter(Boolean);
 
   const employeeTransferApprovals = employeeTransferRequests
@@ -5416,7 +5683,14 @@ useEffect(() => {
       };
     });
 
-  const allApprovalRequests = [...pendingApprovals, ...backendOperationApprovalRequests, ...employeeTransferApprovals, ...assetTransferApprovals, ...stationTransferApprovals];
+  const allApprovalRequests = [
+    ...pendingApprovals,
+    ...backendOperationApprovalRequests,
+    ...backendOperationCorrectionRequests,
+    ...employeeTransferApprovals,
+    ...assetTransferApprovals,
+    ...stationTransferApprovals,
+  ];
 
   const notifications = buildNotificationItems({
     approvals: allApprovalRequests,
@@ -5620,6 +5894,7 @@ if (page === "approvals") {
       onApproveAssetAction={handleApproveAssetAction}
       onApproveStationAction={handleApproveStationAction}
       onOperationApprovalReviewed={loadPendingBackendOperationApprovals}
+      onOperationCorrectionReviewed={loadPendingBackendOperationCorrections}
       runWithActionLoading={runWithActionLoading}
     />
   );
@@ -6928,6 +7203,39 @@ const [showForm, setShowForm] = useState(false);
     return station?.stationId || station?.code || station?.id || stationId || "-";
   };
 
+  const getFuelerDisplayName = (fuelerId) => {
+    const fueler = getFueler(fuelerId);
+    return fueler?.name || fueler?.fullName || fueler?.employeeName || fueler?.id || fuelerId || "-";
+  };
+
+  const getOperationCorrectionDisplayValue = (field, value) => {
+    if (field === "equipment") return getAssetDisplayCode(value);
+    if (field === "station") return getStationDisplayCode(value);
+    if (field === "fueler") return getFuelerDisplayName(value);
+    return value === undefined || value === null || value === "" ? "-" : String(value);
+  };
+
+  const getOperationCorrectionFieldName = (field) => {
+    const map = {
+      equipment: "ASSET",
+      station: "SOURCE_STATION",
+      diesel: "QUANTITY",
+      odometer: "ODOMETER",
+      fueler: "FUELER",
+    };
+
+    return map[field] || field;
+  };
+
+  const getOperationCorrectionBackendId = (row = []) => {
+    const backendOperationIdIndex = headers?.indexOf?.("backend_operation_id") ?? -1;
+    return (
+      row?.__operation?.id ||
+      (backendOperationIdIndex !== -1 ? row?.[backendOperationIdIndex] : "") ||
+      ""
+    );
+  };
+
   const getProjectDisplayName = (projectValue) => {
     const project = getProject(projectValue);
     return project?.name || project?.code || projectValue || "-";
@@ -7475,6 +7783,17 @@ const payload = mapFrontendOperationToBackendPayload({
     return getProjectFuelPriceValue(rawProject, row[dateIndex]);
   };
 
+  const getOperationTotalCost = (item) => {
+    const storedCost = getOperationTotalCostAtOperation(item);
+
+    if (storedCost > 0) {
+      return storedCost;
+    }
+
+    const diesel = parseFloat(item?.row?.[dieselIndex]) || 0;
+    return diesel * getOperationLiterPrice(item);
+  };
+
   const equipmentTypeOptions = [
     ...new Set(
       dateFilteredData
@@ -7651,8 +7970,7 @@ const payload = mapFrontendOperationToBackendPayload({
   }, 0);
 
   const totalCost = filteredDirectRefuelData.reduce((sum, item) => {
-    const diesel = parseFloat(item.row[dieselIndex]) || 0;
-    return sum + diesel * getOperationLiterPrice(item);
+    return sum + getOperationTotalCost(item);
   }, 0);
 
   const dailyData = filteredDirectRefuelData
@@ -7694,7 +8012,7 @@ const payload = mapFrontendOperationToBackendPayload({
       }
 
       acc[dateKey].qtyLiters += diesel;
-      acc[dateKey].totalCost += diesel * getOperationLiterPrice(item);
+      acc[dateKey].totalCost += getOperationTotalCost(item);
 
       return acc;
     }, {})
@@ -7722,7 +8040,7 @@ const payload = mapFrontendOperationToBackendPayload({
       }
 
       acc[equipmentType].qtyLiters += diesel;
-      acc[equipmentType].totalCost += diesel * getOperationLiterPrice(item);
+      acc[equipmentType].totalCost += getOperationTotalCost(item);
 
       return acc;
     }, {})
@@ -7761,7 +8079,7 @@ const payload = mapFrontendOperationToBackendPayload({
 
 
       acc[equipmentNo].fuelConsumption += diesel;
-      acc[equipmentNo].totalCost += diesel * getOperationLiterPrice(item);
+      acc[equipmentNo].totalCost += getOperationTotalCost(item);
 
       if (odometer < acc[equipmentNo].firstOdometer) {
         acc[equipmentNo].firstOdometer = odometer;
@@ -7998,6 +8316,7 @@ const payload = mapFrontendOperationToBackendPayload({
       row,
       field,
       oldValue: currentValue || "",
+      oldValueDisplay: getOperationCorrectionDisplayValue(field, currentValue),
       newValue: currentValue || "",
       reason: "",
     });
@@ -8007,7 +8326,7 @@ const payload = mapFrontendOperationToBackendPayload({
     setEditCell(null);
   };
 
-  const saveCellEdit = () => {
+  const saveCellEdit = async () => {
     if (!editCell) return;
 
     if (!editCell.reason.trim()) {
@@ -8024,7 +8343,6 @@ const payload = mapFrontendOperationToBackendPayload({
     const row = editCell.row;
     const field = editCell.field;
 
-    let updates = {};
     let fieldLabel = "";
 
     if (field === "equipment") {
@@ -8036,7 +8354,6 @@ const payload = mapFrontendOperationToBackendPayload({
         return;
       }
 
-      updates.destinationId = newEquipment;
       fieldLabel = "Equipment";
     }
 
@@ -8048,34 +8365,17 @@ const payload = mapFrontendOperationToBackendPayload({
         return;
       }
 
-      updates.dieselQuantity = String(qty);
       fieldLabel = "Diesel Quantity";
     }
 
     if (field === "odometer") {
       const newOdometer = Number(editCell.newValue);
-      const equipmentNo = row[destinationIndex];
 
       if (!newOdometer || newOdometer <= 0) {
         notifyUser(typeof showToast !== "undefined" ? showToast : null, inferToastTypeFromMessage("Please enter a valid odometer."), "Please enter a valid odometer.");
         return;
       }
 
-      const lastOdometer = getLastOdometerForEquipment(
-        equipmentNo,
-        editCell.originalIndex
-      );
-
-      if (lastOdometer > 0 && newOdometer < lastOdometer) {
-        notifyUser(typeof showToast !== "undefined" ? showToast : null, inferToastTypeFromMessage(`Odometer cannot be less than last recorded odometer (${formatNumber(
-            lastOdometer
-          )}).`), `Odometer cannot be less than last recorded odometer (${formatNumber(
-            lastOdometer
-          )}).`);
-        return;
-      }
-
-      updates.odometer = String(newOdometer);
       fieldLabel = "Odometer";
     }
 
@@ -8093,77 +8393,93 @@ const payload = mapFrontendOperationToBackendPayload({
         return;
       }
 
-      updates.sourceStation = newStation;
       fieldLabel = "Source Station";
     }
 
     if (field === "fueler") {
-      const newFueler = editCell.newValue;
-      const fueler = getFueler(newFueler);
-
-      if (!fueler) {
-        notifyUser(typeof showToast !== "undefined" ? showToast : null, inferToastTypeFromMessage("Please select a valid fueler."), "Please select a valid fueler.");
-        return;
-      }
-
-      const fuelerStatus = fueler.status?.trim().toLowerCase();
-      if (fuelerStatus !== "on duty" && fuelerStatus !== "active") {
-        notifyUser(typeof showToast !== "undefined" ? showToast : null, inferToastTypeFromMessage("Selected fueler must be On Duty."), "Selected fueler must be On Duty.");
-        return;
-      }
-
-      updates.fuelerId = newFueler;
-      fieldLabel = "Operator";
-    }
-
-    if (actionRequiresManagerApproval(currentUser)) {
-      submitApprovalRequest?.({
-        type: "operation_correction",
-        module: "operations",
-        title: `Operation correction - ${operationIdIndex !== -1 ? row[operationIdIndex] : editCell.originalIndex + 1}`,
-        details: editCell.reason,
-        payload: {
-          entity: "operation",
-          id: operationIdIndex !== -1 ? row[operationIdIndex] : editCell.originalIndex + 1,
-          field,
-          oldValue: editCell.oldValue,
-          newValue: editCell.newValue,
-          changedFields: [
-            { field, label: fieldLabel, oldValue: editCell.oldValue, newValue: editCell.newValue, sensitive: true },
-          ],
-        },
-      });
-      closeEditCell();
-      showToast?.("warning", "Operation correction sent for manager approval.");
+      notifyUser(typeof showToast !== "undefined" ? showToast : null, "warning", "Operator correction is not available in backend Phase 1.");
       return;
     }
 
-    setEditedRows((prev) => ({
-      ...prev,
-      [editCell.originalIndex]: {
-        ...prev[editCell.originalIndex],
-        ...updates,
-      },
-    }));
+    const operationBackendId = getOperationCorrectionBackendId(row);
 
-    setAuditLog((prev) => [
-      ...prev,
-      {
-        operationId:
-          operationIdIndex !== -1 ? row[operationIdIndex] : editCell.originalIndex + 1,
-        rowIndex: editCell.originalIndex,
-        field: fieldLabel,
-        oldValue: editCell.oldValue,
-        newValue: editCell.newValue,
+    if (!operationBackendId) {
+      notifyUser(typeof showToast !== "undefined" ? showToast : null, "warning", "Backend operation id was not found for this row.");
+      return;
+    }
+
+    const fieldName = getOperationCorrectionFieldName(field);
+
+    try {
+      const correctionPayload = {
+        operationId: operationBackendId,
+        fieldName,
+        newValue: field === "diesel" || field === "odometer" ? Number(editCell.newValue) : editCell.newValue,
         reason: editCell.reason,
-        editedBy: currentUser?.fullName || currentUser?.name || "System",
-        editedAt: new Date().toISOString(),
-      },
-    ]);
+      };
 
-    trackActivity("Edit Operation", "operations", `${fieldLabel} changed from ${editCell.oldValue} to ${editCell.newValue}.`);
+      const rawBaseUrl =
+        process.env.NEXT_PUBLIC_API_URL ||
+        api?.defaults?.baseURL ||
+        "http://localhost:4000";
 
-    closeEditCell();
+      const baseUrl = String(rawBaseUrl).replace(/\/+$/, "");
+
+      const response = await fetch(`${baseUrl}/operation-corrections`, {
+        method: "POST",
+        headers: {
+          ...buildOperationRequestHeaders(currentUser),
+          "Content-Type": "application/json",
+        },
+        body: JSON.stringify(correctionPayload),
+      });
+
+      const contentType = response.headers.get("content-type") || "";
+      const responseBody = contentType.includes("application/json")
+        ? await response.json()
+        : await response.text();
+
+      if (!response.ok) {
+        const message =
+          typeof responseBody === "string"
+            ? responseBody
+            : responseBody?.message || responseBody?.error || "Failed to submit correction request.";
+
+        showToast?.("warning", message);
+        return;
+      }
+
+      setAuditLog((prev) => [
+        ...prev,
+        {
+          operationId:
+            operationIdIndex !== -1 ? row[operationIdIndex] : editCell.originalIndex + 1,
+          rowIndex: editCell.originalIndex,
+          field: fieldLabel,
+          oldValue: editCell.oldValueDisplay || getOperationCorrectionDisplayValue(field, editCell.oldValue),
+          newValue: getOperationCorrectionDisplayValue(field, editCell.newValue),
+          reason: editCell.reason,
+          editedBy: currentUser?.fullName || currentUser?.name || "System",
+          editedAt: new Date().toISOString(),
+          status: "Pending Approval",
+        },
+      ]);
+
+      trackActivity(
+        "Request Operation Correction",
+        "operations",
+        `${fieldLabel} correction requested from ${editCell.oldValueDisplay || getOperationCorrectionDisplayValue(field, editCell.oldValue)} to ${getOperationCorrectionDisplayValue(field, editCell.newValue)}.`
+      );
+
+      closeEditCell();
+      showToast?.("success", responseBody?.message || "Correction request submitted and pending manager approval.");
+    } catch (error) {
+      console.warn("Correction submit failed:", error);
+      showToast?.(
+        "warning",
+        getFriendlyApiErrorMessage(error, "Failed to submit correction request.")
+      );
+    }
   };
 
   return (
@@ -8928,14 +9244,15 @@ const payload = mapFrontendOperationToBackendPayload({
             </div>
 
             <div className="p-3 sm:p-5 overflow-auto max-h-[68vh]">
-              <table className="min-w-[950px] lg:min-w-[1080px] xl:min-w-[1220px] 2xl:min-w-[1300px] w-full border-collapse text-[11px] sm:text-xs lg:text-sm">
+              <table className="min-w-[1080px] lg:min-w-[1200px] xl:min-w-[1340px] 2xl:min-w-[1420px] w-full border-collapse text-[11px] sm:text-xs lg:text-sm">
                 <thead className="bg-slate-800 sticky top-0 z-[1] shadow-sm">
                   <tr>
                     <Th>#</Th>
                     <Th>Date</Th>
                     <Th>Operation ID</Th>
+                    <Th>Type</Th>
                     <Th>Project</Th>
-                    <Th>Station</Th>
+                    <Th>Source / External</Th>
                     <Th>Fueler</Th>
                     <Th>Equipment</Th>
                     <Th>Liters</Th>
@@ -8948,11 +9265,22 @@ const payload = mapFrontendOperationToBackendPayload({
                   {getEquipmentHistory(selectedEquipmentHistory.equipmentNo).map(
                     (item, i) => {
                       const row = item.row;
+                      const operationTypeValue = typeIndex !== -1 ? row[typeIndex] : row?.__operation?.type || "";
+                      const isExternalDirectRefuelRow = isExternalDirectRefuelTransactionType(operationTypeValue);
+                      const externalSourceName =
+                        externalStationNameIndex !== -1
+                          ? row[externalStationNameIndex]
+                          : row?.__operation?.externalStationName || "";
+                      const sourceDisplayValue = isExternalDirectRefuelRow
+                        ? externalSourceName || "External Station"
+                        : getStationDisplayCode(row[sourceIndex]);
 
                       return (
                         <tr
                           key={item.originalIndex}
-                          className="hover:bg-slate-800/70 transition-colors duration-150"
+                          className={`hover:bg-slate-800/70 transition-colors duration-150 ${
+                            isExternalDirectRefuelRow ? "bg-purple-950/20" : ""
+                          }`}
                         >
                           <Td>{i + 1}</Td>
                           <Td>{formatDisplayDate(row[dateIndex])}</Td>
@@ -8961,6 +9289,16 @@ const payload = mapFrontendOperationToBackendPayload({
                             {operationIdIndex !== -1
                               ? row[operationIdIndex]
                               : item.originalIndex + 1}
+                          </Td>
+
+                          <Td>
+                            <span
+                              className={`inline-flex items-center rounded-full px-2.5 py-1 text-[10px] font-bold whitespace-nowrap ${getOperationTypeBadgeClass(
+                                operationTypeValue
+                              )}`}
+                            >
+                              {getOperationTypeDisplay(operationTypeValue)}
+                            </span>
                           </Td>
 
                           <Td>
@@ -8973,9 +9311,14 @@ const payload = mapFrontendOperationToBackendPayload({
                           <Td>
                             <button
                               onClick={() => openCellEdit(item, "station")}
-                              className="text-blue-300 hover:text-yellow-400 font-semibold cursor-pointer"
+                              className={`font-semibold cursor-pointer ${
+                                isExternalDirectRefuelRow
+                                  ? "text-purple-200 hover:text-yellow-300"
+                                  : "text-blue-300 hover:text-yellow-400"
+                              }`}
+                              title={isExternalDirectRefuelRow ? "External fuel station" : "Source station"}
                             >
-                              {getStationDisplayCode(row[sourceIndex])}
+                              {sourceDisplayValue || "-"}
                             </button>
                           </Td>
 
@@ -9135,7 +9478,7 @@ const payload = mapFrontendOperationToBackendPayload({
           <div className="bg-white text-black w-[min(560px,calc(100vw-2rem))] rounded-2xl shadow-2xl p-6">
             <div className="flex justify-between items-center mb-5 border-b pb-3">
               <h2 className="text-xl sm:text-2xl font-bold">
-                Edit{" "}
+                Request{" "}
                 {editCell.field === "equipment"
                   ? "Equipment"
                   : editCell.field === "diesel"
@@ -9144,7 +9487,7 @@ const payload = mapFrontendOperationToBackendPayload({
                   ? "Odometer"
                   : editCell.field === "station"
                   ? "Source Station"
-                  : "Operator"}
+                  : "Operator"}{" Correction"}
               </h2>
 
               <button
@@ -9157,7 +9500,7 @@ const payload = mapFrontendOperationToBackendPayload({
 
             <div className="bg-gray-100 rounded-xl p-4 mb-4">
               <p className="text-sm text-gray-600">Old Value</p>
-              <p className="text-xl font-bold">{editCell.oldValue || "-"}</p>
+              <p className="text-xl font-bold">{editCell.oldValueDisplay || getOperationCorrectionDisplayValue(editCell.field, editCell.oldValue)}</p>
             </div>
 
             <div className="mb-4">
@@ -9175,8 +9518,8 @@ const payload = mapFrontendOperationToBackendPayload({
                   {assets
                     .filter((asset) => asset.status?.toLowerCase() !== "retired")
                     .map((asset) => (
-                      <option key={makeTenantEntityKey(asset)} value={asset.id}>
-                        {asset.id} - {asset.type || "-"}
+                      <option key={makeTenantEntityKey(asset)} value={asset.backendId || asset.assetBackendId || asset.id}>
+                        {getAssetDisplayCode(asset.id)} - {asset.type || "-"}
                       </option>
                     ))}
                 </select>
@@ -9192,8 +9535,8 @@ const payload = mapFrontendOperationToBackendPayload({
                   {stations
                     .filter((station) => !isSameText(station.id, "External_Supply"))
                     .map((station) => (
-                      <option key={makeTenantEntityKey(station)} value={station.id}>
-                        {station.id} - {station.status || "-"}
+                      <option key={makeTenantEntityKey(station)} value={station.backendId || station.stationBackendId || station.id}>
+                        {getStationDisplayCode(station.id)} - {station.status || "-"}
                       </option>
                     ))}
                 </select>
@@ -9213,7 +9556,7 @@ const payload = mapFrontendOperationToBackendPayload({
                     })
                     .map((fueler) => (
                       <option key={makeTenantEntityKey(fueler)} value={fueler.id}>
-                        {fueler.id} - {fueler.name || "-"} - {fueler.role || "Operator"} - {fueler.status || "On Duty"}
+                        {getFuelerDisplayName(fueler.id)} - {fueler.role || "Operator"} - {fueler.status || "On Duty"}
                       </option>
                     ))}
                 </select>
@@ -17789,6 +18132,12 @@ function ProjectsPage({
     const projectFuelPrice = Number(project.currentFuelPrice || 0);
 
     return getDirectRefuelOperations(project).reduce((sum, item) => {
+      const storedCost = getOperationTotalCostAtOperation(item.row);
+
+      if (storedCost > 0) {
+        return sum + storedCost;
+      }
+
       const diesel = dieselIndex !== -1 ? parseFloat(item.row[dieselIndex]) || 0 : 0;
       const literPriceForProject = projectFuelPrice > 0 ? projectFuelPrice : getOperationLiterPrice(item.row);
       return sum + diesel * literPriceForProject;
@@ -18794,7 +19143,11 @@ function ProjectsPage({
                       const row = item.row;
                       const diesel = dieselIndex !== -1 ? parseFloat(row[dieselIndex]) || 0 : 0;
                       const selectedProjectFuelPrice = Number(selectedProject.currentFuelPrice || 0);
-                      const cost = diesel * (selectedProjectFuelPrice > 0 ? selectedProjectFuelPrice : getOperationLiterPrice(row));
+                      const storedCost = getOperationTotalCostAtOperation(row);
+                      const cost =
+                        storedCost > 0
+                          ? storedCost
+                          : diesel * (selectedProjectFuelPrice > 0 ? selectedProjectFuelPrice : getOperationLiterPrice(row));
 
                       return (
                         <tr key={item.originalIndex} className="hover:bg-slate-800/70 transition-colors duration-150">
@@ -20870,6 +21223,7 @@ function ApprovalsPage({
   onApproveAssetAction,
   onApproveStationAction,
   onOperationApprovalReviewed,
+  onOperationCorrectionReviewed,
   runWithActionLoading = async (_label, actionFn) => actionFn(),
 }) {
   const [selectedStatus, setSelectedStatus] = useState("Pending");
@@ -20881,8 +21235,11 @@ function ApprovalsPage({
       String(request?.type || "").trim()
     );
 
+  const isBackendOperationCorrectionRequest = (request) =>
+    Boolean(request?.isBackendOperationCorrection || request?.backendCorrectionId);
+
   const isBackendOperationRequest = (request) =>
-    Boolean(request?.isBackendOperationApproval || request?.backendOperationId);
+    Boolean(request?.isBackendOperationApproval || (request?.backendOperationId && !isBackendOperationCorrectionRequest(request)));
 
   const visibleApprovals = approvals.filter((item) => {
     if (!canUserViewApproval(currentUser, item)) return false;
@@ -20905,6 +21262,53 @@ function ApprovalsPage({
 
     const reviewedAt = new Date().toISOString();
     const note = reviewNotes[request.id] || "Approved";
+
+    if (isBackendOperationCorrectionRequest(request)) {
+      if (!["Manager", "Admin", "PlatformAdmin"].includes(currentUser?.role)) {
+        showToast?.("warning", "Only managers can approve operation corrections.");
+        return;
+      }
+
+      try {
+        const rawBaseUrl =
+          process.env.NEXT_PUBLIC_API_URL ||
+          api?.defaults?.baseURL ||
+          "http://localhost:4000";
+
+        const baseUrl = String(rawBaseUrl).replace(/\/+$/, "");
+        const response = await fetch(`${baseUrl}/operation-corrections/${request.backendCorrectionId}/review`, {
+          method: "PATCH",
+          headers: {
+            ...buildOperationRequestHeaders(currentUser),
+            "Content-Type": "application/json",
+          },
+          body: JSON.stringify({ action: "APPROVE", note }),
+        });
+
+        const contentType = response.headers.get("content-type") || "";
+        const responseBody = contentType.includes("application/json")
+          ? await response.json()
+          : await response.text();
+
+        if (!response.ok) {
+          const message =
+            typeof responseBody === "string"
+              ? responseBody
+              : responseBody?.message || responseBody?.error || "Failed to approve operation correction.";
+          throw new Error(message);
+        }
+
+        await onOperationCorrectionReviewed?.();
+        await onOperationApprovalReviewed?.();
+        setSelectedRequest(null);
+        trackActivity("Approve Operation Correction", "operations", request.title);
+        showToast?.("success", "Operation correction approved and applied successfully.");
+      } catch (error) {
+        console.warn("Failed to approve operation correction.", error);
+        showToast?.("warning", error?.message || "Failed to approve operation correction.");
+      }
+      return;
+    }
 
     if (isBackendOperationRequest(request)) {
       if (currentUser?.role !== "Manager") {
@@ -21129,6 +21533,52 @@ function ApprovalsPage({
 
     const reviewedAt = new Date().toISOString();
     const note = reviewNotes[request.id] || "Rejected";
+
+    if (isBackendOperationCorrectionRequest(request)) {
+      if (!["Manager", "Admin", "PlatformAdmin"].includes(currentUser?.role)) {
+        showToast?.("warning", "Only managers can reject operation corrections.");
+        return;
+      }
+
+      try {
+        const rawBaseUrl =
+          process.env.NEXT_PUBLIC_API_URL ||
+          api?.defaults?.baseURL ||
+          "http://localhost:4000";
+
+        const baseUrl = String(rawBaseUrl).replace(/\/+$/, "");
+        const response = await fetch(`${baseUrl}/operation-corrections/${request.backendCorrectionId}/review`, {
+          method: "PATCH",
+          headers: {
+            ...buildOperationRequestHeaders(currentUser),
+            "Content-Type": "application/json",
+          },
+          body: JSON.stringify({ action: "REJECT", note }),
+        });
+
+        const contentType = response.headers.get("content-type") || "";
+        const responseBody = contentType.includes("application/json")
+          ? await response.json()
+          : await response.text();
+
+        if (!response.ok) {
+          const message =
+            typeof responseBody === "string"
+              ? responseBody
+              : responseBody?.message || responseBody?.error || "Failed to reject operation correction.";
+          throw new Error(message);
+        }
+
+        await onOperationCorrectionReviewed?.();
+        setSelectedRequest(null);
+        trackActivity("Reject Operation Correction", "operations", request.title);
+        showToast?.("success", "Operation correction rejected.");
+      } catch (error) {
+        console.warn("Failed to reject operation correction.", error);
+        showToast?.("warning", error?.message || "Failed to reject operation correction.");
+      }
+      return;
+    }
 
     if (isBackendOperationRequest(request)) {
       if (currentUser?.role !== "Manager") {
