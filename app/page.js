@@ -20,25 +20,8 @@ import {
   Cell,
 } from "recharts"; 
 import ChartFrame from "./components/charts/ChartFrame";
+import SidebarSvgIcon from "./components/icons/SidebarSvgIcon";
 
-function SidebarSvgIcon({ children, size = 18, className = "" }) {
-  return (
-    <svg
-      width={size}
-      height={size}
-      viewBox="0 0 24 24"
-      fill="none"
-      stroke="currentColor"
-      strokeWidth="2"
-      strokeLinecap="round"
-      strokeLinejoin="round"
-      className={className}
-      aria-hidden="true"
-    >
-      {children}
-    </svg>
-  );
-}
 
 function LayoutDashboard({ size = 18, className = "" }) {
   return (
