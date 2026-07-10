@@ -30,6 +30,8 @@ import {
   FileBarChart2,
   Bell,
 } from "./components/icons/SidebarIcons";
+import Toast from "./components/feedback/Toast";
+import StatusBadge from "./components/feedback/StatusBadge";
 
 
 
@@ -24657,47 +24659,3 @@ function LoginPage({
   );
 }
 
-function Toast({ type, message }) {
-  const styles = {
-    success: "bg-green-600",
-    error: "bg-red-600",
-    warning: "bg-yellow-500 text-black",
-  };
-
-  const icons = {
-    success: "✅",
-    error: "❌",
-    warning: "⚠️",
-  };
-
-  if (typeof document === "undefined") return null;
-
-  return createPortal(
-    <div
-      className={`fixed top-6 right-6 z-[999999] px-5 py-3 rounded-xl shadow-2xl text-white font-medium transition-all duration-300 ${
-        styles[type] || "bg-gray-700"
-      }`}
-    >
-      <span className="mr-2">{icons[type]}</span>
-      {message}
-    </div>,
-    document.body
-  );
-}
-function StatusBadge({ status }) {
-  const cleanStatus = status?.trim().toLowerCase();
-
-  const isActive = cleanStatus === "active";
-
-  return (
-    <span
-      className={`px-3 py-1 rounded-full text-xs font-semibold ${
-        isActive
-          ? "bg-green-500/15 text-green-400 border border-green-500/30"
-          : "bg-red-500/15 text-red-400 border border-red-500/30"
-      }`}
-    >
-      {status || "-"}
-    </span>
-  );
-}
