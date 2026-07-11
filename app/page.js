@@ -59,6 +59,9 @@ import {
   getLinkedUserRoleNameFromEmployee,
   mapBackendEmployeeForState,
   normalizeBackendRoleName,
+  toFrontendOperationType,
+  isBackendStationOperationType,
+  mapBackendOperationForState,
 } from "./lib/helpers";
 
 
@@ -79,59 +82,9 @@ const OPERATION_HEADERS = [
   "backend_operation_id",
 ];
 
-function toFrontendOperationType(value) {
-  return String(value || "")
-    .trim()
-    .toUpperCase()
-    .replace(/[\s-]+/g, "_")
-    .toLowerCase()
-    .split("_")
-    .map((part, index) =>
-      index === 0 ? part.charAt(0).toUpperCase() + part.slice(1) : part.charAt(0).toUpperCase() + part.slice(1)
-    )
-    .join("_");
-}
 
-function isBackendStationOperationType(value) {
-  const normalized = String(value || "").trim().toUpperCase().replace(/[\s-]+/g, "_");
-  return ["INTERNAL_TRANSFER", "EXTERNAL_SUPPLY", "EXTERNAL_TRANSFER"].includes(normalized);
-}
 
-function mapBackendOperationForState(operation = {}) {
-  const type = toFrontendOperationType(operation.type);
-  const destinationId = operation.assetId || operation.destinationStationId || "";
-  const stationCounterValue =
-    operation.stationCounter === undefined || operation.stationCounter === null
-      ? ""
-      : String(operation.stationCounter);
-  const odometerValue =
-    operation.odometer === undefined || operation.odometer === null
-      ? ""
-      : String(operation.odometer);
 
-  const row = [
-    operation.operationNo || operation.id || "",
-    operation.completedAt || operation.createdAt || "",
-    type,
-    operation.sourceStationId || "",
-    operation.requestedBy?.fullName || operation.requestedByUserId || "",
-    destinationId,
-    operation.quantity === undefined || operation.quantity === null ? "" : String(operation.quantity),
-    isBackendStationOperationType(operation.type) ? stationCounterValue || odometerValue : odometerValue,
-    stationCounterValue,
-    operation.externalStationName || "",
-    operation.invoiceNumber || "",
-    operation.status || "",
-    operation.id || "",
-  ];
-
-  // Keep the full backend operation hidden on the row so detail modals can access
-  // non-table fields such as attachments without adding noisy columns to the UI.
-  row.__operation = operation;
-  row.__attachments = operation.attachments || [];
-
-  return row;
-}
 
 function mapFrontendOperationToBackendPayload(operation = {}) {
   const normalizedType = String(operation.transactionType || "")
@@ -1136,9 +1089,6 @@ function logHandledApiIssue(label, error) {
 }
 
 
-
-
-
 function normalizeSystemRole(value) {
   const normalized = String(value || "Operator").trim().toLowerCase();
   const compact = normalized.replace(/[\s_-]+/g, "");
@@ -1151,9 +1101,6 @@ function normalizeSystemRole(value) {
   if (compact === "platformadmin") return "PlatformAdmin";
   return "Operator";
 }
-
-
-
 
 function makeUsernameFromUser({ id, fullName, email }) {
   const emailName = String(email || "").split("@")[0];

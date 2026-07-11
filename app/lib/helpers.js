@@ -357,7 +357,60 @@ export function normalizeBackendRoleName(roleName) {
 }
 
 
+export function toFrontendOperationType(value) {
+  return String(value || "")
+    .trim()
+    .toUpperCase()
+    .replace(/[\s-]+/g, "_")
+    .toLowerCase()
+    .split("_")
+    .map((part, index) =>
+      index === 0 ? part.charAt(0).toUpperCase() + part.slice(1) : part.charAt(0).toUpperCase() + part.slice(1)
+    )
+    .join("_");
+}
 
+export function isBackendStationOperationType(value) {
+  const normalized = String(value || "").trim().toUpperCase().replace(/[\s-]+/g, "_");
+  return ["INTERNAL_TRANSFER", "EXTERNAL_SUPPLY", "EXTERNAL_TRANSFER"].includes(normalized);
+}
+
+
+export function mapBackendOperationForState(operation = {}) {
+  const type = toFrontendOperationType(operation.type);
+  const destinationId = operation.assetId || operation.destinationStationId || "";
+  const stationCounterValue =
+    operation.stationCounter === undefined || operation.stationCounter === null
+      ? ""
+      : String(operation.stationCounter);
+  const odometerValue =
+    operation.odometer === undefined || operation.odometer === null
+      ? ""
+      : String(operation.odometer);
+
+  const row = [
+    operation.operationNo || operation.id || "",
+    operation.completedAt || operation.createdAt || "",
+    type,
+    operation.sourceStationId || "",
+    operation.requestedBy?.fullName || operation.requestedByUserId || "",
+    destinationId,
+    operation.quantity === undefined || operation.quantity === null ? "" : String(operation.quantity),
+    isBackendStationOperationType(operation.type) ? stationCounterValue || odometerValue : odometerValue,
+    stationCounterValue,
+    operation.externalStationName || "",
+    operation.invoiceNumber || "",
+    operation.status || "",
+    operation.id || "",
+  ];
+
+  // Keep the full backend operation hidden on the row so detail modals can access
+  // non-table fields such as attachments without adding noisy columns to the UI.
+  row.__operation = operation;
+  row.__attachments = operation.attachments || [];
+
+  return row;
+}
 
 
 
