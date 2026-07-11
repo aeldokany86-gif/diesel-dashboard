@@ -33,6 +33,10 @@ import {
 import Toast from "./components/feedback/Toast";
 import StatusBadge from "./components/feedback/StatusBadge";
 import Field from "./components/forms/Field";
+import ModalPortal from "./components/ui/ModalPortal";
+import Th from "./components/ui/Th";
+import Td from "./components/ui/Td";
+import Card from "./components/ui/Card";
 
 
 
@@ -3103,17 +3107,6 @@ function getSmartDropdownClass(menuAlign, widthClass = "w-64") {
   return `absolute ${menuAlign === "right" ? "right-0" : "left-0"} mt-3 ${widthClass} max-w-[calc(100vw-1.5rem)]`;
 }
 
-function ModalPortal({ children }) {
-  const [mounted, setMounted] = useState(false);
-
-  useEffect(() => {
-    setMounted(true);
-  }, []);
-
-  if (!mounted || typeof document === "undefined") return null;
-
-  return createPortal(children, document.body);
-}
  
 export default function Home() {
   const [page, setPage] = useState("companies");
@@ -20550,48 +20543,6 @@ function formatNumber(value) {
   return number.toLocaleString("en-US");
 }
  
-function Th({ children, className = "", ...props }) {
-  return (
-    <th
-      {...props}
-      className={`px-3 py-3 text-left border-b border-r border-slate-600/60 last:border-r-0 text-[10px] font-black uppercase tracking-wide text-amber-300 whitespace-normal xl:whitespace-nowrap break-words leading-tight bg-slate-800 ${className}`}
-    >
-      {children}
-    </th>
-  );
-}
- 
-function Td({ children, strong = false, className = "", ...props }) {
-  return (
-    <td
-      {...props}
-      className={`px-3 py-2.5 border-b border-r border-slate-700/45 last:border-r-0 whitespace-normal xl:whitespace-nowrap break-words leading-tight max-w-[260px] ${
-        strong
-          ? "font-bold text-sky-200"
-          : "text-slate-100"
-      } ${className}`}
-    >
-      {children}
-    </td>
-  );
-}
- 
-
- 
-function Card({ title, value }) {
-  return (
-    <div className="fleet-modal-panel relative bg-slate-900/80 border border-slate-700/80 p-4 rounded-2xl shadow-xl shadow-black/10 min-w-0 overflow-hidden transition-all duration-200 hover:border-amber-400/50 hover:-translate-y-0.5">
-      <div className="absolute top-4 right-4 h-2 w-2 rounded-full bg-amber-400/80" />
-      <p className="text-[11px] sm:text-xs lg:text-sm text-slate-400 truncate pr-5">{title}</p>
- 
-      <h2 className="mt-2 text-xl sm:text-2xl xl:text-3xl font-black text-slate-100 leading-tight break-words tabular-nums">
-        {value}
-      </h2>
-    </div>
-  );
-}
-
-
 function AuditTimelinePage({
   approvals = [],
   activityLog = [],
