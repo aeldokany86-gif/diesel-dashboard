@@ -1,7 +1,6 @@
 "use client";
  
 import React, { useEffect, useMemo, useRef, useState } from "react";
-import { createPortal } from "react-dom";
 import { useAuth } from "./context/AuthContext";
 import { login as backendLogin } from "./services/authService";
 import api from "./services/api";
@@ -73,6 +72,21 @@ getValue,
 formatNumber,
 } from "./lib/helpers";
 
+import {
+  mapFrontendOperationToBackendPayload,
+  buildOperationRequestHeaders,
+  mergeOperationRequestHeaders,
+  normalizeOperationAttachments,
+  getPhotoLabel,
+  getOperationTypeDisplay,
+  getOperationTypeBadgeClass,
+  getOperationTotalCostAtOperation,
+} from "./lib/operationHelpers";
+
+import {
+  uploadOperationPhotoFile,
+  getUploadSignedUrl,
+} from "./services/operationsService";
 
 const OPERATION_HEADERS = [
   "operation_id",
@@ -89,283 +103,6 @@ const OPERATION_HEADERS = [
   "operation_status",
   "backend_operation_id",
 ];
-
-
-function mapFrontendOperationToBackendPayload(operation = {}) {
-  const normalizedType = String(operation.transactionType || "")
-    .trim()
-    .toUpperCase()
-    .replace(/[\s-]+/g, "_");
-
-  const payload = {
-    type: normalizedType,
-    quantity: Number(operation.dieselQuantity || 0),
-    notes: operation.notes || undefined,
-    externalStationName: operation.externalStationName || undefined,
-    invoiceNumber: operation.invoiceNumber || undefined,
-    externalInvoiceAmount:
-      operation.externalInvoiceAmount === undefined ||
-      operation.externalInvoiceAmount === null ||
-      operation.externalInvoiceAmount === ""
-        ? undefined
-        : Number(operation.externalInvoiceAmount),
-    attachments: operation.requiredPhotos || operation.photos || undefined,
-  };
-
-  if (["DIRECT_REFUEL", "INTERNAL_TRANSFER", "EXTERNAL_TRANSFER"].includes(normalizedType)) {
-    payload.sourceStationId = operation.sourceStation || undefined;
-  }
-
-  if (["INTERNAL_TRANSFER", "EXTERNAL_SUPPLY", "EXTERNAL_TRANSFER"].includes(normalizedType)) {
-    payload.destinationStationId = operation.destinationId || undefined;
-    payload.stationCounter =
-      operation.odometer === undefined || operation.odometer === null
-        ? undefined
-        : Number(operation.odometer);
-  }
-
-  if (["DIRECT_REFUEL", "EXTERNAL_DIRECT_REFUEL"].includes(normalizedType)) {
-    payload.assetId = operation.destinationId || undefined;
-    payload.odometer =
-      operation.odometer === undefined || operation.odometer === null
-        ? undefined
-        : Number(operation.odometer);
-  }
-
-  return payload;
-}
-
-function buildOperationRequestHeaders(currentUser = {}) {
-  return {
-    "x-user-id": currentUser?.id || "",
-    "x-user-role": currentUser?.role || currentUser?.roleName || "",
-    "x-user-name": currentUser?.fullName || currentUser?.username || currentUser?.email || "",
-  };
-}
-
-function mergeOperationRequestHeaders(config = {}, currentUser = {}) {
-  const authHeaders = buildOperationRequestHeaders(currentUser);
-
-  if (!authHeaders["x-user-id"]) return config;
-
-  const headers = config.headers || {};
-
-  if (typeof headers.set === "function") {
-    Object.entries(authHeaders).forEach(([key, value]) => {
-      if (!value) return;
-      const currentValue = headers.get?.(key);
-      if (!currentValue) headers.set(key, value);
-    });
-    config.headers = headers;
-    return config;
-  }
-
-  config.headers = {
-    ...authHeaders,
-    ...headers,
-  };
-
-  return config;
-}
-
-async function uploadOperationPhotoFile({
-  file,
-  companyId,
-  ownerType,
-  ownerCode,
-  operationNo,
-  photoType,
-  currentUser,
-}) {
-  const formData = new FormData();
-
-  formData.append("file", file);
-  formData.append("companyId", companyId);
-  formData.append("ownerType", ownerType);
-  formData.append("ownerCode", ownerCode);
-  formData.append("operationNo", operationNo);
-  formData.append("photoType", photoType);
-
-  const rawBaseUrl =
-    process.env.NEXT_PUBLIC_API_URL ||
-    api?.defaults?.baseURL ||
-    "http://localhost:4000";
-
-  const baseUrl = String(rawBaseUrl).replace(/\/+$/, "");
-  const response = await fetch(`${baseUrl}/uploads/operation-photo`, {
-    method: "POST",
-    headers: buildOperationRequestHeaders(currentUser),
-    body: formData,
-  });
-
-  const contentType = response.headers.get("content-type") || "";
-  const responseBody = contentType.includes("application/json")
-    ? await response.json()
-    : await response.text();
-
-  if (!response.ok) {
-    const message =
-      typeof responseBody === "string"
-        ? responseBody
-        : responseBody?.message || responseBody?.error || "Failed to upload operation photo.";
-
-    throw new Error(message);
-  }
-
-  return responseBody;
-}
-
-
-async function getUploadSignedUrl(path, currentUser, expiresIn = 300) {
-  const rawBaseUrl =
-    process.env.NEXT_PUBLIC_API_URL ||
-    api?.defaults?.baseURL ||
-    "http://localhost:4000";
-
-  const baseUrl = String(rawBaseUrl).replace(/\/+$/, "");
-  const url = `${baseUrl}/uploads/signed-url?path=${encodeURIComponent(path)}&expiresIn=${encodeURIComponent(expiresIn)}`;
-
-  const response = await fetch(url, {
-    method: "GET",
-    headers: buildOperationRequestHeaders(currentUser),
-  });
-
-  const contentType = response.headers.get("content-type") || "";
-  const responseBody = contentType.includes("application/json")
-    ? await response.json()
-    : await response.text();
-
-  if (!response.ok) {
-    const message =
-      typeof responseBody === "string"
-        ? responseBody
-        : responseBody?.message || responseBody?.error || "Failed to load operation photo.";
-
-    throw new Error(message);
-  }
-
-  return responseBody?.signedUrl || responseBody?.url || responseBody?.publicUrl || "";
-}
-
-function normalizeOperationAttachments(value) {
-  if (!value) return [];
-
-  if (typeof value === "string") {
-    try {
-      return normalizeOperationAttachments(JSON.parse(value));
-    } catch {
-      const trimmed = value.trim();
-      return trimmed ? [{ type: "photo", key: "photo", path: trimmed }] : [];
-    }
-  }
-
-  if (Array.isArray(value)) {
-    return value
-      .flatMap((item) => normalizeOperationAttachments(item))
-      .filter((item) => item?.path);
-  }
-
-  if (typeof value === "object") {
-    const directPath =
-      value.path ||
-      value.storagePath ||
-      value.filePath ||
-      value.objectPath ||
-      value.signedPath ||
-      "";
-
-    if (directPath) {
-      return [
-        {
-          ...value,
-          key: value.key || value.type || value.photoType || value.name || "photo",
-          type: value.type || value.photoType || value.key || "photo",
-          path: directPath,
-        },
-      ];
-    }
-
-    // Backward/alternate JSON support:
-    // { stationMeterPhoto: { path: "..." }, assetPhoto: { path: "..." } }
-    return Object.entries(value)
-      .flatMap(([key, child]) =>
-        normalizeOperationAttachments(child).map((attachment) => ({
-          ...attachment,
-          key: attachment.key || key,
-          type: attachment.type || attachment.photoType || key,
-        }))
-      )
-      .filter((item) => item?.path);
-  }
-
-  return [];
-}
-
-function getPhotoLabel(type) {
-  const normalized = String(type || "photo")
-    .replace(/[\s_]+/g, "-")
-    .toLowerCase();
-
-  const labels = {
-    "source-meter": "Source Meter",
-    "station-meter": "Station Meter",
-    "asset-meter": "Asset Meter",
-    "odometer": "Odometer",
-    "asset": "Asset Photo",
-    "asset-photo": "Asset Photo",
-    "equipment": "Equipment Photo",
-    "invoice": "Invoice / Receipt",
-  };
-
-  return labels[normalized] || normalized.split("-").map((part) => part.charAt(0).toUpperCase() + part.slice(1)).join(" ");
-}
-
-function getOperationTypeDisplay(value) {
-  const normalized = String(value || "")
-    .trim()
-    .toUpperCase()
-    .replace(/[\s-]+/g, "_");
-
-  const labels = {
-    DIRECT_REFUEL: "Direct Refuel",
-    EXTERNAL_DIRECT_REFUEL: "External Direct Refuel",
-    INTERNAL_TRANSFER: "Internal Transfer",
-    EXTERNAL_SUPPLY: "External Supply",
-    EXTERNAL_TRANSFER: "External Transfer",
-  };
-
-  return labels[normalized] || String(value || "-").replace(/_/g, " ");
-}
-
-function getOperationTypeBadgeClass(value) {
-  const normalized = String(value || "")
-    .trim()
-    .toUpperCase()
-    .replace(/[\s-]+/g, "_");
-
-  if (normalized === "EXTERNAL_DIRECT_REFUEL") {
-    return "bg-purple-500/15 text-purple-200 border border-purple-400/40";
-  }
-
-  if (normalized === "DIRECT_REFUEL") {
-    return "bg-emerald-500/15 text-emerald-200 border border-emerald-400/40";
-  }
-
-  return "bg-slate-700 text-slate-200 border border-slate-600";
-}
-
-function getOperationTotalCostAtOperation(rowOrItem = {}) {
-  const backendOperation =
-    rowOrItem?.row?.__operation ||
-    rowOrItem?.__operation ||
-    {};
-
-  const totalCostAtOperation = Number(backendOperation.totalCostAtOperation || 0);
-
-  return Number.isFinite(totalCostAtOperation) && totalCostAtOperation > 0
-    ? totalCostAtOperation
-    : 0;
-}
 
 
 function mapBackendOperationApprovalForFrontend(item = {}, currentUser = {}) {
