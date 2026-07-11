@@ -53,6 +53,12 @@ import {
   mapFrontendAssetStatusForBackend,
   mapBackendAssetForState,
   mapBackendStationForState,
+  mapBackendProjectForState,
+  mapFrontendEmployeeStatusForBackend,
+  mapBackendEmployeeStatusForState,
+  getLinkedUserRoleNameFromEmployee,
+  mapBackendEmployeeForState,
+  normalizeBackendRoleName,
 } from "./lib/helpers";
 
 
@@ -1147,24 +1153,7 @@ function normalizeSystemRole(value) {
 }
 
 
-function mapFrontendEmployeeStatusForBackend(status) {
-  const normalized = String(status || "")
-    .trim()
-    .toLowerCase()
-    .replace(/[\s_-]+/g, "");
 
-  if (normalized === "vacation" || normalized === "invacation") return "VACATION";
-  if (
-    normalized === "retiredresigned" ||
-    normalized === "retired/resigned" ||
-    normalized === "retired" ||
-    normalized === "resigned"
-  ) {
-    return "RETIRED_RESIGNED";
-  }
-
-  return "ON_DUTY";
-}
 
 function makeUsernameFromUser({ id, fullName, email }) {
   const emailName = String(email || "").split("@")[0];
@@ -1312,20 +1301,6 @@ function canAccessPageForUser(user, pageKey) {
   return hasPermissionForUser(user, pageKey, "view");
 }
 
-function normalizeBackendRoleName(roleName) {
-  const normalized = String(roleName || "").trim();
-  const compact = normalized.toLowerCase().replace(/[\s_-]+/g, "");
-
-  if (compact === "platformuser" || compact === "platformadmin") return "PlatformAdmin";
-  if (compact === "topmanagement") return "TopManagement";
-  if (compact === "admin") return "Admin";
-  if (compact === "manager") return "Manager";
-  if (compact === "supervisor") return "Supervisor";
-  if (compact === "officer") return "Officer";
-  if (compact === "operator") return "Operator";
-
-  return normalized || "Operator";
-}
 
 function buildLegacyUserFromAuthUser(authUser) {
   if (!authUser) return null;
@@ -3391,104 +3366,15 @@ useEffect(() => {
     }
   };
 
-  const mapBackendProjectForState = (project = {}) => ({
-    backendId: project.id || "",
-    id: project.code || project.id || "",
-    code: project.code || project.id || "",
-    name: project.name || project.code || project.id || "",
-    location: project.location || "",
-    description: project.description || "",
-    status: project.isActive === false ? "Inactive" : "Active",
-    isActive: project.isActive !== false,
-    approvalStatus: "Approved",
-    companyId: project.companyId || project.company?.id || "",
-    companyName: project.company?.name || "",
-    projectManagerId: project.projectManagerId || project.projectManager?.id || "",
-    projectManagerName: project.projectManager?.fullName || "",
-    projectManagerEmail: project.projectManager?.email || "",
-    currentFuelPrice: Number(project.currentFuelPrice || 0),
-    fuelPriceCurrency: project.fuelPriceCurrency || project.company?.currency || "SAR",
-    fuelPriceEffectiveFrom: project.fuelPriceEffectiveFrom || "",
-    source: "Backend",
-    createdAt: project.createdAt || "",
-    updatedAt: project.updatedAt || "",
-  });
+  
 
-  const mapBackendEmployeeStatusForState = (status) => {
-    const normalized = String(status || "")
-      .trim()
-      .toUpperCase();
+ 
 
-    if (normalized === "VACATION") return "In Vacation";
-    if (normalized === "RETIRED_RESIGNED") return "Retired / Resigned";
-    return "On Duty";
-  };
+  
 
-  const mapFrontendEmployeeStatusForBackend = (status) => {
-    const normalized = String(status || "")
-      .trim()
-      .toLowerCase()
-      .replace(/[\s_-]+/g, "");
+  
 
-    if (normalized === "vacation" || normalized === "invacation") return "VACATION";
-    if (
-      normalized === "retiredresigned" ||
-      normalized === "retired/resigned" ||
-      normalized === "retired" ||
-      normalized === "resigned"
-    ) {
-      return "RETIRED_RESIGNED";
-    }
-
-    return "ON_DUTY";
-  };
-
-  const getLinkedUserRoleNameFromEmployee = (employee = {}) =>
-    normalizeBackendRoleName(
-      employee?.linkedUser?.role?.name ||
-        employee?.linkedUser?.roleName ||
-        employee?.linkedUser?.role ||
-        ""
-    );
-
-  const mapBackendEmployeeForState = (employee = {}) => {
-    const linkedUserRole = getLinkedUserRoleNameFromEmployee(employee);
-
-    return {
-      backendId: employee.id || "",
-      id: employee.employeeId || employee.id || "",
-      employeeId: employee.employeeId || employee.id || "",
-      name: employee.name || "",
-      mobile: employee.phone || "",
-      phone: employee.phone || "",
-      email: employee.email || "",
-      projectId: employee.projectId || employee.project?.id || "",
-      projectName:
-        employee.project?.name ||
-        employee.project?.code ||
-        employee.projectId ||
-        "-",
-      project: employee.project?.name || employee.projectId || "-",
-      companyId: employee.companyId || employee.company?.id || "",
-      linkedUserId: employee.linkedUserId || employee.linkedUser?.id || "",
-      linkedUserName: employee.linkedUser?.fullName || "",
-      linkedUserIsActive: employee.linkedUser?.isActive !== false,
-      linkedUserRole,
-      linkedUserRoleName: employee.linkedUser?.role?.name || employee.linkedUser?.roleName || "",
-      systemRole: linkedUserRole,
-      role: employee.jobTitle || "Operator",
-      jobTitle: employee.jobTitle || "Operator",
-      status: mapBackendEmployeeStatusForState(employee.status),
-      userStatus:
-        (employee.linkedUserId || employee.linkedUser?.id) &&
-        employee.linkedUser?.isActive !== false
-          ? "Linked"
-          : "Not Linked",
-      source: "Backend",
-      createdAt: employee.createdAt || "",
-      updatedAt: employee.updatedAt || "",
-    };
-  };
+  
 
   const mapBackendEmployeeTransferForState = (transfer = {}) => {
     const linkedEmployeeRole = getLinkedUserRoleNameFromEmployee(transfer.employee || {});
