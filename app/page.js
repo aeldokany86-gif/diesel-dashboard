@@ -62,8 +62,16 @@ import {
   toFrontendOperationType,
   isBackendStationOperationType,
   mapBackendOperationForState,
-} from "./lib/helpers";
 
+
+normalizeHeader,
+normalizeText,
+getDuplicateIdError,
+isSameText,
+getHeaderIndex,
+getValue,
+formatNumber,
+} from "./lib/helpers";
 
 
 const OPERATION_HEADERS = [
@@ -81,9 +89,6 @@ const OPERATION_HEADERS = [
   "operation_status",
   "backend_operation_id",
 ];
-
-
-
 
 
 function mapFrontendOperationToBackendPayload(operation = {}) {
@@ -20108,59 +20113,6 @@ function ImageField({ label, preview, setPreview, onUpload, showToast }) {
   );
 }
  
-function normalizeHeader(value) {
-  return cleanCsvCell(value)
-    .toLowerCase()
-    .replace(/\s+/g, "_");
-}
-
-function normalizeText(value) {
-  return cleanCsvCell(value)
-    .toLowerCase()
-    .replace(/\s+/g, "_");
-}
-
-function getDuplicateIdError(inputId, existingItems = [], label = "ID") {
-  const normalizedInputId = normalizeText(inputId);
-
-  if (!normalizedInputId) return "";
-
-  const alreadyExists = existingItems.some((item) =>
-    normalizeText(item?.id) === normalizedInputId
-  );
-
-  return alreadyExists ? `${label} already exists. Please use a unique ID.` : "";
-}
-
-function isSameText(a, b) {
-  return normalizeText(a) === normalizeText(b);
-}
-
-function getHeaderIndex(headers, possibleNames) {
-  const cleanHeaders = headers.map((header) => normalizeHeader(header));
-
-  for (const name of possibleNames) {
-    const index = cleanHeaders.indexOf(normalizeHeader(name));
-
-    if (index !== -1) return index;
-  }
-
-  return -1;
-}
-
-function getValue(row, headers, possibleNames) {
-  const index = getHeaderIndex(headers, possibleNames);
-
-  return index !== -1 ? cleanCsvCell(row[index]) : "";
-}
- 
-function formatNumber(value) {
-  const number = Number(value);
- 
-  if (isNaN(number)) return value || "-";
- 
-  return number.toLocaleString("en-US");
-}
  
 function AuditTimelinePage({
   approvals = [],

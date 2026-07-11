@@ -412,14 +412,56 @@ export function mapBackendOperationForState(operation = {}) {
   return row;
 }
 
+export function normalizeHeader(value) {
+  return cleanCsvCell(value)
+    .toLowerCase()
+    .replace(/\s+/g, "_");
+}
 
+export function normalizeText(value) {
+  return cleanCsvCell(value)
+    .toLowerCase()
+    .replace(/\s+/g, "_");
+}
 
+export function getDuplicateIdError(inputId, existingItems = [], label = "ID") {
+  const normalizedInputId = normalizeText(inputId);
 
+  if (!normalizedInputId) return "";
 
+  const alreadyExists = existingItems.some((item) =>
+    normalizeText(item?.id) === normalizedInputId
+  );
 
+  return alreadyExists ? `${label} already exists. Please use a unique ID.` : "";
+}
 
+export function isSameText(a, b) {
+  return normalizeText(a) === normalizeText(b);
+}
 
+export function getHeaderIndex(headers, possibleNames) {
+  const cleanHeaders = headers.map((header) => normalizeHeader(header));
 
+  for (const name of possibleNames) {
+    const index = cleanHeaders.indexOf(normalizeHeader(name));
 
+    if (index !== -1) return index;
+  }
 
+  return -1;
+}
 
+export function getValue(row, headers, possibleNames) {
+  const index = getHeaderIndex(headers, possibleNames);
+
+  return index !== -1 ? cleanCsvCell(row[index]) : "";
+}
+ 
+export function formatNumber(value) {
+  const number = Number(value);
+ 
+  if (isNaN(number)) return value || "-";
+ 
+  return number.toLocaleString("en-US");
+}
