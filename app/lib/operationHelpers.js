@@ -1,3 +1,5 @@
+import { isSameText } from "./helpers";
+
 export function mapFrontendOperationToBackendPayload(operation = {}) {
   const normalizedType = String(operation.transactionType || "")
     .trim()
@@ -193,4 +195,121 @@ export function getOperationTotalCostAtOperation(rowOrItem = {}) {
   return Number.isFinite(totalCostAtOperation) && totalCostAtOperation > 0
     ? totalCostAtOperation
     : 0;
+}
+
+export function getAllowedTransactionTypesForUser(user) {
+  if (!user || user.status !== "Active") return [];
+
+  if (user.role === "Operator") {
+    return ["Direct_Refuel"];
+  }
+
+  if (user.role === "Supervisor" || user.role === "Manager") {
+    return [
+      "Direct_Refuel",
+      "External_Direct_Refuel",
+      "Internal_Transfer",
+      "External_Supply",
+      "External_Transfer",
+    ];
+  }
+
+  // Admin, Officer, TopManagement, and PlatformAdmin are view-only in Operations.
+  return [];
+}
+
+export function isAssetRefuelTransactionType(transactionType) {
+  return ["Direct_Refuel", "External_Direct_Refuel"].some((type) =>
+    isSameText(transactionType, type)
+  );
+}
+
+export function isExternalDirectRefuelTransactionType(transactionType) {
+  return isSameText(transactionType, "External_Direct_Refuel");
+}
+
+export function isExternalSupplyTransactionType(transactionType) {
+  return isSameText(transactionType, "External_Supply");
+}
+
+export function isExternalTransferTransactionType(transactionType) {
+  return isSameText(transactionType, "External_Transfer");
+}
+
+export function isExternalSourceOperation(transactionType) {
+  return (
+    isExternalSupplyTransactionType(transactionType) ||
+    isExternalDirectRefuelTransactionType(transactionType)
+  );
+}
+
+export function isStationCounterTransactionType(transactionType) {
+  return (
+    isSameText(transactionType, "Internal_Transfer") ||
+    isExternalSupplyTransactionType(transactionType) ||
+    isExternalTransferTransactionType(transactionType)
+  );
+}
+
+export function shouldOperationRequireManagerApproval(transactionType, user) {
+  if (!user || user.status !== "Active") return true;
+
+  if (isExternalTransferTransactionType(transactionType)) {
+    // Cross-project diesel transfer needs the two project managers.
+    // If a Manager creates it, backend will later treat him as the first approval.
+    return user.role === "Supervisor" || user.role === "Manager";
+  }
+
+  if (
+    isExternalDirectRefuelTransactionType(transactionType) ||
+    isExternalSupplyTransactionType(transactionType)
+  ) {
+    // Supervisor submits a request. Manager executes immediately.
+    return user.role === "Supervisor";
+  }
+
+  return false;
+}
+
+export function getOperationApprovalType(transactionType) {
+  if (isExternalDirectRefuelTransactionType(transactionType)) return "operation_external_direct_refuel";
+  if (isExternalSupplyTransactionType(transactionType)) return "operation_external_supply";
+  if (isExternalTransferTransactionType(transactionType)) return "operation_external_transfer";
+  return "operation";
+}
+
+export function getOperationApprovalTitle(transactionType, operationId) {
+  if (isExternalDirectRefuelTransactionType(transactionType)) {
+    return `External Direct Refuel ${operationId} pending approval`;
+  }
+
+  if (isExternalSupplyTransactionType(transactionType)) {
+    return `External Supply ${operationId} pending approval`;
+  }
+
+  if (isExternalTransferTransactionType(transactionType)) {
+    return `External Transfer ${operationId} pending approval`;
+  }
+
+  return `Operation ${operationId} pending approval`;
+}
+
+export function getOperationApprovalSuccessMessage(transactionType) {
+  if (isExternalDirectRefuelTransactionType(transactionType)) {
+    return "External Direct Refuel saved as Pending Manager Approval.";
+  }
+
+  if (isExternalSupplyTransactionType(transactionType)) {
+    return "External Supply saved as Pending Manager Approval.";
+  }
+
+  if (isExternalTransferTransactionType(transactionType)) {
+    return "External Transfer saved as Pending Project Managers Approval.";
+  }
+
+  return "Operation saved as Pending Manager Approval.";
+}
+
+export function shouldExternalSupplyRequireApproval(user) {
+  return shouldOperationRequireManagerApproval("External_Supply", user);
 }

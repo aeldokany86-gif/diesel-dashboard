@@ -61,14 +61,12 @@ import {
   toFrontendOperationType,
   isBackendStationOperationType,
   mapBackendOperationForState,
-
-
-normalizeHeader,
-normalizeText,
-getDuplicateIdError,
-isSameText,
-getHeaderIndex,
-getValue,
+  normalizeHeader,
+  normalizeText,
+  getDuplicateIdError,
+  isSameText,
+  getHeaderIndex,
+  getValue,
 formatNumber,
 } from "./lib/helpers";
 
@@ -81,12 +79,172 @@ import {
   getOperationTypeDisplay,
   getOperationTypeBadgeClass,
   getOperationTotalCostAtOperation,
+  getAllowedTransactionTypesForUser,
+  isAssetRefuelTransactionType,
+  isExternalDirectRefuelTransactionType,
+  isExternalSupplyTransactionType,
+  isExternalTransferTransactionType,
+  isExternalSourceOperation,
+  isStationCounterTransactionType,
+  shouldOperationRequireManagerApproval,
+  getOperationApprovalType,
+  getOperationApprovalTitle,
+  getOperationApprovalSuccessMessage,
+  shouldExternalSupplyRequireApproval,
 } from "./lib/operationHelpers";
 
 import {
   uploadOperationPhotoFile,
   getUploadSignedUrl,
+  createOperation,
+  fetchOperations,
+  fetchPendingOperationApprovals,
+  fetchPendingOperationCorrections,
+  createOperationCorrection,
+  reviewOperation,
+  reviewOperationCorrection,
 } from "./services/operationsService";
+
+import {
+  fetchProjects,
+  createProjectRecord,
+  updateProjectRecord,
+  assignProjectManager,
+  deleteProjectRecord,
+  updateProjectFuelPrice,
+} from "./services/projectsService";
+
+
+import {
+  fetchAssets,
+  fetchAssetById,
+  createAssetRecord,
+  updateAssetRecord,
+  deleteAssetRecord,
+  fetchPendingAssetTransfers,
+  createAssetTransfer,
+  reviewAssetTransfer,
+  resetAssetOdometer,
+} from "./services/assetsService";
+
+import {
+  fetchStations,
+  fetchStationById,
+  createStationRecord,
+  updateStationRecord,
+  deleteStationRecord,
+  fetchPendingStationTransfers,
+  createStationTransfer,
+  reviewStationTransfer,
+  zeroStationBalance,
+  adjustStationInventory,
+} from "./services/stationsService";
+
+import {
+  fetchEmployees,
+  createEmployeeRecord,
+  updateEmployeeRecord,
+  fetchPendingEmployeeTransfers,
+  createEmployeeTransfer,
+  reviewEmployeeTransfer,
+} from "./services/employeesService";
+
+import {
+  fetchUsers,
+  createUserRecord,
+  updateUserRecord,
+  updateUserStatus,
+  resetUserPassword,
+  fetchRoles,
+} from "./services/usersService";
+
+import {
+  normalizeOperationCorrectionFieldName,
+  getOperationCorrectionFieldLabel,
+  findApprovalEntityByAnyId,
+  getAssetApprovalDisplayValue,
+  getStationApprovalDisplayValue,
+  getOperationCorrectionApprovalDisplayValue,
+  normalizeApprovalStatus,
+  isPendingApprovalStatus,
+  isApprovedApprovalStatus,
+  isApprovalFullyApproved,
+  isEmployeeTransferApproval,
+  isManagerEmployeeTransferApproval,
+  mapBackendOperationApprovalForFrontend,
+  mapBackendOperationCorrectionForFrontend,
+  normalizeApprovalValue,
+  isSensitiveApprovalField,
+  buildApprovalChangedFields,
+  inferApprovalEntity,
+  extractApprovalProjects,
+  getProjectScopeValues,
+  projectMatchesScope,
+  findManagerForProject,
+  getReportingManagerForUser,
+  findStrictProjectManagerForProject,
+  buildApprovalRoute,
+  createApprovalRequest,
+} from "./lib/approvalHelpers";
+
+import {
+  ROLE_PERMISSIONS,
+  getRolePermissions,
+  hasPermissionForUser,
+  canAccessPageForUser,
+  actionRequiresManagerApproval,
+  canPerformWriteAction,
+  getPendingApprovers,
+  userHasPendingApproval,
+  canUserViewApproval,
+  canUserReviewApproval,
+} from "./lib/permissionHelpers";
+
+import {
+  formatNotificationDate,
+  getNotificationPriority,
+  buildNotificationItems,
+} from "./lib/notificationHelpers";
+
+import { buildAuditTimelineItems } from "./lib/auditHelpers";
+
+import {
+  SAUDI_PROJECT_LOCATIONS,
+  EGYPT_PROJECT_LOCATIONS,
+  UAE_PROJECT_LOCATIONS,
+  normalizeCountryName,
+  getProjectLocationOptionsByCountry,
+  PLATFORM_CONTEXT_ID,
+  PLATFORM_REAL_COMPANY_ID,
+  PLATFORM_CONTEXT_CODE,
+  PLATFORM_CONTEXT_NAME,
+  PLATFORM_COMPANY_OPTION,
+  isPlatformContextValue,
+  isPlatformCompany,
+  getPlatformCompany,
+  getPlatformCompanyId,
+  mergePlatformConsoleWithCompanies,
+  normalizeCompanyForState,
+  COUNTRY_SETTINGS_OPTIONS,
+  getCompanyCountrySettings,
+  getCurrencyByCountry,
+  getTimezoneByCountry,
+  getCurrencyOptionsForCountry,
+  normalizeCurrencyForCountry,
+  uniqueUsersById,
+  isPlatformAdminUser,
+  getItemCompanyId,
+  companyMatches,
+  makeTenantEntityKey,
+  tenantEntityMatches,
+  isDuplicateEntityIdWithinCompany,
+  filterDuplicateTenantEntities,
+  filterByCompany,
+  getCompanyIdFromProjectValue,
+  getItemCompanyIdWithProjectFallback,
+  filterByCompanyWithProjectFallback,
+  buildCompaniesFromSources,
+  } from "./lib/companyHelpers";
 
 const OPERATION_HEADERS = [
   "operation_id",
@@ -104,617 +262,9 @@ const OPERATION_HEADERS = [
   "backend_operation_id",
 ];
 
-
-function mapBackendOperationApprovalForFrontend(item = {}, currentUser = {}) {
-  const operation = item.operation || item;
-  const operationId = operation.id || item.operationId || item.id || "";
-
-  if (!operationId) return null;
-
-  const normalizedType = String(operation.type || item.type || "")
-    .trim()
-    .toUpperCase()
-    .replace(/[\s-]+/g, "_");
-
-  const frontendType = toFrontendOperationType(normalizedType);
-  const requestType = getOperationApprovalType(frontendType);
-  const operationNo = operation.operationNo || item.operationNo || operationId;
-  const quantity = operation.quantity ?? item.quantity ?? "";
-  const sourceStationId = operation.sourceStationId || item.sourceStationId || "";
-  const destinationStationId = operation.destinationStationId || item.destinationStationId || "";
-  const assetId = operation.assetId || item.assetId || "";
-  const destinationId = assetId || destinationStationId || "-";
-  const requestedBy = operation.requestedBy || item.requestedBy || {};
-  const rawApprovals = Array.isArray(operation.approvals)
-    ? operation.approvals
-    : Array.isArray(item.approvals)
-    ? item.approvals
-    : item.approverUserId
-    ? [item]
-    : [];
-
-  const approvalStatusToFrontend = (value) => {
-    const status = normalizeApprovalStatus(value);
-    if (status === "APPROVED") return "Approved";
-    if (status === "REJECTED") return "Rejected";
-    return "Pending";
-  };
-
-  let requiredApprovers = rawApprovals.map((approval) => {
-    const approverId = approval.approverUserId || approval.userId || approval.approver?.id || "";
-    return {
-      userId: approverId,
-      userName:
-        approval.approver?.fullName ||
-        approval.approver?.name ||
-        (approverId === currentUser?.id ? currentUser?.fullName : "") ||
-        approval.approverName ||
-        "Project Manager",
-      role: "Manager",
-      projectId: approval.projectId || operation.projectId || item.projectId || "-",
-      approvalStage: approval.approvalStage || "Project Manager",
-      status: approvalStatusToFrontend(approval.status),
-      reviewedAt: approval.reviewedAt || "",
-      reviewNote: approval.note || approval.reviewNote || "",
-    };
-  });
-
-  if (!requiredApprovers.length && currentUser?.id && normalizeApprovalStatus(operation.status || item.status) === "PENDING") {
-    requiredApprovers = [
-      {
-        userId: currentUser.id,
-        userName: currentUser.fullName || currentUser.email || "Project Manager",
-        role: "Manager",
-        projectId: operation.projectId || item.projectId || "-",
-        approvalStage: "Project Manager",
-        status: "Pending",
-        reviewedAt: "",
-        reviewNote: "",
-      },
-    ];
-  }
-
-  const hasPendingStageForCurrentUser = requiredApprovers.some(
-    (approver) => approver.userId === currentUser?.id && isPendingApprovalStatus(approver.status)
-  );
-
-  const requestStatus = hasPendingStageForCurrentUser
-    ? "Pending"
-    : requiredApprovers.length && requiredApprovers.every((approver) => isApprovedApprovalStatus(approver.status))
-    ? "Approved"
-    : normalizeApprovalStatus(operation.status) === "REJECTED"
-    ? "Rejected"
-    : "Pending";
-
-  const changedFields = [
-    {
-      field: "transactionType",
-      label: "Operation Type",
-      oldValue: "-",
-      newValue: frontendType || normalizedType || "Operation",
-      sensitive: true,
-    },
-    {
-      field: "sourceStation",
-      label: "Source Station",
-      oldValue: "-",
-      newValue: sourceStationId || operation.externalStationName || "-",
-      sensitive: true,
-    },
-    {
-      field: "destinationId",
-      label: assetId ? "Asset" : "Destination Station",
-      oldValue: "-",
-      newValue: destinationId,
-      sensitive: true,
-    },
-    {
-      field: "dieselQuantity",
-      label: "Diesel Quantity",
-      oldValue: "-",
-      newValue: quantity === "" ? "-" : `${quantity} L`,
-      sensitive: true,
-    },
-  ];
-
-  if (operation.odometer !== undefined && operation.odometer !== null) {
-    changedFields.push({
-      field: "odometer",
-      label: "Odometer / Hour Meter",
-      oldValue: "-",
-      newValue: operation.odometer,
-      sensitive: true,
-    });
-  }
-
-  if (operation.stationCounter !== undefined && operation.stationCounter !== null) {
-    changedFields.push({
-      field: "stationCounter",
-      label: "Station Counter",
-      oldValue: "-",
-      newValue: operation.stationCounter,
-      sensitive: true,
-    });
-  }
-
-  if (operation.externalStationName) {
-    changedFields.push({
-      field: "externalStationName",
-      label: normalizedType === "EXTERNAL_SUPPLY" ? "External Supplier" : "External Station",
-      oldValue: "-",
-      newValue: operation.externalStationName,
-      sensitive: false,
-    });
-  }
-
-  if (operation.invoiceNumber) {
-    changedFields.push({
-      field: "invoiceNumber",
-      label: "Invoice / Receipt Number",
-      oldValue: "-",
-      newValue: operation.invoiceNumber,
-      sensitive: false,
-    });
-  }
-
-  return {
-    id: `BACKEND-OPERATION-${operationId}`,
-    backendOperationId: operationId,
-    isBackendOperationApproval: true,
-    type: requestType,
-    module: "operations",
-    title: getOperationApprovalTitle(frontendType, operationNo),
-    payload: {
-      operation,
-      backendOperationId: operationId,
-    },
-    details: `${quantity || "-"} L - ${frontendType || normalizedType || "Operation"} - ${destinationId}`,
-    status: requestStatus,
-    changedFields,
-    entityType: "Operation",
-    entityId: operationNo,
-    sensitivity: "Sensitive",
-    riskLevel: "High",
-    approvalRoute: {
-      routeType: normalizedType === "EXTERNAL_TRANSFER" ? "dual_project_manager" : "single_project_manager",
-      sourceProject: sourceStationId || "-",
-      destinationProject: destinationId || "-",
-      requiredApprovers,
-      routeStatus: requestStatus,
-    },
-    requestedById: requestedBy.id || operation.requestedByUserId || item.requestedByUserId || "System",
-    requestedByName: requestedBy.fullName || requestedBy.name || operation.requestedByUserId || "System",
-    requestedByRole: requestedBy.role?.name || requestedBy.roleName || "System",
-    requestedAt: operation.createdAt || item.createdAt || new Date().toISOString(),
-    reviewedBy: "",
-    reviewedAt: "",
-    reviewNote: "",
-  };
-
-}
-
-function normalizeOperationCorrectionFieldName(value) {
-  const normalized = String(value || "")
-    .trim()
-    .toUpperCase()
-    .replace(/[\s-]+/g, "_");
-
-  const map = {
-    ASSET: "ASSET_ID",
-    ASSET_ID: "ASSET_ID",
-    EQUIPMENT: "ASSET_ID",
-    EQUIPMENT_ID: "ASSET_ID",
-    SOURCE_STATION: "SOURCE_STATION_ID",
-    SOURCE_STATION_ID: "SOURCE_STATION_ID",
-    STATION: "SOURCE_STATION_ID",
-    STATION_ID: "SOURCE_STATION_ID",
-    QUANTITY: "QUANTITY",
-    DIESEL: "QUANTITY",
-    DIESEL_QUANTITY: "QUANTITY",
-    ODOMETER: "ODOMETER",
-    ODOMETER_AT_FUELING: "ODOMETER",
-    NOTES: "NOTES",
-    NOTE: "NOTES",
-    INVOICE_NUMBER: "INVOICE_NUMBER",
-    INVOICE: "INVOICE_NUMBER",
-  };
-
-  return map[normalized] || normalized;
-}
-
-function getOperationCorrectionFieldLabel(fieldName) {
-  const normalized = normalizeOperationCorrectionFieldName(fieldName);
-  const labels = {
-    ASSET_ID: "Equipment",
-    SOURCE_STATION_ID: "Source Station",
-    QUANTITY: "Diesel Quantity",
-    ODOMETER: "Odometer / Hour Meter",
-    NOTES: "Notes",
-    INVOICE_NUMBER: "Invoice / Receipt Number",
-  };
-
-  return labels[normalized] || makeFieldLabel(normalized);
-}
-
-function findApprovalEntityByAnyId(items = [], value) {
-  const normalizedValue = normalizeScopeValue(value);
-  if (!normalizedValue) return null;
-
-  return (items || []).find((item) => {
-    const candidates = [
-      item?.backendId,
-      item?.assetBackendId,
-      item?.stationBackendId,
-      item?.id,
-      item?.assetId,
-      item?.stationId,
-      item?.equipmentNo,
-      item?.equipmentNumber,
-      item?.code,
-      item?.name,
-    ].map(normalizeScopeValue);
-
-    return candidates.includes(normalizedValue);
-  }) || null;
-}
-
-function getAssetApprovalDisplayValue(value, assets = []) {
-  const asset = findApprovalEntityByAnyId(assets, value);
-  return (
-    asset?.assetId ||
-    asset?.equipmentNo ||
-    asset?.equipmentNumber ||
-    asset?.name ||
-    value ||
-    "-"
-  );
-}
-
-function getStationApprovalDisplayValue(value, stations = []) {
-  const station = findApprovalEntityByAnyId(stations, value);
-  return station?.stationId || station?.code || station?.name || value || "-";
-}
-
-function getOperationCorrectionApprovalDisplayValue(fieldName, value, assets = [], stations = []) {
-  if (value === undefined || value === null || value === "") return "-";
-
-  const normalized = normalizeOperationCorrectionFieldName(fieldName);
-
-  if (normalized === "ASSET_ID") return getAssetApprovalDisplayValue(value, assets);
-  if (normalized === "SOURCE_STATION_ID") return getStationApprovalDisplayValue(value, stations);
-  if (normalized === "QUANTITY") return `${value} L`;
-
-  return String(value);
-}
-
-function mapBackendOperationCorrectionForFrontend(item = {}, currentUser = {}, assets = [], stations = []) {
-  const correctionId = item.id || "";
-  const operation = item.operation || {};
-  const operationId = item.operationId || operation.id || "";
-
-  if (!correctionId || !operationId) return null;
-
-  const fieldName = normalizeOperationCorrectionFieldName(item.fieldName);
-  const operationNo = operation.operationNo || operationId;
-  const requestedBy = item.requestedBy || {};
-  const status = normalizeApprovalStatus(item.status);
-  const isPending = status === "PENDING";
-  const fieldLabel = getOperationCorrectionFieldLabel(fieldName);
-
-  return {
-    id: `BACKEND-OPERATION-CORRECTION-${correctionId}`,
-    backendCorrectionId: correctionId,
-    backendOperationId: operationId,
-    isBackendOperationCorrection: true,
-    type: "operation_correction",
-    module: "operations",
-    title: `Operation Correction - ${operationNo}`,
-    payload: {
-      correction: item,
-      operation,
-      backendCorrectionId: correctionId,
-      backendOperationId: operationId,
-    },
-    details: `${fieldLabel} correction for ${operationNo}`,
-    status: isPending ? "Pending" : status === "APPROVED" ? "Approved" : "Rejected",
-    changedFields: [
-      {
-        field: fieldName,
-        label: fieldLabel,
-        oldValue: getOperationCorrectionApprovalDisplayValue(fieldName, item.oldValue, assets, stations),
-        newValue: getOperationCorrectionApprovalDisplayValue(fieldName, item.newValue, assets, stations),
-        sensitive: ["ASSET_ID", "SOURCE_STATION_ID", "QUANTITY", "ODOMETER"].includes(fieldName),
-      },
-    ],
-    entityType: "Operation",
-    entityId: operationNo,
-    sensitivity: "Sensitive",
-    riskLevel: "High",
-    approvalRoute: {
-      routeType: "operation_correction_manager",
-      sourceProject: operation.projectId || operation.sourceProjectId || "-",
-      destinationProject: operation.projectId || operation.destinationProjectId || "-",
-      requiredApprovers: isPending && ["Manager", "Admin", "PlatformAdmin"].includes(currentUser?.role)
-        ? [
-            {
-              userId: currentUser.id,
-              userName: currentUser.fullName || currentUser.email || "Manager",
-              role: currentUser.role || "Manager",
-              projectId: operation.projectId || "-",
-              approvalStage: "Manager Review",
-              status: "Pending",
-              reviewedAt: "",
-              reviewNote: "",
-            },
-          ]
-        : [],
-      routeStatus: isPending ? "Pending" : status,
-    },
-    requestedById: requestedBy.id || item.requestedByUserId || "System",
-    requestedByName: requestedBy.fullName || requestedBy.name || item.requestedByUserId || "System",
-    requestedByRole: requestedBy.role?.name || requestedBy.roleName || "Supervisor",
-    requestedAt: item.createdAt || new Date().toISOString(),
-    reviewedBy: item.reviewedBy?.fullName || "",
-    reviewedAt: item.reviewedAt || "",
-    reviewNote: item.reviewNote || "",
-  };
-}
-
-// Operations are now backend-only. Google Sheets CSV source was removed in Phase 3.2.
-
-
-
-const SAUDI_PROJECT_LOCATIONS = [
-  "Riyadh Region",
-  "Makkah Region",
-  "Madinah Region",
-  "Eastern Province",
-  "Qassim Region",
-  "Asir Region",
-  "Tabuk Region",
-  "Hail Region",
-  "Northern Borders Region",
-  "Jazan Region",
-  "Najran Region",
-  "Al Bahah Region",
-  "Al Jouf Region",
-];
-
-const EGYPT_PROJECT_LOCATIONS = [
-  "Cairo Governorate",
-  "Giza Governorate",
-  "Alexandria Governorate",
-  "Qalyubia Governorate",
-  "Port Said Governorate",
-  "Suez Governorate",
-  "Dakahlia Governorate",
-  "Sharqia Governorate",
-  "Gharbia Governorate",
-  "Monufia Governorate",
-  "Beheira Governorate",
-  "Kafr El Sheikh Governorate",
-  "Damietta Governorate",
-  "Ismailia Governorate",
-  "Fayoum Governorate",
-  "Beni Suef Governorate",
-  "Minya Governorate",
-  "Assiut Governorate",
-  "Sohag Governorate",
-  "Qena Governorate",
-  "Luxor Governorate",
-  "Aswan Governorate",
-  "Red Sea Governorate",
-  "New Valley Governorate",
-  "Matrouh Governorate",
-  "North Sinai Governorate",
-  "South Sinai Governorate",
-];
-
-const UAE_PROJECT_LOCATIONS = [
-  "Abu Dhabi Emirate",
-  "Dubai Emirate",
-  "Sharjah Emirate",
-  "Ajman Emirate",
-  "Umm Al Quwain Emirate",
-  "Ras Al Khaimah Emirate",
-  "Fujairah Emirate",
-];
-
-function normalizeCountryName(country) {
-  return String(country || "")
-    .trim()
-    .toLowerCase()
-    .replace(/[\s_-]+/g, " ");
-}
-
-function getProjectLocationOptionsByCountry(country) {
-  const normalizedCountry = normalizeCountryName(country);
-
-  if (
-    normalizedCountry === "saudi arabia" ||
-    normalizedCountry === "kingdom of saudi arabia" ||
-    normalizedCountry === "ksa"
-  ) {
-    return SAUDI_PROJECT_LOCATIONS;
-  }
-
-  if (
-    normalizedCountry === "egypt" ||
-    normalizedCountry === "arab republic of egypt"
-  ) {
-    return EGYPT_PROJECT_LOCATIONS;
-  }
-
-  if (
-    normalizedCountry === "united arab emirates" ||
-    normalizedCountry === "uae"
-  ) {
-    return UAE_PROJECT_LOCATIONS;
-  }
-
-  return [];
-}
-
-const PLATFORM_CONTEXT_ID = "PLATFORM";
-const PLATFORM_REAL_COMPANY_ID = "cmph898d701k6cm1g9sjttcoe";
-const PLATFORM_CONTEXT_CODE = "PLATFORM";
-const PLATFORM_CONTEXT_NAME = "Platform Console";
-
-const PLATFORM_COMPANY_OPTION = {
-  id: PLATFORM_CONTEXT_ID,
-  code: PLATFORM_CONTEXT_CODE,
-  name: PLATFORM_CONTEXT_NAME,
-  country: "",
-  currency: "SAR",
-  timezone: "Asia/Riyadh",
-  language: "EN-AR",
-  status: "Active",
-  isPlatformContext: true,
-};
-
-function isPlatformContextValue(value) {
-  const normalized = normalizeScopeValue(value);
-  return (
-    normalized === "platform" ||
-    normalized === "platform console" ||
-    normalized === normalizeScopeValue(PLATFORM_REAL_COMPANY_ID)
-  );
-}
-
-function isPlatformCompany(company) {
-  if (!company) return false;
-
-  return (
-    Boolean(company.isPlatformContext) ||
-    isPlatformContextValue(company.id) ||
-    isPlatformContextValue(company.code) ||
-    isPlatformContextValue(company.name)
-  );
-}
-
-function getPlatformCompany(companies = []) {
-  return companies.find((company) => isPlatformCompany(company)) || null;
-}
-
-function getPlatformCompanyId(companies = []) {
-  return getPlatformCompany(companies)?.id || PLATFORM_CONTEXT_ID;
-}
-
-function mergePlatformConsoleWithCompanies(companies = []) {
-  const map = new Map();
-  let hasRealPlatformCompany = false;
-
-  companies.forEach((company) => {
-    if (!company?.id) return;
-
-    const key = normalizeScopeValue(company.id);
-
-    if (isPlatformCompany(company)) {
-      hasRealPlatformCompany = true;
-      map.set(key, {
-        ...company,
-        code: company.code || PLATFORM_CONTEXT_CODE,
-        name: company.name || PLATFORM_CONTEXT_NAME,
-        isPlatformContext: true,
-      });
-      return;
-    }
-
-    map.set(key, company);
-  });
-
-  if (!hasRealPlatformCompany) {
-    map.set(normalizeScopeValue(PLATFORM_COMPANY_OPTION.id), PLATFORM_COMPANY_OPTION);
-  }
-
-  return Array.from(map.values());
-}
-
-
-function normalizeCompanyForState(company = {}) {
-  const isActive =
-    company.isActive === false ||
-    normalizeScopeValue(company.status) === "inactive" ||
-    normalizeScopeValue(company.status) === "disabled"
-      ? false
-      : true;
-
-  return {
-    id: company.id,
-    name: company.name || company.id || "",
-    code: company.code || "",
-    country: company.country || "",
-    city: company.city || "",
-    currency: company.currency || "SAR",
-    timezone: company.timezone || "Asia/Riyadh",
-    language: company.language || "EN-AR",
-    subscriptionPlan: company.subscriptionPlan || "trial",
-    status: isActive ? "Active" : "Inactive",
-    isActive,
-    isPlatformContext: Boolean(company.isPlatformContext) || isPlatformCompany(company),
-    createdAt: company.createdAt || "",
-    updatedAt: company.updatedAt || "",
-  };
-}
-
-const COUNTRY_SETTINGS_OPTIONS = [
-  { country: "Saudi Arabia", currency: "SAR", timezone: "Asia/Riyadh" },
-  { country: "United Arab Emirates", currency: "AED", timezone: "Asia/Dubai" },
-  { country: "Qatar", currency: "QAR", timezone: "Asia/Qatar" },
-  { country: "Kuwait", currency: "KWD", timezone: "Asia/Kuwait" },
-  { country: "Bahrain", currency: "BHD", timezone: "Asia/Bahrain" },
-  { country: "Oman", currency: "OMR", timezone: "Asia/Muscat" },
-  { country: "Egypt", currency: "EGP", timezone: "Africa/Cairo" },
-  { country: "Jordan", currency: "JOD", timezone: "Asia/Amman" },
-  { country: "India", currency: "INR", timezone: "Asia/Kolkata" },
-  { country: "Pakistan", currency: "PKR", timezone: "Asia/Karachi" },
-  { country: "Turkey", currency: "TRY", timezone: "Europe/Istanbul" },
-  { country: "United States", currency: "USD", timezone: "America/New_York" },
-  { country: "United Kingdom", currency: "GBP", timezone: "Europe/London" },
-  { country: "Germany", currency: "EUR", timezone: "Europe/Berlin" },
-  { country: "France", currency: "EUR", timezone: "Europe/Paris" },
-];
-
-function getCompanyCountrySettings(country) {
-  return (
-    COUNTRY_SETTINGS_OPTIONS.find((item) => item.country === country) ||
-    COUNTRY_SETTINGS_OPTIONS[0]
-  );
-}
-
-function getCurrencyByCountry(country) {
-  return getCompanyCountrySettings(country)?.currency || "USD";
-}
-
-function getTimezoneByCountry(country) {
-  return getCompanyCountrySettings(country)?.timezone || "Asia/Riyadh";
-}
-
-function getCurrencyOptionsForCountry(country) {
-  const countryCurrency = getCurrencyByCountry(country);
-
-  return countryCurrency === "USD" ? ["USD"] : [countryCurrency, "USD"];
-}
-
-function normalizeCurrencyForCountry(country, currency) {
-  const allowedCurrencies = getCurrencyOptionsForCountry(country);
-  return allowedCurrencies.includes(currency) ? currency : allowedCurrencies[0];
-}
-
-function uniqueUsersById(users = []) {
-  const map = new Map();
-
-  users.forEach((user) => {
-    if (!user?.id) return;
-    map.set(normalizeScopeValue(user.id), user);
-  });
-
-  return Array.from(map.values());
-}
-
-const AUTH_SESSION_KEY = "fleet_fuel_pro_auth_session_v1";
-const DEFAULT_SESSION_MS = 8 * 60 * 60 * 1000;
-const REMEMBER_SESSION_MS = 7 * 24 * 60 * 60 * 1000;
+  const AUTH_SESSION_KEY = "fleet_fuel_pro_auth_session_v1";
+  const DEFAULT_SESSION_MS = 8 * 60 * 60 * 1000;
+  const REMEMBER_SESSION_MS = 7 * 24 * 60 * 60 * 1000;
 
 function buildAuthSession(userId, companyId = "", remember = false) {
   const now = Date.now();
@@ -858,137 +408,11 @@ function makeUsernameFromUser({ id, fullName, email }) {
 
 
 
-// ======================================================
-// USERS, ROLES & PERMISSIONS - ENTERPRISE READY LAYER
-// ======================================================
-const ROLE_PERMISSIONS = {
-  PlatformAdmin: {
-    operations: { view: true, add: false, edit: false, delete: false, approve: false, export: true, print: true },
-    assets: { view: true, add: false, edit: false, delete: false, approve: false, export: true, print: true },
-    stations: { view: true, add: false, edit: false, delete: false, approve: false, adjustInventory: false, updatePrice: false, export: true, print: true },
-    team: { view: true, add: false, edit: false, delete: false, approve: false, export: true, print: true },
-    projects: { view: true, add: false, edit: false, delete: false, approve: false, export: true, print: true },
-    reports: { view: true, export: true, print: true },
-    users: { view: true, add: true, edit: true, deactivate: true, resetPassword: true, assignRoles: true },
-    approvals: { view: true, approve: false, reject: false },
-    notifications: { view: true, markRead: true },
-    auditTimeline: { view: true, export: true },
-    auditLog: { view: true, export: true },
-    companies: { view: true, add: true, edit: true, delete: false, export: true, print: true },
-  },
 
-  Admin: {
-    // Admin is system administration only for Operations.
-    // He can monitor operations, export, and print, but cannot create, edit, delete, or approve fuel operations.
-    operations: { view: true, add: false, edit: false, delete: false, approve: false, export: true, print: true },
-    assets: { view: true, add: true, edit: true, delete: true, approve: true, export: true, print: true },
-    stations: { view: true, add: true, edit: true, delete: true, approve: true, adjustInventory: true, updatePrice: true, export: true, print: true },
-    team: { view: true, add: true, edit: true, delete: true, approve: true, export: true, print: true },
-    projects: { view: true, add: true, edit: true, delete: true, approve: true, export: true, print: true },
-    reports: { view: true, export: true, print: true },
-    users: { view: true, add: true, edit: true, deactivate: true, resetPassword: true, assignRoles: true },
-    approvals: { view: true, approve: true, reject: true },
-    notifications: { view: true, markRead: true },
-    auditTimeline: { view: true, export: true },
-    auditLog: { view: true, export: true },
-  },
-
-  Manager: {
-    operations: { view: true, add: true, edit: true, delete: false, approve: true, export: true, print: true },
-    assets: { view: true, add: true, edit: true, delete: false, approve: true, export: true, print: true },
-    stations: { view: true, add: false, edit: true, delete: false, approve: true, adjustInventory: true, updatePrice: false, export: true, print: true },
-    team: { view: true, add: true, edit: true, delete: false, approve: true, export: true, print: true },
-    projects: { view: true, add: true, edit: true, delete: false, approve: true, export: true, print: true },
-    reports: { view: true, export: true, print: true },
-    // Manager can monitor users later, but cannot manage the Users & Roles page in Phase 1.
-    // Admin remains the only role that can access and manage system users.
-    users: { view: false, add: false, edit: false, deactivate: false, resetPassword: false, assignRoles: false },
-    approvals: { view: true, approve: true, reject: true },
-    notifications: { view: true, markRead: true },
-    auditTimeline: { view: true, export: true },
-    auditLog: { view: true, export: true },
-  },
-
-  Officer: {
-    // Officer can view Operations as read-only.
-    // Officer can propose changes on master-data pages; non-status changes go to Manager approval.
-    operations: { view: true, add: false, edit: false, delete: false, approve: false, export: true, print: true },
-    assets: { view: true, add: false, edit: true, delete: false, approve: false, export: true, print: true },
-    stations: { view: true, add: false, edit: true, delete: false, approve: false, adjustInventory: false, updatePrice: false, export: true, print: true },
-    team: { view: true, add: true, edit: true, delete: false, approve: false, export: true, print: true },
-    projects: { view: true, add: true, edit: true, delete: false, approve: false, export: true, print: true },
-    reports: { view: true, export: true, print: true },
-    users: { view: false, add: false, edit: false, deactivate: false, resetPassword: false, assignRoles: false },
-    approvals: { view: false, approve: false, reject: false },
-    notifications: { view: true, markRead: true },
-    auditTimeline: { view: true, export: false },
-    auditLog: { view: true, export: false },
-  },
-
-  TopManagement: {
-    // Executive visibility role.
-    // Can view all operational pages and reports, but cannot perform actions or access governance/security pages.
-    operations: { view: true, add: false, edit: false, delete: false, approve: false, export: true, print: true },
-    assets: { view: true, add: false, edit: false, delete: false, approve: false, export: true, print: true },
-    stations: { view: true, add: false, edit: false, delete: false, approve: false, adjustInventory: false, updatePrice: false, export: true, print: true },
-    team: { view: true, add: false, edit: false, delete: false, approve: false, export: true, print: true },
-    projects: { view: true, add: false, edit: false, delete: false, approve: false, export: true, print: true },
-    reports: { view: true, export: true, print: true },
-    users: { view: false, add: false, edit: false, deactivate: false, resetPassword: false, assignRoles: false },
-    approvals: { view: false, approve: false, reject: false },
-    notifications: { view: false, markRead: false },
-    auditTimeline: { view: false, export: false },
-    auditLog: { view: false, export: false },
-  },
-
-
-  Supervisor: {
-    // Supervisor is site-limited in Phase 2.
-    // He can access Operations only, and can edit operations inside his assigned project scope.
-    operations: { view: true, add: true, edit: true, delete: false, approve: false, export: true, print: true },
-    assets: { view: false, add: false, edit: false, delete: false, approve: false, export: false, print: false },
-    stations: { view: false, add: false, edit: false, delete: false, approve: false, adjustInventory: false, updatePrice: false, export: false, print: false },
-    team: { view: false, add: false, edit: false, delete: false, approve: false, export: false, print: false },
-    projects: { view: false, add: false, edit: false, delete: false, approve: false, export: false, print: false },
-    reports: { view: false, export: false, print: false },
-    users: { view: false, add: false, edit: false, deactivate: false, resetPassword: false, assignRoles: false },
-    approvals: { view: false, approve: false, reject: false },
-    notifications: { view: true, markRead: true },
-    auditTimeline: { view: false, export: false },
-    auditLog: { view: false, export: false },
-  },
-
-  Operator: {
-    // Operator is data-entry only in Phase 1.
-    // He can access Operations and add new operations, but cannot see master-data pages.
-    operations: { view: true, add: true, edit: false, delete: false, approve: false, export: false, print: false },
-    assets: { view: false, add: false, edit: false, delete: false, approve: false, export: false, print: false },
-    stations: { view: false, add: false, edit: false, delete: false, approve: false, adjustInventory: false, updatePrice: false, export: false, print: false },
-    team: { view: false, add: false, edit: false, delete: false, approve: false, export: false, print: false },
-    projects: { view: false, add: false, edit: false, delete: false, approve: false, export: false, print: false },
-    reports: { view: false, export: false, print: false },
-    users: { view: false, add: false, edit: false, deactivate: false, resetPassword: false, assignRoles: false },
-    approvals: { view: false, approve: false, reject: false },
-    notifications: { view: true, markRead: true },
-    auditTimeline: { view: false, export: false },
-    auditLog: { view: false, export: false },
-  },
-};
 
 const INITIAL_USERS = [];
 
-function getRolePermissions(role) {
-  return ROLE_PERMISSIONS[role] || {};
-}
 
-function hasPermissionForUser(user, module, action = "view") {
-  if (!user || user.status !== "Active") return false;
-  return Boolean(getRolePermissions(user.role)?.[module]?.[action]);
-}
-
-function canAccessPageForUser(user, pageKey) {
-  return hasPermissionForUser(user, pageKey, "view");
-}
 
 
 function buildLegacyUserFromAuthUser(authUser) {
@@ -1110,23 +534,6 @@ function mapLegacyPermissionToBackendPermission(module, action = "view") {
   return `${backendModule}.${normalizedAction}`;
 }
 
-
-function actionRequiresManagerApproval(user) {
-  if (!user || user.status !== "Active") return true;
-  return !["Admin", "Manager"].includes(user.role);
-}
-
-function canPerformWriteAction(user, module) {
-  if (!user || user.status !== "Active") return false;
-  if (user.role === "TopManagement") return false;
-  return Boolean(
-    hasPermissionForUser(user, module, "add") ||
-    hasPermissionForUser(user, module, "edit") ||
-    hasPermissionForUser(user, module, "delete") ||
-    hasPermissionForUser(user, module, "approve")
-  );
-}
-
 function createActivityRecord({ user, action, module, details }) {
   return {
     id: `ACT-${Date.now()}-${Math.floor(Math.random() * 1000)}`,
@@ -1137,599 +544,6 @@ function createActivityRecord({ user, action, module, details }) {
     module,
     details,
     createdAt: new Date().toISOString(),
-  };
-}
-
-function normalizeApprovalValue(value) {
-  if (value === undefined || value === null || value === "") return "-";
-  if (typeof value === "object") return JSON.stringify(value);
-  return String(value);
-}
-
-function makeFieldLabel(field) {
-  return String(field || "Field")
-    .replace(/_/g, " ")
-    .replace(/([a-z])([A-Z])/g, "$1 $2")
-    .replace(/\b\w/g, (char) => char.toUpperCase());
-}
-
-function isSensitiveApprovalField(field) {
-  const sensitiveFields = [
-    "project",
-    "capacity",
-    "fuelTank",
-    "fuelTankCapacity",
-    "odometer",
-    "dieselQuantity",
-    "openingBalance",
-    "price",
-    "status",
-    "delete",
-  ];
-
-  return sensitiveFields.some((item) =>
-    String(field || "").toLowerCase().includes(String(item).toLowerCase())
-  );
-}
-
-function buildApprovalChangedFields({ type, payload = {} }) {
-  if (Array.isArray(payload.changedFields)) {
-    return payload.changedFields.map((item) => ({
-      field: item.field,
-      label: item.label || makeFieldLabel(item.field),
-      oldValue: normalizeApprovalValue(item.oldValue),
-      newValue: normalizeApprovalValue(item.newValue),
-      sensitive: item.sensitive ?? isSensitiveApprovalField(item.field),
-    }));
-  }
-
-  if (payload.field) {
-    return [
-      {
-        field: payload.field,
-        label: makeFieldLabel(payload.field),
-        oldValue: normalizeApprovalValue(payload.oldValue),
-        newValue: normalizeApprovalValue(payload.newValue),
-        sensitive: isSensitiveApprovalField(payload.field),
-      },
-    ];
-  }
-
-  if (payload.action === "delete") {
-    return [
-      {
-        field: "delete",
-        label: "Delete Request",
-        oldValue: normalizeApprovalValue(payload.id),
-        newValue: "Requested Deletion",
-        sensitive: true,
-      },
-    ];
-  }
-
-  if (type === "operation_external_supply" && payload.operation) {
-    const operation = payload.operation;
-    return [
-      {
-        field: "transactionType",
-        label: "Operation Type",
-        oldValue: "-",
-        newValue: normalizeApprovalValue(operation.transactionType),
-        sensitive: true,
-      },
-      {
-        field: "sourceStation",
-        label: "Source Station",
-        oldValue: "-",
-        newValue: normalizeApprovalValue(operation.sourceStation),
-        sensitive: false,
-      },
-      {
-        field: "destinationId",
-        label: "Destination",
-        oldValue: "-",
-        newValue: normalizeApprovalValue(operation.destinationId),
-        sensitive: false,
-      },
-      {
-        field: "dieselQuantity",
-        label: "Diesel Quantity",
-        oldValue: "-",
-        newValue: `${normalizeApprovalValue(operation.dieselQuantity)} L`,
-        sensitive: true,
-      },
-    ];
-  }
-
-  if (
-    ["operation_external_direct_refuel", "operation_external_supply", "operation_external_transfer"].includes(type) &&
-    payload.operation
-  ) {
-    const operation = payload.operation;
-    const changedFields = [
-      {
-        field: "transactionType",
-        label: "Operation Type",
-        oldValue: "-",
-        newValue: normalizeApprovalValue(operation.transactionType),
-        sensitive: true,
-      },
-      {
-        field: "sourceStation",
-        label: "Source Station",
-        oldValue: "-",
-        newValue: normalizeApprovalValue(operation.sourceStation),
-        sensitive: true,
-      },
-      {
-        field: "destinationId",
-        label: "Destination",
-        oldValue: "-",
-        newValue: normalizeApprovalValue(operation.destinationId),
-        sensitive: true,
-      },
-      {
-        field: "dieselQuantity",
-        label: "Diesel Quantity",
-        oldValue: "-",
-        newValue: `${normalizeApprovalValue(operation.dieselQuantity)} L`,
-        sensitive: true,
-      },
-    ];
-
-    if (type === "operation_external_transfer") {
-      changedFields.push({
-        field: "project",
-        label: "Project Transfer",
-        oldValue: normalizeApprovalValue(payload.sourceProject || operation.sourceProject),
-        newValue: normalizeApprovalValue(payload.destinationProject || operation.destinationProject),
-        sensitive: true,
-      });
-    }
-
-    return changedFields;
-  }
-
-  return [];
-}
-
-function inferApprovalEntity({ type, payload = {} }) {
-  if (payload.entity || payload.id) {
-    return {
-      entityType: payload.entity || payload.entityType || "Record",
-      entityId: payload.id || payload.entityId || "-",
-    };
-  }
-
-  if (
-    ["operation_external_direct_refuel", "operation_external_supply", "operation_external_transfer"].includes(type) &&
-    payload.operation
-  ) {
-    return {
-      entityType: "Operation",
-      entityId: payload.operation.operationId || "New Operation",
-    };
-  }
-
-  return {
-    entityType: payload.entityType || "Request",
-    entityId: payload.entityId || "-",
-  };
-}
-
-function getProjectScopeValues(user, key = "managedProjects") {
-  if (!user || !Array.isArray(user[key])) return [];
-  return user[key];
-}
-
-function projectMatchesScope(projectValue, scopeValue, projects = []) {
-  if (!projectValue || !scopeValue) return false;
-  if (scopeValue === "All") return true;
-
-  const normalizedProjectValue = normalizeScopeValue(projectValue);
-  const normalizedScopeValue = normalizeScopeValue(scopeValue);
-
-  if (normalizedProjectValue === normalizedScopeValue) return true;
-
-  const matchedProject = projects.find((project) => {
-    const projectCandidates = [
-      project?.id,
-      project?.name,
-      project?.code,
-      project?.projectId,
-      project?.projectName,
-    ].map(normalizeScopeValue);
-
-    return projectCandidates.includes(normalizedProjectValue);
-  });
-
-  if (!matchedProject) return false;
-
-  const matchedProjectCandidates = [
-    matchedProject?.id,
-    matchedProject?.name,
-    matchedProject?.code,
-    matchedProject?.projectId,
-    matchedProject?.projectName,
-  ].map(normalizeScopeValue);
-
-  return matchedProjectCandidates.includes(normalizedScopeValue);
-}
-
-function findManagerForProject(projectValue, users = [], projects = []) {
-  const activeManagers = users.filter((user) => user.role === "Manager" && user.status === "Active");
-
-  if (!activeManagers.length) {
-    return users.find((user) => user.role === "Admin" && user.status === "Active") || null;
-  }
-
-  if (!projectValue || projectValue === "-") {
-    return activeManagers.find((user) => getProjectScopeValues(user).includes("All")) || activeManagers[0];
-  }
-
-  return (
-    activeManagers.find((manager) =>
-      getProjectScopeValues(manager).some((projectScope) => projectMatchesScope(projectValue, projectScope, projects))
-    ) ||
-    activeManagers.find((user) => getProjectScopeValues(user).includes("All")) ||
-    activeManagers[0]
-  );
-}
-
-function findStrictProjectManagerForProject(projectValue, users = [], projects = []) {
-  if (!projectValue || projectValue === "-") return null;
-
-  const normalizedProjectValue = normalizeScopeValue(projectValue);
-
-  const matchedProject = (projects || []).find((project) => {
-    const candidates = [
-      project?.backendId,
-      project?.id,
-      project?.name,
-      project?.code,
-      project?.projectId,
-      project?.projectName,
-    ].map(normalizeScopeValue);
-
-    return candidates.includes(normalizedProjectValue);
-  });
-
-  if (!matchedProject) return null;
-
-  const explicitManagerId =
-    matchedProject?.projectManagerId ||
-    matchedProject?.managerUserId ||
-    matchedProject?.managerId ||
-    matchedProject?.projectManager?.id ||
-    "";
-
-  if (explicitManagerId) {
-    const explicitManager = (users || []).find(
-      (user) =>
-        normalizeScopeValue(user?.id) === normalizeScopeValue(explicitManagerId) &&
-        user?.role === "Manager" &&
-        user?.status === "Active"
-    );
-
-    if (explicitManager) return explicitManager;
-
-    return {
-      id: explicitManagerId,
-      fullName:
-        matchedProject?.projectManagerName ||
-        matchedProject?.managerName ||
-        matchedProject?.projectManager?.fullName ||
-        "Project Manager",
-      email:
-        matchedProject?.projectManagerEmail ||
-        matchedProject?.projectManager?.email ||
-        "",
-      role: "Manager",
-      status: "Active",
-    };
-  }
-
-  return null;
-}
-
-function getReportingManagerForUser(user, users = [], projects = [], fallbackProject = "") {
-  const directManager = users.find(
-    (item) => item.id === user?.reportingManagerId && item.role === "Manager" && item.status === "Active"
-  );
-
-  return directManager || findManagerForProject(fallbackProject, users, projects);
-}
-
-function extractApprovalProjects({ payload = {}, changedFields = [] }) {
-  const projectField = changedFields.find((field) =>
-    ["project", "projectName", "assignedProject", "project_id"].includes(field.field)
-  );
-
-  if (projectField) {
-    return {
-      sourceProject: projectField.oldValue && projectField.oldValue !== "-" ? projectField.oldValue : "",
-      destinationProject: projectField.newValue && projectField.newValue !== "-" ? projectField.newValue : "",
-      isTransfer: Boolean(projectField.oldValue && projectField.newValue && projectField.oldValue !== projectField.newValue),
-    };
-  }
-
-  const valuesProject =
-    payload?.values?.projectId ||
-    payload?.values?.project ||
-    payload?.values?.projectName ||
-    payload?.projectId ||
-    payload?.project ||
-    payload?.projectName ||
-    "";
-
-  return {
-    sourceProject: valuesProject,
-    destinationProject: valuesProject,
-    isTransfer: false,
-  };
-}
-
-function buildApprovalRoute({ requestedBy, users = [], projects = [], payload = {}, changedFields = [] }) {
-  const { sourceProject, destinationProject, isTransfer } = extractApprovalProjects({ payload, changedFields });
-
-  if (isTransfer && sourceProject && destinationProject) {
-    const sourceManager = findManagerForProject(sourceProject, users, projects);
-    const destinationManager = findManagerForProject(destinationProject, users, projects);
-
-    const approvers = [
-      sourceManager && {
-        userId: sourceManager.id,
-        userName: sourceManager.fullName,
-        role: "Manager",
-        projectId: sourceProject,
-        approvalStage: "Source Project Manager",
-        status: "Pending",
-        reviewedAt: "",
-        reviewNote: "",
-      },
-      destinationManager && {
-        userId: destinationManager.id,
-        userName: destinationManager.fullName,
-        role: "Manager",
-        projectId: destinationProject,
-        approvalStage: "Destination Project Manager",
-        status: "Pending",
-        reviewedAt: "",
-        reviewNote: "",
-      },
-    ]
-      .filter(Boolean)
-      .filter((approver, index, list) =>
-        list.findIndex((item) => item.userId === approver.userId && item.approvalStage === approver.approvalStage) === index
-      );
-
-    return {
-      routeType: "dual_project_manager",
-      sourceProject,
-      destinationProject,
-      requiredApprovers: approvers,
-      routeStatus: "Pending",
-    };
-  }
-
-  const projectForApproval =
-    destinationProject ||
-    sourceProject ||
-    payload?.projectId ||
-    payload?.project ||
-    payload?.projectName ||
-    "";
-
-  if (payload?.approvalRouteStrategy === "admin") {
-    const adminApprovers = (users || []).filter(
-      (user) =>
-        ["Admin", "PlatformAdmin"].includes(user?.role) &&
-        user?.status === "Active"
-    );
-
-    return {
-      routeType: "admin",
-      sourceProject: projectForApproval,
-      destinationProject: projectForApproval,
-      requiredApprovers: adminApprovers.map((admin) => ({
-        userId: admin.id,
-        userName: admin.fullName || admin.email || "Admin",
-        role: "Admin",
-        projectId: projectForApproval || "-",
-        approvalStage: "Admin Approval",
-        status: "Pending",
-        reviewedAt: "",
-        reviewNote: "",
-      })),
-      routeStatus: "Pending",
-    };
-  }
-
-  // Some approvals must be routed to the manager responsible for a specific project,
-  // not only to the requester's direct reporting manager.
-  // Example: External Supply is diesel coming from an external supplier into a station,
-  // so the approval must go to the destination station project manager.
-  const manager =
-    payload?.approvalRouteStrategy === "project_manager"
-      ? findStrictProjectManagerForProject(projectForApproval, users, projects)
-      : getReportingManagerForUser(requestedBy, users, projects, projectForApproval);
-
-  return {
-    routeType: payload?.approvalRouteStrategy === "project_manager" ? "single_project_manager" : "single_manager",
-    sourceProject: projectForApproval,
-    destinationProject: projectForApproval,
-    requiredApprovers: manager
-      ? [
-          {
-            userId: manager.id,
-            userName: manager.fullName,
-            role: "Manager",
-            projectId: projectForApproval || "-",
-            approvalStage: "Direct Manager",
-            status: "Pending",
-            reviewedAt: "",
-            reviewNote: "",
-          },
-        ]
-      : [],
-    routeStatus: "Pending",
-  };
-}
-
-function normalizeApprovalStatus(value) {
-  return String(value || "")
-    .trim()
-    .toUpperCase()
-    .replace(/[\s-]+/g, "_");
-}
-
-function isPendingApprovalStatus(value) {
-  return normalizeApprovalStatus(value) === "PENDING";
-}
-
-function isApprovedApprovalStatus(value) {
-  return normalizeApprovalStatus(value) === "APPROVED";
-}
-
-function isApprovalFullyApproved(request) {
-  const approvers = request?.approvalRoute?.requiredApprovers || [];
-  return approvers.length > 0 && approvers.every((approver) => isApprovedApprovalStatus(approver.status));
-}
-
-function isEmployeeTransferApproval(request) {
-  return String(request?.type || "") === "employee_transfer";
-}
-
-function isManagerEmployeeTransferApproval(request) {
-  if (!isEmployeeTransferApproval(request)) return false;
-
-  const approvers = request?.approvalRoute?.requiredApprovers || [];
-  const reason = String(request?.payload?.transfer?.reason || request?.payload?.reason || request?.reason || "").toUpperCase();
-
-  return Boolean(
-    request?.payload?.transfer?.isManagerTransfer ||
-      request?.payload?.isManagerTransfer ||
-      request?.approvalRoute?.routeType === "admin_manager_transfer" ||
-      request?.approvalRoute?.routeType === "admin" ||
-      reason.includes("MANAGER_TRANSFER_ADMIN_APPROVAL") ||
-      approvers.some((approver) =>
-        String(approver?.approvalStage || "").toUpperCase().includes("ADMIN") ||
-        ["Admin", "PlatformAdmin"].includes(approver?.role)
-      )
-  );
-}
-
-function getPendingApprovers(request) {
-  return (request?.approvalRoute?.requiredApprovers || []).filter((approver) =>
-    isPendingApprovalStatus(approver?.status)
-  );
-}
-
-function userHasPendingApproval(user, request) {
-  if (!user?.id) return false;
-  return getPendingApprovers(request).some((approver) => approver.userId === user.id);
-}
-
-function canUserViewApproval(user, request) {
-  if (!user || !request) return false;
-
-  const requestType = String(request?.type || "");
-  const requestAction = String(request?.payload?.action || "");
-
-  const isInventoryAdjustment =
-    requestType === "station_stock_count_adjustment" ||
-    requestType === "inventory_adjustment" ||
-    requestAction === "stock_count_adjustment";
-
-  if (isInventoryAdjustment) {
-    return ["PlatformAdmin", "Admin"].includes(user.role);
-  }
-
-  if (isEmployeeTransferApproval(request)) {
-    const isManagerTransfer = isManagerEmployeeTransferApproval(request);
-
-    if (isManagerTransfer) {
-      return ["PlatformAdmin", "Admin"].includes(user.role) && userHasPendingApproval(user, request);
-    }
-
-    if (["PlatformAdmin", "Admin"].includes(user.role)) return false;
-    return userHasPendingApproval(user, request);
-  }
-
-  if (["asset_transfer", "station_transfer"].includes(requestType)) {
-    if (["PlatformAdmin", "Admin"].includes(user.role)) return false;
-    return userHasPendingApproval(user, request);
-  }
-
-  if (["PlatformAdmin", "Admin"].includes(user.role)) return true;
-  if (request.requestedById === user.id) return true;
-
-  const approvers = request.approvalRoute?.requiredApprovers || [];
-  return approvers.some((approver) => approver.userId === user.id);
-}
-
-function canUserReviewApproval(user, request) {
-  if (!hasPermissionForUser(user, "approvals", "approve")) return false;
-
-  const requestType = String(request?.type || "");
-  const requestAction = String(request?.payload?.action || "");
-
-  const isInventoryAdjustment =
-    requestType === "station_stock_count_adjustment" ||
-    requestType === "inventory_adjustment" ||
-    requestAction === "stock_count_adjustment";
-
-  if (isInventoryAdjustment) {
-    return ["PlatformAdmin", "Admin"].includes(user?.role);
-  }
-
-  const approvers = request?.approvalRoute?.requiredApprovers || [];
-
-  if (isEmployeeTransferApproval(request)) {
-    if (["PlatformAdmin", "Admin"].includes(user?.role)) {
-      return isManagerEmployeeTransferApproval(request) && userHasPendingApproval(user, request);
-    }
-
-    return approvers.some((approver) => approver.userId === user?.id && isPendingApprovalStatus(approver.status));
-  }
-
-  if (["asset_transfer", "station_transfer"].includes(requestType)) {
-    if (["PlatformAdmin", "Admin"].includes(user?.role)) return false;
-    return approvers.some((approver) => approver.userId === user?.id && isPendingApprovalStatus(approver.status));
-  }
-
-  if (user?.role === "Admin") return true;
-
-  return approvers.some((approver) => approver.userId === user?.id && isPendingApprovalStatus(approver.status));
-}
-
-function createApprovalRequest({ type, module, title, payload, requestedBy, details, users = [], projects = [] }) {
-  const changedFields = buildApprovalChangedFields({ type, payload });
-  const sensitive = changedFields.some((item) => item.sensitive);
-  const entityInfo = inferApprovalEntity({ type, payload });
-  const approvalRoute = buildApprovalRoute({ requestedBy, users, projects, payload, changedFields });
-
-  return {
-    id: `APR-${Date.now()}-${Math.floor(Math.random() * 1000)}`,
-    type,
-    module,
-    title,
-    payload,
-    details,
-    status: "Pending",
-    changedFields,
-    entityType: entityInfo.entityType,
-    entityId: entityInfo.entityId,
-    sensitivity: sensitive ? "Sensitive" : "Normal",
-    riskLevel: sensitive ? "High" : "Standard",
-    approvalRoute,
-    requestedById: requestedBy?.id || "System",
-    requestedByName: requestedBy?.fullName || requestedBy?.name || "System",
-    requestedByRole: requestedBy?.role || "System",
-    requestedAt: new Date().toISOString(),
-    reviewedBy: "",
-    reviewedAt: "",
-    reviewNote: "",
   };
 }
 
@@ -1747,172 +561,6 @@ function formatProjectFuelPriceDate(value) {
     day: "2-digit",
     hour: "2-digit",
     minute: "2-digit",
-  });
-}
-
-function formatNotificationDate(rawDate) {
-  if (!rawDate) return "-";
-  const d = new Date(rawDate);
-  if (Number.isNaN(d.getTime())) return rawDate;
-  return d.toLocaleString("en-GB", {
-    year: "numeric",
-    month: "2-digit",
-    day: "2-digit",
-    hour: "2-digit",
-    minute: "2-digit",
-  });
-}
-
-function getNotificationPriority(item) {
-  if (!item) return "Normal";
-  if (item.status === "Pending" && item.sensitivity === "Sensitive") return "High";
-  if (item.status === "Pending") return "Medium";
-  if (item.status === "Rejected") return "High";
-  return "Normal";
-}
-
-function buildNotificationItems({ approvals = [], activityLog = [], currentUser, readMap = {} }) {
-  // Notifications are intentionally targeted.
-  // Audit Timeline remains the comprehensive record for all activities.
-  // Notification Center should show only items that need attention from the current user.
-  const visibleApprovals = approvals.filter((item) => canUserViewApproval(currentUser, item));
-
-  const approvalNotifications = visibleApprovals
-    .map((item) => {
-      const needsDecision = canUserReviewApproval(currentUser, item);
-      const isOwnRequest = item.requestedById === currentUser?.id;
-      const userIsApprover = item.approvalRoute?.requiredApprovers?.some(
-        (approver) => approver.userId === currentUser?.id && isPendingApprovalStatus(approver.status)
-      );
-
-      const title = needsDecision
-        ? `Approval required: ${item.title}`
-        : isOwnRequest
-        ? `Your request is ${item.status}: ${item.title}`
-        : userIsApprover
-        ? `${item.status}: ${item.title}`
-        : "";
-
-      if (!title) return null;
-
-      return {
-        id: `NTF-APR-${item.id}`,
-        sourceId: item.id,
-        type: "approval",
-        category: needsDecision ? "Approval Required" : "Approval Update",
-        module: item.module,
-        title,
-        message: item.details || "Approval workflow update.",
-        status: item.status,
-        priority: getNotificationPriority(item),
-        entityType: item.entityType,
-        entityId: item.entityId,
-        createdAt: item.reviewedAt || item.requestedAt,
-        read: Boolean(readMap[`NTF-APR-${item.id}`]),
-        route: "approvals",
-        actionable: needsDecision,
-      };
-    })
-    .filter(Boolean);
-
-  // Activity notifications are personal only.
-  // Managers/Admins should use Audit Timeline for company-wide activity review.
-  const visibleActivities = activityLog
-    .filter((item) => item.userId === currentUser?.id)
-    .slice(0, 8)
-    .map((item) => ({
-      id: `NTF-ACT-${item.id}`,
-      sourceId: item.id,
-      type: "activity",
-      category: "My Activity",
-      module: item.module,
-      title: item.action,
-      message: item.details,
-      status: "Info",
-      priority: "Normal",
-      entityType: "Activity",
-      entityId: item.id,
-      createdAt: item.createdAt,
-      read: Boolean(readMap[`NTF-ACT-${item.id}`]),
-      route: item.module,
-      actionable: false,
-    }));
-
-  return [...approvalNotifications, ...visibleActivities].sort((a, b) => {
-    const da = new Date(a.createdAt)?.getTime() || 0;
-    const db = new Date(b.createdAt)?.getTime() || 0;
-    return db - da;
-  });
-}
-
-function buildAuditTimelineItems({ approvals = [], activityLog = [], currentUser }) {
-  const canViewCompanyWide = ["PlatformAdmin", "Admin", "Manager", "Officer"].includes(currentUser?.role);
-  if (!canViewCompanyWide) return [];
-
-  const visibleApprovals = approvals.filter((item) => canUserViewApproval(currentUser, item));
-
-  const activityEvents = activityLog
-    .filter((item) => ["PlatformAdmin", "Admin"].includes(currentUser?.role) || item.userId === currentUser?.id || ["Manager", "Officer"].includes(currentUser?.role))
-    .map((item) => ({
-    id: `TML-ACT-${item.id}`,
-    source: "Activity",
-    sourceId: item.id,
-    title: item.action || "Activity",
-    module: item.module || "system",
-    status: "Info",
-    actorName: item.userName || "System",
-    actorRole: item.role || "System",
-    description: item.details || "System activity recorded.",
-    entityType: "Activity",
-    entityId: item.id,
-    riskLevel: "Standard",
-    sensitivity: "Normal",
-    changedFields: [],
-    createdAt: item.createdAt,
-  }));
-
-  const approvalRequestEvents = visibleApprovals.map((item) => ({
-    id: `TML-APR-REQ-${item.id}`,
-    source: "Approval",
-    sourceId: item.id,
-    title: `Approval requested: ${item.title}`,
-    module: item.module || "approvals",
-    status: "Pending",
-    actorName: item.requestedByName || "System",
-    actorRole: item.requestedByRole || "System",
-    description: item.details || "Approval request submitted.",
-    entityType: item.entityType || "Request",
-    entityId: item.entityId || item.id,
-    riskLevel: item.riskLevel || "Standard",
-    sensitivity: item.sensitivity || "Normal",
-    changedFields: item.changedFields || [],
-    createdAt: item.requestedAt,
-  }));
-
-  const approvalReviewEvents = visibleApprovals
-    .filter((item) => item.reviewedAt)
-    .map((item) => ({
-      id: `TML-APR-REV-${item.id}`,
-      source: "Approval Review",
-      sourceId: item.id,
-      title: `${item.status}: ${item.title}`,
-      module: item.module || "approvals",
-      status: item.status || "Reviewed",
-      actorName: item.reviewedBy || "Reviewer",
-      actorRole: "Manager / Admin",
-      description: item.reviewNote || `${item.status} by ${item.reviewedBy || "reviewer"}.`,
-      entityType: item.entityType || "Request",
-      entityId: item.entityId || item.id,
-      riskLevel: item.riskLevel || "Standard",
-      sensitivity: item.sensitivity || "Normal",
-      changedFields: item.changedFields || [],
-      createdAt: item.reviewedAt,
-    }));
-
-  return [...activityEvents, ...approvalRequestEvents, ...approvalReviewEvents].sort((a, b) => {
-    const da = new Date(a.createdAt)?.getTime() || 0;
-    const db = new Date(b.createdAt)?.getTime() || 0;
-    return db - da;
   });
 }
 
@@ -1963,122 +611,7 @@ function exportAuditTimelineCSV(timelineItems = []) {
   URL.revokeObjectURL(url);
 }
 
-function getAllowedTransactionTypesForUser(user) {
-  if (!user || user.status !== "Active") return [];
 
-  if (user.role === "Operator") {
-    return ["Direct_Refuel"];
-  }
-
-  if (user.role === "Supervisor" || user.role === "Manager") {
-    return [
-      "Direct_Refuel",
-      "External_Direct_Refuel",
-      "Internal_Transfer",
-      "External_Supply",
-      "External_Transfer",
-    ];
-  }
-
-  // Admin, Officer, TopManagement, and PlatformAdmin are view-only in Operations.
-  return [];
-}
-
-function isAssetRefuelTransactionType(transactionType) {
-  return ["Direct_Refuel", "External_Direct_Refuel"].some((type) =>
-    isSameText(transactionType, type)
-  );
-}
-
-function isExternalDirectRefuelTransactionType(transactionType) {
-  return isSameText(transactionType, "External_Direct_Refuel");
-}
-
-function isExternalSupplyTransactionType(transactionType) {
-  return isSameText(transactionType, "External_Supply");
-}
-
-function isExternalTransferTransactionType(transactionType) {
-  return isSameText(transactionType, "External_Transfer");
-}
-
-function isExternalSourceOperation(transactionType) {
-  return (
-    isExternalSupplyTransactionType(transactionType) ||
-    isExternalDirectRefuelTransactionType(transactionType)
-  );
-}
-
-function isStationCounterTransactionType(transactionType) {
-  return (
-    isSameText(transactionType, "Internal_Transfer") ||
-    isExternalSupplyTransactionType(transactionType) ||
-    isExternalTransferTransactionType(transactionType)
-  );
-}
-
-function shouldOperationRequireManagerApproval(transactionType, user) {
-  if (!user || user.status !== "Active") return true;
-
-  if (isExternalTransferTransactionType(transactionType)) {
-    // Cross-project diesel transfer needs the two project managers.
-    // If a Manager creates it, backend will later treat him as the first approval.
-    return user.role === "Supervisor" || user.role === "Manager";
-  }
-
-  if (
-    isExternalDirectRefuelTransactionType(transactionType) ||
-    isExternalSupplyTransactionType(transactionType)
-  ) {
-    // Supervisor submits a request. Manager executes immediately.
-    return user.role === "Supervisor";
-  }
-
-  return false;
-}
-
-function getOperationApprovalType(transactionType) {
-  if (isExternalDirectRefuelTransactionType(transactionType)) return "operation_external_direct_refuel";
-  if (isExternalSupplyTransactionType(transactionType)) return "operation_external_supply";
-  if (isExternalTransferTransactionType(transactionType)) return "operation_external_transfer";
-  return "operation";
-}
-
-function getOperationApprovalTitle(transactionType, operationId) {
-  if (isExternalDirectRefuelTransactionType(transactionType)) {
-    return `External Direct Refuel ${operationId} pending approval`;
-  }
-
-  if (isExternalSupplyTransactionType(transactionType)) {
-    return `External Supply ${operationId} pending approval`;
-  }
-
-  if (isExternalTransferTransactionType(transactionType)) {
-    return `External Transfer ${operationId} pending approval`;
-  }
-
-  return `Operation ${operationId} pending approval`;
-}
-
-function getOperationApprovalSuccessMessage(transactionType) {
-  if (isExternalDirectRefuelTransactionType(transactionType)) {
-    return "External Direct Refuel saved as Pending Manager Approval.";
-  }
-
-  if (isExternalSupplyTransactionType(transactionType)) {
-    return "External Supply saved as Pending Manager Approval.";
-  }
-
-  if (isExternalTransferTransactionType(transactionType)) {
-    return "External Transfer saved as Pending Project Managers Approval.";
-  }
-
-  return "Operation saved as Pending Manager Approval.";
-}
-
-function shouldExternalSupplyRequireApproval(user) {
-  return shouldOperationRequireManagerApproval("External_Supply", user);
-}
 
 function isOfficerUser(user) {
   return user?.role === "Officer";
@@ -2358,93 +891,6 @@ function getRowProjectValue(row, headers, assets = [], stations = []) {
   );
 }
 
-function filterDataByUserProjectScope({ user, data, headers, assets, stations, projects }) {
-  if (userCanAccessAllProjects(user)) return data;
-
-  return data.filter((row) => {
-    const rowProject = getRowProjectValue(row, headers, assets, stations);
-    return isProjectAllowedForUser(user, rowProject, projects);
-  });
-}
-
-function filterMasterDataByUserProjectScope({ user, items, projects, projectKey = "project" }) {
-  if (userCanAccessAllProjects(user)) return items;
-
-  return items.filter((item) =>
-    isProjectAllowedForUser(user, item?.[projectKey], projects)
-  );
-}
-
-function isPlatformAdminUser(user) {
-  return user?.role === "PlatformAdmin";
-}
-
-function getItemCompanyId(item) {
-  return item?.companyId || item?.company_id || item?.company || "";
-}
-
-function companyMatches(itemCompanyId, companyId) {
-  return normalizeScopeValue(itemCompanyId) === normalizeScopeValue(companyId);
-}
-
-function makeTenantEntityKey(item, fallbackId = "") {
-  const entityId = item?.id || fallbackId || "NO-ID";
-  const companyId = getItemCompanyId(item) || item?.companyId || item?.company_id || "GLOBAL";
-  return `${normalizeScopeValue(companyId) || "global"}::${normalizeScopeValue(entityId) || "no-id"}`;
-}
-
-function tenantEntityMatches(item, id, companyId = "") {
-  if (!item) return false;
-  const sameId = normalizeScopeValue(item.id) === normalizeScopeValue(id);
-  if (!sameId) return false;
-  if (!companyId) return true;
-  return companyMatches(getItemCompanyId(item), companyId);
-}
-
-function isDuplicateEntityIdWithinCompany(items = [], id, companyId, excludeKey = "") {
-  const nextKey = `${normalizeScopeValue(companyId)}::${normalizeScopeValue(id)}`;
-  return items.some((item) => {
-    const itemKey = makeTenantEntityKey(item);
-    return itemKey === nextKey && itemKey !== excludeKey;
-  });
-}
-
-function filterDuplicateTenantEntities(items = []) {
-  const seen = new Set();
-  return items.filter((item) => {
-    const key = makeTenantEntityKey(item);
-    if (seen.has(key)) return false;
-    seen.add(key);
-    return true;
-  });
-}
-
-function filterByCompany(items = [], companyId, user) {
-  if (isPlatformAdminUser(user) && isPlatformContextValue(companyId)) return items;
-  if (!companyId || isPlatformContextValue(companyId)) return [];
-  return items.filter((item) => companyMatches(getItemCompanyId(item), companyId));
-}
-
-function getCompanyIdFromProjectValue(projectValue, projects = []) {
-  if (!projectValue) return "";
-  const matchedProject = projects.find((project) =>
-    normalizeScopeValue(project.id) === normalizeScopeValue(projectValue) ||
-    normalizeScopeValue(project.name) === normalizeScopeValue(projectValue)
-  );
-  return matchedProject?.companyId || "";
-}
-
-function getItemCompanyIdWithProjectFallback(item, projects = [], projectKey = "project") {
-  return getItemCompanyId(item) || getCompanyIdFromProjectValue(item?.[projectKey], projects);
-}
-
-function filterByCompanyWithProjectFallback(items = [], companyId, user, projects = [], projectKey = "project") {
-  if (isPlatformAdminUser(user) && isPlatformContextValue(companyId)) return items;
-  if (!companyId || isPlatformContextValue(companyId)) return [];
-  return items.filter((item) =>
-    companyMatches(getItemCompanyIdWithProjectFallback(item, projects, projectKey), companyId)
-  );
-}
 
 function inferRowCompanyId(row, headers, assets = [], stations = [], projects = []) {
   const explicitCompanyId = getValue(row, headers, ["company_id", "Company ID", "company id", "company"]);
@@ -2467,34 +913,22 @@ function filterTransactionRowsByCompany({ rows = [], headers = [], companyId, us
     companyMatches(inferRowCompanyId(row, headers, assets, stations, projects), companyId)
   );
 }
+function filterDataByUserProjectScope({ user, data, headers, assets, stations, projects }) {
+  if (userCanAccessAllProjects(user)) return data;
 
-function buildCompaniesFromSources({ companies = [], users = [], fuelers = [], projects = [], assets = [], stations = [] }) {
-  const map = new Map();
-
-  companies.forEach((company) => {
-    if (!company?.id) return;
-    map.set(company.id, company);
+  return data.filter((row) => {
+    const rowProject = getRowProjectValue(row, headers, assets, stations);
+    return isProjectAllowedForUser(user, rowProject, projects);
   });
-
-  [...users, ...fuelers, ...projects, ...assets, ...stations].forEach((item) => {
-    const companyId = getItemCompanyId(item);
-    if (!companyId || normalizeScopeValue(companyId) === "platform") return;
-    if (!map.has(companyId)) {
-      map.set(companyId, {
-        id: companyId,
-        name: companyId,
-        country: "",
-        currency: "SAR",
-        timezone: "Asia/Riyadh",
-        language: "EN-AR",
-        status: "Active",
-      });
-    }
-  });
-
-  return mergePlatformConsoleWithCompanies(Array.from(map.values()));
 }
 
+function filterMasterDataByUserProjectScope({ user, items, projects, projectKey = "project" }) {
+  if (userCanAccessAllProjects(user)) return items;
+
+  return items.filter((item) =>
+    isProjectAllowedForUser(user, item?.[projectKey], projects)
+  );
+}
 
 function useOutsideClick(ref, callback) {
   useEffect(() => {
@@ -2511,7 +945,6 @@ function useOutsideClick(ref, callback) {
     };
   }, [ref, callback]);
 }
-
 
 function useSmartDropdownPosition(ref, isOpen, menuWidth = 260) {
   const [menuAlign, setMenuAlign] = useState("left");
@@ -3114,11 +1547,9 @@ useEffect(() => {
 
   const refreshBackendProjects = async (companyId = "") => {
     try {
-      const response = await api.get("/projects", {
-        params: companyId && !isPlatformContextValue(companyId) ? { companyId } : {},
+      const backendProjects = await fetchProjects({
+        companyId: companyId && !isPlatformContextValue(companyId) ? companyId : "",
       });
-
-      const backendProjects = Array.isArray(response.data) ? response.data : [];
       setProjects(backendProjects.map(mapBackendProjectForState).filter((project) => project.id));
       return backendProjects;
     } catch (error) {
@@ -3129,8 +1560,8 @@ useEffect(() => {
   };
 
   const handleCreateProject = async (payload) => {
-    const response = await api.post("/projects", payload);
-    const createdProject = mapBackendProjectForState(response.data);
+    const createdProjectData = await createProjectRecord(payload);
+    const createdProject = mapBackendProjectForState(createdProjectData);
 
     setProjects((prev) => [
       createdProject,
@@ -3145,8 +1576,8 @@ useEffect(() => {
 
   const handleUpdateProject = async (project, payload) => {
     const backendId = project?.backendId || project?.id || project;
-    const response = await api.patch(`/projects/${backendId}`, payload);
-    const updatedProject = mapBackendProjectForState(response.data);
+    const updatedProjectData = await updateProjectRecord(backendId, payload);
+    const updatedProject = mapBackendProjectForState(updatedProjectData);
 
     setProjects((prev) =>
       prev.map((item) =>
@@ -3167,12 +1598,12 @@ useEffect(() => {
       throw new Error("Project backend ID is required.");
     }
 
-    const response = await api.patch(`/projects/${backendId}/manager`, {
+    const updatedProjectData = await assignProjectManager(backendId, {
       managerUserId,
       requestedByUserId: backendAuthUser?.id || currentUser?.id || "",
     });
 
-    const updatedProject = mapBackendProjectForState(response.data);
+    const updatedProject = mapBackendProjectForState(updatedProjectData);
 
     setProjects((prev) =>
       prev.map((item) =>
@@ -3188,7 +1619,7 @@ useEffect(() => {
 
   const handleDeleteProject = async (project) => {
     const backendId = project?.backendId || project?.id || project;
-    await api.delete(`/projects/${backendId}`);
+    await deleteProjectRecord(backendId);
 
     setProjects((prev) =>
       prev.filter((item) =>
@@ -3198,14 +1629,11 @@ useEffect(() => {
   };
   const refreshBackendEmployees = async (companyId = "", viewerUserId = "") => {
     try {
-      const response = await api.get("/employees", {
-        params: {
-          ...(companyId && !isPlatformContextValue(companyId) ? { companyId } : {}),
-          ...(viewerUserId ? { viewerUserId } : {}),
-        },
+      const backendEmployees = await fetchEmployees({
+        companyId:
+          companyId && !isPlatformContextValue(companyId) ? companyId : "",
+        viewerUserId,
       });
-
-      const backendEmployees = Array.isArray(response.data) ? response.data : [];
       const mappedEmployees = backendEmployees
         .map(mapBackendEmployeeForState)
         .filter((employee) => employee.id);
@@ -3221,8 +1649,7 @@ useEffect(() => {
 
   const refreshBackendEmployeeTransfers = async () => {
     try {
-      const response = await api.get("/employee-transfers/pending");
-      const backendTransfers = Array.isArray(response.data) ? response.data : [];
+      const backendTransfers = await fetchPendingEmployeeTransfers();
       const mappedTransfers = backendTransfers
         .map(mapBackendEmployeeTransferForState)
         .filter((transfer) => transfer.id);
@@ -3252,8 +1679,7 @@ useEffect(() => {
 
   const refreshBackendAssetTransfers = async () => {
     try {
-      const response = await api.get("/assets/transfers/pending");
-      const backendTransfers = Array.isArray(response.data) ? response.data : [];
+      const backendTransfers = await fetchPendingAssetTransfers();
       const mappedTransfers = backendTransfers
         .map(mapBackendAssetTransferForState)
         .filter((transfer) => transfer.id);
@@ -3283,8 +1709,7 @@ useEffect(() => {
 
   const refreshBackendStationTransfers = async () => {
     try {
-      const response = await api.get("/stations/transfers/pending");
-      const backendTransfers = Array.isArray(response.data) ? response.data : [];
+      const backendTransfers = await fetchPendingStationTransfers();
       const mappedTransfers = backendTransfers
         .map(mapBackendStationTransferForState)
         .filter((transfer) => transfer.id);
@@ -3299,8 +1724,8 @@ useEffect(() => {
   };
 
   const handleCreateEmployee = async (payload) => {
-    const response = await api.post("/employees", payload);
-    const createdEmployee = mapBackendEmployeeForState(response.data);
+    const createdEmployeeData = await createEmployeeRecord(payload);
+    const createdEmployee = mapBackendEmployeeForState(createdEmployeeData);
 
     setFuelers((prev) => [
       createdEmployee,
@@ -3321,8 +1746,8 @@ useEffect(() => {
       throw new Error("Employee backend ID is required.");
     }
 
-    const response = await api.patch(`/employees/${backendId}`, payload);
-    const updatedEmployee = mapBackendEmployeeForState(response.data);
+    const updatedEmployeeData = await updateEmployeeRecord(backendId, payload);
+    const updatedEmployee = mapBackendEmployeeForState(updatedEmployeeData);
 
     setFuelers((prev) =>
       prev.map((item) =>
@@ -3352,14 +1777,14 @@ useEffect(() => {
       throw new Error("Requester user ID is required.");
     }
 
-    const response = await api.post("/employee-transfers", {
+    const createdTransferData = await createEmployeeTransfer({
       employeeId: employeeBackendId,
       toProjectId,
       requestedByUserId,
       effectiveDate: options?.effectiveDate || undefined,
     });
 
-    const createdTransfer = mapBackendEmployeeTransferForState(response.data);
+    const createdTransfer = mapBackendEmployeeTransferForState(createdTransferData);
 
     setEmployeeTransferRequests((prev) => [
       createdTransfer,
@@ -3406,12 +1831,12 @@ useEffect(() => {
       throw new Error("Approver user ID is required.");
     }
 
-    const response = await api.patch(`/employee-transfers/${transferId}/review`, {
+    const reviewedTransferData = await reviewEmployeeTransfer(transferId, {
       managerUserId,
       approve: true,
     });
 
-    const reviewedTransfer = mapBackendEmployeeTransferForState(response.data);
+    const reviewedTransfer = mapBackendEmployeeTransferForState(reviewedTransferData);
 
     setEmployeeTransferRequests((prev) => {
       if (String(reviewedTransfer.status || "").toUpperCase() === "APPROVED") {
@@ -3447,13 +1872,13 @@ useEffect(() => {
       throw new Error("Reviewer user ID is required.");
     }
 
-    const response = await api.patch(`/employee-transfers/${transferId}/review`, {
+    const reviewedTransferData = await reviewEmployeeTransfer(transferId, {
       managerUserId,
       approve: false,
       rejectionReason: reason || "Rejected",
     });
 
-    const reviewedTransfer = mapBackendEmployeeTransferForState(response.data);
+    const reviewedTransfer = mapBackendEmployeeTransferForState(reviewedTransferData);
 
     setEmployeeTransferRequests((prev) =>
       prev.filter((item) => normalizeScopeValue(item.id) !== normalizeScopeValue(reviewedTransfer.id))
@@ -3466,8 +1891,7 @@ useEffect(() => {
 
   const refreshBackendAssets = async () => {
     try {
-      const response = await api.get("/assets");
-      const backendAssets = Array.isArray(response.data) ? response.data : [];
+      const backendAssets = await fetchAssets();
       const mappedAssets = backendAssets
         .map(mapBackendAssetForState)
         .filter((asset) => asset.id && !asset.deletedAt);
@@ -3529,12 +1953,12 @@ useEffect(() => {
       throw new Error("Approver user ID is required.");
     }
 
-    const response = await api.patch(`/assets/transfers/${transferId}/review`, {
+    const reviewedTransferData = await reviewAssetTransfer(transferId, {
       managerUserId,
       approve: true,
     });
 
-    const reviewedTransfer = mapBackendAssetTransferForState(response.data);
+    const reviewedTransfer = mapBackendAssetTransferForState(reviewedTransferData);
 
     setAssetTransferRequests((prev) => {
       if (String(reviewedTransfer.status || "").toUpperCase() === "APPROVED") {
@@ -3550,8 +1974,8 @@ useEffect(() => {
 
     if (String(reviewedTransfer.status || "").toUpperCase() === "APPROVED") {
       try {
-        const assetResponse = await api.get(`/assets/${reviewedTransfer.assetBackendId}`);
-        replaceBackendAssetInState(assetResponse.data);
+        const assetData = await fetchAssetById(reviewedTransfer.assetBackendId);
+        replaceBackendAssetInState(assetData);
       } catch (error) {
         await refreshBackendAssets();
       }
@@ -3574,13 +1998,13 @@ useEffect(() => {
       throw new Error("Reviewer user ID is required.");
     }
 
-    const response = await api.patch(`/assets/transfers/${transferId}/review`, {
+    const reviewedTransferData = await reviewAssetTransfer(transferId, {
       managerUserId,
       approve: false,
       rejectionReason: reason || "Rejected",
     });
 
-    const reviewedTransfer = mapBackendAssetTransferForState(response.data);
+    const reviewedTransfer = mapBackendAssetTransferForState(reviewedTransferData);
 
     setAssetTransferRequests((prev) =>
       (prev || []).filter((item) => normalizeScopeValue(item.id) !== normalizeScopeValue(reviewedTransfer.id))
@@ -3603,12 +2027,12 @@ useEffect(() => {
       throw new Error("Approver user ID is required.");
     }
 
-    const response = await api.patch(`/stations/transfers/${transferId}/review`, {
+    const reviewedTransferData = await reviewStationTransfer(transferId, {
       managerUserId,
       approve: true,
     });
 
-    const reviewedTransfer = mapBackendStationTransferForState(response.data);
+    const reviewedTransfer = mapBackendStationTransferForState(reviewedTransferData);
 
     setStationTransferRequests((prev) => {
       if (String(reviewedTransfer.status || "").toUpperCase() === "APPROVED") {
@@ -3624,8 +2048,8 @@ useEffect(() => {
 
     if (String(reviewedTransfer.status || "").toUpperCase() === "APPROVED") {
       try {
-        const stationResponse = await api.get(`/stations/${reviewedTransfer.stationBackendId}`);
-        const mappedStation = mapBackendStationForState(stationResponse.data);
+        const stationData = await fetchStationById(reviewedTransfer.stationBackendId);
+        const mappedStation = mapBackendStationForState(stationData);
         setStations((prev) =>
           (prev || []).map((station) =>
             normalizeScopeValue(station.backendId || station.stationBackendId) ===
@@ -3637,11 +2061,13 @@ useEffect(() => {
         );
       } catch (error) {
         try {
-          const stationsResponse = await api.get("/stations", {
-            params: currentCompanyId && !isPlatformContextValue(currentCompanyId) ? { companyId: currentCompanyId } : {},
+          const backendStations = await fetchStations({
+            companyId:
+              currentCompanyId && !isPlatformContextValue(currentCompanyId)
+                ? currentCompanyId
+                : "",
           });
-          const mappedStations = (Array.isArray(stationsResponse.data) ? stationsResponse.data : [])
-            .map(mapBackendStationForState);
+          const mappedStations = backendStations.map(mapBackendStationForState);
           setStations((prev) => {
             const otherCompanies = (prev || []).filter(
               (station) => !companyMatches(getItemCompanyId(station), currentCompanyId)
@@ -3671,13 +2097,13 @@ useEffect(() => {
       throw new Error("Reviewer user ID is required.");
     }
 
-    const response = await api.patch(`/stations/transfers/${transferId}/review`, {
+    const reviewedTransferData = await reviewStationTransfer(transferId, {
       managerUserId,
       approve: false,
       rejectionReason: reason || "Rejected",
     });
 
-    const reviewedTransfer = mapBackendStationTransferForState(response.data);
+    const reviewedTransfer = mapBackendStationTransferForState(reviewedTransferData);
 
     setStationTransferRequests((prev) =>
       (prev || []).filter((item) => normalizeScopeValue(item.id) !== normalizeScopeValue(reviewedTransfer.id))
@@ -3697,10 +2123,10 @@ useEffect(() => {
     // Officer request -> Admin approval -> create asset in backend.
     // Admin-created assets are created directly from the Assets page and do not come here.
     if (action === "add") {
-      const response = await api.post("/assets", values);
-      replaceBackendAssetInState(response.data);
+      const createdAsset = await createAssetRecord(values);
+      replaceBackendAssetInState(createdAsset);
       await refreshBackendAssets();
-      return { action: "add", asset: response.data };
+      return { action: "add", asset: createdAsset };
     }
 
     let backendAssetId =
@@ -3741,7 +2167,7 @@ useEffect(() => {
         throw new Error("Asset backend ID is required for delete approval.");
       }
 
-      await api.delete(`/assets/${backendAssetId}`);
+      await deleteAssetRecord(backendAssetId);
       removeBackendAssetFromState(backendAssetId);
       return { action: "delete", backendAssetId };
     }
@@ -3751,7 +2177,7 @@ useEffect(() => {
     }
 
     if (action === "odometer_reset") {
-      const response = await api.post(`/assets/${backendAssetId}/reset-odometer`, {
+      const resetResult = await resetAssetOdometer(backendAssetId, {
         newOdometer:
           Number(values.newOdometerAfterReset ?? values.newOdometer ?? values.newReading ?? 0) || 0,
         reason: values.reason || payload.reason || request.details || "Odometer reset approved",
@@ -3759,12 +2185,12 @@ useEffect(() => {
         createdByUserId: backendAuthUser?.id || currentUser?.id || undefined,
       });
 
-      if (response.data?.asset) {
-        replaceBackendAssetInState(response.data.asset);
+      if (resetResult?.asset) {
+        replaceBackendAssetInState(resetResult.asset);
       }
 
-      if (response.data?.resetRecord && typeof setAssetOdometerHistory === "function") {
-        const record = response.data.resetRecord;
+      if (resetResult?.resetRecord && typeof setAssetOdometerHistory === "function") {
+        const record = resetResult.resetRecord;
         setAssetOdometerHistory((prev) => [
           ...(prev || []),
           {
@@ -3784,7 +2210,7 @@ useEffect(() => {
         ]);
       }
 
-      return response.data;
+      return resetResult;
     }
 
     throw new Error("Unsupported asset approval action.");
@@ -3844,13 +2270,13 @@ useEffect(() => {
         : "Inventory adjustment approved by Admin");
 
     if (action === "zero_balance_adjustment") {
-      const response = await api.post(`/stations/${backendStationId}/zero-balance`, {
+      const zeroBalanceResult = await zeroStationBalance(backendStationId, {
         reason,
         createdByUserId: backendAuthUser?.id || currentUser?.id || undefined,
       });
 
-      if (response.data?.station) {
-        const mappedStation = mapBackendStationForState(response.data.station);
+      if (zeroBalanceResult?.station) {
+        const mappedStation = mapBackendStationForState(zeroBalanceResult.station);
         setStations((prev) =>
           (prev || []).map((station) =>
             normalizeScopeValue(station.backendId || station.stationBackendId) ===
@@ -3881,7 +2307,7 @@ useEffect(() => {
         },
       ]);
 
-      return response.data;
+      return zeroBalanceResult;
     }
 
     if (!backendStationId && action === "stock_count_adjustment") {
@@ -3891,29 +2317,32 @@ useEffect(() => {
     const systemQty = Number(payload.oldValue ?? values.oldValue ?? 0) || 0;
     const actualQty = Number(payload.newValue ?? values.newValue ?? 0) || 0;
 
-    const response = await api.post(`/stations/${backendStationId}/adjust-inventory`, {
+    const inventoryAdjustmentResult = await adjustStationInventory(backendStationId, {
       actualStock: actualQty,
       reason,
       createdByUserId: backendAuthUser?.id || currentUser?.id || undefined,
     });
 
     const confirmedSystemQty =
-      response.data?.balanceBefore !== undefined && response.data?.balanceBefore !== null
-        ? Number(response.data.balanceBefore) || 0
+      inventoryAdjustmentResult?.balanceBefore !== undefined &&
+      inventoryAdjustmentResult?.balanceBefore !== null
+        ? Number(inventoryAdjustmentResult.balanceBefore) || 0
         : systemQty;
 
     const confirmedActualQty =
-      response.data?.actualStock !== undefined && response.data?.actualStock !== null
-        ? Number(response.data.actualStock) || 0
+      inventoryAdjustmentResult?.actualStock !== undefined &&
+      inventoryAdjustmentResult?.actualStock !== null
+        ? Number(inventoryAdjustmentResult.actualStock) || 0
         : actualQty;
 
     const adjustmentQty =
-      response.data?.adjustmentQuantity !== undefined && response.data?.adjustmentQuantity !== null
-        ? Number(response.data.adjustmentQuantity) || 0
+      inventoryAdjustmentResult?.adjustmentQuantity !== undefined &&
+      inventoryAdjustmentResult?.adjustmentQuantity !== null
+        ? Number(inventoryAdjustmentResult.adjustmentQuantity) || 0
         : confirmedActualQty - confirmedSystemQty;
 
-    if (response.data?.station) {
-      const mappedStation = mapBackendStationForState(response.data.station);
+    if (inventoryAdjustmentResult?.station) {
+      const mappedStation = mapBackendStationForState(inventoryAdjustmentResult.station);
       setStations((prev) =>
         (prev || []).map((station) =>
           normalizeScopeValue(station.backendId || station.stationBackendId) ===
@@ -3947,7 +2376,7 @@ useEffect(() => {
       `${requestedStationId} adjusted from ${formatNumber(confirmedSystemQty)} L to ${formatNumber(confirmedActualQty)} L. Difference: ${formatNumber(adjustmentQty)} L.`
     );
 
-    return response.data;
+    return inventoryAdjustmentResult;
   };
 
   const mapBackendUserForState = (user = {}) => {
@@ -3996,8 +2425,8 @@ useEffect(() => {
   };
 
   const handleCreateUserFromEmployee = async (payload) => {
-    const response = await api.post("/users", payload);
-    const savedUser = mapBackendUserForState(response.data);
+    const savedUserData = await createUserRecord(payload);
+    const savedUser = mapBackendUserForState(savedUserData);
 
     setUsers((prev) => [
       savedUser,
@@ -4014,11 +2443,8 @@ useEffect(() => {
       throw new Error("User ID is required.");
     }
 
-    const response = await api.patch(`/users/${userId}/status`, {
-      isActive,
-    });
-
-    const savedUser = mapBackendUserForState(response.data);
+    const savedUserData = await updateUserStatus(userId, isActive);
+    const savedUser = mapBackendUserForState(savedUserData);
 
     setUsers((prev) =>
       prev.map((user) =>
@@ -4050,14 +2476,10 @@ useEffect(() => {
     setUsersLoading(true);
 
     try {
-      const response = await api.get("/users", {
-        params:
-          companyId && !isPlatformContextValue(companyId)
-            ? { companyId }
-            : {},
+      const backendUsers = await fetchUsers({
+        companyId:
+          companyId && !isPlatformContextValue(companyId) ? companyId : "",
       });
-
-      const backendUsers = Array.isArray(response.data) ? response.data : [];
       const mappedUsers = backendUsers
         .map(mapBackendUserForState)
         .filter((user) => user.id);
@@ -4115,8 +2537,7 @@ useEffect(() => {
 
         const fetchBackendProjects = async () => {
           try {
-            const response = await api.get("/projects");
-            return Array.isArray(response.data) ? response.data : [];
+            return await fetchProjects();
           } catch (error) {
             console.warn("Projects backend API is not available.", error);
             showToast?.("warning", "Projects backend API is not available.");
@@ -4126,8 +2547,7 @@ useEffect(() => {
 
         const fetchBackendEmployees = async () => {
           try {
-            const response = await api.get("/employees");
-            return Array.isArray(response.data) ? response.data : [];
+            return await fetchEmployees();
           } catch (error) {
             console.warn("Employees backend API is not available.", error);
             showToast?.("warning", "Employees backend API is not available.");
@@ -4138,8 +2558,7 @@ useEffect(() => {
         const fetchBackendAssets = async () => {
           try {
             if (!canUseNetwork(showToast)) return [];
-            const response = await api.get("/assets");
-            return Array.isArray(response.data) ? response.data : [];
+            return await fetchAssets();
           } catch (error) {
             logHandledApiIssue("Assets backend API is not available", error);
             if (isNetworkConnectionError(error)) {
@@ -4153,8 +2572,7 @@ useEffect(() => {
 
         const fetchBackendStations = async () => {
           try {
-            const response = await api.get("/stations");
-            return Array.isArray(response.data) ? response.data : [];
+            return await fetchStations();
           } catch (error) {
             console.warn("Stations backend API is not available.", error);
             showToast?.("warning", "Stations backend API is not available.");
@@ -4165,10 +2583,7 @@ useEffect(() => {
         const fetchBackendOperations = async () => {
           try {
             if (!canUseNetwork(showToast)) return [];
-            const response = await api.get("/operations", {
-              headers: buildOperationRequestHeaders(currentUserRef.current || currentUser),
-            });
-            return Array.isArray(response.data) ? response.data : [];
+            return await fetchOperations(currentUserRef.current || currentUser);
           } catch (error) {
             logHandledApiIssue("Operations backend API is not available", error);
             if (isNetworkConnectionError(error)) {
@@ -4664,11 +3079,8 @@ useEffect(() => {
     }
 
     try {
-      const response = await api.get("/operations/pending-approvals", {
-        headers: buildOperationRequestHeaders(currentUser),
-      });
-
-      setBackendOperationApprovals(Array.isArray(response.data) ? response.data : []);
+      const pendingApprovals = await fetchPendingOperationApprovals(currentUser);
+      setBackendOperationApprovals(pendingApprovals);
     } catch (error) {
       setBackendOperationApprovals([]);
       console.warn("Failed to load backend operation approvals.", error);
@@ -4691,31 +3103,9 @@ useEffect(() => {
     }
 
     try {
-      const rawBaseUrl =
-        process.env.NEXT_PUBLIC_API_URL ||
-        api?.defaults?.baseURL ||
-        "http://localhost:4000";
-
-      const baseUrl = String(rawBaseUrl).replace(/\/+$/, "");
-      const response = await fetch(`${baseUrl}/operation-corrections/pending`, {
-        method: "GET",
-        headers: buildOperationRequestHeaders(currentUser),
-      });
-
-      const contentType = response.headers.get("content-type") || "";
-      const responseBody = contentType.includes("application/json")
-        ? await response.json()
-        : await response.text();
-
-      if (!response.ok) {
-        const message =
-          typeof responseBody === "string"
-            ? responseBody
-            : responseBody?.message || responseBody?.error || "Failed to load operation corrections.";
-        throw new Error(message);
-      }
-
-      setBackendOperationCorrections(Array.isArray(responseBody) ? responseBody : []);
+      const pendingCorrections =
+        await fetchPendingOperationCorrections(currentUser);
+      setBackendOperationCorrections(pendingCorrections);
     } catch (error) {
       setBackendOperationCorrections([]);
       console.warn("Failed to load backend operation corrections.", error);
@@ -5052,6 +3442,7 @@ useEffect(() => {
       onCreateEmployeeTransfer={handleCreateEmployeeTransfer}
       onCreateUserFromEmployee={handleCreateUserFromEmployee}
       onUpdateUserStatus={handleUpdateUserStatusFromTeam}
+      onLoadRoles={fetchRoles}
       pendingEmployeeTransfers={employeeTransferRequests}
       companies={companies}
     />
@@ -6292,17 +4683,16 @@ const [showForm, setShowForm] = useState(false);
     setFuelPriceSaving(true);
 
     try {
-      const response = await api.post(
-        `/projects/${selectedProjectForFuelPrice.backendId}/update-fuel-price`,
-        {
-          pricePerLiter,
-          effectiveFrom: new Date(fuelPriceForm.effectiveFrom).toISOString(),
-          reason: fuelPriceForm.reason?.trim() || "Project fuel price update",
-          ...(currentUser?.id ? { createdByUserId: currentUser.id } : {}),
-        }
-      );
-
-      const updatedPrice = response.data || {};
+      const updatedPrice =
+        (await updateProjectFuelPrice(
+          selectedProjectForFuelPrice.backendId,
+          {
+            pricePerLiter,
+            effectiveFrom: new Date(fuelPriceForm.effectiveFrom).toISOString(),
+            reason: fuelPriceForm.reason?.trim() || "Project fuel price update",
+            ...(currentUser?.id ? { createdByUserId: currentUser.id } : {}),
+          }
+        )) || {};
       const nextFuelPrice = Number(updatedPrice.pricePerLiter || pricePerLiter);
       const nextCurrency =
         updatedPrice.currency ||
@@ -6588,23 +4978,16 @@ const payload = mapFrontendOperationToBackendPayload({
     operation.destinationId,
 });
 
-      const response = await api.post("/operations", payload, {
-        headers: buildOperationRequestHeaders(currentUser),
-      });
+      const createdOperation = await createOperation(payload, currentUser);
 
-      const backendMessage = response?.data?.message || "Operation saved successfully.";
-      const backendStatus = String(response?.data?.status || "").toUpperCase();
+      const backendMessage =
+        createdOperation?.message || "Operation saved successfully.";
+      const backendStatus = String(createdOperation?.status || "").toUpperCase();
       const toastType = backendStatus === "COMPLETED" ? "success" : "warning";
 
       showToast?.(toastType, backendMessage);
 
-      const operationsResponse = await api.get("/operations", {
-        headers: buildOperationRequestHeaders(currentUser),
-      });
-
-      const backendOperations = Array.isArray(operationsResponse.data)
-        ? operationsResponse.data
-        : [];
+      const backendOperations = await fetchOperations(currentUser);
 
       if (typeof setData === "function") {
         setData(
@@ -6619,7 +5002,7 @@ const payload = mapFrontendOperationToBackendPayload({
       trackActivity(
         "Add Operation",
         "operations",
-        `${operation.transactionType} ${response?.data?.operationNo || response?.data?.operationId || operation.operationId} saved through backend.`
+        `${operation.transactionType} ${createdOperation?.operationNo || createdOperation?.operationId || operation.operationId} saved through backend.`
       );
 
       closeForm();
@@ -7654,36 +6037,7 @@ const payload = mapFrontendOperationToBackendPayload({
         reason: editCell.reason,
       };
 
-      const rawBaseUrl =
-        process.env.NEXT_PUBLIC_API_URL ||
-        api?.defaults?.baseURL ||
-        "http://localhost:4000";
-
-      const baseUrl = String(rawBaseUrl).replace(/\/+$/, "");
-
-      const response = await fetch(`${baseUrl}/operation-corrections`, {
-        method: "POST",
-        headers: {
-          ...buildOperationRequestHeaders(currentUser),
-          "Content-Type": "application/json",
-        },
-        body: JSON.stringify(correctionPayload),
-      });
-
-      const contentType = response.headers.get("content-type") || "";
-      const responseBody = contentType.includes("application/json")
-        ? await response.json()
-        : await response.text();
-
-      if (!response.ok) {
-        const message =
-          typeof responseBody === "string"
-            ? responseBody
-            : responseBody?.message || responseBody?.error || "Failed to submit correction request.";
-
-        showToast?.("warning", message);
-        return;
-      }
+      await createOperationCorrection(correctionPayload, currentUser);
 
       setAuditLog((prev) => [
         ...prev,
@@ -9248,8 +7602,8 @@ useOutsideClick(assetSettingsRef, () => {
 
     
     try {
-      const response = await api.post("/assets", payload);
-      replaceAssetInState(response.data);
+      const createdAsset = await createAssetRecord(payload);
+      replaceAssetInState(createdAsset);
       trackActivity?.("Add Asset", "assets", `${payload.assetId} added from backend.`);
       showToast?.("success", "Asset added successfully.");
       closeAddAsset();
@@ -9427,11 +7781,11 @@ useOutsideClick(assetSettingsRef, () => {
     }
 
     try {
-      const response = await api.patch(`/assets/${backendAssetId}`, {
+      const updatedAsset = await updateAssetRecord(backendAssetId, {
         status: mapFrontendAssetStatusForBackend(newStatus),
       });
 
-      replaceAssetInState(response.data);
+      replaceAssetInState(updatedAsset);
       trackActivity?.("Change Asset Status", "assets", `${asset.id} status changed to ${newStatus}.`);
       showToast?.("success", `Asset status changed to ${newStatus}.`);
     } catch (error) {
@@ -9510,13 +7864,13 @@ useOutsideClick(assetSettingsRef, () => {
     }
 
     try {
-      const response = await api.post(`/assets/${backendAssetId}/transfer`, {
+      const createdTransfer = await createAssetTransfer(backendAssetId, {
         toProjectId,
         requestedByUserId: currentUser?.id || "",
         effectiveDate: projectEffectiveDate || undefined,
       });
 
-      onAssetTransferCreated?.(response.data);
+      onAssetTransferCreated?.(createdTransfer);
 
       showToast?.("warning", "Asset transfer request submitted for project manager approval.");
       trackActivity?.(
@@ -9565,7 +7919,7 @@ useOutsideClick(assetSettingsRef, () => {
     if (canDeleteDirectly) {
       try {
         await runWithActionLoading("Deleting asset...", async () => {
-          await api.delete(`/assets/${backendAssetId}`);
+          await deleteAssetRecord(backendAssetId);
         });
 
         // Close every UI layer related to the deleted asset immediately.
@@ -9586,8 +7940,7 @@ useOutsideClick(assetSettingsRef, () => {
 
         // Then sync the visible list with backend truth after soft delete.
         try {
-          const response = await api.get("/assets");
-          const backendAssets = Array.isArray(response.data) ? response.data : [];
+          const backendAssets = await fetchAssets();
           const mappedAssets = backendAssets
             .map(mapBackendAssetForState)
             .filter((asset) => asset.id && !asset.deletedAt);
@@ -9802,8 +8155,7 @@ useOutsideClick(assetSettingsRef, () => {
 
     const syncBackendAssetsSafely = async () => {
       try {
-        const response = await api.get("/assets");
-        const backendAssets = Array.isArray(response.data) ? response.data : [];
+        const backendAssets = await fetchAssets();
         const mappedAssets = backendAssets
           .map(mapBackendAssetForState)
           .filter((asset) => asset.id && !asset.deletedAt);
@@ -9821,8 +8173,8 @@ useOutsideClick(assetSettingsRef, () => {
 
     if (canResetDirectly) {
       try {
-        const response = await runWithActionLoading("Resetting odometer...", async () =>
-          api.post(`/assets/${backendAssetId}/reset-odometer`, {
+        const resetResult = await runWithActionLoading("Resetting odometer...", async () =>
+          resetAssetOdometer(backendAssetId, {
             newOdometer: newReading,
             reason: odometerReason,
             effectiveAt: odometerEffectiveDate || undefined,
@@ -9830,7 +8182,7 @@ useOutsideClick(assetSettingsRef, () => {
           })
         );
 
-        const updatedAsset = response?.data?.asset || null;
+        const updatedAsset = resetResult?.asset || null;
 
         // Update the visible table immediately.
         // Do not call the global backend asset replacement helper here,
@@ -9838,7 +8190,7 @@ useOutsideClick(assetSettingsRef, () => {
         updateAssetOdometerLocally(updatedAsset);
 
         if (typeof setAssetOdometerHistory === "function") {
-          const resetRecord = response?.data?.resetRecord;
+          const resetRecord = resetResult?.resetRecord;
           setAssetOdometerHistory((prev) => [
             ...(prev || []),
             resetRecord
@@ -11387,7 +9739,7 @@ const [showConfirm, setShowConfirm] = useState(false);
     // Important: this try/catch is for the backend create request only.
     // Any UI refresh/activity error after a successful POST must not turn the save into a false failure.
     try {
-      const response = await api.post("/stations", {
+      const createdStationData = await createStationRecord({
         companyId: stationCompanyId,
         stationId: cleanStation.stationId,
         name: cleanStation.name,
@@ -11400,7 +9752,7 @@ const [showConfirm, setShowConfirm] = useState(false);
         createdById: currentUser?.id || undefined,
       });
 
-      createdStation = mapBackendStationForState(response.data);
+      createdStation = mapBackendStationForState(createdStationData);
     } catch (error) {
       const backendMessage = getFriendlyApiErrorMessage(error, "Failed to add station.");
 
@@ -11413,10 +9765,9 @@ const [showConfirm, setShowConfirm] = useState(false);
     closeAddStation();
 
     try {
-      const refreshResponse = await api.get("/stations", {
-        params: { companyId: stationCompanyId },
+      const backendStations = await fetchStations({
+        companyId: stationCompanyId,
       });
-      const backendStations = Array.isArray(refreshResponse.data) ? refreshResponse.data : [];
       const mappedStations = backendStations.map(mapBackendStationForState);
 
       setStations((prev) => {
@@ -11689,13 +10040,13 @@ const [showConfirm, setShowConfirm] = useState(false);
     }
 
     try {
-      const response = await api.post(`/stations/${backendId}/transfer`, {
+      const createdTransfer = await createStationTransfer(backendId, {
         toProjectId,
         requestedByUserId: currentUser?.id || "",
         effectiveDate: stationProjectEffectiveDate || undefined,
       });
 
-      onStationTransferCreated?.(response.data);
+      onStationTransferCreated?.(createdTransfer);
 
       trackActivity?.(
         "Request Station Transfer",
@@ -11722,11 +10073,7 @@ const [showConfirm, setShowConfirm] = useState(false);
   const refreshBackendStationsForCompany = async (companyId) => {
     if (!companyId || isPlatformContextValue(companyId)) return;
 
-    const response = await api.get("/stations", {
-      params: { companyId },
-    });
-
-    const backendStations = Array.isArray(response.data) ? response.data : [];
+    const backendStations = await fetchStations({ companyId });
     const mappedStations = backendStations.map(mapBackendStationForState);
 
     setStations((prev) => {
@@ -11846,11 +10193,11 @@ const [showConfirm, setShowConfirm] = useState(false);
     const oldStatus = getCurrentStationStatus(statusEditStation);
 
     try {
-      const response = await api.patch(`/stations/${backendId}`, {
+      const updatedStationData = await updateStationRecord(backendId, {
         status: mapFrontendStationStatusForBackend(newStationStatus),
       });
 
-      const updatedStation = mapBackendStationForState(response.data);
+      const updatedStation = mapBackendStationForState(updatedStationData);
 
       setStations((prev) =>
         prev.map((station) =>
@@ -11969,11 +10316,11 @@ const [showConfirm, setShowConfirm] = useState(false);
     setCapacitySaveLoading(true);
 
     try {
-      const response = await api.patch(`/stations/${backendId}`, {
+      const updatedStationData = await updateStationRecord(backendId, {
         capacity: nextCapacity,
       });
 
-      const updatedStation = mapBackendStationForState(response.data);
+      const updatedStation = mapBackendStationForState(updatedStationData);
 
       setStations((prev) =>
         prev.map((station) =>
@@ -12057,7 +10404,7 @@ const [showConfirm, setShowConfirm] = useState(false);
     setStationDeleteLoading(true);
 
     try {
-      await api.delete(`/stations/${backendId}`);
+      await deleteStationRecord(backendId);
 
       setStations((prev) =>
         prev.filter((station) =>
@@ -12571,13 +10918,13 @@ const getLatestStationCounter = (stationId, fallbackValue = 0) => {
     }
 
     try {
-      const response = await api.post(`/stations/${backendId}/zero-balance`, {
+      const zeroBalanceResult = await zeroStationBalance(backendId, {
         reason,
         createdByUserId: currentUser?.id || undefined,
       });
 
-      if (response.data?.station) {
-        const mappedStation = mapBackendStationForState(response.data.station);
+      if (zeroBalanceResult?.station) {
+        const mappedStation = mapBackendStationForState(zeroBalanceResult.station);
         setStations((prev) =>
           (prev || []).map((station) =>
             normalizeScopeValue(station.backendId || station.stationBackendId) ===
@@ -14259,6 +12606,7 @@ function TeamPage({
   onCreateEmployeeTransfer,
   onCreateUserFromEmployee,
   onUpdateUserStatus,
+  onLoadRoles,
   pendingEmployeeTransfers = [],
   companies = [],
 }) {
@@ -14288,30 +12636,8 @@ function TeamPage({
     setShowFuelersSettings(false);
   });
 
-  const teamRoleOptions = useMemo(() => {
-    const roleIdByNormalizedName = new Map();
-
-    users.forEach((user) => {
-      const normalizedName = normalizeBackendRoleName(user.roleName || user.role || "");
-      const roleId = user.roleId || "";
-
-      if (!normalizedName || normalizedName === "PlatformAdmin" || !roleId) return;
-
-      roleIdByNormalizedName.set(normalizedName, roleId);
-    });
-
-    return TEAM_CREATE_USER_ROLE_NAMES.map((roleName) => {
-      const normalizedName = normalizeBackendRoleName(roleName);
-
-      return {
-        id: roleIdByNormalizedName.get(normalizedName) || roleName,
-        name: roleName,
-        normalizedName,
-      };
-    });
-  }, [users]);
-
-  const loadingTeamRoles = false;
+  const [teamRoleOptions, setTeamRoleOptions] = useState([]);
+  const [loadingTeamRoles, setLoadingTeamRoles] = useState(false);
 
   const getCompanyCodeForFueler = (fueler = {}) => {
     const matchedCompany = companies.find((company) =>
@@ -15183,75 +13509,80 @@ function TeamPage({
     });
   };
 
-  const loadTeamRoleOptions = async () => teamRoleOptions;
+  const normalizeBackendTeamRoles = (roles = []) => {
+    const allowedRoleNames = new Set(
+      TEAM_CREATE_USER_ROLE_NAMES.map((roleName) =>
+        normalizeBackendRoleName(roleName)
+      )
+    );
 
-  const getTeamRoleOptionByValue = (roleValue) => {
+    return (roles || [])
+      .map((role) => {
+        const name =
+          role?.name ||
+          role?.roleName ||
+          role?.label ||
+          role?.key ||
+          "";
+
+        return {
+          id: String(role?.id || "").trim(),
+          name,
+          normalizedName: normalizeBackendRoleName(name),
+        };
+      })
+      .filter(
+        (role) =>
+          role.id &&
+          role.name &&
+          allowedRoleNames.has(role.normalizedName)
+      );
+  };
+
+  const loadTeamRoleOptions = async (companyId = "") => {
+    if (typeof onLoadRoles !== "function") {
+      throw new Error("Roles API is not configured.");
+    }
+
+    const targetCompanyId = companyId || currentUser?.companyId || "";
+
+    setLoadingTeamRoles(true);
+
+    try {
+      const backendRoles = await onLoadRoles({
+        companyId: targetCompanyId,
+        fallbackToGlobal: false,
+      });
+
+      const normalizedRoles = normalizeBackendTeamRoles(backendRoles);
+      setTeamRoleOptions(normalizedRoles);
+      return normalizedRoles;
+    } finally {
+      setLoadingTeamRoles(false);
+    }
+  };
+
+  const getTeamRoleOptionByValue = (roleValue, options = teamRoleOptions) => {
     const normalizedRoleValue = normalizeScopeValue(roleValue);
 
-    return (teamRoleOptions || []).find((role) =>
+    return (options || []).find((role) =>
       normalizeScopeValue(role.id) === normalizedRoleValue ||
       normalizeScopeValue(role.normalizedName) === normalizedRoleValue ||
       normalizeScopeValue(role.name) === normalizedRoleValue
     );
   };
 
-  const roleOptionNeedsBackendId = (roleOption, roleValue) => {
-    if (!roleOption?.id) return true;
-
-    const normalizedId = normalizeScopeValue(roleOption.id);
-    const normalizedName = normalizeScopeValue(roleOption.name);
-    const normalizedSystemName = normalizeScopeValue(roleOption.normalizedName);
-    const normalizedRoleValue = normalizeScopeValue(roleValue);
-
-    return (
-      normalizedId === normalizedName ||
-      normalizedId === normalizedSystemName ||
-      normalizedId === normalizedRoleValue
-    );
-  };
-
   const resolveTeamRoleForSave = async (roleValue, companyId = "") => {
-    const selectedRole = getTeamRoleOptionByValue(roleValue) || {
-      id: roleValue,
-      name: roleValue,
-      normalizedName: normalizeBackendRoleName(roleValue),
-    };
+    let selectedRole = getTeamRoleOptionByValue(roleValue);
 
-    if (!roleOptionNeedsBackendId(selectedRole, roleValue)) {
+    if (selectedRole?.id) {
       return selectedRole;
     }
 
-    const targetCompanyId = companyId || currentUser?.companyId || "";
-    const roleEndpoints = targetCompanyId
-      ? [`/roles?companyId=${encodeURIComponent(targetCompanyId)}`, "/roles"]
-      : ["/roles"];
+    const roles = await loadTeamRoleOptions(companyId);
+    selectedRole = getTeamRoleOptionByValue(roleValue, roles);
 
-    const targetNormalizedRole = normalizeBackendRoleName(
-      selectedRole.normalizedName || selectedRole.name || roleValue
-    );
-
-    for (const endpoint of roleEndpoints) {
-      try {
-        const response = await api.get(endpoint);
-        const roles = Array.isArray(response.data) ? response.data : [];
-        const matchedRole = roles.find((role) =>
-          normalizeBackendRoleName(role.name || role.roleName || role.label || role.key) ===
-          targetNormalizedRole
-        );
-
-        if (matchedRole?.id) {
-          return {
-            id: matchedRole.id,
-            name: matchedRole.name || selectedRole.name || roleValue,
-            normalizedName: targetNormalizedRole,
-          };
-        }
-      } catch (error) {
-        // Try the next endpoint. If all fail, the caller will handle the safe fallback.
-      }
-    }
-
-    return selectedRole;
+    return selectedRole || null;
   };
 
   const getDefaultTeamRoleId = (roles = []) => {
@@ -15271,14 +13602,34 @@ function TeamPage({
       return;
     }
 
-    const fallbackRoles = teamRoleOptions;
-    const defaultRoleId = getDefaultTeamRoleId(fallbackRoles);
+    const roleCompanyId = fueler?.companyId || currentUser?.companyId || "";
 
-    setLinkUserModal({
-      fueler,
-      roleId: defaultRoleId || "Operator",
-      password: `FFP@${Math.floor(100000 + Math.random() * 900000)}`,
-    });
+    try {
+      const backendRoles = await loadTeamRoleOptions(roleCompanyId);
+
+      if (!backendRoles.length) {
+        showToast?.(
+          "warning",
+          "No backend roles are available for this company."
+        );
+        return;
+      }
+
+      const defaultRoleId = getDefaultTeamRoleId(backendRoles);
+
+      setLinkUserModal({
+        fueler,
+        roleId: defaultRoleId,
+        password: `FFP@${Math.floor(100000 + Math.random() * 900000)}`,
+      });
+    } catch (error) {
+      const message =
+        error?.response?.data?.message ||
+        error?.message ||
+        "Failed to load company roles.";
+
+      showToast?.("warning", message);
+    }
   };
 
   const handleUserLinkStatusChange = async (fueler, nextStatus) => {
@@ -15387,10 +13738,16 @@ function TeamPage({
       }));
 
       const roleCompanyId = fueler.companyId || currentUser?.companyId || "";
-      const selectedTeamRole = await resolveTeamRoleForSave(linkUserModal.roleId, roleCompanyId);
+      const selectedTeamRole = await resolveTeamRoleForSave(
+        linkUserModal.roleId,
+        roleCompanyId
+      );
 
-      if (roleOptionNeedsBackendId(selectedTeamRole, linkUserModal.roleId)) {
-        showToast?.("warning", "Selected role is not valid for this company.");
+      if (!selectedTeamRole?.id) {
+        showToast?.(
+          "warning",
+          "Selected backend role is no longer available for this company."
+        );
         setSavingLinkedUser(false);
         setUpdatingUserStatusByFuelerId((prev) => ({
           ...prev,
@@ -16301,14 +14658,21 @@ function TeamPage({
                           roleId: e.target.value,
                         }))
                       }
-                      disabled={savingLinkedUser}
+                      disabled={savingLinkedUser || loadingTeamRoles}
                       className="w-full rounded-xl border border-slate-700 bg-slate-950 px-3 py-2 text-white outline-none focus:border-amber-400"
                     >
-                      {teamRoleOptions.map((role) => (
-                        <option key={role.id} value={role.id}>
-                          {role.name}
-                        </option>
-                      ))}
+                      {loadingTeamRoles && (
+                        <option value="">Loading backend roles...</option>
+                      )}
+                      {!loadingTeamRoles && !teamRoleOptions.length && (
+                        <option value="">No backend roles available</option>
+                      )}
+                      {!loadingTeamRoles &&
+                        teamRoleOptions.map((role) => (
+                          <option key={role.id} value={role.id}>
+                            {role.name}
+                          </option>
+                        ))}
                     </select>
                   </div>
 
@@ -16344,7 +14708,12 @@ function TeamPage({
 
                   <button
                     onClick={confirmCreateAndLinkUser}
-                    disabled={savingLinkedUser || !linkUserModal.roleId}
+                    disabled={
+                      savingLinkedUser ||
+                      loadingTeamRoles ||
+                      !linkUserModal.roleId ||
+                      !teamRoleOptions.length
+                    }
                     className="px-4 py-2 rounded-xl bg-yellow-500 hover:bg-yellow-400 text-black font-bold disabled:opacity-60"
                   >
                     {savingLinkedUser ? "Saving..." : "Create & Link"}
@@ -16883,17 +15252,16 @@ function ProjectsPage({
     setFuelPriceSaving(true);
 
     try {
-      const response = await api.post(
-        `/projects/${selectedProjectForFuelPrice.backendId}/update-fuel-price`,
-        {
-          pricePerLiter,
-          effectiveFrom: new Date(fuelPriceForm.effectiveFrom).toISOString(),
-          reason: fuelPriceForm.reason?.trim() || "Project fuel price update",
-          ...(currentUser?.id ? { createdByUserId: currentUser.id } : {}),
-        }
-      );
-
-      const updatedPrice = response.data || {};
+      const updatedPrice =
+        (await updateProjectFuelPrice(
+          selectedProjectForFuelPrice.backendId,
+          {
+            pricePerLiter,
+            effectiveFrom: new Date(fuelPriceForm.effectiveFrom).toISOString(),
+            reason: fuelPriceForm.reason?.trim() || "Project fuel price update",
+            ...(currentUser?.id ? { createdByUserId: currentUser.id } : {}),
+          }
+        )) || {};
       const nextFuelPrice = Number(updatedPrice.pricePerLiter || pricePerLiter);
       const nextCurrency =
         updatedPrice.currency ||
@@ -17000,13 +15368,9 @@ function ProjectsPage({
       }
 
       try {
-        const response = await api.get("/users", {
-          params: {
-            companyId: currentCompanyId,
-          },
+        const backendUsers = await fetchUsers({
+          companyId: currentCompanyId,
         });
-
-        const backendUsers = Array.isArray(response.data) ? response.data : [];
 
         setBackendProjectManagers(
           backendUsers
@@ -20365,33 +18729,12 @@ function ApprovalsPage({
       }
 
       try {
-        const rawBaseUrl =
-          process.env.NEXT_PUBLIC_API_URL ||
-          api?.defaults?.baseURL ||
-          "http://localhost:4000";
-
-        const baseUrl = String(rawBaseUrl).replace(/\/+$/, "");
-        const response = await fetch(`${baseUrl}/operation-corrections/${request.backendCorrectionId}/review`, {
-          method: "PATCH",
-          headers: {
-            ...buildOperationRequestHeaders(currentUser),
-            "Content-Type": "application/json",
-          },
-          body: JSON.stringify({ action: "APPROVE", note }),
-        });
-
-        const contentType = response.headers.get("content-type") || "";
-        const responseBody = contentType.includes("application/json")
-          ? await response.json()
-          : await response.text();
-
-        if (!response.ok) {
-          const message =
-            typeof responseBody === "string"
-              ? responseBody
-              : responseBody?.message || responseBody?.error || "Failed to approve operation correction.";
-          throw new Error(message);
-        }
+        await reviewOperationCorrection(
+          request.backendCorrectionId,
+          "APPROVE",
+          note,
+          currentUser
+        );
 
         await onOperationCorrectionReviewed?.();
         await onOperationApprovalReviewed?.();
@@ -20412,10 +18755,11 @@ function ApprovalsPage({
       }
 
       try {
-        await api.patch(
-          `/operations/${request.backendOperationId}/review`,
-          { action: "APPROVE", note },
-          { headers: buildOperationRequestHeaders(currentUser) }
+        await reviewOperation(
+          request.backendOperationId,
+          "APPROVE",
+          note,
+          currentUser
         );
 
         await onOperationApprovalReviewed?.();
@@ -20636,33 +18980,12 @@ function ApprovalsPage({
       }
 
       try {
-        const rawBaseUrl =
-          process.env.NEXT_PUBLIC_API_URL ||
-          api?.defaults?.baseURL ||
-          "http://localhost:4000";
-
-        const baseUrl = String(rawBaseUrl).replace(/\/+$/, "");
-        const response = await fetch(`${baseUrl}/operation-corrections/${request.backendCorrectionId}/review`, {
-          method: "PATCH",
-          headers: {
-            ...buildOperationRequestHeaders(currentUser),
-            "Content-Type": "application/json",
-          },
-          body: JSON.stringify({ action: "REJECT", note }),
-        });
-
-        const contentType = response.headers.get("content-type") || "";
-        const responseBody = contentType.includes("application/json")
-          ? await response.json()
-          : await response.text();
-
-        if (!response.ok) {
-          const message =
-            typeof responseBody === "string"
-              ? responseBody
-              : responseBody?.message || responseBody?.error || "Failed to reject operation correction.";
-          throw new Error(message);
-        }
+        await reviewOperationCorrection(
+          request.backendCorrectionId,
+          "REJECT",
+          note,
+          currentUser
+        );
 
         await onOperationCorrectionReviewed?.();
         setSelectedRequest(null);
@@ -20682,10 +19005,11 @@ function ApprovalsPage({
       }
 
       try {
-        await api.patch(
-          `/operations/${request.backendOperationId}/review`,
-          { action: "REJECT", note },
-          { headers: buildOperationRequestHeaders(currentUser) }
+        await reviewOperation(
+          request.backendOperationId,
+          "REJECT",
+          note,
+          currentUser
         );
 
         await onOperationApprovalReviewed?.();
@@ -21397,33 +19721,10 @@ function UsersPage({
     }
 
     try {
-      const roleEndpoints = isPlatformUserContext
-        ? [
-            `/roles?companyId=${encodeURIComponent(targetCompanyId)}`,
-            "/roles",
-          ]
-        : ["/roles"];
-
-      let roles = [];
-      let lastError = null;
-
-      for (const endpoint of roleEndpoints) {
-        try {
-          const response = await api.get(endpoint);
-          const nextRoles = Array.isArray(response.data) ? response.data : [];
-
-          if (nextRoles.length) {
-            roles = nextRoles;
-            break;
-          }
-        } catch (error) {
-          lastError = error;
-        }
-      }
-
-      if (!roles.length && lastError) {
-        throw lastError;
-      }
+      const roles = await fetchRoles({
+        companyId: isPlatformUserContext ? targetCompanyId : "",
+        fallbackToGlobal: true,
+      });
 
       setBackendRoles(roles);
       return roles;
@@ -21456,14 +19757,12 @@ function UsersPage({
           silent: true,
         });
       } else {
-        const usersResponse = await api.get("/users", {
-          params:
+        backendUsers = await fetchUsers({
+          companyId:
             targetCompanyId && !isPlatformContextValue(targetCompanyId)
-              ? { companyId: targetCompanyId }
-              : {},
+              ? targetCompanyId
+              : "",
         });
-
-        backendUsers = Array.isArray(usersResponse.data) ? usersResponse.data : [];
 
         setUsers(
           backendUsers
@@ -21630,8 +19929,8 @@ function UsersPage({
 
     try {
       if (userModalMode === "add") {
-        const response = await api.post("/users", payload);
-        const savedUser = normalizeBackendUserForState(response.data);
+        const savedUserData = await createUserRecord(payload);
+        const savedUser = normalizeBackendUserForState(savedUserData);
 
         setUsers((prev) => [
           savedUser,
@@ -21752,13 +20051,13 @@ function UsersPage({
         ? selectedRoleName
         : selectedRoleOption.id;
 
-      const response = await api.patch(`/users/${user.id}`, {
+      const savedUserData = await updateUserRecord(user.id, {
         roleId: roleValueForBackend,
         role: selectedNormalizedRole,
         roleName: selectedRoleName,
       });
 
-      const savedUser = normalizeBackendUserForState(response.data);
+      const savedUser = normalizeBackendUserForState(savedUserData);
 
       setUsers((prev) =>
         prev.map((item) => (item.id === savedUser.id ? savedUser : item))
@@ -21819,11 +20118,12 @@ function UsersPage({
         }));
 
         try {
-          const response = await api.patch(`/users/${user.id}/status`, {
-            isActive: nextIsActive,
-          });
+          const updatedUserData = await updateUserStatus(
+            user.id,
+            nextIsActive
+          );
 
-          const updatedUser = normalizeBackendUserForState(response.data);
+          const updatedUser = normalizeBackendUserForState(updatedUserData);
 
           setUsers((prev) =>
             prev.map((item) => (item.id === updatedUser.id ? updatedUser : item))
@@ -21892,8 +20192,8 @@ function UsersPage({
         setResettingPassword(true);
 
         try {
-          const response = await api.patch(`/users/${user.id}/reset-password`, {});
-          const temporaryPassword = response.data?.temporaryPassword || "";
+          const resetResult = await resetUserPassword(user.id);
+          const temporaryPassword = resetResult?.temporaryPassword || "";
 
           setUsers((prev) =>
             prev.map((item) =>

@@ -465,3 +465,10 @@ export function formatNumber(value) {
  
   return number.toLocaleString("en-US");
 }
+
+export function makeFieldLabel(field) {
+  return String(field || "Field")
+    .replace(/_/g, " ")
+    .replace(/([a-z])([A-Z])/g, "$1 $2")
+    .replace(/\b\w/g, (char) => char.toUpperCase());
+}

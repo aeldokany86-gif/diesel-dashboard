@@ -78,3 +78,82 @@ export async function getUploadSignedUrl(path, currentUser, expiresIn = 300) {
 
   return responseBody?.signedUrl || responseBody?.url || responseBody?.publicUrl || "";
 }
+
+export async function createOperation(payload, currentUser = {}) {
+  const response = await api.post("/operations", payload, {
+    headers: buildOperationRequestHeaders(currentUser),
+  });
+
+  return response.data;
+}
+
+export async function fetchOperations(currentUser = {}) {
+  const response = await api.get("/operations", {
+    headers: buildOperationRequestHeaders(currentUser),
+  });
+
+  return Array.isArray(response.data) ? response.data : [];
+}
+
+export async function fetchPendingOperationApprovals(currentUser = {}) {
+  const response = await api.get("/operations/pending-approvals", {
+    headers: buildOperationRequestHeaders(currentUser),
+  });
+
+  return Array.isArray(response.data) ? response.data : [];
+}
+
+export async function fetchPendingOperationCorrections(currentUser = {}) {
+  const response = await api.get("/operation-corrections/pending", {
+    headers: buildOperationRequestHeaders(currentUser),
+  });
+
+  return Array.isArray(response.data) ? response.data : [];
+}
+
+export async function createOperationCorrection(payload, currentUser = {}) {
+  const response = await api.post("/operation-corrections", payload, {
+    headers: buildOperationRequestHeaders(currentUser),
+  });
+
+  return response.data;
+}
+
+export async function reviewOperation(
+  operationId,
+  action,
+  note = "",
+  currentUser = {}
+) {
+  if (!operationId) {
+    throw new Error("Operation ID is required.");
+  }
+
+  const response = await api.patch(
+    `/operations/${operationId}/review`,
+    { action, note },
+    { headers: buildOperationRequestHeaders(currentUser) }
+  );
+
+  return response.data;
+}
+
+export async function reviewOperationCorrection(
+  correctionId,
+  action,
+  note = "",
+  currentUser = {}
+) {
+  if (!correctionId) {
+    throw new Error("Operation correction ID is required.");
+  }
+
+  const response = await api.patch(
+    `/operation-corrections/${correctionId}/review`,
+    { action, note },
+    { headers: buildOperationRequestHeaders(currentUser) }
+  );
+
+  return response.data;
+}
+
