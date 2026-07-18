@@ -7,7 +7,12 @@ import {
   useState,
 } from "react";
 
-import { getCurrentUser, logout as logoutService } from "../services/authService";
+import {
+  changePassword as changePasswordService,
+  getCurrentUser,
+  login as loginService,
+  logout as logoutService,
+} from "../services/authService";
 
 const AuthContext = createContext(null);
 
@@ -16,26 +21,47 @@ export function AuthProvider({ children }) {
   const [permissions, setPermissions] = useState([]);
   const [loading, setLoading] = useState(true);
 
+  function applyAuthenticatedUser(user) {
+    setCurrentUser(user || null);
+    setPermissions(user?.permissions || []);
+    return user || null;
+  }
+
   async function loadCurrentUser() {
     try {
       const user = await getCurrentUser();
-
-      setCurrentUser(user);
-      setPermissions(user.permissions || []);
+      return applyAuthenticatedUser(user);
     } catch (error) {
       logoutService();
-      setCurrentUser(null);
-      setPermissions([]);
+      applyAuthenticatedUser(null);
+      throw error;
     } finally {
       setLoading(false);
     }
+  }
+
+  async function login(identifier, password) {
+    const user = await loginService(identifier, password);
+    return applyAuthenticatedUser(user);
+  }
+
+  async function changePassword(currentPassword, newPassword) {
+    const result = await changePasswordService(currentPassword, newPassword);
+
+    if (result?.user) {
+      applyAuthenticatedUser(result.user);
+    }
+
+    return result;
   }
 
   useEffect(() => {
     const token = localStorage.getItem("fleetfuelpro_token");
 
     if (token) {
-      loadCurrentUser();
+      loadCurrentUser().catch(() => {
+        // Invalid or expired token is handled inside loadCurrentUser.
+      });
     } else {
       setLoading(false);
     }
@@ -47,8 +73,7 @@ export function AuthProvider({ children }) {
 
   function logout() {
     logoutService();
-    setCurrentUser(null);
-    setPermissions([]);
+    applyAuthenticatedUser(null);
   }
 
   return (
@@ -57,9 +82,11 @@ export function AuthProvider({ children }) {
         currentUser,
         permissions,
         loading,
-        isLoggedIn: !!currentUser,
+        isLoggedIn: Boolean(currentUser),
         hasPermission,
+        login,
         logout,
+        changePassword,
         reloadUser: loadCurrentUser,
       }}
     >

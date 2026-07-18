@@ -1,0 +1,3021 @@
+"use client";
+
+import React, { useEffect, useMemo, useRef, useState } from "react";
+import {
+  AreaChart,
+  Area,
+  XAxis,
+  YAxis,
+  Tooltip,
+  BarChart,
+  Bar,
+  PieChart,
+  Pie,
+  Cell,
+} from "recharts";
+
+import ChartFrame from "../../components/charts/ChartFrame";
+import Th from "../../components/ui/Th";
+import Td from "../../components/ui/Td";
+import Card from "../../components/ui/Card";
+import { Fuel } from "../../components/icons/SidebarIcons";
+
+import {
+  formatNumber,
+  getHeaderIndex,
+  isSameText,
+  normalizeScopeValue,
+} from "../../lib/helpers";
+
+import {
+  mapFrontendOperationToBackendPayload,
+  normalizeOperationAttachments,
+  getPhotoLabel,
+  getOperationTypeDisplay,
+  getOperationTypeBadgeClass,
+  getOperationTotalCostAtOperation,
+  getAllowedTransactionTypesForUser,
+  isAssetRefuelTransactionType,
+  isExternalDirectRefuelTransactionType,
+  isExternalSupplyTransactionType,
+  isExternalTransferTransactionType,
+  isExternalSourceOperation,
+  isStationCounterTransactionType,
+} from "../../lib/operationHelpers";
+
+import {
+  getUploadSignedUrl,
+  createOperation,
+} from "../../services/operationsService";
+
+import { createOperationCorrection } from "../../services/operationCorrectionsService";
+import { updateProjectFuelPrice } from "../../services/projectsService";
+import OperationCorrectionModal from "./OperationCorrectionModal";
+import AddOperationModal from "./AddOperationModal";
+import useOperationsData from "./hooks/useOperationsData";
+
+const NETWORK_OFFLINE_MESSAGE =
+  "No internet connection. Please check your connection and try again.";
+const BACKEND_UNAVAILABLE_MESSAGE =
+  "Connection to server is unavailable. Please try again.";
+
+function notifyUser(showToastFn, type, message) {
+  const safeType = type || "info";
+  const safeMessage = String(message ?? "");
+
+  if (typeof showToastFn === "function") {
+    showToastFn(safeType, safeMessage);
+    return;
+  }
+
+  if (safeType === "warning" || safeType === "error") {
+    console.warn(safeMessage);
+  } else {
+    console.log(safeMessage);
+  }
+}
+
+function inferToastTypeFromMessage(message) {
+  const normalized = String(message || "").toLowerCase();
+
+  if (
+    normalized.includes("success") ||
+    normalized.includes("saved") ||
+    normalized.includes("updated") ||
+    normalized.includes("exported") ||
+    normalized.includes("completed") ||
+    normalized.includes("submitted") ||
+    normalized.includes("added")
+  ) {
+    return "success";
+  }
+
+  return "warning";
+}
+
+function isBrowserOffline() {
+  return typeof navigator !== "undefined" && navigator.onLine === false;
+}
+
+function isNetworkConnectionError(error) {
+  if (isBrowserOffline()) return true;
+
+  const message = String(error?.message || "").toLowerCase();
+  const code = String(error?.code || "").toUpperCase();
+
+  return (
+    code === "ERR_NETWORK" ||
+    code === "ECONNABORTED" ||
+    message.includes("network error") ||
+    message.includes("failed to fetch") ||
+    (!error?.response && Boolean(error?.request))
+  );
+}
+
+function getFriendlyApiErrorMessage(
+  error,
+  fallbackMessage = BACKEND_UNAVAILABLE_MESSAGE
+) {
+  if (isNetworkConnectionError(error)) return NETWORK_OFFLINE_MESSAGE;
+
+  const backendMessage =
+    error?.response?.data?.message || error?.response?.data?.error;
+
+  if (Array.isArray(backendMessage)) return backendMessage.join(" / ");
+  if (backendMessage) return String(backendMessage);
+
+  return fallbackMessage;
+}
+
+function canUseNetwork(showToastFn) {
+  if (!isBrowserOffline()) return true;
+
+  notifyUser(showToastFn, "warning", NETWORK_OFFLINE_MESSAGE);
+  return false;
+}
+
+function formatProjectFuelPriceDate(value) {
+  if (!value) return "-";
+
+  const date = new Date(value);
+  if (Number.isNaN(date.getTime())) return "-";
+
+  return date.toLocaleString("en-GB", {
+    year: "numeric",
+    month: "2-digit",
+    day: "2-digit",
+    hour: "2-digit",
+    minute: "2-digit",
+  });
+}
+
+function isOfficerUser(user) {
+  return user?.role === "Officer";
+}
+
+function getUserProjectScope(user) {
+  if (!user || !Array.isArray(user.assignedProjects)) return [];
+  return user.assignedProjects;
+}
+
+function userCanAccessAllProjects(user) {
+  if (!user) return false;
+
+  if (["PlatformAdmin", "Admin", "TopManagement"].includes(user.role)) {
+    return true;
+  }
+
+  const scope = getUserProjectScope(user);
+  return scope.includes("All") && !["Operator", "Supervisor"].includes(user.role);
+}
+
+function isProjectAllowedForUser(user, projectValue, projects = []) {
+  if (userCanAccessAllProjects(user)) return true;
+
+  const scope = getUserProjectScope(user);
+  if (!scope.length || !projectValue) return false;
+
+  const normalizedScope = scope.map(normalizeScopeValue);
+  const normalizedProjectValue = normalizeScopeValue(projectValue);
+
+  if (normalizedScope.includes(normalizedProjectValue)) return true;
+
+  const matchedProject = projects.find((project) => {
+    const projectId = normalizeScopeValue(project.id);
+    const projectName = normalizeScopeValue(project.name);
+
+    return (
+      projectId === normalizedProjectValue ||
+      projectName === normalizedProjectValue
+    );
+  });
+
+  if (!matchedProject) return false;
+
+  return (
+    normalizedScope.includes(normalizeScopeValue(matchedProject.id)) ||
+    normalizedScope.includes(normalizeScopeValue(matchedProject.name))
+  );
+}
+
+function useOutsideClick(ref, handler) {
+  useEffect(() => {
+    function listener(event) {
+      if (!ref.current || ref.current.contains(event.target)) return;
+
+      handler(event);
+    }
+
+    document.addEventListener("mousedown", listener);
+    document.addEventListener("touchstart", listener);
+
+    return () => {
+      document.removeEventListener("mousedown", listener);
+      document.removeEventListener("touchstart", listener);
+    };
+  }, [ref, handler]);
+}
+
+export default function OperationsPage({
+  data,
+  headers,
+  setData,
+  assets,
+  stations,
+  allStations = [],
+  fuelers,
+  literPrice = 2.33,
+  getLiterPriceByDate,
+  currency = "SAR",
+  assetProjectHistory = [],
+  currentUser,
+  contextCompanyId = "",
+  hasPermission = () => false,
+  trackActivity = () => {},
+  submitApprovalRequest = () => {},
+  projects = [],
+  showToast,
+
+  assetOdometerHistory,
+  stationCounterResetHistory,}) {
+
+  const {
+    refreshOperations,
+    operationsLoading,
+    operationsError,
+    operationsLoaded,
+  } = useOperationsData({
+    currentUser,
+    setData,
+  });
+
+  const getLatestResetRecordForEntity = (history = [], entityId, companyId = "") => {
+    return (history || [])
+      .filter((item) => {
+        const sameEntity = isSameText(item.assetId || item.stationId || item.entityId, entityId);
+        const sameCompany = !companyId || !item.companyId || companyMatches(item.companyId, companyId);
+        return sameEntity && sameCompany;
+      })
+      .sort((a, b) => {
+        const da = new Date(a.effectiveFrom || a.createdAt).getTime() || 0;
+        const db = new Date(b.effectiveFrom || b.createdAt).getTime() || 0;
+        return db - da;
+      })[0];
+  };
+
+  const getEffectiveLastAssetReading = (assetId) => {
+    const asset = assets.find((item) => isSameText(item.id, assetId));
+    const assetCompanyId = asset?.companyId || currentUser?.companyId || "";
+    const latestReset = getLatestResetRecordForEntity(assetOdometerHistory, assetId, assetCompanyId);
+    const resetTime = latestReset ? new Date(latestReset.effectiveFrom || latestReset.createdAt).getTime() || 0 : 0;
+
+    const typeIndexLocal = getHeaderIndex(headers, ["transaction_type", "Transaction type", "transaction type", "operation_type", "Operation type"]);
+    const destinationIndexLocal = getHeaderIndex(headers, ["destination_id", "Destination ID", "destination id", "destination", "equipment_no", "Equipment No", "asset_id", "Asset ID"]);
+    const odometerIndexLocal = getHeaderIndex(headers, ["odometer_at_fueling", "Odometer at fueling", "odometer at fueling", "odometer", "hour_meter", "Hour Meter"]);
+    const dateIndexLocal = getHeaderIndex(headers, ["transaction_datetime", "Transaction datetime", "transaction datetime", "date"]);
+
+    const latestOperation = data
+      .map((row, originalIndex) => ({ row, originalIndex }))
+      .filter(({ row }) => {
+        if (typeIndexLocal === -1 || destinationIndexLocal === -1 || odometerIndexLocal === -1) return false;
+        const rowTime = dateIndexLocal !== -1 ? new Date(row[dateIndexLocal]).getTime() || 0 : 0;
+        return rowTime >= resetTime && isAssetRefuelTransactionType(row[typeIndexLocal]) && isSameText(row[destinationIndexLocal], assetId) && !Number.isNaN(parseFloat(row[odometerIndexLocal]));
+      })
+      .sort((a, b) => {
+        const da = dateIndexLocal !== -1 ? new Date(a.row[dateIndexLocal]).getTime() || 0 : 0;
+        const db = dateIndexLocal !== -1 ? new Date(b.row[dateIndexLocal]).getTime() || 0 : 0;
+        return db - da || b.originalIndex - a.originalIndex;
+      })[0];
+
+    if (latestOperation) return parseFloat(latestOperation.row[odometerIndexLocal]) || 0;
+    if (latestReset) return parseFloat(latestReset.newReading ?? latestReset.resetReading ?? latestReset.reading) || 0;
+    return parseFloat(asset?.odometer) || 0;
+  };
+  const getEffectiveLastStationCounter = (stationId) => {
+    const station = stations.find((item) => isSameText(item.id, stationId));
+    const stationCompanyId = station?.companyId || currentUser?.companyId || "";
+    const latestReset = getLatestResetRecordForEntity(
+      stationCounterResetHistory,
+      stationId,
+      stationCompanyId
+    );
+    const resetTime = latestReset
+      ? new Date(latestReset.effectiveFrom || latestReset.createdAt).getTime() || 0
+      : 0;
+
+    const typeIndexLocal = getHeaderIndex(headers, [
+      "transaction_type",
+      "Transaction type",
+      "transaction type",
+      "operation_type",
+      "Operation type",
+    ]);
+
+    const destinationIndexLocal = getHeaderIndex(headers, [
+      "destination_id",
+      "Destination ID",
+      "destination id",
+      "destination",
+    ]);
+
+    const counterIndexLocal = getHeaderIndex(headers, [
+      "odometer_at_fueling",
+      "Odometer at fueling",
+      "odometer at fueling",
+    ]);
+
+    const dateIndexLocal = getHeaderIndex(headers, [
+      "transaction_datetime",
+      "Transaction datetime",
+      "transaction datetime",
+      "date",
+    ]);
+
+    const latestOperation = data
+      .map((row, originalIndex) => ({ row, originalIndex }))
+      .filter(({ row }) => {
+        if (
+          typeIndexLocal === -1 ||
+          destinationIndexLocal === -1 ||
+          counterIndexLocal === -1
+        ) {
+          return false;
+        }
+
+        const type = row[typeIndexLocal];
+        if (isSameText(type, "Direct_Refuel")) return false;
+
+        const rowTime =
+          dateIndexLocal !== -1
+            ? new Date(row[dateIndexLocal]).getTime() || 0
+            : 0;
+
+        const destination = row[destinationIndexLocal];
+
+        return (
+          rowTime >= resetTime &&
+          (isSameText(type, "Internal_Transfer") ||
+            isSameText(type, "External_Transfer") ||
+            isSameText(type, "External_Supply")) &&
+          isSameText(destination, stationId) &&
+          !Number.isNaN(parseFloat(row[counterIndexLocal]))
+        );
+      })
+      .sort((a, b) => {
+        const da =
+          dateIndexLocal !== -1
+            ? new Date(a.row[dateIndexLocal]).getTime() || 0
+            : 0;
+        const db =
+          dateIndexLocal !== -1
+            ? new Date(b.row[dateIndexLocal]).getTime() || 0
+            : 0;
+        return db - da || b.originalIndex - a.originalIndex;
+      })[0];
+
+    if (latestOperation) return parseFloat(latestOperation.row[counterIndexLocal]) || 0;
+    if (latestReset) {
+      return parseFloat(latestReset.newReading ?? latestReset.resetReading ?? latestReset.reading) || 0;
+    }
+
+    return parseFloat(station?.openingCounter) || parseFloat(station?.counter) || 0;
+  };
+
+const [showForm, setShowForm] = useState(false);
+  const [transactionType, setTransactionType] = useState("");
+  const [stationMeterPhoto, setStationMeterPhoto] = useState(null);
+  const [assetPhoto, setAssetPhoto] = useState(null);
+  const [assetMeterPhoto, setAssetMeterPhoto] = useState(null);
+  const [invoicePhoto, setInvoicePhoto] = useState(null);
+
+  // Filters
+  const [fromDate, setFromDate] = useState("");
+  const [toDate, setToDate] = useState("");
+  const [showDateFilter, setShowDateFilter] = useState(false);
+
+  const [startMonth, setStartMonth] = useState(new Date().getMonth());
+  const [startYear, setStartYear] = useState(new Date().getFullYear());
+  const [endMonth, setEndMonth] = useState(new Date().getMonth());
+  const [endYear, setEndYear] = useState(new Date().getFullYear());
+
+  const [selectedEquipment, setSelectedEquipment] = useState([]);
+  const [selectedEquipmentType, setSelectedEquipmentType] = useState([]);
+  const [selectedProject, setSelectedProject] = useState([]);
+  const [equipmentSearch, setEquipmentSearch] = useState("");
+  const [equipmentTypeSearch, setEquipmentTypeSearch] = useState("");
+  const [projectSearch, setProjectSearch] = useState("");
+  const [showEquipmentDropdown, setShowEquipmentDropdown] = useState(false);
+  const [showEquipmentTypeDropdown, setShowEquipmentTypeDropdown] = useState(false);
+  const [showProjectDropdown, setShowProjectDropdown] = useState(false);
+
+  // Table export menus
+  const [showEquipmentSummarySettings, setShowEquipmentSummarySettings] =
+    useState(false);
+  const [showEquipmentTypeSettings, setShowEquipmentTypeSettings] =
+    useState(false);
+  const [showDailyConsumptionSettings, setShowDailyConsumptionSettings] =
+    useState(false);
+
+  const dateFilterRef = useRef(null);
+  const equipmentDropdownRef = useRef(null);
+  const equipmentTypeDropdownRef = useRef(null);
+  const projectDropdownRef = useRef(null);
+  const equipmentSummarySettingsRef = useRef(null);
+  const equipmentTypeSettingsRef = useRef(null);
+  const dailyConsumptionSettingsRef = useRef(null);
+
+  useOutsideClick(dateFilterRef, () => setShowDateFilter(false));
+  useOutsideClick(equipmentDropdownRef, () => setShowEquipmentDropdown(false));
+  useOutsideClick(equipmentTypeDropdownRef, () =>
+    setShowEquipmentTypeDropdown(false)
+  );
+  useOutsideClick(projectDropdownRef, () => setShowProjectDropdown(false));
+  useOutsideClick(equipmentSummarySettingsRef, () =>
+    setShowEquipmentSummarySettings(false)
+  );
+  useOutsideClick(equipmentTypeSettingsRef, () =>
+    setShowEquipmentTypeSettings(false)
+  );
+  useOutsideClick(dailyConsumptionSettingsRef, () =>
+    setShowDailyConsumptionSettings(false)
+  );
+
+  // Operation review / edit
+  const [selectedEquipmentHistory, setSelectedEquipmentHistory] = useState(null);
+  const [operationPhotoViewer, setOperationPhotoViewer] = useState(null);
+  const [operationPhotoViewerLoading, setOperationPhotoViewerLoading] = useState(false);
+  const [editedRows, setEditedRows] = useState({});
+  const [localAddedRows, setLocalAddedRows] = useState([]);
+  const [auditLog, setAuditLog] = useState([]);
+  const [editCell, setEditCell] = useState(null);
+
+
+  const dieselIndex = getHeaderIndex(headers, [
+    "diesel_quantity",
+    "Diesel quantity",
+    "diesel quantity",
+    "quantity",
+    "qty",
+  ]);
+  const typeIndex = getHeaderIndex(headers, [
+    "transaction_type",
+    "Transaction type",
+    "transaction type",
+    "operation_type",
+    "Operation type",
+  ]);
+  const sourceIndex = getHeaderIndex(headers, [
+    "source_station",
+    "Source station",
+    "source station",
+    "source_station_id",
+    "station_id",
+  ]);
+  const destinationIndex = getHeaderIndex(headers, [
+    "destination_id",
+    "Destination ID",
+    "destination id",
+    "destination",
+  ]);
+  const odometerIndex = getHeaderIndex(headers, [
+    "odometer_at_fueling",
+    "Odometer at fueling",
+    "odometer at fueling",
+    "odometer",
+  ]);
+  const dateIndex = getHeaderIndex(headers, [
+    "transaction_datetime",
+    "Transaction datetime",
+    "transaction datetime",
+    "date",
+  ]);
+
+  const externalStationNameIndex = getHeaderIndex(headers, [
+    "external_station_name",
+    "External station name",
+    "external station name",
+    "externalStationName",
+    "supplier",
+    "supplier_name",
+  ]);
+
+  const buildExternalSourceHistory = (targetTransactionType) => {
+    if (externalStationNameIndex === -1) return [];
+
+    const seen = new Set();
+
+    return data
+      .filter((row) => {
+        if (typeIndex === -1) return true;
+        return isSameText(row[typeIndex], targetTransactionType);
+      })
+      .map((row) => String(row[externalStationNameIndex] || "").trim())
+      .filter((name) => {
+        if (!name) return false;
+        const key = name.toLowerCase();
+        if (seen.has(key)) return false;
+        seen.add(key);
+        return true;
+      })
+      .sort((a, b) => a.localeCompare(b));
+  };
+
+  const externalStationHistory = buildExternalSourceHistory("External_Direct_Refuel");
+  const externalSupplierHistory = buildExternalSourceHistory("External_Supply");
+
+  const fuelerIndex = getHeaderIndex(headers, [
+    "fueler_id",
+    "Operator ID",
+    "fueler id",
+    "fueler",
+  ]);
+
+  const formatProjectFuelPriceDate = (rawDate) => {
+    if (!rawDate) return "-";
+    const date = new Date(rawDate);
+    if (Number.isNaN(date.getTime())) return "-";
+
+    return date.toLocaleString("en-GB", {
+      year: "numeric",
+      month: "2-digit",
+      day: "2-digit",
+      hour: "2-digit",
+      minute: "2-digit",
+    });
+  };
+
+  const openFuelPriceModal = (project) => {
+    if (!hasPermission("projects", "edit")) {
+      showToast?.("warning", "Read-only access: you cannot update project fuel price.");
+      return;
+    }
+
+    if (!project?.backendId) {
+      showToast?.("warning", "Project must be saved in backend before updating fuel price.");
+      return;
+    }
+
+    setSelectedProjectForFuelPrice(project);
+    setFuelPriceForm({
+      pricePerLiter:
+        project.currentFuelPrice === undefined || project.currentFuelPrice === null
+          ? ""
+          : String(project.currentFuelPrice),
+      effectiveFrom: project.fuelPriceEffectiveFrom
+        ? new Date(project.fuelPriceEffectiveFrom).toISOString().slice(0, 16)
+        : new Date().toISOString().slice(0, 16),
+      reason: "",
+    });
+    setFuelPriceModalOpen(true);
+  };
+
+  const closeFuelPriceModal = () => {
+    setFuelPriceModalOpen(false);
+    setSelectedProjectForFuelPrice(null);
+    setFuelPriceForm({
+      pricePerLiter: "",
+      effectiveFrom: "",
+      reason: "",
+    });
+    setFuelPriceSaving(false);
+  };
+
+  const saveProjectFuelPrice = async () => {
+    if (!selectedProjectForFuelPrice?.backendId) {
+      showToast?.("warning", "Project backend ID is required.");
+      return;
+    }
+
+    const pricePerLiter = Number(fuelPriceForm.pricePerLiter);
+
+    if (!Number.isFinite(pricePerLiter) || pricePerLiter <= 0) {
+      showToast?.("warning", "Fuel price must be greater than zero.");
+      return;
+    }
+
+    if (!fuelPriceForm.effectiveFrom) {
+      showToast?.("warning", "Effective date is required.");
+      return;
+    }
+
+    setFuelPriceSaving(true);
+
+    try {
+      const updatedPrice =
+        (await updateProjectFuelPrice(
+          selectedProjectForFuelPrice.backendId,
+          {
+            pricePerLiter,
+            effectiveFrom: new Date(fuelPriceForm.effectiveFrom).toISOString(),
+            reason: fuelPriceForm.reason?.trim() || "Project fuel price update",
+            ...(currentUser?.id ? { createdByUserId: currentUser.id } : {}),
+          }
+        )) || {};
+      const nextFuelPrice = Number(updatedPrice.pricePerLiter || pricePerLiter);
+      const nextCurrency =
+        updatedPrice.currency ||
+        selectedProjectForFuelPrice.fuelPriceCurrency ||
+        currentCompany?.currency ||
+        currency ||
+        "SAR";
+      const nextEffectiveFrom = updatedPrice.effectiveFrom || new Date(fuelPriceForm.effectiveFrom).toISOString();
+
+      const patchProject = (project) => ({
+        ...project,
+        currentFuelPrice: nextFuelPrice,
+        fuelPriceCurrency: nextCurrency,
+        fuelPriceEffectiveFrom: nextEffectiveFrom,
+      });
+
+      setLocalProjects((prev) => {
+        const key = normalizeScopeValue(selectedProjectForFuelPrice.id);
+        const exists = prev.some((project) => normalizeScopeValue(project.id) === key);
+
+        if (exists) {
+          return prev.map((project) =>
+            normalizeScopeValue(project.id) === key ? patchProject(project) : project
+          );
+        }
+
+        return [...prev, patchProject(selectedProjectForFuelPrice)];
+      });
+
+      if (selectedProject && normalizeScopeValue(selectedProject.id) === normalizeScopeValue(selectedProjectForFuelPrice.id)) {
+        setSelectedProject((prev) => (prev ? patchProject(prev) : prev));
+      }
+
+      trackActivity?.(
+        "Update Project Fuel Price",
+        "projects",
+        `${selectedProjectForFuelPrice.id} fuel price updated to ${nextFuelPrice} ${nextCurrency}/L.`
+      );
+
+      showToast?.("success", "Project fuel price updated successfully.");
+      closeFuelPriceModal();
+    } catch (error) {
+      const backendMessage = error?.response?.data?.message || "Failed to update project fuel price.";
+      notifyUser(
+        typeof showToast !== "undefined" ? showToast : null,
+        "warning",
+        Array.isArray(backendMessage) ? backendMessage.join(", ") : backendMessage
+      );
+    } finally {
+      setFuelPriceSaving(false);
+    }
+  };
+
+  const operationIdIndex = getHeaderIndex(headers, [
+    "operation_id",
+    "Operation ID",
+    "operation id",
+    "transaction_id",
+    "Transaction ID",
+    "transaction id",
+    "id",
+  ]);
+
+  const buildLookupCandidates = (...values) =>
+    values
+      .flatMap((value) => (Array.isArray(value) ? value : [value]))
+      .filter((value) => value !== undefined && value !== null && String(value).trim() !== "")
+      .map(normalizeScopeValue);
+
+  const getAsset = (assetId) => {
+    const candidates = buildLookupCandidates(assetId);
+    if (!candidates.length) return null;
+
+    return assets.find((asset) => {
+      const assetCandidates = buildLookupCandidates(
+        asset?.id,
+        asset?.assetId,
+        asset?.backendId,
+        asset?.assetBackendId,
+        asset?.equipmentNo,
+        asset?.equipmentNumber,
+        asset?.equipment_no,
+        asset?.equipment_number
+      );
+
+      return assetCandidates.some((candidate) => candidates.includes(candidate));
+    }) || null;
+  };
+
+  const getStation = (stationId) => {
+    const candidates = buildLookupCandidates(stationId);
+    if (!candidates.length) return null;
+
+    return stations.find((station) => {
+      const stationCandidates = buildLookupCandidates(
+        station?.id,
+        station?.stationId,
+        station?.backendId,
+        station?.stationBackendId,
+        station?.stationCode,
+        station?.code,
+        station?.name
+      );
+
+      return stationCandidates.some((candidate) => candidates.includes(candidate));
+    }) || null;
+  };
+
+  const getProject = (projectValue) => {
+    const candidates = buildLookupCandidates(projectValue);
+    if (!candidates.length) return null;
+
+    return projects.find((project) => {
+      const projectCandidates = buildLookupCandidates(
+        project?.id,
+        project?.backendId,
+        project?.code,
+        project?.name,
+        project?.projectId,
+        project?.projectName
+      );
+
+      return projectCandidates.some((candidate) => candidates.includes(candidate));
+    }) || null;
+  };
+
+  const getAssetDisplayCode = (assetId) => {
+    const asset = getAsset(assetId);
+    return asset?.assetId || asset?.equipmentNo || asset?.equipmentNumber || asset?.id || assetId || "-";
+  };
+
+  const getStationDisplayCode = (stationId) => {
+    const station = getStation(stationId);
+    return station?.stationId || station?.code || station?.id || stationId || "-";
+  };
+
+  const getFuelerDisplayName = (fuelerId) => {
+    const fueler = getFueler(fuelerId);
+    return fueler?.name || fueler?.fullName || fueler?.employeeName || fueler?.id || fuelerId || "-";
+  };
+
+  const getOperationCorrectionDisplayValue = (field, value) => {
+    if (field === "equipment") return getAssetDisplayCode(value);
+    if (field === "station") return getStationDisplayCode(value);
+    if (field === "fueler") return getFuelerDisplayName(value);
+    return value === undefined || value === null || value === "" ? "-" : String(value);
+  };
+
+  const getOperationCorrectionFieldName = (field) => {
+    const map = {
+      equipment: "ASSET",
+      station: "SOURCE_STATION",
+      diesel: "QUANTITY",
+      odometer: "ODOMETER",
+      fueler: "FUELER",
+    };
+
+    return map[field] || field;
+  };
+
+  const getOperationCorrectionBackendId = (row = []) => {
+    const backendOperationIdIndex = headers?.indexOf?.("backend_operation_id") ?? -1;
+    return (
+      row?.__operation?.id ||
+      (backendOperationIdIndex !== -1 ? row?.[backendOperationIdIndex] : "") ||
+      ""
+    );
+  };
+
+  const getProjectDisplayName = (projectValue) => {
+    const project = getProject(projectValue);
+    return project?.name || project?.code || projectValue || "-";
+  };
+
+  const getProjectFuelPriceValue = (projectValue, transactionDate) => {
+    const project = getProject(projectValue);
+    const projectPrice = Number(project?.currentFuelPrice || 0);
+
+    if (projectPrice > 0) return projectPrice;
+
+    return getLiterPriceByDate
+      ? getLiterPriceByDate(transactionDate)
+      : literPrice;
+  };
+
+  const getFueler = (fuelerId) => fuelers.find((f) => f.id === fuelerId);
+
+  const getAssetProjectByDate = (assetId, transactionDate) => {
+    const asset = getAsset(assetId);
+
+    const operationDate = parseOperationDate(transactionDate);
+
+    if (!assetId || !operationDate) {
+      return asset?.project || "-";
+    }
+
+    const history = assetProjectHistory
+      .filter((item) => {
+        const historyCandidates = buildLookupCandidates(item.assetId, item.assetBackendId, item.backendId);
+        const assetCandidates = buildLookupCandidates(assetId, asset?.id, asset?.assetId, asset?.backendId, asset?.assetBackendId);
+        return historyCandidates.some((candidate) => assetCandidates.includes(candidate));
+      })
+      .filter((item) => item.effectiveDate)
+      .sort(
+        (a, b) => new Date(a.effectiveDate) - new Date(b.effectiveDate)
+      );
+
+    if (history.length === 0) {
+      return asset?.project || "-";
+    }
+
+    let project = history[0]?.oldProject || asset?.project || "-";
+
+    history.forEach((item) => {
+      const effectiveDate = new Date(item.effectiveDate);
+
+      if (
+        !Number.isNaN(effectiveDate.getTime()) &&
+        effectiveDate <= operationDate
+      ) {
+        project = item.newProject || project;
+      }
+    });
+
+    return project || asset?.project || "-";
+  };
+
+  const destinationOptions =
+    isAssetRefuelTransactionType(transactionType)
+      ? assets.map((a) => a.id)
+      : transactionType === "Internal_Transfer"
+      ? stations.map((s) => s.id)
+      : transactionType === "External_Supply" || transactionType === "External_Transfer"
+      ? stations.map((s) => s.id)
+      : [];
+
+  const closeForm = () => {
+    setShowForm(false);
+    setTransactionType("");
+    setStationMeterPhoto(null);
+    setAssetPhoto(null);
+    setAssetMeterPhoto(null);
+    setInvoicePhoto(null);
+  };
+
+  const saveNewOperation = async (operation) => {
+    if (!canUseNetwork(showToast)) return;
+
+    try {
+      const selectedSourceStation = stations.find(
+  (station) =>
+    station.id === operation.sourceStation ||
+    station.stationId === operation.sourceStation ||
+    station.backendId === operation.sourceStation
+);
+
+const selectedDestinationStation = allStations.find(
+  (station) =>
+    station.id === operation.destinationId ||
+    station.stationId === operation.destinationId ||
+    station.backendId === operation.destinationId
+);
+
+const selectedAsset = assets.find(
+  (asset) =>
+    asset.id === operation.destinationId ||
+    asset.assetId === operation.destinationId ||
+    asset.backendId === operation.destinationId ||
+    asset.assetBackendId === operation.destinationId
+);
+
+const payload = mapFrontendOperationToBackendPayload({
+  ...operation,
+  sourceStation:
+    selectedSourceStation?.backendId ||
+    selectedSourceStation?.id ||
+    operation.sourceStation,
+  destinationId:
+    selectedAsset?.backendId ||
+    selectedAsset?.assetBackendId ||
+    selectedDestinationStation?.backendId ||
+    selectedDestinationStation?.id ||
+    operation.destinationId,
+});
+
+      const createdOperation = await createOperation(payload, currentUser);
+
+      const backendMessage =
+        createdOperation?.message || "Operation saved successfully.";
+      const backendStatus = String(createdOperation?.status || "").toUpperCase();
+      const toastType = backendStatus === "COMPLETED" ? "success" : "warning";
+
+      // The backend has confirmed that the operation was saved.
+      // Close the form immediately and refresh the operations list in the background.
+      closeForm();
+      showToast?.(toastType, backendMessage);
+      setLocalAddedRows([]);
+
+      trackActivity(
+        "Add Operation",
+        "operations",
+        `${operation.transactionType} ${createdOperation?.operationNo || createdOperation?.operationId || operation.operationId} saved through backend.`
+      );
+
+      void refreshOperations({ silent: true });
+    } catch (error) {
+      showToast?.(
+        "warning",
+        getFriendlyApiErrorMessage(error, "Failed to save operation.")
+      );
+    }
+  };
+
+  const deleteProject = async (project) => {
+    if (!hasPermission("projects", "delete")) {
+      showToast?.("warning", "Read-only access: you cannot delete projects.");
+      return;
+    }
+
+    const projectLabel = project?.name || project?.id || "this project";
+    const confirmed = window.confirm(
+      `Are you sure you want to delete ${projectLabel}?\n\nThis will hide the project from active screens, but it will remain in the database for audit history.`
+    );
+
+    if (!confirmed) return;
+
+    try {
+      if (typeof onDeleteProject === "function" && project?.backendId) {
+        await onDeleteProject(project);
+      } else {
+        setLocalProjects((prev) => prev.filter((item) => !isSameText(item.id, project.id)));
+      }
+
+      if (selectedProject && isSameText(selectedProject.id, project.id)) {
+        setSelectedProject(null);
+      }
+
+      trackActivity?.("Delete Project", "projects", `${project.id} was soft deleted.`);
+      showToast?.("success", "Project deleted successfully.");
+    } catch (error) {
+      const backendMessage = error?.response?.data?.message || "Failed to delete project.";
+      notifyUser(
+        typeof showToast !== "undefined" ? showToast : null,
+        "warning",
+        Array.isArray(backendMessage) ? backendMessage.join(", ") : backendMessage
+      );
+    }
+  };
+
+  const exportRowsToCSV = (fileName, csvHeaders, csvRows) => {
+    const csvContent = [csvHeaders, ...csvRows]
+      .map((row) =>
+        row
+          .map((cell) => `"${String(cell ?? "").replace(/"/g, '""')}"`)
+          .join(",")
+      )
+      .join("\n");
+
+    const blob = new Blob([csvContent], {
+      type: "text/csv;charset=utf-8;",
+    });
+
+    const url = URL.createObjectURL(blob);
+    const link = document.createElement("a");
+    const today = new Date().toISOString().split("T")[0];
+
+    link.href = url;
+    link.download = `${fileName}_${today}.csv`;
+    link.click();
+
+    URL.revokeObjectURL(url);
+  };
+
+  const printTable = (tableId, title = "Table Report") => {
+    const tableElement = document.getElementById(tableId);
+
+    if (!tableElement) return;
+
+    const printWindow = window.open("", "", "width=1400,height=900");
+
+    printWindow.document.write(`
+      <html>
+        <head>
+          <title>${title}</title>
+
+          <style>
+            body {
+              font-family: Arial, sans-serif;
+              padding: 25px;
+              color: #111;
+            }
+
+            h2 {
+              margin-bottom: 20px;
+              font-size: 22px;
+            }
+
+            .report-meta {
+              margin-bottom: 18px;
+              font-size: 12px;
+              color: #555;
+            }
+
+            table {
+              width: 100%;
+              border-collapse: collapse;
+              font-size: 13px;
+            }
+
+            th, td {
+              border: 1px solid #ccc;
+              padding: 8px 10px;
+              text-align: left;
+            }
+
+            th {
+              background: #f3f4f6;
+              font-weight: bold;
+            }
+
+            tr:nth-child(even) {
+              background: #fafafa;
+            }
+
+            @media print {
+              body {
+                padding: 15px;
+              }
+            }
+          </style>
+        </head>
+
+        <body>
+          <h2>${title}</h2>
+          <div class="report-meta">
+            Generated at: ${new Date().toLocaleString()}
+          </div>
+
+          ${tableElement.outerHTML}
+        </body>
+      </html>
+    `);
+
+    printWindow.document.close();
+    printWindow.focus();
+    printWindow.print();
+  };
+
+  const exportEquipmentSummaryCSV = () => {
+    exportRowsToCSV(
+      "equipment_consumption_summary",
+      [
+        "#",
+        "Equipment No.",
+        "Project",
+        "Equipment Type",
+        "Last Odometer",
+        "Fuel Consumption",
+        "Total Cost",
+        "Distance",
+        "Efficiency",
+      ],
+      equipmentSummary.map((item, i) => [
+        i + 1,
+        item.equipmentNo,
+        item.project,
+        item.equipmentType,
+        item.lastOdometer,
+        item.fuelConsumption,
+        item.totalCost,
+        item.distance,
+        item.efficiency,
+      ])
+    );
+
+    setShowEquipmentSummarySettings(false);
+  };
+
+  const exportEquipmentTypeSummaryCSV = () => {
+    exportRowsToCSV(
+      "consumption_by_equipment_type",
+      ["#", "Equipment Type", "Qty Liters", "Total Cost"],
+      equipmentTypeConsumptionSummary.map((item, i) => [
+        i + 1,
+        item.equipmentType,
+        item.qtyLiters,
+        item.totalCost,
+      ])
+    );
+
+    setShowEquipmentTypeSettings(false);
+  };
+
+  const exportDailyConsumptionCSV = () => {
+    exportRowsToCSV(
+      "daily_consumption",
+      ["#", "Date", "Qty Liters", "Total Cost"],
+      dailyConsumptionSummary.map((item, i) => [
+        i + 1,
+        item.dateKey,
+        item.qtyLiters,
+        item.totalCost,
+      ])
+    );
+
+    setShowDailyConsumptionSettings(false);
+  };
+
+  const formatDateKey = (year, monthIndex, day) => {
+    const month = String(monthIndex + 1).padStart(2, "0");
+    const date = String(day).padStart(2, "0");
+    return `${year}-${month}-${date}`;
+  };
+
+  const parseOperationDate = (rawDate) => {
+    if (!rawDate) return null;
+    const d = new Date(rawDate);
+    if (Number.isNaN(d.getTime())) return null;
+    return d;
+  };
+
+  const formatDisplayDate = (rawDate) => {
+    const d = parseOperationDate(rawDate);
+    if (!d) return rawDate || "-";
+
+    return d.toLocaleString("en-GB", {
+      year: "numeric",
+      month: "2-digit",
+      day: "2-digit",
+      hour: "2-digit",
+      minute: "2-digit",
+    });
+  };
+
+  const getMonthName = (monthIndex) => {
+    return new Date(2026, monthIndex, 1).toLocaleString("en-US", {
+      month: "short",
+    }).toUpperCase();
+  };
+
+  const getDaysInMonth = (year, monthIndex) => {
+    return new Date(year, monthIndex + 1, 0).getDate();
+  };
+
+  const moveMonth = (calendar, direction) => {
+    if (calendar === "start") {
+      let newMonth = startMonth + direction;
+      let newYear = startYear;
+
+      if (newMonth < 0) {
+        newMonth = 11;
+        newYear -= 1;
+      }
+
+      if (newMonth > 11) {
+        newMonth = 0;
+        newYear += 1;
+      }
+
+      setStartMonth(newMonth);
+      setStartYear(newYear);
+    }
+
+    if (calendar === "end") {
+      let newMonth = endMonth + direction;
+      let newYear = endYear;
+
+      if (newMonth < 0) {
+        newMonth = 11;
+        newYear -= 1;
+      }
+
+      if (newMonth > 11) {
+        newMonth = 0;
+        newYear += 1;
+      }
+
+      setEndMonth(newMonth);
+      setEndYear(newYear);
+    }
+  };
+
+  const renderCalendarDays = (year, monthIndex, selectedDate, onSelect) => {
+    const days = getDaysInMonth(year, monthIndex);
+    const firstDay = new Date(year, monthIndex, 1).getDay();
+    const blanks = Array.from({ length: firstDay }, (_, i) => i);
+
+    return (
+      <div className="grid grid-cols-7 gap-1 text-center">
+        {["S", "M", "T", "W", "T", "F", "S"].map((day, i) => (
+          <div key={i} className="text-[11px] text-gray-400 py-1">
+            {day}
+          </div>
+        ))}
+
+        {blanks.map((blank) => (
+          <div key={`blank-${blank}`} />
+        ))}
+
+        {Array.from({ length: days }, (_, i) => i + 1).map((day) => {
+          const dateKey = formatDateKey(year, monthIndex, day);
+          const isSelected = selectedDate === dateKey;
+
+          return (
+            <button
+              key={day}
+              onClick={() => onSelect(dateKey)}
+              className={`w-8 h-8 rounded-full text-sm transition ${
+                isSelected
+                  ? "bg-yellow-500 text-black font-bold"
+                  : "hover:bg-gray-700"
+              }`}
+            >
+              {day}
+            </button>
+          );
+        })}
+      </div>
+    );
+  };
+
+  const applyEditsToRow = (row, originalIndex) => {
+    const updates = editedRows[originalIndex];
+    if (!updates) return row;
+
+    const newRow = [...row];
+
+    // Preserve hidden backend fields attached to the row array.
+    // Spreading an array drops custom properties like __operation / __attachments.
+    newRow.__operation = row.__operation;
+    newRow.__attachments = row.__attachments;
+
+    if (updates.destinationId !== undefined && destinationIndex !== -1) {
+      newRow[destinationIndex] = updates.destinationId;
+    }
+
+    if (updates.dieselQuantity !== undefined && dieselIndex !== -1) {
+      newRow[dieselIndex] = updates.dieselQuantity;
+    }
+
+    if (updates.odometer !== undefined && odometerIndex !== -1) {
+      newRow[odometerIndex] = updates.odometer;
+    }
+
+    if (updates.sourceStation !== undefined && sourceIndex !== -1) {
+      newRow[sourceIndex] = updates.sourceStation;
+    }
+
+    if (updates.fuelerId !== undefined && fuelerIndex !== -1) {
+      newRow[fuelerIndex] = updates.fuelerId;
+    }
+
+    return newRow;
+  };
+
+  const combinedData = [...data, ...localAddedRows];
+
+  const workingData = combinedData.map((row, originalIndex) => ({
+    row: applyEditsToRow(row, originalIndex),
+    originalIndex,
+  }));
+
+  const directRefuelData = workingData.filter(
+    (item) => isAssetRefuelTransactionType(item.row[typeIndex])
+  );
+
+  const dateFilteredData = directRefuelData.filter((item) => {
+    const rawDate = item.row[dateIndex];
+    const operationDate = parseOperationDate(rawDate);
+
+    if (!operationDate) return false;
+
+    if (fromDate) {
+      const from = new Date(fromDate);
+      from.setHours(0, 0, 0, 0);
+
+      if (operationDate < from) return false;
+    }
+
+    if (toDate) {
+      const to = new Date(toDate);
+      to.setHours(23, 59, 59, 999);
+
+      if (operationDate > to) return false;
+    }
+
+    return true;
+  });
+
+  const getOperationProjectName = (item) => {
+    const row = item?.row || [];
+    const rawProject = getAssetProjectByDate(row[destinationIndex], row[dateIndex]);
+    return getProjectDisplayName(rawProject);
+  };
+
+  const getOperationLiterPrice = (item) => {
+    const row = item?.row || [];
+    const rawProject = getAssetProjectByDate(row[destinationIndex], row[dateIndex]);
+    return getProjectFuelPriceValue(rawProject, row[dateIndex]);
+  };
+
+  const getOperationTotalCost = (item) => {
+    const storedCost = getOperationTotalCostAtOperation(item);
+
+    if (storedCost > 0) {
+      return storedCost;
+    }
+
+    const diesel = parseFloat(item?.row?.[dieselIndex]) || 0;
+    return diesel * getOperationLiterPrice(item);
+  };
+
+  const equipmentTypeOptions = [
+    ...new Set(
+      dateFilteredData
+        .filter((item) => {
+          const equipmentNo = item.row[destinationIndex];
+          const project = getOperationProjectName(item);
+
+          if (
+            selectedProject.length > 0 &&
+            !selectedProject.includes(project)
+          ) {
+            return false;
+          }
+
+          return true;
+        })
+        .map((item) => {
+          const equipmentNo = item.row[destinationIndex];
+          const asset = getAsset(equipmentNo);
+          return asset?.type;
+        })
+        .filter(Boolean)
+    ),
+  ];
+
+  const equipmentOptions = [
+    ...new Set(
+      dateFilteredData
+        .filter((item) => {
+          const equipmentNo = item.row[destinationIndex];
+          const asset = getAsset(equipmentNo);
+          const equipmentType = asset?.type || "";
+
+          if (
+            selectedEquipmentType.length > 0 &&
+            !selectedEquipmentType.includes(equipmentType)
+          ) {
+            return false;
+          }
+
+          const project = getOperationProjectName(item);
+
+          if (
+            selectedProject.length > 0 &&
+            !selectedProject.includes(project)
+          ) {
+            return false;
+          }
+
+          return true;
+        })
+        .map((item) => item.row[destinationIndex])
+        .filter(Boolean)
+    ),
+  ];
+
+  const projectOptions = [
+    ...new Set(
+      dateFilteredData
+        .filter((item) => {
+          const equipmentNo = item.row[destinationIndex];
+          const asset = getAsset(equipmentNo);
+          const equipmentType = asset?.type || "";
+
+          if (
+            selectedEquipmentType.length > 0 &&
+            !selectedEquipmentType.includes(equipmentType)
+          ) {
+            return false;
+          }
+
+          if (
+            selectedEquipment.length > 0 &&
+            !selectedEquipment.includes(equipmentNo)
+          ) {
+            return false;
+          }
+
+          return true;
+        })
+        .map((item) =>
+          getOperationProjectName(item)
+        )
+        .filter((project) => project && project !== "-")
+    ),
+  ];
+
+  const visibleEquipmentOptions = equipmentOptions.filter((equipment) =>
+    equipment.toLowerCase().includes(equipmentSearch.toLowerCase())
+  );
+
+  const visibleEquipmentTypeOptions = equipmentTypeOptions.filter((type) =>
+    type.toLowerCase().includes(equipmentTypeSearch.toLowerCase())
+  );
+
+  const visibleProjectOptions = projectOptions.filter((project) =>
+    project.toLowerCase().includes(projectSearch.toLowerCase())
+  );
+
+  const toggleEquipmentSelection = (equipment) => {
+    setSelectedEquipment((prev) =>
+      prev.includes(equipment)
+        ? prev.filter((item) => item !== equipment)
+        : [...prev, equipment]
+    );
+  };
+
+  const toggleEquipmentTypeSelection = (type) => {
+    setSelectedEquipmentType((prev) =>
+      prev.includes(type)
+        ? prev.filter((item) => item !== type)
+        : [...prev, type]
+    );
+
+    setSelectedEquipment([]);
+  };
+
+  const toggleProjectSelection = (project) => {
+    setSelectedProject((prev) =>
+      prev.includes(project)
+        ? prev.filter((item) => item !== project)
+        : [...prev, project]
+    );
+  };
+
+  const getEquipmentFilterLabel = () => {
+    if (selectedEquipment.length === 0) return "All Equipment";
+    if (selectedEquipment.length === 1) return selectedEquipment[0];
+    return `${selectedEquipment.length} Equipment Selected`;
+  };
+
+  const getEquipmentTypeFilterLabel = () => {
+    if (selectedEquipmentType.length === 0) return "All Equipment Types";
+    if (selectedEquipmentType.length === 1) return selectedEquipmentType[0];
+    return `${selectedEquipmentType.length} Types Selected`;
+  };
+
+  const getProjectFilterLabel = () => {
+    if (selectedProject.length === 0) return "All Projects";
+    if (selectedProject.length === 1) return selectedProject[0];
+    return `${selectedProject.length} Projects Selected`;
+  };
+
+  const filteredDirectRefuelData = dateFilteredData.filter((item) => {
+    const equipmentNo = item.row[destinationIndex];
+    const asset = getAsset(equipmentNo);
+    const equipmentType = asset?.type || "";
+
+    if (
+      selectedEquipment.length > 0 &&
+      !selectedEquipment.includes(equipmentNo)
+    )
+      return false;
+
+    if (
+      selectedEquipmentType.length > 0 &&
+      !selectedEquipmentType.includes(equipmentType)
+    )
+      return false;
+
+    const project = getOperationProjectName(item);
+
+    if (
+      selectedProject.length > 0 &&
+      !selectedProject.includes(project)
+    )
+      return false;
+
+    return true;
+  });
+
+  const totalDiesel = filteredDirectRefuelData.reduce((sum, item) => {
+    return sum + (parseFloat(item.row[dieselIndex]) || 0);
+  }, 0);
+
+  const totalCost = filteredDirectRefuelData.reduce((sum, item) => {
+    return sum + getOperationTotalCost(item);
+  }, 0);
+
+  const dailyData = filteredDirectRefuelData
+    .reduce((acc, item) => {
+      const operationDate = parseOperationDate(item.row[dateIndex]);
+      const date = operationDate
+        ? operationDate.toISOString().split("T")[0]
+        : "No Date";
+
+      const diesel = parseFloat(item.row[dieselIndex]) || 0;
+      const found = acc.find((d) => d.date === date);
+
+      if (found) found.value += diesel;
+      else acc.push({ date, value: diesel });
+
+      return acc;
+    }, [])
+    .sort((a, b) => {
+      if (a.date === "No Date") return 1;
+      if (b.date === "No Date") return -1;
+      return new Date(a.date) - new Date(b.date);
+    });
+
+  const dailyConsumptionSummary = Object.values(
+    filteredDirectRefuelData.reduce((acc, item) => {
+      const operationDate = parseOperationDate(item.row[dateIndex]);
+      const dateKey = operationDate
+        ? operationDate.toISOString().split("T")[0]
+        : "No Date";
+
+      const diesel = parseFloat(item.row[dieselIndex]) || 0;
+
+      if (!acc[dateKey]) {
+        acc[dateKey] = {
+          dateKey,
+          qtyLiters: 0,
+          totalCost: 0,
+        };
+      }
+
+      acc[dateKey].qtyLiters += diesel;
+      acc[dateKey].totalCost += getOperationTotalCost(item);
+
+      return acc;
+    }, {})
+  ).sort((a, b) => {
+    if (a.dateKey === "No Date") return 1;
+    if (b.dateKey === "No Date") return -1;
+    return new Date(b.dateKey) - new Date(a.dateKey);
+  });
+
+  const equipmentTypeConsumptionSummary = Object.values(
+    filteredDirectRefuelData.reduce((acc, item) => {
+      const row = item.row;
+      const equipmentNo = row[destinationIndex];
+      const asset = getAsset(equipmentNo);
+      const equipmentType = asset?.type || "Unknown";
+
+      const diesel = parseFloat(row[dieselIndex]) || 0;
+
+      if (!acc[equipmentType]) {
+        acc[equipmentType] = {
+          equipmentType,
+          qtyLiters: 0,
+          totalCost: 0,
+        };
+      }
+
+      acc[equipmentType].qtyLiters += diesel;
+      acc[equipmentType].totalCost += getOperationTotalCost(item);
+
+      return acc;
+    }, {})
+  ).sort((a, b) => b.qtyLiters - a.qtyLiters);
+
+  const equipmentSummary = Object.values(
+    filteredDirectRefuelData.reduce((acc, item) => {
+      const row = item.row;
+      const equipmentNo = row[destinationIndex];
+
+      if (!equipmentNo) return acc;
+
+      const asset = getAsset(equipmentNo);
+      const assetDisplayCode = getAssetDisplayCode(equipmentNo);
+      const operationProject = getOperationProjectName(item);
+      const diesel = parseFloat(row[dieselIndex]) || 0;
+      const odometer = parseFloat(row[odometerIndex]) || 0;
+
+      if (!acc[equipmentNo]) {
+        acc[equipmentNo] = {
+          equipmentNo: assetDisplayCode,
+          equipmentBackendId: equipmentNo,
+          project: operationProject,
+          projectsSet: new Set(),
+          equipmentType: asset?.type || "-",
+          fuelConsumption: 0,
+          totalCost: 0,
+          firstOdometer: odometer,
+          lastOdometer: odometer,
+        };
+      }
+
+      if (operationProject && operationProject !== "-") {
+        acc[equipmentNo].projectsSet.add(operationProject);
+      }
+
+
+      acc[equipmentNo].fuelConsumption += diesel;
+      acc[equipmentNo].totalCost += getOperationTotalCost(item);
+
+      if (odometer < acc[equipmentNo].firstOdometer) {
+        acc[equipmentNo].firstOdometer = odometer;
+      }
+
+      if (odometer > acc[equipmentNo].lastOdometer) {
+        acc[equipmentNo].lastOdometer = odometer;
+      }
+
+      return acc;
+    }, {})
+  ).map((item) => {
+    const distance = item.lastOdometer - item.firstOdometer;
+
+    const efficiency =
+      distance > 0 ? (item.fuelConsumption / distance).toFixed(2) : "-";
+
+    return {
+      ...item,
+      project: item.projectsSet?.size ? Array.from(item.projectsSet).join(", ") : item.project,
+      distance,
+      efficiency,
+      totalCost: item.totalCost,
+    };
+  });
+
+  const topEquipmentConsumptionChartData = equipmentSummary
+    .slice()
+    .sort((a, b) => b.fuelConsumption - a.fuelConsumption)
+    .slice(0, 10)
+    .map((item) => ({
+      equipmentNo: item.equipmentNo,
+      qtyLiters: Number(item.fuelConsumption) || 0,
+    }));
+
+  const equipmentTypeRatioChartData = equipmentTypeConsumptionSummary.map(
+    (item) => ({
+      name: item.equipmentType,
+      value: Number(item.qtyLiters) || 0,
+    })
+  );
+
+  const equipmentTypeRatioTotal = equipmentTypeRatioChartData.reduce(
+    (sum, item) => sum + (Number(item.value) || 0),
+    0
+  );
+
+  const chartColors = [
+    "#60a5fa",
+    "#f59e0b",
+    "#a78bfa",
+    "#34d399",
+    "#f472b6",
+    "#facc15",
+    "#22d3ee",
+    "#fb7185",
+    "#818cf8",
+    "#c084fc",
+    "#94a3b8",
+    "#f97316",
+  ];
+
+  const getEquipmentHistory = (equipmentNo) => {
+    return filteredDirectRefuelData
+      .filter((item) => {
+        const rowEquipment = item.row[destinationIndex];
+        return rowEquipment === equipmentNo || getAssetDisplayCode(rowEquipment) === equipmentNo;
+      })
+      .sort((a, b) => {
+        const da = parseOperationDate(a.row[dateIndex])?.getTime() || 0;
+        const db = parseOperationDate(b.row[dateIndex])?.getTime() || 0;
+        return db - da;
+      });
+  };
+
+  const getOperationAttachmentsFromRow = (row) => {
+    const directAttachments = normalizeOperationAttachments(
+      row?.__attachments ||
+        row?.__operation?.attachments ||
+        row?.__operation?.requiredPhotos ||
+        row?.__operation?.photos
+    );
+
+    if (directAttachments.length) return directAttachments;
+
+    const backendOperationIdIndexSafe = headers?.indexOf?.("backend_operation_id") ?? -1;
+    const operationNoIndexSafe = operationIdIndex !== -1 ? operationIdIndex : headers?.indexOf?.("operation_id") ?? -1;
+
+    const backendOperationId =
+      backendOperationIdIndexSafe !== -1 ? row?.[backendOperationIdIndexSafe] : row?.__operation?.id || "";
+
+    const operationNo =
+      operationNoIndexSafe !== -1
+        ? row?.[operationNoIndexSafe]
+        : row?.__operation?.operationNo || row?.__operation?.id || "";
+
+    const matchedBackendRow = (data || []).find((candidateRow) => {
+      const candidateBackendId =
+        backendOperationIdIndexSafe !== -1
+          ? candidateRow?.[backendOperationIdIndexSafe]
+          : candidateRow?.__operation?.id || "";
+
+      const candidateOperationNo =
+        operationNoIndexSafe !== -1
+          ? candidateRow?.[operationNoIndexSafe]
+          : candidateRow?.__operation?.operationNo || candidateRow?.__operation?.id || "";
+
+      return (
+        (backendOperationId && String(candidateBackendId) === String(backendOperationId)) ||
+        (operationNo && String(candidateOperationNo) === String(operationNo))
+      );
+    });
+
+    return normalizeOperationAttachments(
+      matchedBackendRow?.__attachments ||
+        matchedBackendRow?.__operation?.attachments ||
+        matchedBackendRow?.__operation?.requiredPhotos ||
+        matchedBackendRow?.__operation?.photos
+    );
+  };
+
+  const openOperationPhotoViewer = async (row) => {
+    const attachments = getOperationAttachmentsFromRow(row);
+    const operationNo =
+      operationIdIndex !== -1
+        ? row?.[operationIdIndex]
+        : row?.__operation?.operationNo || row?.__operation?.id || "Operation";
+
+    if (!attachments.length) {
+      showToast?.("warning", "No photos attached to this operation.");
+      return;
+    }
+
+    setOperationPhotoViewer({
+      operationNo,
+      photos: attachments.map((attachment) => ({ ...attachment, signedUrl: "" })),
+    });
+    setOperationPhotoViewerLoading(true);
+
+    try {
+      const photos = await Promise.all(
+        attachments.map(async (attachment) => ({
+          ...attachment,
+          signedUrl: await getUploadSignedUrl(attachment.path, currentUser),
+        }))
+      );
+
+      setOperationPhotoViewer({ operationNo, photos });
+    } catch (error) {
+      showToast?.("warning", getFriendlyApiErrorMessage(error, "Failed to load operation photos."));
+    } finally {
+      setOperationPhotoViewerLoading(false);
+    }
+  };
+
+  const getLastOdometerForEquipment = (equipmentNo, excludeOriginalIndex = null) => {
+  const selectedAsset = assets.find(
+    (asset) =>
+      isSameText(asset.id, equipmentNo) ||
+      isSameText(asset.assetId, equipmentNo) ||
+      isSameText(asset.backendId, equipmentNo) ||
+      isSameText(asset.assetBackendId, equipmentNo)
+  );
+
+  const assetKeys = [
+    equipmentNo,
+    selectedAsset?.id,
+    selectedAsset?.assetId,
+    selectedAsset?.backendId,
+    selectedAsset?.assetBackendId,
+  ]
+    .filter(Boolean)
+    .map((value) => String(value).trim());
+
+  const readings = directRefuelData
+    .filter((item) => {
+      if (item.originalIndex === excludeOriginalIndex) return false;
+
+      const destinationValue = String(item.row[destinationIndex] || "").trim();
+
+      return assetKeys.some((key) => isSameText(destinationValue, key));
+    })
+    .map((item) => parseFloat(item.row[odometerIndex]) || 0)
+    .filter((value) => value > 0);
+
+  if (readings.length === 0) return Number(selectedAsset?.currentOdometer || selectedAsset?.odometer || 0);
+
+  return Math.max(...readings);
+};
+
+  const getLastStationCounter = (stationId) => {
+    if (!stationId || odometerIndex === -1 || dateIndex === -1) return 0;
+
+    const readings = workingData
+      .filter((item) => {
+        const row = item.row;
+        const sourceStation = sourceIndex !== -1 ? row[sourceIndex] : "";
+        const destination = destinationIndex !== -1 ? row[destinationIndex] : "";
+
+        return (
+          isSameText(sourceStation, stationId) ||
+          isSameText(destination, stationId)
+        );
+      })
+      .map((item) => ({
+        date: parseOperationDate(item.row[dateIndex]),
+        reading: parseFloat(item.row[odometerIndex]) || 0,
+      }))
+      .filter((item) => item.date && item.reading > 0)
+      .sort((a, b) => b.date - a.date);
+
+    return readings[0]?.reading || 0;
+  };
+
+  const openCellEdit = (item, field) => {
+    if (!hasPermission("operations", "edit")) return;
+
+    const row = item.row;
+    const currentValue =
+      field === "equipment"
+        ? row[destinationIndex]
+        : field === "diesel"
+        ? row[dieselIndex]
+        : field === "odometer"
+        ? row[odometerIndex]
+        : field === "station"
+        ? row[sourceIndex]
+        : field === "fueler"
+        ? row[fuelerIndex]
+        : "";
+
+    setEditCell({
+      originalIndex: item.originalIndex,
+      row,
+      field,
+      oldValue: currentValue || "",
+      oldValueDisplay: getOperationCorrectionDisplayValue(field, currentValue),
+      newValue: currentValue || "",
+      reason: "",
+    });
+  };
+
+  const closeEditCell = () => {
+    setEditCell(null);
+  };
+
+  const saveCellEdit = async () => {
+    if (!editCell) return;
+
+    if (!editCell.reason.trim()) {
+      notifyUser(typeof showToast !== "undefined" ? showToast : null, inferToastTypeFromMessage("Please enter edit reason."), "Please enter edit reason.");
+      return;
+    }
+
+
+    if (!String(editCell.newValue).trim()) {
+      notifyUser(typeof showToast !== "undefined" ? showToast : null, inferToastTypeFromMessage("Please enter a new value."), "Please enter a new value.");
+      return;
+    }
+
+    const row = editCell.row;
+    const field = editCell.field;
+
+    let fieldLabel = "";
+
+    if (field === "equipment") {
+      const newEquipment = editCell.newValue;
+      const asset = getAsset(newEquipment);
+
+      if (!asset) {
+        notifyUser(typeof showToast !== "undefined" ? showToast : null, inferToastTypeFromMessage("Please select a valid equipment."), "Please select a valid equipment.");
+        return;
+      }
+
+      fieldLabel = "Equipment";
+    }
+
+    if (field === "diesel") {
+      const qty = Number(editCell.newValue);
+
+      if (!qty || qty <= 0) {
+        notifyUser(typeof showToast !== "undefined" ? showToast : null, inferToastTypeFromMessage("Diesel quantity must be greater than 0."), "Diesel quantity must be greater than 0.");
+        return;
+      }
+
+      fieldLabel = "Diesel Quantity";
+    }
+
+    if (field === "odometer") {
+      const newOdometer = Number(editCell.newValue);
+
+      if (!newOdometer || newOdometer <= 0) {
+        notifyUser(typeof showToast !== "undefined" ? showToast : null, inferToastTypeFromMessage("Please enter a valid odometer."), "Please enter a valid odometer.");
+        return;
+      }
+
+      fieldLabel = "Odometer";
+    }
+
+    if (field === "station") {
+      const newStation = editCell.newValue;
+      const station = getStation(newStation);
+
+      if (!station) {
+        notifyUser(typeof showToast !== "undefined" ? showToast : null, inferToastTypeFromMessage("Please select a valid station."), "Please select a valid station.");
+        return;
+      }
+
+      if (station.status?.trim().toLowerCase() !== "active") {
+        notifyUser(typeof showToast !== "undefined" ? showToast : null, inferToastTypeFromMessage("Selected station must be active."), "Selected station must be active.");
+        return;
+      }
+
+      fieldLabel = "Source Station";
+    }
+
+    if (field === "fueler") {
+      notifyUser(typeof showToast !== "undefined" ? showToast : null, "warning", "Operator correction is not available in backend Phase 1.");
+      return;
+    }
+
+    const operationBackendId = getOperationCorrectionBackendId(row);
+
+    if (!operationBackendId) {
+      notifyUser(typeof showToast !== "undefined" ? showToast : null, "warning", "Backend operation id was not found for this row.");
+      return;
+    }
+
+    const fieldName = getOperationCorrectionFieldName(field);
+
+    try {
+      const correctionPayload = {
+        operationId: operationBackendId,
+        fieldName,
+        newValue: field === "diesel" || field === "odometer" ? Number(editCell.newValue) : editCell.newValue,
+        reason: editCell.reason,
+      };
+
+      await createOperationCorrection(correctionPayload, currentUser);
+
+      setAuditLog((prev) => [
+        ...prev,
+        {
+          operationId:
+            operationIdIndex !== -1 ? row[operationIdIndex] : editCell.originalIndex + 1,
+          rowIndex: editCell.originalIndex,
+          field: fieldLabel,
+          oldValue: editCell.oldValueDisplay || getOperationCorrectionDisplayValue(field, editCell.oldValue),
+          newValue: getOperationCorrectionDisplayValue(field, editCell.newValue),
+          reason: editCell.reason,
+          editedBy: currentUser?.fullName || currentUser?.name || "System",
+          editedAt: new Date().toISOString(),
+          status: "Pending Approval",
+        },
+      ]);
+
+      trackActivity(
+        "Request Operation Correction",
+        "operations",
+        `${fieldLabel} correction requested from ${editCell.oldValueDisplay || getOperationCorrectionDisplayValue(field, editCell.oldValue)} to ${getOperationCorrectionDisplayValue(field, editCell.newValue)}.`
+      );
+
+      closeEditCell();
+      showToast?.("success", responseBody?.message || "Correction request submitted and pending manager approval.");
+    } catch (error) {
+      console.warn("Correction submit failed:", error);
+      showToast?.(
+        "warning",
+        getFriendlyApiErrorMessage(error, "Failed to submit correction request.")
+      );
+    }
+  };
+
+  return (
+    <div className="bg-transparent min-h-screen text-slate-100 overflow-y-auto h-screen scroll-smooth [scrollbar-color:#334155_transparent]">
+      <div className="fleet-page-shell relative isolate w-full max-w-[1920px] mx-auto px-2 sm:px-3 lg:px-4 xl:px-5 2xl:px-8 py-3 sm:py-4 lg:py-5 text-[12px] lg:text-[13px]">
+      <div className="flex flex-col sm:flex-row justify-between sm:items-start xl:items-center gap-3 mb-4">
+        <div>
+          <h1 className="text-xl sm:text-2xl font-black tracking-tight text-slate-100">Diesel Dashboard</h1>
+          <p className="text-slate-400 text-sm">Fuel transactions monitoring</p>
+          {isOfficerUser(currentUser) && (
+            <p className="mt-2 inline-flex rounded-full bg-blue-500/15 border border-blue-500/30 px-3 py-1 text-xs text-blue-300 font-semibold">
+              Officer access: Operations page is read-only.
+            </p>
+          )}
+        </div>
+
+        {getAllowedTransactionTypesForUser(currentUser).length > 0 && (
+          <button
+            onClick={() => setShowForm(true)}
+            className="bg-amber-400 hover:bg-amber-300 text-slate-950 px-4 py-2.5 rounded-xl font-bold shadow-lg shadow-amber-500/20 transition-all duration-200 active:scale-[0.98]"
+          >
+            + Add Operation
+          </button>
+        )}
+      </div>
+
+      <div className="relative z-[80] bg-slate-900/80 border border-slate-700/80 rounded-2xl p-3 mb-4 shadow-xl shadow-black/10 backdrop-blur">
+        <div className="grid grid-cols-1 sm:grid-cols-2 xl:grid-cols-4 2xl:flex 2xl:flex-wrap gap-3 items-center">
+          <div ref={dateFilterRef} className="relative z-[90]">
+            <button
+              onClick={() => setShowDateFilter(!showDateFilter)}
+              className="bg-[#080d19] border border-slate-700 hover:border-amber-400 focus:border-amber-400 focus:ring-2 focus:ring-amber-400/20 text-slate-100 px-3 lg:px-4 py-2.5 rounded-xl w-full min-w-0 2xl:min-w-[220px] shadow-inner transition-all duration-200 flex justify-between items-center text-[12px] lg:text-sm"
+            >
+              <span>
+                {fromDate || toDate
+                  ? `${fromDate || "Start"} → ${toDate || "End"}`
+                  : "Select date range"}
+              </span>
+              <span>▾</span>
+            </button>
+
+            {showDateFilter && (
+              <div className="absolute left-0 mt-3 bg-white text-slate-950 border border-slate-200 rounded-2xl z-[9999] w-[min(650px,calc(100vw-2rem))] shadow-2xl overflow-hidden">
+                <div className="bg-slate-800 text-white p-3 flex justify-end border-b border-slate-700">
+                  <button className="border border-gray-500 px-3 lg:px-4 py-2 rounded-lg text-sm">
+                    Auto date range ▾
+                  </button>
+                </div>
+
+                <div className="grid grid-cols-1 md:grid-cols-2 gap-4 lg:gap-8 p-3 sm:p-5">
+                  <div>
+                    <p className="text-sm font-semibold mb-3">Start Date</p>
+
+                    <div className="flex justify-between items-center mb-3">
+                      <button onClick={() => moveMonth("start", -1)}>‹</button>
+                      <span className="font-semibold">
+                        {getMonthName(startMonth)} {startYear}
+                      </span>
+                      <button onClick={() => moveMonth("start", 1)}>›</button>
+                    </div>
+
+                    {renderCalendarDays(startYear, startMonth, fromDate, setFromDate)}
+                  </div>
+
+                  <div>
+                    <p className="text-sm font-semibold mb-3">End Date</p>
+
+                    <div className="flex justify-between items-center mb-3">
+                      <button onClick={() => moveMonth("end", -1)}>‹</button>
+                      <span className="font-semibold">
+                        {getMonthName(endMonth)} {endYear}
+                      </span>
+                      <button onClick={() => moveMonth("end", 1)}>›</button>
+                    </div>
+
+                    {renderCalendarDays(endYear, endMonth, toDate, setToDate)}
+                  </div>
+                </div>
+
+                <div className="flex justify-between items-center p-4 border-t">
+                  <button
+                    onClick={() => {
+                      setFromDate("");
+                      setToDate("");
+                    }}
+                    className="bg-gray-200 px-3 lg:px-4 py-2 rounded-lg text-sm"
+                  >
+                    Clear
+                  </button>
+
+                  <button
+                    onClick={() => setShowDateFilter(false)}
+                    className="bg-gray-900 text-white px-5 py-2 rounded-full text-sm"
+                  >
+                    Apply
+                  </button>
+                </div>
+              </div>
+            )}
+          </div>
+
+          <div ref={equipmentDropdownRef} className="relative z-[90]">
+            <button
+              onClick={() => setShowEquipmentDropdown(!showEquipmentDropdown)}
+              className="bg-[#080d19] border border-slate-700 hover:border-amber-400 focus:border-amber-400 focus:ring-2 focus:ring-amber-400/20 text-slate-100 px-3 lg:px-4 py-2.5 rounded-xl w-full min-w-0 2xl:min-w-[220px] shadow-inner transition-all duration-200 text-left text-[12px] lg:text-sm"
+            >
+              {getEquipmentFilterLabel()} ▾
+            </button>
+
+            {showEquipmentDropdown && (
+              <div className="absolute mt-2 bg-slate-950 border border-slate-700 rounded-xl p-3 z-[9999] w-[280px] shadow-2xl">
+                <input
+                  value={equipmentSearch}
+                  onChange={(e) => setEquipmentSearch(e.target.value)}
+                  placeholder="Search equipment..."
+                  className="w-full bg-slate-900 border border-slate-700 rounded-lg p-2 mb-2 text-slate-100 outline-none focus:border-amber-400 focus:ring-2 focus:ring-amber-400/20"
+                />
+
+                <button
+                  onClick={() => {
+                    setSelectedEquipment([]);
+                    setEquipmentSearch("");
+                  }}
+                  className="block w-full text-left px-3 py-2 hover:bg-slate-800 rounded text-amber-300"
+                >
+                  Clear Equipment Selection
+                </button>
+
+                <div className="max-h-[380px] overflow-auto">
+                  {visibleEquipmentOptions.map((equipment) => (
+                    <button
+                      key={equipment}
+                      onClick={() => toggleEquipmentSelection(equipment)}
+                      className="flex items-center gap-2 w-full text-left px-3 py-2 hover:bg-slate-800 rounded cursor-pointer transition"
+                    >
+                      <span
+                        className={`w-4 h-4 rounded border flex items-center justify-center text-xs ${
+                          selectedEquipment.includes(equipment)
+                            ? "bg-amber-400 border-amber-400 text-slate-950"
+                            : "border-gray-500"
+                        }`}
+                      >
+                        {selectedEquipment.includes(equipment) ? "✓" : ""}
+                      </span>
+
+                      <span>{equipment}</span>
+                    </button>
+                  ))}
+                </div>
+
+                <button
+                  onClick={() => {
+                    setShowEquipmentDropdown(false);
+                    setEquipmentSearch("");
+                  }}
+                  className="mt-3 w-full bg-amber-400 hover:bg-amber-300 text-slate-950 rounded-lg py-2 font-bold transition"
+                >
+                  Apply
+                </button>
+              </div>
+            )}
+          </div>
+
+          <div ref={equipmentTypeDropdownRef} className="relative z-[90]">
+            <button
+              onClick={() =>
+                setShowEquipmentTypeDropdown(!showEquipmentTypeDropdown)
+              }
+              className="bg-[#080d19] border border-slate-700 hover:border-amber-400 focus:border-amber-400 focus:ring-2 focus:ring-amber-400/20 text-slate-100 px-3 lg:px-4 py-2.5 rounded-xl w-full min-w-0 2xl:min-w-[220px] shadow-inner transition-all duration-200 text-left text-[12px] lg:text-sm"
+            >
+              {getEquipmentTypeFilterLabel()} ▾
+            </button>
+
+            {showEquipmentTypeDropdown && (
+              <div className="absolute mt-2 bg-slate-950 border border-slate-700 rounded-xl p-3 z-[9999] w-[280px] shadow-2xl">
+                <input
+                  value={equipmentTypeSearch}
+                  onChange={(e) => setEquipmentTypeSearch(e.target.value)}
+                  placeholder="Search type..."
+                  className="w-full bg-slate-900 border border-slate-700 rounded-lg p-2 mb-2 text-slate-100 outline-none focus:border-amber-400 focus:ring-2 focus:ring-amber-400/20"
+                />
+
+                <button
+                  onClick={() => {
+                    setSelectedEquipmentType([]);
+                    setSelectedEquipment([]);
+                    setEquipmentTypeSearch("");
+                  }}
+                  className="block w-full text-left px-3 py-2 hover:bg-slate-800 rounded text-amber-300"
+                >
+                  Clear Type Selection
+                </button>
+
+                <div className="max-h-[380px] overflow-auto">
+                  {visibleEquipmentTypeOptions.map((type) => (
+                    <button
+                      key={type}
+                      onClick={() => toggleEquipmentTypeSelection(type)}
+                      className="flex items-center gap-2 w-full text-left px-3 py-2 hover:bg-slate-800 rounded cursor-pointer transition"
+                    >
+                      <span
+                        className={`w-4 h-4 rounded border flex items-center justify-center text-xs ${
+                          selectedEquipmentType.includes(type)
+                            ? "bg-amber-400 border-amber-400 text-slate-950"
+                            : "border-gray-500"
+                        }`}
+                      >
+                        {selectedEquipmentType.includes(type) ? "✓" : ""}
+                      </span>
+
+                      <span>{type}</span>
+                    </button>
+                  ))}
+                </div>
+
+                <button
+                  onClick={() => {
+                    setShowEquipmentTypeDropdown(false);
+                    setEquipmentTypeSearch("");
+                  }}
+                  className="mt-3 w-full bg-amber-400 hover:bg-amber-300 text-slate-950 rounded-lg py-2 font-bold transition"
+                >
+                  Apply
+                </button>
+              </div>
+            )}
+          </div>
+
+          <div ref={projectDropdownRef} className="relative z-[90]">
+            <button
+              onClick={() => setShowProjectDropdown(!showProjectDropdown)}
+              className="bg-[#080d19] border border-slate-700 hover:border-amber-400 focus:border-amber-400 focus:ring-2 focus:ring-amber-400/20 text-slate-100 px-3 lg:px-4 py-2.5 rounded-xl w-full min-w-0 2xl:min-w-[220px] shadow-inner transition-all duration-200 text-left text-[12px] lg:text-sm"
+            >
+              {getProjectFilterLabel()} ▾
+            </button>
+
+            {showProjectDropdown && (
+              <div className="absolute mt-2 bg-slate-950 border border-slate-700 rounded-xl p-3 z-[9999] w-[280px] shadow-2xl">
+                <input
+                  value={projectSearch}
+                  onChange={(e) => setProjectSearch(e.target.value)}
+                  placeholder="Search project..."
+                  className="w-full bg-slate-900 border border-slate-700 rounded-lg p-2 mb-2 text-slate-100 outline-none focus:border-amber-400 focus:ring-2 focus:ring-amber-400/20"
+                />
+
+                <button
+                  onClick={() => {
+                    setSelectedProject([]);
+                    setProjectSearch("");
+                  }}
+                  className="block w-full text-left px-3 py-2 hover:bg-slate-800 rounded text-amber-300"
+                >
+                  Clear Project Selection
+                </button>
+
+                <div className="max-h-[380px] overflow-auto">
+                  {visibleProjectOptions.map((project) => (
+                    <button
+                      key={project}
+                      onClick={() => toggleProjectSelection(project)}
+                      className="flex items-center gap-2 w-full text-left px-3 py-2 hover:bg-slate-800 rounded cursor-pointer transition"
+                    >
+                      <span
+                        className={`w-4 h-4 rounded border flex items-center justify-center text-xs ${
+                          selectedProject.includes(project)
+                            ? "bg-amber-400 border-amber-400 text-slate-950"
+                            : "border-gray-500"
+                        }`}
+                      >
+                        {selectedProject.includes(project) ? "✓" : ""}
+                      </span>
+
+                      <span>{project}</span>
+                    </button>
+                  ))}
+                </div>
+
+                <button
+                  onClick={() => {
+                    setShowProjectDropdown(false);
+                    setProjectSearch("");
+                  }}
+                  className="mt-3 w-full bg-amber-400 hover:bg-amber-300 text-slate-950 rounded-lg py-2 font-bold transition"
+                >
+                  Apply
+                </button>
+              </div>
+            )}
+          </div>
+
+          <button
+            onClick={() => {
+              setFromDate("");
+              setToDate("");
+              setSelectedEquipment([]);
+              setSelectedEquipmentType([]);
+              setSelectedProject([]);
+              setEquipmentSearch("");
+              setEquipmentTypeSearch("");
+              setProjectSearch("");
+            }}
+            className="w-full 2xl:w-auto bg-red-500/10 hover:bg-red-500/20 text-red-300 border border-red-500/35 px-3 lg:px-4 py-2.5 rounded-xl cursor-pointer transition-all duration-200"
+          >
+            Reset Filters
+          </button>
+        </div>
+      </div>
+
+      <div className="relative z-0 grid grid-cols-1 sm:grid-cols-2 2xl:grid-cols-4 gap-3 mb-4">
+        <Card title="Total Quantity (L)" value={formatNumber(totalDiesel)} />
+
+        <Card
+          title={`Total Cost (${currency})`}
+          value={formatNumber(totalCost)}
+        />
+
+        <Card
+          title="Direct Refuel Operations"
+          value={formatNumber(filteredDirectRefuelData.length)}
+        />
+
+        <Card
+          title="Active Equipment"
+          value={formatNumber(equipmentSummary.length)}
+        />
+      </div>
+
+      <div className="relative z-0 bg-slate-900/80 rounded-2xl shadow-xl shadow-black/10 overflow-hidden mb-4 border border-slate-700/80">
+        <div className="p-3 sm:p-4 border-b border-slate-700/80 flex flex-col sm:flex-row gap-2 sm:gap-3 justify-between sm:items-center bg-slate-900/60">
+          <h2 className="text-base sm:text-lg font-extrabold text-amber-300">
+            Equipment Consumption Summary
+          </h2>
+
+          <div className="flex flex-wrap items-center gap-3">
+            <span className="text-sm text-slate-400">
+              {equipmentSummary.length} records
+            </span>
+
+            <div ref={equipmentSummarySettingsRef} className="relative">
+              <button
+                onClick={() =>
+                  setShowEquipmentSummarySettings(
+                    !showEquipmentSummarySettings
+                  )
+                }
+                className="bg-slate-950 hover:bg-slate-800 border border-slate-700 hover:border-amber-400 text-amber-300 px-3 py-2 rounded-lg transition cursor-pointer"
+              >
+                ☰
+              </button>
+
+              {showEquipmentSummarySettings && (
+                <div className="absolute left-0 mt-2 w-44 bg-slate-950 border border-slate-700 rounded-xl shadow-2xl z-[9999] overflow-hidden">
+                  <button
+                    onClick={exportEquipmentSummaryCSV}
+                    className="block w-full cursor-pointer text-left px-4 py-3 hover:bg-slate-800 transition text-white"
+                  >
+                    Export CSV
+                  </button>
+
+                  <button
+                    onClick={() => {
+                      printTable(
+                        "equipment-summary-table",
+                        "Equipment Consumption Summary"
+                      );
+                      setShowEquipmentSummarySettings(false);
+                    }}
+                    className="block w-full cursor-pointer text-left px-4 py-3 hover:bg-slate-800 transition text-white border-t border-gray-700"
+                  >
+                    Print
+                  </button>
+                </div>
+              )}
+            </div>
+          </div>
+        </div>
+
+        <div className="relative z-0 w-full max-h-[360px] overflow-auto overflow-x-auto [scrollbar-color:#334155_transparent]">
+          <table
+              id="equipment-summary-table"
+              className="min-w-[980px] lg:min-w-[1100px] xl:min-w-[1180px] 2xl:min-w-[1350px] w-full border-collapse text-[11px] sm:text-xs lg:text-sm"
+            >
+            <thead className="bg-slate-800 sticky top-0 z-[1] shadow-sm">
+              <tr>
+                <Th>#</Th>
+                <Th>Equipment No.</Th>
+                <Th>Project</Th>
+                <Th>Equipment Type</Th>
+                <Th>Last Odometer</Th>
+                <Th>Fuel Consumption</Th>
+                <Th>Total Cost</Th>
+                <Th>Distance</Th>
+                <Th>Efficiency</Th>
+              </tr>
+            </thead>
+
+            <tbody>
+              {equipmentSummary.map((item, i) => (
+                <tr key={i} className="hover:bg-slate-800/70 transition-colors duration-150">
+                  <Td>{i + 1}</Td>
+
+                  <Td>
+                    <button
+                      onClick={() => setSelectedEquipmentHistory(item)}
+                      className="text-blue-300 hover:text-yellow-400 font-semibold transition cursor-pointer"
+                    >
+                      {item.equipmentNo}
+                    </button>
+                  </Td>
+
+                  <Td>{item.project}</Td>
+                  <Td>{item.equipmentType}</Td>
+                  <Td>{formatNumber(item.lastOdometer)}</Td>
+                  <Td>{formatNumber(item.fuelConsumption)}</Td>
+                  <Td>
+                    {formatNumber(item.totalCost)} {currency}
+                  </Td>
+                  <Td>{formatNumber(item.distance)}</Td>
+                  <Td>{item.efficiency}</Td>
+                </tr>
+              ))}
+            </tbody>
+          </table>
+        </div>
+      </div>
+
+      <div className="fleet-chart-grid grid grid-cols-1 xl:grid-cols-2 gap-4 mb-5">
+        <div className="relative z-0 bg-slate-900/80 rounded-2xl shadow-xl shadow-black/10 overflow-hidden border border-slate-700/80">
+          <div className="p-3 sm:p-4 border-b border-slate-700/80 flex flex-col sm:flex-row gap-2 sm:gap-3 justify-between sm:items-center bg-slate-900/60">
+            <div>
+              <h2 className="fleet-chart-title text-base font-extrabold text-amber-300">
+                Consumed Quantity per Equipment Type
+              </h2>
+              <p className="text-xs text-gray-400 mt-1">
+                Quantity and cost grouped by equipment type
+              </p>
+            </div>
+
+            <div className="flex flex-wrap items-center gap-3">
+              <span className="text-sm text-slate-400">
+                {equipmentTypeConsumptionSummary.length} types
+              </span>
+
+              <div ref={equipmentTypeSettingsRef} className="relative">
+                <button
+                  onClick={() =>
+                    setShowEquipmentTypeSettings(!showEquipmentTypeSettings)
+                  }
+                  className="bg-slate-950 hover:bg-slate-800 border border-slate-700 hover:border-amber-400 text-amber-300 px-3 py-2 rounded-lg transition cursor-pointer"
+                >
+                  ☰
+                </button>
+
+                {showEquipmentTypeSettings && (
+                  <div className="absolute left-0 mt-2 w-44 bg-slate-950 border border-slate-700 rounded-xl shadow-2xl z-[9999] overflow-hidden">
+                    <button
+                      onClick={exportEquipmentTypeSummaryCSV}
+                      className="block w-full cursor-pointer text-left px-4 py-3 hover:bg-slate-800 transition text-white"
+                    >
+                      Export CSV
+                    </button>
+
+                    <button
+                      onClick={() => {
+                        printTable(
+                          "equipment-type-table",
+                          "Consumed Quantity per Equipment Type"
+                        );
+                        setShowEquipmentTypeSettings(false);
+                      }}
+                      className="block w-full cursor-pointer text-left px-4 py-3 hover:bg-slate-800 transition text-white border-t border-gray-700"
+                    >
+                      Print
+                    </button>
+                  </div>
+                )}
+              </div>
+            </div>
+          </div>
+
+          <div className="relative z-0 w-full max-h-[320px] overflow-auto overflow-x-auto [scrollbar-color:#334155_transparent]">
+            <table
+                id="equipment-type-table"
+                className="min-w-[560px] lg:min-w-[620px] w-full border-collapse text-[11px] sm:text-xs lg:text-sm"
+              >
+              <thead className="bg-slate-800 sticky top-0 z-[1] shadow-sm">
+                <tr>
+                  <Th>#</Th>
+                  <Th>Equipment Type</Th>
+                  <Th>Qty Liters</Th>
+                  <Th>Total Cost</Th>
+                </tr>
+              </thead>
+
+              <tbody>
+                {equipmentTypeConsumptionSummary.map((item, i) => (
+                  <tr key={item.equipmentType} className="hover:bg-slate-800/70 transition-colors duration-150">
+                    <Td>{i + 1}</Td>
+                    <Td strong>{item.equipmentType}</Td>
+                    <Td>{formatNumber(item.qtyLiters)}</Td>
+                    <Td>
+                      {formatNumber(item.totalCost)} {currency}
+                    </Td>
+                  </tr>
+                ))}
+              </tbody>
+            </table>
+          </div>
+        </div>
+
+        <div className="relative z-0 bg-slate-900/80 rounded-2xl shadow-xl shadow-black/10 overflow-hidden border border-slate-700/80">
+          <div className="p-3 sm:p-4 border-b border-slate-700/80 flex flex-col sm:flex-row gap-2 sm:gap-3 justify-between sm:items-center bg-slate-900/60">
+            <div>
+              <h2 className="fleet-chart-title text-base font-extrabold text-amber-300">
+                Daily Consumption
+              </h2>
+              <p className="text-xs text-gray-400 mt-1">
+                Daily quantity and cost based on selected filters
+              </p>
+            </div>
+
+            <div className="flex flex-wrap items-center gap-3">
+              <span className="text-sm text-slate-400">
+                {dailyConsumptionSummary.length} days
+              </span>
+
+              <div ref={dailyConsumptionSettingsRef} className="relative">
+                <button
+                  onClick={() =>
+                    setShowDailyConsumptionSettings(
+                      !showDailyConsumptionSettings
+                    )
+                  }
+                  className="bg-slate-950 hover:bg-slate-800 border border-slate-700 hover:border-amber-400 text-amber-300 px-3 py-2 rounded-lg transition cursor-pointer"
+                >
+                  ☰
+                </button>
+
+                {showDailyConsumptionSettings && (
+                  <div className="absolute left-0 mt-2 w-44 bg-slate-950 border border-slate-700 rounded-xl shadow-2xl z-[9999] overflow-hidden">
+                    <button
+                      onClick={exportDailyConsumptionCSV}
+                      className="block w-full cursor-pointer text-left px-4 py-3 hover:bg-slate-800 transition text-white"
+                    >
+                      Export CSV
+                    </button>
+
+                    <button
+                      onClick={() => {
+                        printTable(
+                          "daily-consumption-table",
+                          "Daily Consumption"
+                        );
+                        setShowDailyConsumptionSettings(false);
+                      }}
+                      className="block w-full cursor-pointer text-left px-4 py-3 hover:bg-slate-800 transition text-white border-t border-gray-700"
+                    >
+                      Print
+                    </button>
+                  </div>
+                )}
+              </div>
+            </div>
+          </div>
+
+          <div className="relative z-0 w-full max-h-[320px] overflow-auto overflow-x-auto [scrollbar-color:#334155_transparent]">
+            <table
+                id="daily-consumption-table"
+                className="min-w-[560px] lg:min-w-[620px] w-full border-collapse text-[11px] sm:text-xs lg:text-sm"
+              >
+              <thead className="bg-slate-800 sticky top-0 z-[1] shadow-sm">
+                <tr>
+                  <Th>#</Th>
+                  <Th>Date</Th>
+                  <Th>Qty Liters</Th>
+                  <Th>Total Cost</Th>
+                </tr>
+              </thead>
+
+              <tbody>
+                {dailyConsumptionSummary.map((item, i) => (
+                  <tr key={item.dateKey} className="hover:bg-slate-800/70 transition-colors duration-150">
+                    <Td>{i + 1}</Td>
+                    <Td strong>{item.dateKey}</Td>
+                    <Td>{formatNumber(item.qtyLiters)}</Td>
+                    <Td>
+                      {formatNumber(item.totalCost)} {currency}
+                    </Td>
+                  </tr>
+                ))}
+              </tbody>
+            </table>
+          </div>
+        </div>
+      </div>
+
+      <div className="fleet-chart-card relative z-0 bg-slate-900/80 p-3 sm:p-4 rounded-2xl mb-4 border border-slate-700/80 shadow-xl shadow-black/10 overflow-visible">
+        <h3 className="fleet-chart-title text-base sm:text-lg font-extrabold text-amber-300 mb-3">
+          Consumed Quantity Over Time
+        </h3>
+
+        <div className="h-[260px] sm:h-[300px] xl:h-[340px]">
+          <ChartFrame height={260}>
+          <AreaChart
+  data={dailyData}
+  margin={{ top: 10, right: 20, left: 0, bottom: 0 }}
+>
+  <defs>
+    <linearGradient id="colorQty" x1="0" y1="0" x2="0" y2="1">
+      <stop offset="0%" stopColor="#60a5fa" stopOpacity={0.45} />
+      <stop offset="100%" stopColor="#60a5fa" stopOpacity={0.03} />
+    </linearGradient>
+  </defs>
+
+  <XAxis
+    dataKey="date"
+    stroke="#ccc"
+    tick={{ fontSize: 11 }}
+    minTickGap={24}
+  />
+
+  <YAxis stroke="#ccc" />
+
+  <Tooltip />
+
+  <Area
+    type="monotone"
+    dataKey="value"
+    stroke="#60a5fa"
+    strokeWidth={2}
+    fill="url(#colorQty)"
+    dot={{ r: 3 }}
+    activeDot={{ r: 5 }}
+  />
+</AreaChart>
+          </ChartFrame>
+        </div>
+      </div>
+
+      <div className="fleet-chart-grid grid grid-cols-1 xl:grid-cols-2 gap-4 2xl:gap-5 mb-5">
+        <div className="fleet-chart-card relative z-0 bg-slate-900/80 rounded-2xl shadow-xl shadow-black/10 overflow-visible border border-slate-700/80 p-3 lg:p-4">
+          <h2 className="fleet-chart-title text-base sm:text-lg font-extrabold text-amber-300 mb-3">
+            Consumed Quantity Per Equipment No.
+          </h2>
+
+          <div className="h-[300px] sm:h-[340px] xl:h-[360px]">
+            <ChartFrame height={260}>
+              <BarChart data={topEquipmentConsumptionChartData}>
+              <XAxis dataKey="equipmentNo" stroke="#ccc" tick={{ fontSize: 11 }} minTickGap={16} />
+              <YAxis stroke="#ccc" tick={{ fontSize: 11 }} />
+              <Tooltip />
+              <Bar dataKey="qtyLiters" fill="#86efac" name="Qty Liters" />
+            </BarChart>
+            </ChartFrame>
+          </div>
+        </div>
+
+        <div className="fleet-chart-card relative z-0 bg-slate-900/80 rounded-2xl shadow-xl shadow-black/10 overflow-visible border border-slate-700/80 p-3 lg:p-4">
+          <h2 className="fleet-chart-title text-base sm:text-lg font-extrabold text-amber-300 mb-3">
+            Consumed Quantity Ratio per Asset Type
+          </h2>
+
+          <div className="grid grid-cols-1 gap-3">
+            <div className="h-[220px] sm:h-[240px] xl:h-[260px] flex items-center justify-center">
+              <ChartFrame height={240}>
+                <PieChart>
+                  <Pie
+                    data={equipmentTypeRatioChartData}
+                    dataKey="value"
+                    nameKey="name"
+                    cx="50%"
+                    cy="50%"
+                    innerRadius={54}
+                    outerRadius={88}
+                    paddingAngle={2}
+                    labelLine={false}
+                    label={false}
+                  >
+                    {equipmentTypeRatioChartData.map((entry, index) => (
+                      <Cell
+                        key={`cell-${entry.name}`}
+                        fill={chartColors[index % chartColors.length]}
+                      />
+                    ))}
+                  </Pie>
+
+                  <Tooltip
+                    formatter={(value, name) => {
+                      const percentage =
+                        equipmentTypeRatioTotal > 0
+                          ? ((Number(value) / equipmentTypeRatioTotal) * 100).toFixed(1)
+                          : "0.0";
+
+                      return [`${percentage}%`, name];
+                    }}
+                  />
+                </PieChart>
+              </ChartFrame>
+            </div>
+
+            <div className="border-t border-slate-700/80 pt-3">
+              <div className="max-h-[120px] overflow-y-auto pr-1 grid grid-cols-1 sm:grid-cols-2 xl:grid-cols-2 2xl:grid-cols-3 gap-x-4 gap-y-1">
+                {equipmentTypeRatioChartData.map((item, index) => {
+                  const percentage =
+                    equipmentTypeRatioTotal > 0
+                      ? ((Number(item.value) / equipmentTypeRatioTotal) * 100).toFixed(1)
+                      : "0.0";
+
+                  return (
+                    <div
+                      key={item.name}
+                      className="flex items-center justify-between gap-2 text-[11px] py-1 border-b border-slate-700/30 min-w-0"
+                      title={`${item.name} - ${percentage}%`}
+                    >
+                      <div className="flex items-center gap-2 min-w-0">
+                        <span
+                          className="w-2.5 h-2.5 rounded-sm shrink-0"
+                          style={{
+                            backgroundColor: chartColors[index % chartColors.length],
+                          }}
+                        />
+
+                        <span className="truncate text-gray-200">
+                          {item.name}
+                        </span>
+                      </div>
+
+                      <span className="text-yellow-300 shrink-0 font-semibold">
+                        {percentage}%
+                      </span>
+                    </div>
+                  );
+                })}
+              </div>
+            </div>
+          </div>
+        </div>
+      </div>
+
+      {selectedEquipmentHistory && (
+        <div className="fixed inset-0 bg-black/75 backdrop-blur-sm flex items-center justify-center z-[10000] p-3">
+          <div className="bg-slate-950 text-white w-full max-w-[min(1150px,calc(100vw-2rem))] max-h-[92vh] rounded-3xl shadow-2xl border border-slate-700 overflow-hidden">
+            <div className="p-3 sm:p-5 border-b border-gray-700 flex justify-between items-start gap-3">
+              <div>
+                <h2 className="text-xl sm:text-2xl font-bold text-yellow-400 italic underline">
+                  Equipment Operations History
+                </h2>
+                <p className="text-gray-400 mt-1">
+                  Equipment:{" "}
+                  <span className="text-blue-300 font-semibold">
+                    {selectedEquipmentHistory.equipmentNo}
+                  </span>
+                </p>
+              </div>
+
+              <button
+                onClick={() => setSelectedEquipmentHistory(null)}
+                className="text-gray-400 hover:text-red-400 text-2xl"
+              >
+                ×
+              </button>
+            </div>
+
+            <div className="p-3 sm:p-5 overflow-auto max-h-[68vh]">
+              <table className="min-w-[1080px] lg:min-w-[1200px] xl:min-w-[1340px] 2xl:min-w-[1420px] w-full border-collapse text-[11px] sm:text-xs lg:text-sm">
+                <thead className="bg-slate-800 sticky top-0 z-[1] shadow-sm">
+                  <tr>
+                    <Th>#</Th>
+                    <Th>Date</Th>
+                    <Th>Operation ID</Th>
+                    <Th>Type</Th>
+                    <Th>Project</Th>
+                    <Th>Source / External</Th>
+                    <Th>Fueler</Th>
+                    <Th>Equipment</Th>
+                    <Th>Liters</Th>
+                    <Th>Odometer</Th>
+                    <Th>Photos</Th>
+                  </tr>
+                </thead>
+
+                <tbody>
+                  {getEquipmentHistory(selectedEquipmentHistory.equipmentNo).map(
+                    (item, i) => {
+                      const row = item.row;
+                      const operationTypeValue = typeIndex !== -1 ? row[typeIndex] : row?.__operation?.type || "";
+                      const isExternalDirectRefuelRow = isExternalDirectRefuelTransactionType(operationTypeValue);
+                      const externalSourceName =
+                        externalStationNameIndex !== -1
+                          ? row[externalStationNameIndex]
+                          : row?.__operation?.externalStationName || "";
+                      const sourceDisplayValue = isExternalDirectRefuelRow
+                        ? externalSourceName || "External Station"
+                        : getStationDisplayCode(row[sourceIndex]);
+
+                      return (
+                        <tr
+                          key={item.originalIndex}
+                          className={`hover:bg-slate-800/70 transition-colors duration-150 ${
+                            isExternalDirectRefuelRow ? "bg-purple-950/20" : ""
+                          }`}
+                        >
+                          <Td>{i + 1}</Td>
+                          <Td>{formatDisplayDate(row[dateIndex])}</Td>
+
+                          <Td>
+                            {operationIdIndex !== -1
+                              ? row[operationIdIndex]
+                              : item.originalIndex + 1}
+                          </Td>
+
+                          <Td>
+                            <span
+                              className={`inline-flex items-center rounded-full px-2.5 py-1 text-[10px] font-bold whitespace-nowrap ${getOperationTypeBadgeClass(
+                                operationTypeValue
+                              )}`}
+                            >
+                              {getOperationTypeDisplay(operationTypeValue)}
+                            </span>
+                          </Td>
+
+                          <Td>
+                            {getAssetProjectByDate(
+                              row[destinationIndex],
+                              row[dateIndex]
+                            )}
+                          </Td>
+
+                          <Td>
+                            <button
+                              onClick={() => openCellEdit(item, "station")}
+                              className={`font-semibold cursor-pointer ${
+                                isExternalDirectRefuelRow
+                                  ? "text-purple-200 hover:text-yellow-300"
+                                  : "text-blue-300 hover:text-yellow-400"
+                              }`}
+                              title={isExternalDirectRefuelRow ? "External fuel station" : "Source station"}
+                            >
+                              {sourceDisplayValue || "-"}
+                            </button>
+                          </Td>
+
+                          <Td>
+                            <button
+                              onClick={() => openCellEdit(item, "fueler")}
+                              className="text-blue-300 hover:text-yellow-400 font-semibold cursor-pointer"
+                            >
+                              {row[fuelerIndex] || "-"}
+                            </button>
+                          </Td>
+
+                          <Td>
+                            <button
+                              onClick={() => openCellEdit(item, "equipment")}
+                              className="text-blue-300 hover:text-yellow-400 font-semibold cursor-pointer"
+                            >
+                              {getAssetDisplayCode(row[destinationIndex])}
+                            </button>
+                          </Td>
+
+                          <Td>
+                            <button
+                              onClick={() => openCellEdit(item, "diesel")}
+                              className="text-blue-300 hover:text-yellow-400 font-semibold cursor-pointer"
+                            >
+                              {formatNumber(row[dieselIndex])}
+                            </button>
+                          </Td>
+
+                          <Td>
+                            <button
+                              onClick={() => openCellEdit(item, "odometer")}
+                              className="text-blue-300 hover:text-yellow-400 font-semibold cursor-pointer"
+                            >
+                              {formatNumber(row[odometerIndex])}
+                            </button>
+                          </Td>
+
+                          <Td>
+                            {getOperationAttachmentsFromRow(row).length ? (
+                              <button
+                                onClick={() => openOperationPhotoViewer(row)}
+                                className="bg-amber-400 hover:bg-amber-300 text-slate-950 font-bold px-3 py-1 rounded-lg text-[11px] transition"
+                              >
+                                📷 View
+                              </button>
+                            ) : (
+                              <span className="text-slate-500">-</span>
+                            )}
+                          </Td>
+                        </tr>
+                      );
+                    }
+                  )}
+                </tbody>
+              </table>
+
+              {auditLog.length > 0 && (
+                <div className="mt-6 bg-gray-950 border border-gray-700 rounded-2xl p-4">
+                  <h3 className="text-yellow-400 font-semibold mb-3">
+                    Local Audit Log
+                  </h3>
+
+                  <div className="max-h-44 overflow-auto">
+                    {auditLog
+                      .slice()
+                      .reverse()
+                      .map((log, i) => (
+                        <div
+                          key={i}
+                          className="text-xs text-gray-300 border-b border-gray-800 py-2"
+                        >
+                          <span className="text-blue-300">
+                            Operation {log.operationId}
+                          </span>{" "}
+                          | {log.field}:{" "}
+                          <span className="text-red-300">{log.oldValue}</span>{" "}
+                          →{" "}
+                          <span className="text-green-300">{log.newValue}</span>{" "}
+                          | Reason: {log.reason} | By: {log.editedBy}
+                        </div>
+                      ))}
+                  </div>
+                </div>
+              )}
+            </div>
+          </div>
+        </div>
+      )}
+
+      {operationPhotoViewer && (
+        <div className="fixed inset-0 bg-black/80 backdrop-blur-sm flex items-center justify-center z-[10020] p-3">
+          <div className="bg-slate-950 text-white w-full max-w-[min(980px,calc(100vw-2rem))] max-h-[92vh] rounded-3xl shadow-2xl border border-slate-700 overflow-hidden">
+            <div className="p-4 border-b border-slate-700 flex items-start justify-between gap-3">
+              <div>
+                <h2 className="text-xl font-bold text-yellow-400 italic underline">
+                  Operation Photos
+                </h2>
+                <p className="text-gray-400 mt-1">
+                  Operation: <span className="text-blue-300 font-semibold">{operationPhotoViewer.operationNo}</span>
+                </p>
+              </div>
+
+              <button
+                onClick={() => setOperationPhotoViewer(null)}
+                className="text-gray-400 hover:text-red-400 text-2xl"
+              >
+                ×
+              </button>
+            </div>
+
+            <div className="p-4 overflow-auto max-h-[75vh]">
+              {operationPhotoViewerLoading ? (
+                <div className="text-center text-slate-300 py-10">Loading photos...</div>
+              ) : operationPhotoViewer.photos?.length ? (
+                <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-4">
+                  {operationPhotoViewer.photos.map((photo, index) => (
+                    <div
+                      key={`${photo.path}-${index}`}
+                      className="bg-slate-900 border border-slate-700 rounded-2xl overflow-hidden"
+                    >
+                      <div className="px-3 py-2 border-b border-slate-700 text-sm font-bold text-amber-300">
+                        {getPhotoLabel(photo.type || photo.photoType)}
+                      </div>
+
+                      {photo.signedUrl ? (
+                        <a href={photo.signedUrl} target="_blank" rel="noreferrer">
+                          <img
+                            src={photo.signedUrl}
+                            alt={getPhotoLabel(photo.type || photo.photoType)}
+                            className="w-full h-64 object-contain bg-black"
+                          />
+                        </a>
+                      ) : (
+                        <div className="h-64 flex items-center justify-center text-red-300 bg-black/40">
+                          Photo could not be loaded
+                        </div>
+                      )}
+
+                      <div className="p-3 text-[11px] text-slate-400 break-all">
+                        {photo.path}
+                      </div>
+                    </div>
+                  ))}
+                </div>
+              ) : (
+                <div className="text-center text-slate-400 py-10">No photos attached.</div>
+              )}
+            </div>
+          </div>
+        </div>
+      )}
+
+      <OperationCorrectionModal
+        editCell={editCell}
+        setEditCell={setEditCell}
+        assets={assets}
+        stations={stations}
+        fuelers={fuelers}
+        onClose={closeEditCell}
+        onSave={saveCellEdit}
+        getDisplayValue={getOperationCorrectionDisplayValue}
+        getAssetDisplayCode={getAssetDisplayCode}
+        getStationDisplayCode={getStationDisplayCode}
+        getFuelerDisplayName={getFuelerDisplayName}
+      />
+
+      {showForm && (
+        <AddOperationModal
+          closeForm={closeForm}
+          fuelers={fuelers}
+          stations={stations}
+          allStations={allStations}
+          assets={assets}
+          projects={projects}
+          currentUser={currentUser}
+          transactionType={transactionType}
+          setTransactionType={setTransactionType}
+          stationMeterPhoto={stationMeterPhoto}
+          setStationMeterPhoto={setStationMeterPhoto}
+          assetPhoto={assetPhoto}
+          setAssetPhoto={setAssetPhoto}
+          assetMeterPhoto={assetMeterPhoto}
+          setAssetMeterPhoto={setAssetMeterPhoto}
+          invoicePhoto={invoicePhoto}
+          setInvoicePhoto={setInvoicePhoto}
+          getLastOdometerForEquipment={getLastOdometerForEquipment}
+          getLastStationCounter={getLastStationCounter}
+          externalStationHistory={externalStationHistory}
+          externalSupplierHistory={externalSupplierHistory}
+          onSaveOperation={saveNewOperation}
+          showToast={showToast}
+        />
+      )}
+      </div>
+    </div>
+  );
+}
+
