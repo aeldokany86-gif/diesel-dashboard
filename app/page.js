@@ -43,7 +43,6 @@ import {
   mapBackendAssetForState,
   mapBackendStationForState,
   mapBackendProjectForState,
-  getLinkedUserRoleNameFromEmployee,
   mapBackendEmployeeForState,
   normalizeBackendRoleName,
   mapBackendOperationForState,
@@ -51,6 +50,12 @@ import {
   getValue,
   formatNumber,
 } from "./lib/helpers";
+
+import {
+  mapBackendAssetTransferForState,
+  mapBackendStationTransferForState,
+  mapBackendEmployeeTransferForState,
+} from "./lib/transferHelpers";
 
 import {
   mergeOperationRequestHeaders,
@@ -382,103 +387,6 @@ function getUserProjectScope(user) {
 }
 
 
-function normalizeBackendApprovalStatusForState(status) {
-  const normalized = String(status || "PENDING")
-    .trim()
-    .toUpperCase()
-    .replace(/[\s-]+/g, "_");
-
-  if (normalized === "APPROVED") return "Approved";
-  if (normalized === "REJECTED") return "Rejected";
-  return "Pending";
-}
-
-function normalizeBackendTransferStatusForState(status) {
-  const normalized = String(status || "PENDING")
-    .trim()
-    .toUpperCase()
-    .replace(/[\s-]+/g, "_");
-
-  if (normalized === "APPROVED") return "APPROVED";
-  if (normalized === "REJECTED") return "REJECTED";
-  if (normalized === "PARTIALLY_APPROVED") return "PARTIALLY_APPROVED";
-  return "PENDING";
-}
-
-function mapBackendAssetTransferForState(transfer = {}) {
-  const asset = transfer.asset || {};
-  const fromProject = transfer.fromProject || {};
-  const toProject = transfer.toProject || {};
-
-  return {
-    id: transfer.id || "",
-    backendId: transfer.id || "",
-    assetBackendId: transfer.assetId || asset.id || "",
-    assetId: asset.assetId || transfer.assetId || "",
-    assetName: asset.assetId || transfer.assetId || "Asset",
-    companyId: transfer.companyId || asset.companyId || "",
-    fromProjectId: transfer.fromProjectId || fromProject.id || "",
-    fromProjectName: fromProject.name || fromProject.code || transfer.fromProjectId || "-",
-    toProjectId: transfer.toProjectId || toProject.id || "",
-    toProjectName: toProject.name || toProject.code || transfer.toProjectId || "-",
-    requestedByUserId: transfer.requestedByUserId || "",
-    status: normalizeBackendTransferStatusForState(transfer.status),
-    reason: transfer.reason || "",
-    rejectionReason: transfer.rejectionReason || "",
-    createdAt: transfer.createdAt || "",
-    approvedAt: transfer.approvedAt || "",
-    appliedAt: transfer.appliedAt || "",
-    approvals: Array.isArray(transfer.approvals)
-      ? transfer.approvals.map((approval) => ({
-          id: approval.id || "",
-          approverUserId: approval.approverUserId || "",
-          projectId: approval.projectId || "",
-          approvalStage: approval.approvalStage || "Project Manager",
-          status: normalizeBackendApprovalStatusForState(approval.status),
-          reviewedAt: approval.reviewedAt || "",
-          note: approval.note || "",
-        }))
-      : [],
-  };
-}
-
-function mapBackendStationTransferForState(transfer = {}) {
-  const station = transfer.station || {};
-  const fromProject = transfer.fromProject || {};
-  const toProject = transfer.toProject || {};
-
-  return {
-    id: transfer.id || "",
-    backendId: transfer.id || "",
-    stationBackendId: transfer.stationId || station.id || "",
-    stationId: station.stationId || transfer.stationId || "",
-    stationName: station.stationId || station.name || transfer.stationId || "Station",
-    companyId: transfer.companyId || station.companyId || "",
-    fromProjectId: transfer.fromProjectId || fromProject.id || "",
-    fromProjectName: fromProject.name || fromProject.code || transfer.fromProjectId || "-",
-    toProjectId: transfer.toProjectId || toProject.id || "",
-    toProjectName: toProject.name || toProject.code || transfer.toProjectId || "-",
-    requestedByUserId: transfer.requestedByUserId || "",
-    status: normalizeBackendTransferStatusForState(transfer.status),
-    effectiveDate: transfer.effectiveDate || "",
-    reason: transfer.reason || "",
-    rejectionReason: transfer.rejectionReason || "",
-    createdAt: transfer.createdAt || "",
-    approvedAt: transfer.approvedAt || "",
-    appliedAt: transfer.appliedAt || "",
-    approvals: Array.isArray(transfer.approvals)
-      ? transfer.approvals.map((approval) => ({
-          id: approval.id || "",
-          approverUserId: approval.approverUserId || "",
-          projectId: approval.projectId || "",
-          approvalStage: approval.approvalStage || "Project Manager",
-          status: normalizeBackendApprovalStatusForState(approval.status),
-          reviewedAt: approval.reviewedAt || "",
-          note: approval.note || "",
-        }))
-      : [],
-  };
-}
 
 function userCanAccessAllProjects(user) {
   if (!user) return false;
@@ -490,31 +398,6 @@ function userCanAccessAllProjects(user) {
 
   const scope = getUserProjectScope(user);
   return scope.includes("All") && !["Operator", "Supervisor"].includes(user.role);
-}
-
-function isProjectAllowedForUser(user, projectValue, projects = []) {
-  if (userCanAccessAllProjects(user)) return true;
-
-  const scope = getUserProjectScope(user);
-  if (!scope.length || !projectValue) return false;
-
-  const normalizedScope = scope.map(normalizeScopeValue);
-  const normalizedProjectValue = normalizeScopeValue(projectValue);
-
-  if (normalizedScope.includes(normalizedProjectValue)) return true;
-
-  const matchedProject = projects.find((project) => {
-    const projectId = normalizeScopeValue(project.id);
-    const projectName = normalizeScopeValue(project.name);
-    return projectId === normalizedProjectValue || projectName === normalizedProjectValue;
-  });
-
-  if (!matchedProject) return false;
-
-  return (
-    normalizedScope.includes(normalizeScopeValue(matchedProject.id)) ||
-    normalizedScope.includes(normalizeScopeValue(matchedProject.name))
-  );
 }
 
 function getAssetProjectValue(assetId, assets = []) {
@@ -1156,52 +1039,6 @@ useEffect(() => {
 
   
 
-  const mapBackendEmployeeTransferForState = (transfer = {}) => {
-    const linkedEmployeeRole = getLinkedUserRoleNameFromEmployee(transfer.employee || {});
-
-    return {
-      id: transfer.id || "",
-      backendId: transfer.id || "",
-      employeeBackendId: transfer.employeeId || transfer.employee?.id || "",
-      employeeId: transfer.employee?.employeeId || transfer.employeeId || "",
-      employeeName: transfer.employee?.name || "",
-      employeeRole: linkedEmployeeRole || "Employee",
-      isManagerTransfer:
-        String(transfer.reason || "").toUpperCase().includes("MANAGER_TRANSFER_ADMIN_APPROVAL") ||
-        ["Manager", "TopManagement"].includes(linkedEmployeeRole),
-    fromProjectId: transfer.fromProjectId || transfer.fromProject?.id || "",
-    fromProjectName:
-      transfer.fromProject?.name ||
-      transfer.fromProject?.code ||
-      transfer.fromProjectId ||
-      "-",
-    toProjectId: transfer.toProjectId || transfer.toProject?.id || "",
-    toProjectName:
-      transfer.toProject?.name ||
-      transfer.toProject?.code ||
-      transfer.toProjectId ||
-      "-",
-    requestedByUserId: transfer.requestedByUserId || "",
-    status: normalizeBackendTransferStatusForState(transfer.status),
-    reason: transfer.reason || "",
-    rejectionReason: transfer.rejectionReason || "",
-    createdAt: transfer.createdAt || "",
-    approvedAt: transfer.approvedAt || "",
-    appliedAt: transfer.appliedAt || "",
-    effectiveDate: transfer.effectiveDate || "",
-      approvals: Array.isArray(transfer.approvals)
-        ? transfer.approvals.map((approval) => ({
-            id: approval.id || "",
-            approverUserId: approval.approverUserId || "",
-            projectId: approval.projectId || "",
-            approvalStage: approval.approvalStage || "Project Manager",
-            status: normalizeBackendApprovalStatusForState(approval.status),
-            reviewedAt: approval.reviewedAt || "",
-            note: approval.note || "",
-          }))
-        : [],
-    };
-  };
 
   const refreshBackendProjects = async (companyId = "") => {
     try {
@@ -1563,6 +1400,22 @@ useEffect(() => {
     }
   };
 
+  const refreshBackendStations = async () => {
+    try {
+      const backendStations = await fetchStations();
+      const mappedStations = backendStations
+        .map(mapBackendStationForState)
+        .filter((station) => station.id && !station.deletedAt);
+
+      setStations(mappedStations);
+      return mappedStations;
+    } catch (error) {
+      console.warn("Stations backend API is not available.", error);
+      showToast?.("warning", "Stations backend API is not available.");
+      return [];
+    }
+  };
+
   const replaceBackendAssetInState = (asset) => {
     const mappedAsset = mapBackendAssetForState(asset);
     if (!mappedAsset.id) return mappedAsset;
@@ -1582,6 +1435,23 @@ useEffect(() => {
     });
 
     return mappedAsset;
+  };
+
+  const replaceBackendStationInState = (stationData) => {
+    const mappedStation = mapBackendStationForState(stationData);
+    if (!mappedStation.id) return mappedStation;
+
+    setStations((prev) =>
+      (prev || []).map((station) =>
+        normalizeScopeValue(station.backendId || station.stationBackendId) ===
+          normalizeScopeValue(mappedStation.backendId || mappedStation.stationBackendId) ||
+        tenantEntityMatches(station, mappedStation.id, mappedStation.companyId)
+          ? { ...station, ...mappedStation }
+          : station
+      )
+    );
+
+    return mappedStation;
   };
 
   const removeBackendAssetFromState = (assetOrId) => {
@@ -1707,16 +1577,7 @@ useEffect(() => {
     if (String(reviewedTransfer.status || "").toUpperCase() === "APPROVED") {
       try {
         const stationData = await fetchStationById(reviewedTransfer.stationBackendId);
-        const mappedStation = mapBackendStationForState(stationData);
-        setStations((prev) =>
-          (prev || []).map((station) =>
-            normalizeScopeValue(station.backendId || station.stationBackendId) ===
-              normalizeScopeValue(mappedStation.backendId || mappedStation.stationBackendId) ||
-            tenantEntityMatches(station, mappedStation.id, mappedStation.companyId)
-              ? { ...station, ...mappedStation }
-              : station
-          )
-        );
+        replaceBackendStationInState(stationData);
       } catch (error) {
         try {
           const backendStations = await fetchStations({
@@ -1819,7 +1680,11 @@ useEffect(() => {
         return candidates.includes(normalizeScopeValue(requestedAssetId));
       });
 
-      backendAssetId = backendAssetId || getBackendAssetId(matchedAsset);
+      backendAssetId =
+        backendAssetId ||
+        matchedAsset?.backendId ||
+        matchedAsset?.assetBackendId ||
+        "";
 
       if (!backendAssetId) {
         throw new Error("Asset backend ID is required for delete approval.");
@@ -1934,16 +1799,7 @@ useEffect(() => {
       });
 
       if (zeroBalanceResult?.station) {
-        const mappedStation = mapBackendStationForState(zeroBalanceResult.station);
-        setStations((prev) =>
-          (prev || []).map((station) =>
-            normalizeScopeValue(station.backendId || station.stationBackendId) ===
-              normalizeScopeValue(mappedStation.backendId || mappedStation.stationBackendId) ||
-            tenantEntityMatches(station, mappedStation.id, mappedStation.companyId)
-              ? { ...station, ...mappedStation }
-              : station
-          )
-        );
+        replaceBackendStationInState(zeroBalanceResult.station);
       }
 
       const balanceBefore =
@@ -2000,16 +1856,7 @@ useEffect(() => {
         : confirmedActualQty - confirmedSystemQty;
 
     if (inventoryAdjustmentResult?.station) {
-      const mappedStation = mapBackendStationForState(inventoryAdjustmentResult.station);
-      setStations((prev) =>
-        (prev || []).map((station) =>
-          normalizeScopeValue(station.backendId || station.stationBackendId) ===
-            normalizeScopeValue(mappedStation.backendId || mappedStation.stationBackendId) ||
-          tenantEntityMatches(station, mappedStation.id, mappedStation.companyId)
-            ? { ...station, ...mappedStation }
-            : station
-        )
-      );
+      replaceBackendStationInState(inventoryAdjustmentResult.station);
     }
 
     setApprovedStationStockAdjustments((prev) => [
@@ -2661,23 +2508,6 @@ useEffect(() => {
       );
 
   const scopedTeamMembers = scopedFuelers.map((member) => {
-    const linkedUser = companyUsers.find((user) => {
-      const sameCompany = isPlatformAdminUser(currentUser)
-        ? companyMatches(user.companyId, member.companyId)
-        : true;
-
-      if (!sameCompany) return false;
-
-      return (
-        normalizeScopeValue(user.id) === normalizeScopeValue(member.linkedUserId) ||
-        normalizeScopeValue(user.id) === normalizeScopeValue(member.id) ||
-        (
-          member.email &&
-          normalizeScopeValue(user.email) === normalizeScopeValue(member.email)
-        )
-      );
-    });
-
     const explicitlyLinkedUser =
       companyUsers.find((user) =>
         normalizeScopeValue(user.id) === normalizeScopeValue(member.linkedUserId)
@@ -2756,6 +2586,36 @@ useEffect(() => {
   useEffect(() => {
     loadPendingBackendOperationCorrections();
   }, [currentUser?.id, currentUser?.role, currentUser?.status]);
+
+  const refreshOperationsWorkspace = async () => {
+    if (!currentUser?.id || currentUser.status !== "Active") return;
+
+    const refreshCompletedOperations = async () => {
+      try {
+        const backendOperations = await fetchOperations(currentUser);
+        const completedOperations = backendOperations
+          .filter(
+            (operation) =>
+              String(operation?.status || "").toUpperCase() === "COMPLETED"
+          )
+          .map(mapBackendOperationForState);
+
+        setData(completedOperations);
+        return completedOperations;
+      } catch (error) {
+        console.warn("Failed to refresh backend operations.", error);
+        return [];
+      }
+    };
+
+    await Promise.all([
+      refreshCompletedOperations(),
+      refreshBackendAssets(),
+      refreshBackendStations(),
+      loadPendingBackendOperationApprovals(),
+      loadPendingBackendOperationCorrections(),
+    ]);
+  };
 
   const backendOperationApprovalRequests = backendOperationApprovals
     .map((item) => mapBackendOperationApprovalForFrontend(item, currentUser))
@@ -3008,6 +2868,7 @@ useEffect(() => {
           submitApprovalRequest={submitApprovalRequest}
           projects={companyProjects}
           showToast={showToast}
+          onOperationsWorkspaceRefresh={refreshOperationsWorkspace}
         />
       );
     }
@@ -3163,6 +3024,7 @@ if (page === "approvals") {
       onApproveStationAction={handleApproveStationAction}
       onOperationApprovalReviewed={loadPendingBackendOperationApprovals}
       onOperationCorrectionReviewed={loadPendingBackendOperationCorrections}
+      onOperationsWorkspaceRefresh={refreshOperationsWorkspace}
       runWithActionLoading={runWithActionLoading}
     />
   );
@@ -3956,9 +3818,6 @@ function LoginPage({
   setTheme,
   actionLoading = { active: false, label: "" },
 }) {
-  const [loginCompanyInfo, setLoginCompanyInfo] = useState(null);
-  const [loginCompanyLoading, setLoginCompanyLoading] = useState(false);
-  const [loginCompanyMessage, setLoginCompanyMessage] = useState("");
 
   const loginCompanies = useMemo(
     () =>
@@ -3972,23 +3831,11 @@ function LoginPage({
 
   const activeUsers = users.filter((user) => user.status === "Active");
 
-  const loginEmailValue = String(loginIdentifier || "")
-    .trim()
-    .toLowerCase();
-  const loginLooksLikeEmail = loginEmailValue.includes("@");
-  const isDetectedPlatformUser = Boolean(loginCompanyInfo?.isPlatformUser);
-  const detectedCompanyName =
-    loginCompanyInfo?.companyName ||
-    loginCompanies.find((company) => companyMatches(company.id, loginCompanyInfo?.companyId))?.name ||
-    "";
-
   useEffect(() => {
     const email = String(loginIdentifier || "")
       .trim()
       .toLowerCase();
 
-    setLoginCompanyMessage("");
-    setLoginCompanyInfo(null);
 
     if (!email || !email.includes("@")) {
       setSelectedCompanyId?.("");
@@ -3998,8 +3845,6 @@ function LoginPage({
     let cancelled = false;
 
     const timer = window.setTimeout(async () => {
-      setLoginCompanyLoading(true);
-
       try {
         const response = await api.get(
           `/auth/login-company?email=${encodeURIComponent(email)}`
@@ -4013,28 +3858,12 @@ function LoginPage({
           ? selectedCompanyId || getPlatformCompanyId(loginCompanies)
           : info.companyId || "";
 
-        setLoginCompanyInfo(info);
         setSelectedCompanyId?.(nextCompanyId);
 
-        if (!isPlatformUser && !info.companyId) {
-          setLoginCompanyMessage("Company could not be detected for this user.");
-        }
       } catch (error) {
         if (cancelled) return;
 
-        const backendMessage =
-          error?.response?.data?.message ||
-          "Enter a valid registered email to detect the company.";
-
-        setLoginCompanyInfo(null);
         setSelectedCompanyId?.("");
-        setLoginCompanyMessage(
-          Array.isArray(backendMessage) ? backendMessage.join(", ") : backendMessage
-        );
-      } finally {
-        if (!cancelled) {
-          setLoginCompanyLoading(false);
-        }
       }
     }, 450);
 

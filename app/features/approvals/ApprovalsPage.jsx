@@ -136,6 +136,7 @@ export default function ApprovalsPage({
   onApproveStationAction,
   onOperationApprovalReviewed,
   onOperationCorrectionReviewed,
+  onOperationsWorkspaceRefresh,
   runWithActionLoading = async (_label, actionFn) => actionFn(),
 }) {
   const [selectedStatus, setSelectedStatus] = useState("Pending");
@@ -189,8 +190,12 @@ export default function ApprovalsPage({
           currentUser
         );
 
-        await onOperationCorrectionReviewed?.();
-        await onOperationApprovalReviewed?.();
+        if (typeof onOperationsWorkspaceRefresh === "function") {
+          await onOperationsWorkspaceRefresh();
+        } else {
+          await onOperationCorrectionReviewed?.();
+          await onOperationApprovalReviewed?.();
+        }
         setSelectedRequest(null);
         trackActivity("Approve Operation Correction", "operations", request.title);
         showToast?.("success", "Operation correction approved and applied successfully.");
@@ -215,7 +220,11 @@ export default function ApprovalsPage({
           currentUser
         );
 
-        await onOperationApprovalReviewed?.();
+        if (typeof onOperationsWorkspaceRefresh === "function") {
+          await onOperationsWorkspaceRefresh();
+        } else {
+          await onOperationApprovalReviewed?.();
+        }
         setSelectedRequest(null);
         trackActivity("Approve Operation Request", "operations", request.title);
         showToast?.("success", "Operation request approved successfully.");
@@ -440,7 +449,11 @@ export default function ApprovalsPage({
           currentUser
         );
 
-        await onOperationCorrectionReviewed?.();
+        if (typeof onOperationsWorkspaceRefresh === "function") {
+          await onOperationsWorkspaceRefresh();
+        } else {
+          await onOperationCorrectionReviewed?.();
+        }
         setSelectedRequest(null);
         trackActivity("Reject Operation Correction", "operations", request.title);
         showToast?.("success", "Operation correction rejected.");
@@ -465,7 +478,11 @@ export default function ApprovalsPage({
           currentUser
         );
 
-        await onOperationApprovalReviewed?.();
+        if (typeof onOperationsWorkspaceRefresh === "function") {
+          await onOperationsWorkspaceRefresh();
+        } else {
+          await onOperationApprovalReviewed?.();
+        }
         setSelectedRequest(null);
         trackActivity("Reject Operation Request", "operations", request.title);
         showToast?.("success", "Operation request rejected.");

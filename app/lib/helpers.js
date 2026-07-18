@@ -378,11 +378,44 @@ export function isBackendStationOperationType(value) {
 
 export function mapBackendOperationForState(operation = {}) {
   const type = toFrontendOperationType(operation.type);
-  const destinationId = operation.assetId || operation.destinationStationId || "";
+
+  const sourceStationDisplay =
+    operation.sourceStation?.stationId ||
+    operation.sourceStation?.stationCode ||
+    operation.sourceStation?.code ||
+    operation.sourceStation?.name ||
+    operation.sourceStationId ||
+    "";
+
+  const destinationStationDisplay =
+    operation.destinationStation?.stationId ||
+    operation.destinationStation?.stationCode ||
+    operation.destinationStation?.code ||
+    operation.destinationStation?.name ||
+    operation.destinationStationId ||
+    "";
+
+  const assetDisplay =
+    operation.asset?.assetId ||
+    operation.asset?.assetCode ||
+    operation.asset?.code ||
+    operation.assetId ||
+    "";
+
+  const destinationId = assetDisplay || destinationStationDisplay;
+
+  const requestedByDisplay =
+    operation.requestedBy?.fullName ||
+    operation.requestedBy?.name ||
+    operation.requestedBy?.email ||
+    operation.requestedByUserId ||
+    "";
+
   const stationCounterValue =
     operation.stationCounter === undefined || operation.stationCounter === null
       ? ""
       : String(operation.stationCounter);
+
   const odometerValue =
     operation.odometer === undefined || operation.odometer === null
       ? ""
@@ -392,11 +425,15 @@ export function mapBackendOperationForState(operation = {}) {
     operation.operationNo || operation.id || "",
     operation.completedAt || operation.createdAt || "",
     type,
-    operation.sourceStationId || "",
-    operation.requestedBy?.fullName || operation.requestedByUserId || "",
+    sourceStationDisplay,
+    requestedByDisplay,
     destinationId,
-    operation.quantity === undefined || operation.quantity === null ? "" : String(operation.quantity),
-    isBackendStationOperationType(operation.type) ? stationCounterValue || odometerValue : odometerValue,
+    operation.quantity === undefined || operation.quantity === null
+      ? ""
+      : String(operation.quantity),
+    isBackendStationOperationType(operation.type)
+      ? stationCounterValue || odometerValue
+      : odometerValue,
     stationCounterValue,
     operation.externalStationName || "",
     operation.invoiceNumber || "",

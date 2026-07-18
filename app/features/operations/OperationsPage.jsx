@@ -235,6 +235,7 @@ export default function OperationsPage({
   submitApprovalRequest = () => {},
   projects = [],
   showToast,
+  onOperationsWorkspaceRefresh,
 
   assetOdometerHistory,
   stationCounterResetHistory,}) {
@@ -915,7 +916,11 @@ const payload = mapFrontendOperationToBackendPayload({
         `${operation.transactionType} ${createdOperation?.operationNo || createdOperation?.operationId || operation.operationId} saved through backend.`
       );
 
-      void refreshOperations({ silent: true });
+      if (typeof onOperationsWorkspaceRefresh === "function") {
+        void onOperationsWorkspaceRefresh();
+      } else {
+        void refreshOperations({ silent: true });
+      }
     } catch (error) {
       showToast?.(
         "warning",
@@ -1947,7 +1952,10 @@ const payload = mapFrontendOperationToBackendPayload({
         reason: editCell.reason,
       };
 
-      await createOperationCorrection(correctionPayload, currentUser);
+      const responseBody = await createOperationCorrection(
+        correctionPayload,
+        currentUser
+      );
 
       setAuditLog((prev) => [
         ...prev,
@@ -1972,7 +1980,17 @@ const payload = mapFrontendOperationToBackendPayload({
       );
 
       closeEditCell();
-      showToast?.("success", responseBody?.message || "Correction request submitted and pending manager approval.");
+      showToast?.(
+        "success",
+        responseBody?.message ||
+          "Correction request submitted and pending manager approval."
+      );
+
+      if (typeof onOperationsWorkspaceRefresh === "function") {
+        void onOperationsWorkspaceRefresh();
+      } else {
+        void refreshOperations({ silent: true });
+      }
     } catch (error) {
       console.warn("Correction submit failed:", error);
       showToast?.(
