@@ -3,24 +3,15 @@
 
 "use client";
  
-import React, { useEffect, useMemo, useRef, useState } from "react";
+import {
+  useEffect,
+  useMemo,
+  useRef,
+  useState,
+} from "react";
 import { useAuth } from "./context/AuthContext";
 import api from "./services/api";
-import {
-  AreaChart,
-  Area,
-  LineChart,
-  Line,
-  XAxis,
-  YAxis,
-  Tooltip,
-  BarChart,
-  Bar,
-  PieChart,
-  Pie,
-  Cell,
-} from "recharts"; 
-import ChartFrame from "./components/charts/ChartFrame";
+
 import SidebarSvgIcon from "./components/icons/SidebarSvgIcon";
 import {
   LayoutDashboard,
@@ -32,12 +23,8 @@ import {
   Bell,
 } from "./components/icons/SidebarIcons";
 import Toast from "./components/feedback/Toast";
-import StatusBadge from "./components/feedback/StatusBadge";
-import Field from "./components/forms/Field";
-import ModalPortal from "./components/ui/ModalPortal";
-import Th from "./components/ui/Th";
-import Td from "./components/ui/Td";
-import Card from "./components/ui/Card";
+
+
 import OperationsPage from "./features/operations/OperationsPage";
 import AssetsPage from "./features/assets/AssetsPage";
 import StationsPage from "./features/stations/StationsPage";
@@ -50,74 +37,33 @@ import NotificationCenterPage from "./features/notifications/NotificationCenterP
 import AuditTimelinePage from "./features/audit/AuditTimelinePage";
 
 import {
-  cleanCsvCell,
-  parseCSV,
   normalizeSystemUserStatus,
   normalizeScopeValue,
-  isActiveProject,
-  hasAssignedProjectManager,
-  filterActiveProjects,
   filterAvailableProjects,
-  normalizeBackendAssetStatusForState,
-  normalizeBackendStationStatusForState,
-  mapFrontendStationStatusForBackend,
-  mapFrontendAssetStatusForBackend,
   mapBackendAssetForState,
   mapBackendStationForState,
   mapBackendProjectForState,
-  mapFrontendEmployeeStatusForBackend,
-  mapBackendEmployeeStatusForState,
   getLinkedUserRoleNameFromEmployee,
   mapBackendEmployeeForState,
   normalizeBackendRoleName,
-  toFrontendOperationType,
-  isBackendStationOperationType,
   mapBackendOperationForState,
-  normalizeHeader,
-  normalizeText,
-  getDuplicateIdError,
-  isSameText,
   getHeaderIndex,
   getValue,
-formatNumber,
+  formatNumber,
 } from "./lib/helpers";
 
 import {
-  mapFrontendOperationToBackendPayload,
-  buildOperationRequestHeaders,
   mergeOperationRequestHeaders,
-  normalizeOperationAttachments,
-  getPhotoLabel,
-  getOperationTypeDisplay,
-  getOperationTypeBadgeClass,
-  getOperationTotalCostAtOperation,
-  getAllowedTransactionTypesForUser,
   isAssetRefuelTransactionType,
-  isExternalDirectRefuelTransactionType,
-  isExternalSupplyTransactionType,
-  isExternalTransferTransactionType,
-  isExternalSourceOperation,
-  isStationCounterTransactionType,
-  shouldOperationRequireManagerApproval,
-  getOperationApprovalType,
-  getOperationApprovalTitle,
-  getOperationApprovalSuccessMessage,
-  shouldExternalSupplyRequireApproval,
 } from "./lib/operationHelpers";
 
 import {
-  uploadOperationPhotoFile,
-  getUploadSignedUrl,
-  createOperation,
   fetchOperations,
   fetchPendingOperationApprovals,
-  reviewOperation,
 } from "./services/operationsService";
 
 import {
   fetchPendingOperationCorrections,
-  createOperationCorrection,
-  reviewOperationCorrection,
 } from "./services/operationCorrectionsService";
 
 import {
@@ -126,27 +72,19 @@ import {
   updateProjectRecord,
   assignProjectManager,
   deleteProjectRecord,
-  updateProjectFuelPrice,
 } from "./services/projectsService";
-
 
 import {
   fetchCompanies,
   fetchPublicCompanies,
-  createCompanyRecord,
-  updateCompanyRecord,
-  updateCompanyStatus,
 } from "./services/companiesService";
-
 
 import {
   fetchAssets,
   fetchAssetById,
   createAssetRecord,
-  updateAssetRecord,
   deleteAssetRecord,
   fetchPendingAssetTransfers,
-  createAssetTransfer,
   reviewAssetTransfer,
   resetAssetOdometer,
 } from "./services/assetsService";
@@ -154,11 +92,7 @@ import {
 import {
   fetchStations,
   fetchStationById,
-  createStationRecord,
-  updateStationRecord,
-  deleteStationRecord,
   fetchPendingStationTransfers,
-  createStationTransfer,
   reviewStationTransfer,
   zeroStationBalance,
   adjustStationInventory,
@@ -176,96 +110,41 @@ import {
 import {
   fetchUsers,
   createUserRecord,
-  updateUserRecord,
   updateUserStatus,
-  resetUserPassword,
   fetchRoles,
 } from "./services/usersService";
 
 import {
-  normalizeOperationCorrectionFieldName,
-  getOperationCorrectionFieldLabel,
-  findApprovalEntityByAnyId,
-  getAssetApprovalDisplayValue,
-  getStationApprovalDisplayValue,
-  getOperationCorrectionApprovalDisplayValue,
-  normalizeApprovalStatus,
-  isPendingApprovalStatus,
-  isApprovedApprovalStatus,
-  isApprovalFullyApproved,
-  isEmployeeTransferApproval,
-  isManagerEmployeeTransferApproval,
   mapBackendOperationApprovalForFrontend,
   mapBackendOperationCorrectionForFrontend,
-  normalizeApprovalValue,
-  isSensitiveApprovalField,
-  buildApprovalChangedFields,
-  inferApprovalEntity,
-  extractApprovalProjects,
-  getProjectScopeValues,
-  projectMatchesScope,
-  findManagerForProject,
-  getReportingManagerForUser,
-  findStrictProjectManagerForProject,
-  buildApprovalRoute,
   createApprovalRequest,
 } from "./lib/approvalHelpers";
 
 import {
-  ROLE_PERMISSIONS,
-  getRolePermissions,
   hasPermissionForUser,
   canAccessPageForUser,
-  actionRequiresManagerApproval,
-  canPerformWriteAction,
-  getPendingApprovers,
-  userHasPendingApproval,
   canUserViewApproval,
-  canUserReviewApproval,
 } from "./lib/permissionHelpers";
 
 import {
-  getNotificationPriority,
   buildNotificationItems,
 } from "./lib/notificationHelpers";
 
 import {
-  SAUDI_PROJECT_LOCATIONS,
-  EGYPT_PROJECT_LOCATIONS,
-  UAE_PROJECT_LOCATIONS,
-  normalizeCountryName,
-  getProjectLocationOptionsByCountry,
-  PLATFORM_CONTEXT_ID,
-  PLATFORM_REAL_COMPANY_ID,
-  PLATFORM_CONTEXT_CODE,
-  PLATFORM_CONTEXT_NAME,
-  PLATFORM_COMPANY_OPTION,
   isPlatformContextValue,
   isPlatformCompany,
-  getPlatformCompany,
   getPlatformCompanyId,
   mergePlatformConsoleWithCompanies,
   normalizeCompanyForState,
-  COUNTRY_SETTINGS_OPTIONS,
-  getCompanyCountrySettings,
-  getCurrencyByCountry,
-  getTimezoneByCountry,
-  getCurrencyOptionsForCountry,
-  normalizeCurrencyForCountry,
-  uniqueUsersById,
   isPlatformAdminUser,
   getItemCompanyId,
   companyMatches,
   makeTenantEntityKey,
   tenantEntityMatches,
-  isDuplicateEntityIdWithinCompany,
   filterDuplicateTenantEntities,
   filterByCompany,
-  getCompanyIdFromProjectValue,
-  getItemCompanyIdWithProjectFallback,
   filterByCompanyWithProjectFallback,
-  buildCompaniesFromSources,
-  } from "./lib/companyHelpers";
+} from "./lib/companyHelpers";
 
 const OPERATION_HEADERS = [
   "operation_id",
@@ -300,34 +179,6 @@ function notifyUser(showToastFn, type, message) {
   } else {
     console.log(safeMessage);
   }
-}
-
-function inferToastTypeFromMessage(message) {
-  const normalized = String(message || "").toLowerCase();
-
-  if (
-    normalized.includes("success") ||
-    normalized.includes("saved") ||
-    normalized.includes("updated") ||
-    normalized.includes("exported") ||
-    normalized.includes("completed") ||
-    normalized.includes("submitted") ||
-    normalized.includes("added")
-  ) {
-    return "success";
-  }
-
-  if (
-    normalized.includes("not allowed") ||
-    normalized.includes("cannot") ||
-    normalized.includes("invalid") ||
-    normalized.includes("failed") ||
-    normalized.includes("error")
-  ) {
-    return "warning";
-  }
-
-  return "warning";
 }
 
 const NETWORK_OFFLINE_MESSAGE = "No internet connection. Please check your connection and try again.";
@@ -379,19 +230,6 @@ function logHandledApiIssue(label, error) {
 }
 
 
-function normalizeSystemRole(value) {
-  const normalized = String(value || "Operator").trim().toLowerCase();
-  const compact = normalized.replace(/[\s_-]+/g, "");
-
-  if (normalized === "admin") return "Admin";
-  if (normalized === "manager") return "Manager";
-  if (normalized === "officer") return "Officer";
-  if (normalized === "supervisor") return "Supervisor";
-  if (compact === "topmanagement") return "TopManagement";
-  if (compact === "platformadmin") return "PlatformAdmin";
-  return "Operator";
-}
-
 function makeUsernameFromUser({ id, fullName, email }) {
   const emailName = String(email || "").split("@")[0];
   const raw = emailName || fullName || id || "user";
@@ -403,14 +241,6 @@ function makeUsernameFromUser({ id, fullName, email }) {
     .replace(/\.+/g, ".")
     .replace(/^\.|\.$/g, "") || String(id || "user");
 }
-
-
-
-
-
-const INITIAL_USERS = [];
-
-
 
 
 function buildLegacyUserFromAuthUser(authUser) {
@@ -545,27 +375,6 @@ function createActivityRecord({ user, action, module, details }) {
   };
 }
 
-
-function formatProjectFuelPriceDate(value) {
-  if (!value) return "-";
-
-  const date = new Date(value);
-
-  if (Number.isNaN(date.getTime())) return "-";
-
-  return date.toLocaleString("en-GB", {
-    year: "numeric",
-    month: "2-digit",
-    day: "2-digit",
-    hour: "2-digit",
-    minute: "2-digit",
-  });
-}
-
-
-function isOfficerUser(user) {
-  return user?.role === "Officer";
-}
 
 function getUserProjectScope(user) {
   if (!user || !Array.isArray(user.assignedProjects)) return [];
@@ -863,83 +672,6 @@ function filterTransactionRowsByCompany({ rows = [], headers = [], companyId, us
     companyMatches(inferRowCompanyId(row, headers, assets, stations, projects), companyId)
   );
 }
-function filterDataByUserProjectScope({ user, data, headers, assets, stations, projects }) {
-  if (userCanAccessAllProjects(user)) return data;
-
-  return data.filter((row) => {
-    const rowProject = getRowProjectValue(row, headers, assets, stations);
-    return isProjectAllowedForUser(user, rowProject, projects);
-  });
-}
-
-function filterMasterDataByUserProjectScope({ user, items, projects, projectKey = "project" }) {
-  if (userCanAccessAllProjects(user)) return items;
-
-  return items.filter((item) =>
-    isProjectAllowedForUser(user, item?.[projectKey], projects)
-  );
-}
-
-function useOutsideClick(ref, callback) {
-  useEffect(() => {
-    const handleClickOutside = (event) => {
-      if (ref.current && !ref.current.contains(event.target)) {
-        callback();
-      }
-    };
-
-    document.addEventListener("mousedown", handleClickOutside);
-
-    return () => {
-      document.removeEventListener("mousedown", handleClickOutside);
-    };
-  }, [ref, callback]);
-}
-
-function useSmartDropdownPosition(ref, isOpen, menuWidth = 260) {
-  const [menuAlign, setMenuAlign] = useState("left");
-
-  useEffect(() => {
-    if (!isOpen || typeof window === "undefined") return;
-
-    const updateMenuPosition = () => {
-      const element = ref?.current;
-      if (!element) return;
-
-      const rect = element.getBoundingClientRect();
-      const safePadding = 16;
-      const viewportWidth = window.innerWidth || 0;
-
-      const spaceIfOpenRight = viewportWidth - rect.left - safePadding;
-      const spaceIfOpenLeft = rect.right - safePadding;
-
-      if (spaceIfOpenRight >= menuWidth) {
-        setMenuAlign("left");
-      } else if (spaceIfOpenLeft >= menuWidth) {
-        setMenuAlign("right");
-      } else {
-        setMenuAlign("right");
-      }
-    };
-
-    updateMenuPosition();
-
-    window.addEventListener("resize", updateMenuPosition);
-    window.addEventListener("scroll", updateMenuPosition, true);
-
-    return () => {
-      window.removeEventListener("resize", updateMenuPosition);
-      window.removeEventListener("scroll", updateMenuPosition, true);
-    };
-  }, [ref, isOpen, menuWidth]);
-
-  return menuAlign;
-}
-
-function getSmartDropdownClass(menuAlign, widthClass = "w-64") {
-  return `absolute ${menuAlign === "right" ? "right-0" : "left-0"} mt-3 ${widthClass} max-w-[calc(100vw-1.5rem)]`;
-}
-
  
 export default function Home() {
   const [page, setPage] = useState("companies");
@@ -2439,12 +2171,6 @@ useEffect(() => {
 
     async function fetchData() {
       try {
-        const fetchCsvText = async (url) => {
-          if (!url || String(url).includes("YOUR_COMPANIES_SHEET")) return "";
-          const response = await fetch(url);
-          return response.text();
-        };
-
         const fetchBackendCompanies = async () => {
           try {
             const backendCompanies = await fetchPublicCompanies();
@@ -2656,15 +2382,6 @@ useEffect(() => {
     companyMatches(company.code, currentCompanyId) ||
     companyMatches(company.name, currentCompanyId)
   );
-
-  const platformUsers = uniqueUsersById([
-    backendLegacyUser,
-    ...users.filter((user) =>
-      user?.role === "PlatformAdmin" ||
-      isPlatformContextValue(user?.companyId) ||
-      isPlatformContextValue(user?.companyName)
-    ),
-  ].filter(Boolean));
 
   const companyUsers = isPlatformAdminUser(currentUser)
     ? isPlatformConsoleContext
@@ -2919,7 +2636,6 @@ useEffect(() => {
     return currentUser?.role === "Admin";
   });
 
-  const availableScopedProjects = filterAvailableProjects(scopedProjects);
   const availableProjectsForTransfer = filterAvailableProjects(companyProjects);
 
   // Enterprise transfer rule:
@@ -4224,80 +3940,6 @@ if (currentUser?.passwordResetRequired || forcePasswordChangeOpen) {
     </>
   );
 }
- 
-// IMPORTANT:
-// Add these components to your Recharts import in app/page.js:
-// BarChart, Bar, PieChart, Pie, Cell, Legend
-
-
-function GenericModal({ title, closeForm, saveText, onSave, saveDisabled = false, children }) {
-  return (
-    <ModalPortal>
-      <div className="fleet-portal-modal-backdrop fixed inset-0 bg-black/60 flex items-center justify-center p-4">
-        <div className="fleet-portal-modal-panel bg-white text-black w-[min(650px,calc(100vw-2rem))] max-h-[92vh] overflow-y-auto rounded-xl shadow-2xl p-6">
-          <div className="flex justify-between items-center mb-6 border-b pb-3">
-            <h2 className="text-xl sm:text-2xl font-bold">{title}</h2>
-            <button onClick={closeForm} className="text-gray-500 hover:text-black text-xl">×</button>
-          </div>
-
-          <div className="grid grid-cols-1 gap-4">
-            {children}
-          </div>
-
-          <div className="flex justify-end gap-3 mt-6 border-t pt-4">
-            <button onClick={closeForm} className="bg-gray-200 px-3 lg:px-4 py-2 rounded-lg">Cancel</button>
-            <button
-              onClick={onSave}
-              disabled={saveDisabled}
-              className={`px-3 lg:px-4 py-2 rounded-lg ${
-                saveDisabled
-                  ? "bg-gray-300 text-gray-500 cursor-not-allowed"
-                  : "bg-green-600 text-white hover:bg-green-700"
-              }`}
-            >
-              {saveText}
-            </button>
-          </div>
-        </div>
-      </div>
-    </ModalPortal>
-  );
-}
- 
-function SelectField({
-  label,
-  value,
-  onChange,
-  options = [],
-  placeholder,
-  disabled = false,
-}) {
-  return (
-    <div className="grid grid-cols-1 sm:grid-cols-3 items-start sm:items-center gap-2 sm:gap-4">
-      <label className="font-medium text-gray-700">{label}</label>
-
-      <select
-        value={value}
-        onChange={onChange}
-        disabled={disabled}
-        className={`col-span-2 border rounded-lg p-2 ${
-          disabled ? "bg-gray-100 text-gray-400 cursor-not-allowed" : ""
-        }`}
-      >
-        <option value="">{placeholder}</option>
-
-        {(options || []).map((item, i) => (
-          <option key={i} value={item}>
-            {item}
-          </option>
-        ))}
-      </select>
-    </div>
-  );
-}
- 
-
- 
  
 function LoginPage({
   users = [],
