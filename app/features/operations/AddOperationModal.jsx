@@ -296,6 +296,31 @@ export default function AddOperationModal({
   const selectedDestinationStation = (allStations.length ? allStations : stations).find(
     (station) => isSameText(station.id, destinationId)
   );
+
+  const getStationBalance = (station) => {
+    const rawBalance =
+      station?.currentStock ??
+      station?.balance ??
+      station?.currentBalance ??
+      station?.availableStock ??
+      station?.stock;
+
+    const numericBalance = Number(rawBalance);
+
+    return Number.isFinite(numericBalance) ? numericBalance : null;
+  };
+
+  const sourceStationBalance = getStationBalance(selectedSourceStation);
+  const destinationStationBalance = getStationBalance(selectedDestinationStation);
+
+  const shouldShowSourceStationBalance =
+    Boolean(sourceStation) &&
+    [isDirectRefuel, isInternalTransfer, isExternalTransfer].some(Boolean);
+
+  const shouldShowDestinationStationBalance =
+    Boolean(destinationId) &&
+    [isInternalTransfer, isExternalSupply, isExternalTransfer].some(Boolean);
+
   const operationCompanyId =
     currentUser?.companyId ||
     selectedSourceStation?.companyId ||
@@ -754,6 +779,20 @@ export default function AddOperationModal({
                     setSearchValue={setSourceStationSearch}
                   />
 
+                  {shouldShowSourceStationBalance && (
+                    <div className="grid grid-cols-1 sm:grid-cols-3 gap-2 sm:gap-4 -mt-2">
+                      <div />
+                      <p className="col-span-2 text-xs text-slate-500 px-1">
+                        Current balance:{" "}
+                        <span className="font-semibold text-slate-700">
+                          {sourceStationBalance === null
+                            ? "-"
+                            : `${formatNumber(sourceStationBalance)} L`}
+                        </span>
+                      </p>
+                    </div>
+                  )}
+
                   {sourceStation && (
                     <div className="grid grid-cols-1 sm:grid-cols-3 items-start sm:items-center gap-2 sm:gap-4">
                       <label className="font-medium text-gray-700">Source Project</label>
@@ -780,6 +819,20 @@ export default function AddOperationModal({
                 searchValue={destinationSearch}
                 setSearchValue={setDestinationSearch}
               />
+
+              {shouldShowDestinationStationBalance && (
+                <div className="grid grid-cols-1 sm:grid-cols-3 gap-2 sm:gap-4 -mt-2">
+                  <div />
+                  <p className="col-span-2 text-xs text-slate-500 px-1">
+                    Current balance:{" "}
+                    <span className="font-semibold text-slate-700">
+                      {destinationStationBalance === null
+                        ? "-"
+                        : `${formatNumber(destinationStationBalance)} L`}
+                    </span>
+                  </p>
+                </div>
+              )}
 
               {isExternalTransfer && destinationId && (
                 <div className="grid grid-cols-1 sm:grid-cols-3 items-start sm:items-center gap-2 sm:gap-4">

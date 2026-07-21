@@ -53,6 +53,7 @@ import { updateProjectFuelPrice } from "../../services/projectsService";
 import OperationCorrectionModal from "./OperationCorrectionModal";
 import AddOperationModal from "./AddOperationModal";
 import useOperationsData from "./hooks/useOperationsData";
+import { companyMatches } from "../../lib/companyHelpers";
 
 const NETWORK_OFFLINE_MESSAGE =
   "No internet connection. Please check your connection and try again.";
@@ -250,58 +251,228 @@ export default function OperationsPage({
     setData,
   });
 
-  const getLatestResetRecordForEntity = (history = [], entityId, companyId = "") => {
-    return (history || [])
-      .filter((item) => {
-        const sameEntity = isSameText(item.assetId || item.stationId || item.entityId, entityId);
-        const sameCompany = !companyId || !item.companyId || companyMatches(item.companyId, companyId);
-        return sameEntity && sameCompany;
-      })
-      .sort((a, b) => {
-        const da = new Date(a.effectiveFrom || a.createdAt).getTime() || 0;
-        const db = new Date(b.effectiveFrom || b.createdAt).getTime() || 0;
-        return db - da;
-      })[0];
+  const getResetEffectiveTime = (resetRecord) => {
+    if (!resetRecord) return 0;
+
+    return (
+      new Date(
+        resetRecord.effectiveAt ||
+          resetRecord.effectiveFrom ||
+          resetRecord.effectiveDate ||
+          resetRecord.createdAt
+      ).getTime() || 0
+    );
   };
 
-  const getEffectiveLastAssetReading = (assetId) => {
-    const asset = assets.find((item) => isSameText(item.id, assetId));
-    const assetCompanyId = asset?.companyId || currentUser?.companyId || "";
-    const latestReset = getLatestResetRecordForEntity(assetOdometerHistory, assetId, assetCompanyId);
-    const resetTime = latestReset ? new Date(latestReset.effectiveFrom || latestReset.createdAt).getTime() || 0 : 0;
+  const getEntityLookupKeys = (entity, requestedId) =>
+    [
+      requestedId,
+      entity?.id,
+      entity?.assetId,
+      entity?.assetBackendId,
+      entity?.backendId,
+      entity?.stationId,
+      entity?.stationBackendId,
+      entity?.code,
+    ]
+      .filter(Boolean)
+      .map(normalizeScopeValue);
 
-    const typeIndexLocal = getHeaderIndex(headers, ["transaction_type", "Transaction type", "transaction type", "operation_type", "Operation type"]);
-    const destinationIndexLocal = getHeaderIndex(headers, ["destination_id", "Destination ID", "destination id", "destination", "equipment_no", "Equipment No", "asset_id", "Asset ID"]);
-    const odometerIndexLocal = getHeaderIndex(headers, ["odometer_at_fueling", "Odometer at fueling", "odometer at fueling", "odometer", "hour_meter", "Hour Meter"]);
-    const dateIndexLocal = getHeaderIndex(headers, ["transaction_datetime", "Transaction datetime", "transaction datetime", "date"]);
+  const resetMatchesEntity = (resetRecord, entity, requestedId) => {
+    const resetKeys = [
+      resetRecord?.assetId,
+      resetRecord?.stationId,
+      resetRecord?.entityId,
+      resetRecord?.backendAssetId,
+      resetRecord?.backendStationId,
+    ]
+      .filter(Boolean)
+      .map(normalizeScopeValue);
+
+    const entityKeys = getEntityLookupKeys(entity, requestedId);
+    return resetKeys.some((key) => entityKeys.includes(key));
+  };
+
+  const getLatestResetRecordForEntity = (
+    history = [],
+    entity,
+    entityId,
+    companyId = ""
+  ) => {
+    const now = Date.now();
+
+    return (history || [])
+      .filter((item) => {
+        const sameEntity = resetMatchesEntity(item, entity, entityId);
+        const sameCompany =
+          !companyId || !item.companyId || companyMatches(item.companyId, companyId);
+        const isEffective = getResetEffectiveTime(item) <= now;
+
+        return sameEntity && sameCompany && isEffective;
+      })
+      .sort((a, b) => getResetEffectiveTime(b) - getResetEffectiveTime(a))[0];
+  };
+
+  const getEffectiveLastAssetReading = (
+    assetId,
+    excludeOriginalIndex = null
+  ) => {
+    const asset = getAsset(assetId);
+    const assetCompanyId = asset?.companyId || currentUser?.companyId || "";
+    const latestReset = getLatestResetRecordForEntity(
+      assetOdometerHistory,
+      asset,
+      assetId,
+      assetCompanyId
+    );
+    const resetTime = getResetEffectiveTime(latestReset);
+    const assetKeys = getEntityLookupKeys(asset, assetId);
+
+    const typeIndexLocal = getHeaderIndex(headers, [
+      "transaction_type",
+      "Transaction type",
+      "transaction type",
+      "operation_type",
+      "Operation type",
+    ]);
+    const destinationIndexLocal = getHeaderIndex(headers, [
+      "destination_id",
+      "Destination ID",
+      "destination id",
+      "destination",
+      "equipment_no",
+      "Equipment No",
+      "asset_id",
+      "Asset ID",
+    ]);
+    const odometerIndexLocal = getHeaderIndex(headers, [
+      "odometer_at_fueling",
+      "Odometer at fueling",
+      "odometer at fueling",
+      "odometer",
+      "hour_meter",
+      "Hour Meter",
+    ]);
+    const dateIndexLocal = getHeaderIndex(headers, [
+      "transaction_datetime",
+      "Transaction datetime",
+      "transaction datetime",
+      "date",
+    ]);
 
     const latestOperation = data
       .map((row, originalIndex) => ({ row, originalIndex }))
-      .filter(({ row }) => {
-        if (typeIndexLocal === -1 || destinationIndexLocal === -1 || odometerIndexLocal === -1) return false;
-        const rowTime = dateIndexLocal !== -1 ? new Date(row[dateIndexLocal]).getTime() || 0 : 0;
-        return rowTime >= resetTime && isAssetRefuelTransactionType(row[typeIndexLocal]) && isSameText(row[destinationIndexLocal], assetId) && !Number.isNaN(parseFloat(row[odometerIndexLocal]));
+      .filter(({ row, originalIndex }) => {
+        if (originalIndex === excludeOriginalIndex) return false;
+        if (
+          typeIndexLocal === -1 ||
+          destinationIndexLocal === -1 ||
+          odometerIndexLocal === -1
+        ) {
+          return false;
+        }
+
+        const rowTime =
+          dateIndexLocal !== -1
+            ? new Date(row[dateIndexLocal]).getTime() || 0
+            : originalIndex;
+        const destinationKey = normalizeScopeValue(row[destinationIndexLocal]);
+        const reading = Number(row[odometerIndexLocal]);
+
+        return (
+          rowTime >= resetTime &&
+          isAssetRefuelTransactionType(row[typeIndexLocal]) &&
+          assetKeys.includes(destinationKey) &&
+          Number.isFinite(reading)
+        );
       })
       .sort((a, b) => {
-        const da = dateIndexLocal !== -1 ? new Date(a.row[dateIndexLocal]).getTime() || 0 : 0;
-        const db = dateIndexLocal !== -1 ? new Date(b.row[dateIndexLocal]).getTime() || 0 : 0;
+        const da =
+          dateIndexLocal !== -1
+            ? new Date(a.row[dateIndexLocal]).getTime() || 0
+            : a.originalIndex;
+        const db =
+          dateIndexLocal !== -1
+            ? new Date(b.row[dateIndexLocal]).getTime() || 0
+            : b.originalIndex;
         return db - da || b.originalIndex - a.originalIndex;
       })[0];
 
-    if (latestOperation) return parseFloat(latestOperation.row[odometerIndexLocal]) || 0;
-    if (latestReset) return parseFloat(latestReset.newReading ?? latestReset.resetReading ?? latestReset.reading) || 0;
-    return parseFloat(asset?.odometer) || 0;
+    if (latestOperation) {
+      return Number(latestOperation.row[odometerIndexLocal]) || 0;
+    }
+
+    if (latestReset) {
+      return (
+        Number(
+          latestReset.newOdometer ??
+            latestReset.newOdometerAfterReset ??
+            latestReset.newReading ??
+            latestReset.resetReading ??
+            latestReset.reading
+        ) || 0
+      );
+    }
+
+    return Number(asset?.currentOdometer ?? asset?.odometer ?? 0) || 0;
+  };
+
+  const getAssetLifetimeReading = (assetId, rawReading, operationDate) => {
+    const asset = getAsset(assetId);
+    const assetCompanyId = asset?.companyId || currentUser?.companyId || "";
+    const operationTime = parseOperationDate(operationDate)?.getTime() || 0;
+
+    const matchingResets = (assetOdometerHistory || [])
+      .filter((resetRecord) => {
+        const sameEntity = resetMatchesEntity(resetRecord, asset, assetId);
+        const sameCompany =
+          !assetCompanyId ||
+          !resetRecord.companyId ||
+          companyMatches(resetRecord.companyId, assetCompanyId);
+
+        return (
+          sameEntity &&
+          sameCompany &&
+          getResetEffectiveTime(resetRecord) <= operationTime
+        );
+      })
+      .sort((a, b) => getResetEffectiveTime(a) - getResetEffectiveTime(b));
+
+    const lifetimeOffset = matchingResets.reduce((sum, resetRecord) => {
+      const oldReading = Number(
+        resetRecord.oldOdometer ??
+          resetRecord.oldOdometerBeforeReset ??
+          resetRecord.historicalDistanceBase ??
+          0
+      );
+      const newReading = Number(
+        resetRecord.newOdometer ??
+          resetRecord.newOdometerAfterReset ??
+          resetRecord.newReading ??
+          resetRecord.resetMeterStart ??
+          0
+      );
+
+      if (!Number.isFinite(oldReading) || !Number.isFinite(newReading)) {
+        return sum;
+      }
+
+      return sum + (oldReading - newReading);
+    }, 0);
+
+    return lifetimeOffset + (Number(rawReading) || 0);
   };
   const getEffectiveLastStationCounter = (stationId) => {
     const station = stations.find((item) => isSameText(item.id, stationId));
     const stationCompanyId = station?.companyId || currentUser?.companyId || "";
     const latestReset = getLatestResetRecordForEntity(
       stationCounterResetHistory,
+      station,
       stationId,
       stationCompanyId
     );
     const resetTime = latestReset
-      ? new Date(latestReset.effectiveFrom || latestReset.createdAt).getTime() || 0
+      ? getResetEffectiveTime(latestReset)
       : 0;
 
     const typeIndexLocal = getHeaderIndex(headers, [
@@ -760,13 +931,17 @@ const [showForm, setShowForm] = useState(false);
     return value === undefined || value === null || value === "" ? "-" : String(value);
   };
 
-  const getOperationCorrectionFieldName = (field) => {
+  const getOperationCorrectionFieldName = (field, editContext = null) => {
+    if (field === "station" && editContext?.isExternalDirectRefuel) {
+      return "EXTERNAL_STATION_NAME";
+    }
+
     const map = {
       equipment: "ASSET",
       station: "SOURCE_STATION",
       diesel: "QUANTITY",
       odometer: "ODOMETER",
-      fueler: "FUELER",
+      fueler: "FUELER_ID",
     };
 
     return map[field] || field;
@@ -797,7 +972,29 @@ const [showForm, setShowForm] = useState(false);
       : literPrice;
   };
 
-  const getFueler = (fuelerId) => fuelers.find((f) => f.id === fuelerId);
+  const getFueler = (fuelerId) => {
+    const candidates = buildLookupCandidates(fuelerId);
+    if (!candidates.length) return null;
+
+    return (
+      fuelers.find((fueler) => {
+        const fuelerCandidates = buildLookupCandidates(
+          fueler?.id,
+          fueler?.backendId,
+          fueler?.employeeId,
+          fueler?.employeeBackendId,
+          fueler?.userId,
+          fueler?.name,
+          fueler?.fullName,
+          fueler?.employeeName
+        );
+
+        return fuelerCandidates.some((candidate) =>
+          candidates.includes(candidate)
+        );
+      }) || null
+    );
+  };
 
   const getAssetProjectByDate = (assetId, transactionDate) => {
     const asset = getAsset(assetId);
@@ -1507,26 +1704,61 @@ const payload = mapFrontendOperationToBackendPayload({
     return sum + getOperationTotalCost(item);
   }, 0);
 
-  const dailyData = filteredDirectRefuelData
-    .reduce((acc, item) => {
+  const dailyConsumptionByDate = filteredDirectRefuelData.reduce(
+    (acc, item) => {
       const operationDate = parseOperationDate(item.row[dateIndex]);
-      const date = operationDate
-        ? operationDate.toISOString().split("T")[0]
-        : "No Date";
 
+      if (!operationDate) return acc;
+
+      const dateKey = operationDate.toISOString().split("T")[0];
       const diesel = parseFloat(item.row[dieselIndex]) || 0;
-      const found = acc.find((d) => d.date === date);
 
-      if (found) found.value += diesel;
-      else acc.push({ date, value: diesel });
-
+      acc[dateKey] = (acc[dateKey] || 0) + diesel;
       return acc;
-    }, [])
-    .sort((a, b) => {
-      if (a.date === "No Date") return 1;
-      if (b.date === "No Date") return -1;
-      return new Date(a.date) - new Date(b.date);
-    });
+    },
+    {}
+  );
+
+  const dailyData = (() => {
+    const operationDates = Object.keys(dailyConsumptionByDate).sort();
+
+    if (operationDates.length === 0) return [];
+
+    // Use the selected date-filter boundaries when available. Otherwise,
+    // fill every calendar day between the first and last operation dates.
+    const firstDateKey = fromDate || operationDates[0];
+    const lastDateKey = toDate || operationDates[operationDates.length - 1];
+
+    const startDate = new Date(`${firstDateKey}T00:00:00.000Z`);
+    const endDate = new Date(`${lastDateKey}T00:00:00.000Z`);
+
+    if (
+      Number.isNaN(startDate.getTime()) ||
+      Number.isNaN(endDate.getTime()) ||
+      startDate > endDate
+    ) {
+      return operationDates.map((date) => ({
+        date,
+        value: dailyConsumptionByDate[date] || 0,
+      }));
+    }
+
+    const result = [];
+    const cursor = new Date(startDate);
+
+    while (cursor <= endDate) {
+      const dateKey = cursor.toISOString().split("T")[0];
+
+      result.push({
+        date: dateKey,
+        value: dailyConsumptionByDate[dateKey] || 0,
+      });
+
+      cursor.setUTCDate(cursor.getUTCDate() + 1);
+    }
+
+    return result;
+  })();
 
   const dailyConsumptionSummary = Object.values(
     filteredDirectRefuelData.reduce((acc, item) => {
@@ -1592,9 +1824,18 @@ const payload = mapFrontendOperationToBackendPayload({
       const operationProject = getOperationProjectName(item);
       const diesel = parseFloat(row[dieselIndex]) || 0;
       const odometer = parseFloat(row[odometerIndex]) || 0;
+      const operationDate = dateIndex !== -1 ? row[dateIndex] : null;
+      const lifetimeOdometer = getAssetLifetimeReading(
+        equipmentNo,
+        odometer,
+        operationDate
+      );
+      const equipmentKey = normalizeScopeValue(
+        asset?.backendId || asset?.assetBackendId || asset?.id || equipmentNo
+      );
 
-      if (!acc[equipmentNo]) {
-        acc[equipmentNo] = {
+      if (!acc[equipmentKey]) {
+        acc[equipmentKey] = {
           equipmentNo: assetDisplayCode,
           equipmentBackendId: equipmentNo,
           project: operationProject,
@@ -1602,38 +1843,50 @@ const payload = mapFrontendOperationToBackendPayload({
           equipmentType: asset?.type || "-",
           fuelConsumption: 0,
           totalCost: 0,
-          firstOdometer: odometer,
+          firstLifetimeOdometer: lifetimeOdometer,
+          lastLifetimeOdometer: lifetimeOdometer,
           lastOdometer: odometer,
+          lastOperationTime: parseOperationDate(operationDate)?.getTime() || 0,
         };
       }
 
       if (operationProject && operationProject !== "-") {
-        acc[equipmentNo].projectsSet.add(operationProject);
+        acc[equipmentKey].projectsSet.add(operationProject);
       }
 
+      acc[equipmentKey].fuelConsumption += diesel;
+      acc[equipmentKey].totalCost += getOperationTotalCost(item);
 
-      acc[equipmentNo].fuelConsumption += diesel;
-      acc[equipmentNo].totalCost += getOperationTotalCost(item);
-
-      if (odometer < acc[equipmentNo].firstOdometer) {
-        acc[equipmentNo].firstOdometer = odometer;
+      if (lifetimeOdometer < acc[equipmentKey].firstLifetimeOdometer) {
+        acc[equipmentKey].firstLifetimeOdometer = lifetimeOdometer;
       }
 
-      if (odometer > acc[equipmentNo].lastOdometer) {
-        acc[equipmentNo].lastOdometer = odometer;
+      if (lifetimeOdometer > acc[equipmentKey].lastLifetimeOdometer) {
+        acc[equipmentKey].lastLifetimeOdometer = lifetimeOdometer;
+      }
+
+      const operationTime = parseOperationDate(operationDate)?.getTime() || 0;
+      if (operationTime >= acc[equipmentKey].lastOperationTime) {
+        acc[equipmentKey].lastOperationTime = operationTime;
+        acc[equipmentKey].lastOdometer = odometer;
       }
 
       return acc;
     }, {})
   ).map((item) => {
-    const distance = item.lastOdometer - item.firstOdometer;
+    const distance = Math.max(
+      0,
+      item.lastLifetimeOdometer - item.firstLifetimeOdometer
+    );
 
     const efficiency =
       distance > 0 ? (item.fuelConsumption / distance).toFixed(2) : "-";
 
     return {
       ...item,
-      project: item.projectsSet?.size ? Array.from(item.projectsSet).join(", ") : item.project,
+      project: item.projectsSet?.size
+        ? Array.from(item.projectsSet).join(", ")
+        : item.project,
       distance,
       efficiency,
       totalCost: item.totalCost,
@@ -1769,40 +2022,10 @@ const payload = mapFrontendOperationToBackendPayload({
     }
   };
 
-  const getLastOdometerForEquipment = (equipmentNo, excludeOriginalIndex = null) => {
-  const selectedAsset = assets.find(
-    (asset) =>
-      isSameText(asset.id, equipmentNo) ||
-      isSameText(asset.assetId, equipmentNo) ||
-      isSameText(asset.backendId, equipmentNo) ||
-      isSameText(asset.assetBackendId, equipmentNo)
-  );
-
-  const assetKeys = [
+  const getLastOdometerForEquipment = (
     equipmentNo,
-    selectedAsset?.id,
-    selectedAsset?.assetId,
-    selectedAsset?.backendId,
-    selectedAsset?.assetBackendId,
-  ]
-    .filter(Boolean)
-    .map((value) => String(value).trim());
-
-  const readings = directRefuelData
-    .filter((item) => {
-      if (item.originalIndex === excludeOriginalIndex) return false;
-
-      const destinationValue = String(item.row[destinationIndex] || "").trim();
-
-      return assetKeys.some((key) => isSameText(destinationValue, key));
-    })
-    .map((item) => parseFloat(item.row[odometerIndex]) || 0)
-    .filter((value) => value > 0);
-
-  if (readings.length === 0) return Number(selectedAsset?.currentOdometer || selectedAsset?.odometer || 0);
-
-  return Math.max(...readings);
-};
+    excludeOriginalIndex = null
+  ) => getEffectiveLastAssetReading(equipmentNo, excludeOriginalIndex);
 
   const getLastStationCounter = (stationId) => {
     if (!stationId || odometerIndex === -1 || dateIndex === -1) return 0;
@@ -1832,6 +2055,18 @@ const payload = mapFrontendOperationToBackendPayload({
     if (!hasPermission("operations", "edit")) return;
 
     const row = item.row;
+    const operationType =
+      row?.__operation?.type ||
+      (typeIndex !== -1 ? row[typeIndex] : "");
+    const isExternalDirectRefuel =
+      isExternalDirectRefuelTransactionType(operationType);
+
+    const externalStationValue =
+      row?.__operation?.externalStationName ||
+      (externalStationNameIndex !== -1
+        ? row[externalStationNameIndex]
+        : "");
+
     const currentValue =
       field === "equipment"
         ? row[destinationIndex]
@@ -1840,7 +2075,9 @@ const payload = mapFrontendOperationToBackendPayload({
         : field === "odometer"
         ? row[odometerIndex]
         : field === "station"
-        ? row[sourceIndex]
+        ? isExternalDirectRefuel
+          ? externalStationValue
+          : row[sourceIndex]
         : field === "fueler"
         ? row[fuelerIndex]
         : "";
@@ -1849,8 +2086,13 @@ const payload = mapFrontendOperationToBackendPayload({
       originalIndex: item.originalIndex,
       row,
       field,
+      operationType,
+      isExternalDirectRefuel,
       oldValue: currentValue || "",
-      oldValueDisplay: getOperationCorrectionDisplayValue(field, currentValue),
+      oldValueDisplay:
+        field === "station" && isExternalDirectRefuel
+          ? currentValue || "-"
+          : getOperationCorrectionDisplayValue(field, currentValue),
       newValue: currentValue || "",
       reason: "",
     });
@@ -1914,25 +2156,66 @@ const payload = mapFrontendOperationToBackendPayload({
     }
 
     if (field === "station") {
-      const newStation = editCell.newValue;
-      const station = getStation(newStation);
+      if (editCell.isExternalDirectRefuel) {
+        const externalStationName = String(editCell.newValue || "").trim();
 
-      if (!station) {
-        notifyUser(typeof showToast !== "undefined" ? showToast : null, inferToastTypeFromMessage("Please select a valid station."), "Please select a valid station.");
-        return;
+        if (!externalStationName) {
+          notifyUser(
+            typeof showToast !== "undefined" ? showToast : null,
+            "warning",
+            "Please select a valid external station."
+          );
+          return;
+        }
+
+        fieldLabel = "External Station";
+      } else {
+        const newStation = editCell.newValue;
+        const station = getStation(newStation);
+
+        if (!station) {
+          notifyUser(typeof showToast !== "undefined" ? showToast : null, inferToastTypeFromMessage("Please select a valid station."), "Please select a valid station.");
+          return;
+        }
+
+        if (station.status?.trim().toLowerCase() !== "active") {
+          notifyUser(typeof showToast !== "undefined" ? showToast : null, inferToastTypeFromMessage("Selected station must be active."), "Selected station must be active.");
+          return;
+        }
+
+        fieldLabel = "Source Station";
       }
-
-      if (station.status?.trim().toLowerCase() !== "active") {
-        notifyUser(typeof showToast !== "undefined" ? showToast : null, inferToastTypeFromMessage("Selected station must be active."), "Selected station must be active.");
-        return;
-      }
-
-      fieldLabel = "Source Station";
     }
 
     if (field === "fueler") {
-      notifyUser(typeof showToast !== "undefined" ? showToast : null, "warning", "Operator correction is not available in backend Phase 1.");
-      return;
+      const selectedFueler = getFueler(editCell.newValue);
+
+      if (!selectedFueler) {
+        notifyUser(
+          typeof showToast !== "undefined" ? showToast : null,
+          "warning",
+          "Please select a valid operator."
+        );
+        return;
+      }
+
+      const normalizedFuelerStatus = String(
+        selectedFueler.status || "On Duty"
+      )
+        .trim()
+        .toLowerCase()
+        .replace(/[\s_-]+/g, "");
+
+      if (!["onduty", "active"].includes(normalizedFuelerStatus)) {
+        notifyUser(
+          typeof showToast !== "undefined" ? showToast : null,
+          "warning",
+          "Selected operator must be active or on duty."
+        );
+        return;
+      }
+
+      fieldLabel = "Operator";
     }
 
     const operationBackendId = getOperationCorrectionBackendId(row);
@@ -1942,7 +2225,7 @@ const payload = mapFrontendOperationToBackendPayload({
       return;
     }
 
-    const fieldName = getOperationCorrectionFieldName(field);
+    const fieldName = getOperationCorrectionFieldName(field, editCell);
 
     try {
       const correctionPayload = {
@@ -2762,7 +3045,7 @@ const payload = mapFrontendOperationToBackendPayload({
             </div>
 
             <div className="p-3 sm:p-5 overflow-auto max-h-[68vh]">
-              <table className="min-w-[1080px] lg:min-w-[1200px] xl:min-w-[1340px] 2xl:min-w-[1420px] w-full border-collapse text-[11px] sm:text-xs lg:text-sm">
+              <table className="min-w-[1160px] lg:min-w-[1280px] xl:min-w-[1420px] 2xl:min-w-[1500px] w-full border-collapse text-[11px] sm:text-xs lg:text-sm">
                 <thead className="bg-slate-800 sticky top-0 z-[1] shadow-sm">
                   <tr>
                     <Th>#</Th>
@@ -2774,6 +3057,7 @@ const payload = mapFrontendOperationToBackendPayload({
                     <Th>Fueler</Th>
                     <Th>Equipment</Th>
                     <Th>Liters</Th>
+                    <Th>Cost</Th>
                     <Th>Odometer</Th>
                     <Th>Photos</Th>
                   </tr>
@@ -2865,6 +3149,10 @@ const payload = mapFrontendOperationToBackendPayload({
                             >
                               {formatNumber(row[dieselIndex])}
                             </button>
+                          </Td>
+
+                          <Td>
+                            {formatNumber(getOperationTotalCost(item))} {currency}
                           </Td>
 
                           <Td>
@@ -2997,6 +3285,7 @@ const payload = mapFrontendOperationToBackendPayload({
         assets={assets}
         stations={stations}
         fuelers={fuelers}
+        externalStationHistory={externalStationHistory}
         onClose={closeEditCell}
         onSave={saveCellEdit}
         getDisplayValue={getOperationCorrectionDisplayValue}

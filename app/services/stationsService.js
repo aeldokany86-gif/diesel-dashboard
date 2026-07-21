@@ -80,3 +80,28 @@ export async function adjustStationInventory(stationId, payload) {
   const response = await api.post(`/stations/${stationId}/adjust-inventory`, payload);
   return response.data;
 }
+
+
+export async function fetchStationStockMovements({
+  companyId = "",
+  projectId = "",
+  stationId = "",
+  dateFrom = "",
+  dateTo = "",
+  movementType = "",
+  direction = "",
+} = {}) {
+  const response = await api.get("/stations/stock-movements", {
+    params: {
+      ...(companyId ? { companyId } : {}),
+      ...(projectId ? { projectId } : {}),
+      ...(stationId ? { stationId } : {}),
+      ...(dateFrom ? { dateFrom } : {}),
+      ...(dateTo ? { dateTo } : {}),
+      ...(movementType && movementType !== "all" ? { movementType } : {}),
+      ...(direction && direction !== "all" ? { direction } : {}),
+    },
+  });
+
+  return Array.isArray(response.data) ? response.data : [];
+}

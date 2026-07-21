@@ -11,6 +11,7 @@ export default function OperationCorrectionModal({
   assets = [],
   stations = [],
   fuelers = [],
+  externalStationHistory = [],
   onClose,
   onSave,
   getDisplayValue,
@@ -20,21 +21,36 @@ export default function OperationCorrectionModal({
 }) {
   if (!editCell) return null;
 
+  const externalStationOptions = Array.from(
+    new Set(
+      [
+        editCell.isExternalDirectRefuel ? editCell.oldValue : "",
+        ...externalStationHistory,
+      ]
+        .map((value) => String(value || "").trim())
+        .filter(Boolean)
+    )
+  );
+
+  const correctionTitle =
+    editCell.field === "equipment"
+      ? "Equipment"
+      : editCell.field === "diesel"
+      ? "Diesel Quantity"
+      : editCell.field === "odometer"
+      ? "Odometer"
+      : editCell.field === "station"
+      ? editCell.isExternalDirectRefuel
+        ? "External Station"
+        : "Source Station"
+      : "Operator";
+
   return (
     <div className="fixed inset-0 bg-black/75 backdrop-blur-sm flex items-center justify-center z-[10010] p-3">
       <div className="bg-white text-black w-[min(560px,calc(100vw-2rem))] rounded-2xl shadow-2xl p-6">
         <div className="flex justify-between items-center mb-5 border-b pb-3">
           <h2 className="text-xl sm:text-2xl font-bold">
-            Request{" "}
-            {editCell.field === "equipment"
-              ? "Equipment"
-              : editCell.field === "diesel"
-                ? "Diesel Quantity"
-                : editCell.field === "odometer"
-                  ? "Odometer"
-                  : editCell.field === "station"
-                    ? "Source Station"
-                    : "Operator"}{" Correction"}
+            Request {correctionTitle} Correction
           </h2>
 
           <button
@@ -49,7 +65,8 @@ export default function OperationCorrectionModal({
           <p className="text-sm text-gray-600">Old Value</p>
           <p className="text-xl font-bold">
             {editCell.oldValueDisplay ||
-              getDisplayValue?.(editCell.field, editCell.oldValue)}
+              getDisplayValue?.(editCell.field, editCell.oldValue) ||
+              "-"}
           </p>
         </div>
 
@@ -86,6 +103,25 @@ export default function OperationCorrectionModal({
                     {asset.type || "-"}
                   </option>
                 ))}
+            </select>
+          ) : editCell.field === "station" &&
+            editCell.isExternalDirectRefuel ? (
+            <select
+              value={editCell.newValue}
+              onChange={(event) =>
+                setEditCell({
+                  ...editCell,
+                  newValue: event.target.value,
+                })
+              }
+              className="border rounded-lg p-3 w-full mt-2"
+            >
+              <option value="">Select External Station</option>
+              {externalStationOptions.map((stationName) => (
+                <option key={stationName} value={stationName}>
+                  {stationName}
+                </option>
+              ))}
             </select>
           ) : editCell.field === "station" ? (
             <select
@@ -143,9 +179,19 @@ export default function OperationCorrectionModal({
                 .map((fueler) => (
                   <option
                     key={makeTenantEntityKey(fueler)}
-                    value={fueler.id}
+                    value={
+                      fueler.backendId ||
+                      fueler.employeeBackendId ||
+                      fueler.employeeId ||
+                      fueler.id
+                    }
                   >
-                    {getFuelerDisplayName?.(fueler.id)} -{" "}
+                    {getFuelerDisplayName?.(
+                      fueler.backendId ||
+                        fueler.employeeBackendId ||
+                        fueler.employeeId ||
+                        fueler.id
+                    )} -{" "}
                     {fueler.role || "Operator"} -{" "}
                     {fueler.status || "On Duty"}
                   </option>

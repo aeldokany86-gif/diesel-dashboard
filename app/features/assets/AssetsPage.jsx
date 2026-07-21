@@ -37,7 +37,6 @@ import {
 } from "../../lib/companyHelpers";
 
 import {
-  fetchAssets,
   createAssetRecord,
   updateAssetRecord,
   deleteAssetRecord,
@@ -200,8 +199,6 @@ export default function AssetsPage({
   showToast,
   data = [],
   headers = [],
-  assetProjectHistory = [],
-  setAssetProjectHistory,
   assetOdometerHistory = [],
   setAssetOdometerHistory,
   currentUser,
@@ -334,7 +331,6 @@ const assetCurrentOdometerMap = useMemo(() => {
 
 const [showForm, setShowForm] = useState(false);
   const [searchTerm, setSearchTerm] = useState("");
-  const [localAssets, setLocalAssets] = useState([]);
   const [newAsset, setNewAsset] = useState({
     id: "",
     project: "",
@@ -432,25 +428,6 @@ useOutsideClick(assetSettingsRef, () => {
       );
     }
 
-    if (typeof setLocalAssets === "function") {
-      setLocalAssets((prev) =>
-        (prev || []).filter((item) => {
-          const candidates = [
-            item.backendId,
-            item.assetBackendId,
-            item.id,
-            item.assetId,
-          ]
-            .filter(Boolean)
-            .map(normalizeScopeValue);
-
-          return !(
-            (normalizedBackendId && candidates.includes(normalizedBackendId)) ||
-            (normalizedAssetId && candidates.includes(normalizedAssetId))
-          );
-        })
-      );
-    }
   };
 
   const [selectedAsset, setSelectedAsset] = useState(null);
@@ -462,14 +439,10 @@ useOutsideClick(assetSettingsRef, () => {
   const [selectedProjectValue, setSelectedProjectValue] = useState("");
   const [projectEffectiveDate, setProjectEffectiveDate] = useState("");
   const [showProjectConfirm, setShowProjectConfirm] = useState(false);
-  const [showProjectPassword, setShowProjectPassword] = useState(false);
-  const [projectPassword, setProjectPassword] = useState("");
 
   const [deleteTargetAsset, setDeleteTargetAsset] = useState(null);
   const [deleteReason, setDeleteReason] = useState("");
   const [showDeleteConfirm, setShowDeleteConfirm] = useState(false);
-  const [showDeletePassword, setShowDeletePassword] = useState(false);
-  const [deletePassword, setDeletePassword] = useState("");
 
   const [odometerTargetAsset, setOdometerTargetAsset] = useState(null);
   const [oldOdometerBeforeReset, setOldOdometerBeforeReset] = useState("");
@@ -477,12 +450,10 @@ useOutsideClick(assetSettingsRef, () => {
   const [odometerEffectiveDate, setOdometerEffectiveDate] = useState("");
   const [odometerReason, setOdometerReason] = useState("");
   const [showOdometerConfirm, setShowOdometerConfirm] = useState(false);
-  const [showOdometerPassword, setShowOdometerPassword] = useState(false);
-  const [odometerPassword, setOdometerPassword] = useState("");
 
   const assetIdDuplicateError = getDuplicateIdError(
     newAsset.id,
-    [...assets, ...localAssets],
+    assets,
     "Asset ID"
   );
 
@@ -583,7 +554,7 @@ useOutsideClick(assetSettingsRef, () => {
     }
   };
 
-  const displayAssets = [...assets, ...localAssets].map((asset) => ({
+  const displayAssets = assets.map((asset) => ({
     ...asset,
     status: localAssetUpdates[asset.id]?.status || asset.status,
     project: localAssetUpdates[asset.id]?.project || asset.project,
@@ -784,7 +755,6 @@ useOutsideClick(assetSettingsRef, () => {
     setProjectTargetAsset(null);
     setSelectedProjectValue("");
     setShowProjectConfirm(false);
-    setShowProjectPassword(false);
   };
 
   const proceedProjectConfirm = () => {
@@ -892,11 +862,9 @@ useOutsideClick(assetSettingsRef, () => {
 
         // Close every UI layer related to the deleted asset immediately.
         setShowDeleteConfirm(false);
-        setShowDeletePassword(false);
         setDeleteTargetAsset(null);
         setSelectedAsset(null);
         setDeleteReason("");
-        setDeletePassword("");
 
         // Remove it from local UI state first so the list updates without a page reload.
         removeAssetFromState({
@@ -906,17 +874,6 @@ useOutsideClick(assetSettingsRef, () => {
           assetId: deleteTargetAsset?.assetId || deleteTargetAsset?.id || "",
         });
 
-        // Then sync the visible list with backend truth after soft delete.
-        try {
-          const backendAssets = await fetchAssets();
-          const mappedAssets = backendAssets
-            .map(mapBackendAssetForState)
-            .filter((asset) => asset.id && !asset.deletedAt);
-
-          setAssets(mappedAssets);
-        } catch (refreshError) {
-          console.warn("Failed to refresh assets after delete.", refreshError);
-        }
 
         showToast?.("success", "Asset deleted successfully.");
       } catch (error) {
@@ -963,7 +920,6 @@ useOutsideClick(assetSettingsRef, () => {
     });
 
     setShowDeleteConfirm(false);
-    setShowDeletePassword(false);
     setDeleteTargetAsset(null);
     setDeleteReason("");
 
@@ -1075,8 +1031,6 @@ useOutsideClick(assetSettingsRef, () => {
       setOdometerEffectiveDate("");
       setOdometerReason("");
       setShowOdometerConfirm(false);
-      setShowOdometerPassword(false);
-      setOdometerPassword("");
       setSelectedAsset(null);
     };
 
@@ -1114,30 +1068,10 @@ useOutsideClick(assetSettingsRef, () => {
         setAssets((prev) => (prev || []).map(patchAsset));
       }
 
-      if (typeof setLocalAssets === "function") {
-        setLocalAssets((prev) => (prev || []).map(patchAsset));
-      }
 
       setSelectedAsset((prev) => (prev ? patchAsset(prev) : prev));
     };
 
-    const syncBackendAssetsSafely = async () => {
-      try {
-        const backendAssets = await fetchAssets();
-        const mappedAssets = backendAssets
-          .map(mapBackendAssetForState)
-          .filter((asset) => asset.id && !asset.deletedAt);
-
-        if (typeof setAssets === "function") {
-          setAssets(mappedAssets);
-        }
-
-        return mappedAssets;
-      } catch (syncError) {
-        console.warn("Failed to refresh assets after odometer reset.", syncError);
-        return null;
-      }
-    };
 
     if (canResetDirectly) {
       try {
@@ -1186,10 +1120,6 @@ useOutsideClick(assetSettingsRef, () => {
 
         closeOdometerResetUi();
 
-        // Sync after React has committed the immediate local update.
-        window.setTimeout(() => {
-          syncBackendAssetsSafely();
-        }, 150);
 
         showToast?.("success", "Odometer reset completed successfully.");
       } catch (error) {

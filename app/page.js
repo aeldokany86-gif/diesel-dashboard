@@ -35,6 +35,7 @@ import ApprovalsPage from "./features/approvals/ApprovalsPage";
 import CompaniesPage from "./features/companies/CompaniesPage";
 import NotificationCenterPage from "./features/notifications/NotificationCenterPage";
 import AuditTimelinePage from "./features/audit/AuditTimelinePage";
+import ReportsPage from "./features/reports/ReportsPage";
 
 import {
   normalizeSystemUserStatus,
@@ -2977,6 +2978,21 @@ if (page === "projects") {
       refreshProjects={refreshBackendProjects}
       users={companyUsers}
       theme={theme}
+    />
+  );
+}
+
+if (page === "reports") {
+  return (
+    <ReportsPage
+      data={scopedData}
+      headers={headers}
+      projects={scopedProjects}
+      assets={scopedAssets}
+      stations={scopedStations}
+      currency={currency}
+      currentUser={currentUser}
+      currentCompany={currentCompany}
     />
   );
 }
