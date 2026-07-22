@@ -1389,8 +1389,18 @@ useEffect(() => {
     try {
       const backendAssets = await fetchAssets();
       const mappedAssets = backendAssets
-        .map(mapBackendAssetForState)
-        .filter((asset) => asset.id && !asset.deletedAt);
+        .map((backendAsset) => {
+          const mappedAsset = mapBackendAssetForState(backendAsset);
+
+          return backendAsset?.deletedAt
+            ? {
+                ...mappedAsset,
+                deletedAt: backendAsset.deletedAt,
+                status: "Retired",
+              }
+            : mappedAsset;
+        })
+        .filter((asset) => asset.id);
 
       setAssets(mappedAssets);
       return mappedAssets;
@@ -2121,8 +2131,17 @@ useEffect(() => {
         // ASSETS - backend only. No CSV fallback.
         setAssets(
           backendAssets
-            .filter((asset) => !asset.deletedAt)
-            .map(mapBackendAssetForState)
+            .map((backendAsset) => {
+              const mappedAsset = mapBackendAssetForState(backendAsset);
+
+              return backendAsset?.deletedAt
+                ? {
+                    ...mappedAsset,
+                    deletedAt: backendAsset.deletedAt,
+                    status: "Retired",
+                  }
+                : mappedAsset;
+            })
             .filter((asset) => asset.id)
         );
 

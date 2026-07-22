@@ -559,6 +559,14 @@ useOutsideClick(assetSettingsRef, () => {
     status: localAssetUpdates[asset.id]?.status || asset.status,
     project: localAssetUpdates[asset.id]?.project || asset.project,
     odometer: localAssetUpdates[asset.id]?.odometer ?? asset.odometer,
+    currentLifetimeOdometer:
+      localAssetUpdates[asset.id]?.currentLifetimeOdometer ??
+      asset.currentLifetimeOdometer ??
+      0,
+    currentMeterCycle:
+      localAssetUpdates[asset.id]?.currentMeterCycle ??
+      asset.currentMeterCycle ??
+      1,
   }));
 
   const activeAssets = displayAssets.filter(
@@ -856,8 +864,17 @@ useOutsideClick(assetSettingsRef, () => {
     // Asset transfer remains a separate approval workflow regardless of role.
     if (canDeleteDirectly) {
       try {
-        await runWithActionLoading("Deleting asset...", async () => {
-          await deleteAssetRecord(backendAssetId);
+        const deletedAsset = await runWithActionLoading(
+          "Deleting asset...",
+          async () => deleteAssetRecord(backendAssetId)
+        );
+
+        // Keep the soft-deleted record in state as Retired so the KPI updates
+        // immediately, while visibleAssets continues to hide it from the list.
+        replaceAssetInState({
+          ...deletedAsset,
+          deletedAt: deletedAsset?.deletedAt || new Date().toISOString(),
+          status: "Retired",
         });
 
         // Close every UI layer related to the deleted asset immediately.
@@ -865,15 +882,6 @@ useOutsideClick(assetSettingsRef, () => {
         setDeleteTargetAsset(null);
         setSelectedAsset(null);
         setDeleteReason("");
-
-        // Remove it from local UI state first so the list updates without a page reload.
-        removeAssetFromState({
-          backendId: backendAssetId,
-          assetBackendId: backendAssetId,
-          id: deleteTargetAsset?.id || "",
-          assetId: deleteTargetAsset?.assetId || deleteTargetAsset?.id || "",
-        });
-
 
         showToast?.("success", "Asset deleted successfully.");
       } catch (error) {
@@ -1190,7 +1198,7 @@ const exportAssetsToCSV = () => {
     asset.project || "",
     asset.type || "",
     asset.category || "",
-    asset.odometer || "",
+    getEffectiveAssetOdometer(asset),
     asset.fuelTank || "",
     asset.status || "",
   ]);
@@ -1884,34 +1892,43 @@ const printAssetsReport = () => {
                   </p>
                 </div>
 
-                <div>
-                  <div className="flex items-center gap-2">
-                    <p className="text-xs text-gray-400">Current Odometer</p>
+                <div className="col-span-1 md:col-span-2 grid grid-cols-1 sm:grid-cols-3 gap-3 pt-1">
+                  <div className="rounded-lg border border-slate-700/80 bg-slate-900/35 px-3 py-3 text-center">
+                    <div className="flex items-center justify-center gap-2">
+                      <p className="text-xs text-gray-400">Current Odometer</p>
 
-                    <button
-                      onClick={() => {
-                        setOdometerTargetAsset(selectedAsset);
-                        setOldOdometerBeforeReset(String(getEffectiveAssetOdometer(selectedAsset) || ""));
-                        setNewOdometer("0");
-                        setOdometerEffectiveDate("");
-                        setOdometerReason("");
-                      }}
-                      className="text-gray-400 hover:text-yellow-400 transition text-sm cursor-pointer"
-                    >
-                      ✏️
-                    </button>
+                      <button
+                        onClick={() => {
+                          setOdometerTargetAsset(selectedAsset);
+                          setOldOdometerBeforeReset(String(getEffectiveAssetOdometer(selectedAsset) || ""));
+                          setNewOdometer("0");
+                          setOdometerEffectiveDate("");
+                          setOdometerReason("");
+                        }}
+                        className="text-gray-400 hover:text-yellow-400 transition text-sm cursor-pointer"
+                      >
+                        ✏️
+                      </button>
+                    </div>
+
+                    <p className="mt-1 text-lg font-semibold text-yellow-300">
+                      {formatNumber(getEffectiveAssetOdometer(selectedAsset))}
+                    </p>
                   </div>
 
-                  <p className="text-lg font-semibold text-yellow-300">
-                    {formatNumber(getEffectiveAssetOdometer(selectedAsset))}
-                  </p>
-                </div>
+                  <div className="rounded-lg border border-slate-700/80 bg-slate-900/35 px-3 py-3 text-center">
+                    <p className="text-xs text-gray-400">Lifetime Odometer</p>
+                    <p className="mt-1 text-lg font-semibold text-yellow-300">
+                      {formatNumber(selectedAsset.currentLifetimeOdometer ?? 0)}
+                    </p>
+                  </div>
 
-                <div className="text-right">
-                  <p className="text-xs text-gray-400">Fuel Tank Capacity</p>
-                  <p className="text-lg font-semibold text-yellow-300">
-                    {formatNumber(selectedAsset.fuelTank)} L
-                  </p>
+                  <div className="rounded-lg border border-slate-700/80 bg-slate-900/35 px-3 py-3 text-center">
+                    <p className="text-xs text-gray-400">Fuel Tank Capacity</p>
+                    <p className="mt-1 text-lg font-semibold text-yellow-300">
+                      {formatNumber(selectedAsset.fuelTank)} L
+                    </p>
+                  </div>
                 </div>
               </div>
             </div>

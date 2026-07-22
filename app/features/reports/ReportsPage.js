@@ -30,6 +30,87 @@ const OPERATIONS_REPORTS = [
   },
 ];
 
+const ASSETS_REPORTS = [
+  {
+    id: "assets-master",
+    title: "Assets Master Report",
+    description:
+      "Complete asset register including asset ID, type, category, assigned project, status, current odometer, lifetime odometer and fuel tank capacity.",
+    available: false,
+  },
+  {
+    id: "asset-movements",
+    title: "Asset Movement Report",
+    description:
+      "Complete history of asset project assignments and transfers, including source project, destination project, effective date and approval status.",
+    available: false,
+  },
+  {
+    id: "asset-utilization",
+    title: "Asset Utilization Report",
+    description:
+      "Asset utilization analysis including lifetime odometer, fuel consumption, refueling activity and operational usage.",
+    available: false,
+  },
+];
+
+const REPORT_MODULES = [
+  {
+    id: "operations",
+    title: "Operations",
+    description:
+      "Operational transactions, station movements and fuel supplier reports.",
+    icon: "⚙️",
+    reports: OPERATIONS_REPORTS,
+    available: true,
+  },
+  {
+    id: "assets",
+    title: "Assets",
+    description:
+      "Asset register, movement history and utilization reports.",
+    icon: "🚜",
+    reports: ASSETS_REPORTS,
+    available: true,
+  },
+  {
+    id: "stations",
+    title: "Stations",
+    description:
+      "Station master data, stock performance and reconciliation reports.",
+    icon: "⛽",
+    reports: [],
+    available: false,
+  },
+  {
+    id: "team",
+    title: "Team",
+    description:
+      "Team members, assignments, transfers and workforce activity reports.",
+    icon: "👷",
+    reports: [],
+    available: false,
+  },
+  {
+    id: "projects",
+    title: "Projects",
+    description:
+      "Project summaries, operational activity and fuel performance reports.",
+    icon: "📁",
+    reports: [],
+    available: false,
+  },
+  {
+    id: "users",
+    title: "Users",
+    description:
+      "User access, roles, account activity and administration reports.",
+    icon: "👤",
+    reports: [],
+    available: false,
+  },
+];
+
 const TABLE_HEADERS = [
   "Operation No.",
   "Date",
@@ -1482,6 +1563,7 @@ export default function ReportsPage({
   headers = [],
   currency = "SAR",
 }) {
+  const [selectedReportModule, setSelectedReportModule] = useState(null);
   const [selectedReport, setSelectedReport] = useState(null);
   const [filtersOpen, setFiltersOpen] = useState(false);
   const [reportGenerated, setReportGenerated] = useState(false);
@@ -1744,6 +1826,13 @@ export default function ReportsPage({
   };
 
   const handleBackToReports = () => {
+    setSelectedReport(null);
+    setFiltersOpen(false);
+    setReportGenerated(false);
+  };
+
+  const handleBackToModules = () => {
+    setSelectedReportModule(null);
     setSelectedReport(null);
     setFiltersOpen(false);
     setReportGenerated(false);
@@ -2178,58 +2267,143 @@ export default function ReportsPage({
     );
   }
 
+  const activeModule = REPORT_MODULES.find(
+    (module) => module.id === selectedReportModule
+  );
+
+  if (!selectedReportModule) {
+    return (
+      <div className="min-h-full bg-slate-950 px-4 py-5 text-slate-100 sm:px-6 lg:px-8">
+        <div className="mx-auto max-w-[1800px] space-y-5">
+          <section className="rounded-2xl border border-amber-500/30 bg-slate-900/80 p-5 shadow-xl shadow-black/10">
+            <div className="mb-3 inline-flex items-center rounded-full border border-amber-500/30 bg-amber-500/10 px-3 py-1 text-xs font-bold text-amber-300">
+              Fleet Fuel PRO Reporting Center
+            </div>
+
+            <h1 className="text-2xl font-black text-white sm:text-3xl">
+              Reports
+            </h1>
+
+            <p className="mt-2 max-w-4xl text-sm leading-6 text-slate-400">
+              Select a system module to view its available reports.
+            </p>
+          </section>
+
+          <section className="grid gap-4 sm:grid-cols-2 xl:grid-cols-3">
+            {REPORT_MODULES.map((module) => {
+              const availableReports = module.reports.filter(
+                (report) => report.available
+              ).length;
+              const totalReports = module.reports.length;
+
+              return (
+                <button
+                  key={module.id}
+                  type="button"
+                  disabled={!module.available}
+                  onClick={() => setSelectedReportModule(module.id)}
+                  className={`group min-h-[210px] rounded-2xl border p-5 text-left shadow-xl shadow-black/10 transition ${
+                    module.available
+                      ? "border-amber-500/30 bg-slate-900/80 hover:-translate-y-1 hover:border-amber-400/70 hover:bg-slate-900"
+                      : "cursor-not-allowed border-slate-800 bg-slate-900/45 opacity-60"
+                  }`}
+                >
+                  <div className="flex items-start justify-between gap-4">
+                    <div
+                      className={`flex h-14 w-14 items-center justify-center rounded-2xl border text-3xl ${
+                        module.available
+                          ? "border-amber-500/30 bg-amber-500/10"
+                          : "border-slate-700 bg-slate-950/70 grayscale"
+                      }`}
+                    >
+                      {module.icon}
+                    </div>
+
+                    <span
+                      className={`rounded-full border px-2.5 py-1 text-[11px] font-black ${
+                        module.available
+                          ? "border-emerald-500/30 bg-emerald-500/10 text-emerald-300"
+                          : "border-slate-700 bg-slate-950/70 text-slate-500"
+                      }`}
+                    >
+                      {module.available ? "Open Module" : "Coming Soon"}
+                    </span>
+                  </div>
+
+                  <h2 className="mt-5 text-xl font-black text-white">
+                    {module.title}
+                  </h2>
+
+                  <p className="mt-2 min-h-[48px] text-sm leading-6 text-slate-400">
+                    {module.description}
+                  </p>
+
+                  <div className="mt-5 flex items-center justify-between border-t border-slate-800 pt-4">
+                    <div>
+                      <p className="text-[11px] font-bold uppercase tracking-wider text-slate-500">
+                        Reports
+                      </p>
+                      <p className="mt-1 text-sm font-extrabold text-slate-200">
+                        {totalReports
+                          ? `${totalReports} Report${totalReports === 1 ? "" : "s"}`
+                          : "Not added yet"}
+                      </p>
+                    </div>
+
+                    {module.available ? (
+                      <div className="text-right">
+                        <p className="text-[11px] font-bold uppercase tracking-wider text-slate-500">
+                          Available Now
+                        </p>
+                        <p className="mt-1 text-sm font-extrabold text-amber-300">
+                          {availableReports}
+                        </p>
+                      </div>
+                    ) : null}
+                  </div>
+                </button>
+              );
+            })}
+          </section>
+        </div>
+      </div>
+    );
+  }
+
   return (
     <div className="min-h-full bg-slate-950 px-4 py-5 text-slate-100 sm:px-6 lg:px-8">
-      <div className="mx-auto max-w-[1600px] space-y-5">
-        <section className="rounded-2xl border border-slate-800 bg-slate-900/80 p-5 shadow-xl shadow-black/10">
-          <div className="flex flex-col gap-3 sm:flex-row sm:items-center sm:justify-between">
+      <div className="mx-auto max-w-[1800px] space-y-5">
+        <section className="rounded-2xl border border-amber-500/30 bg-slate-900/80 p-5 shadow-xl shadow-black/10">
+          <button
+            type="button"
+            onClick={handleBackToModules}
+            className="mb-4 inline-flex items-center gap-2 rounded-lg border border-slate-700 bg-slate-950/70 px-3 py-2 text-sm font-bold text-slate-300 transition hover:border-amber-500/50 hover:text-amber-300"
+          >
+            <span aria-hidden="true">←</span>
+            Back to Report Modules
+          </button>
+
+          <div className="flex items-start gap-4">
+            <div className="flex h-14 w-14 shrink-0 items-center justify-center rounded-2xl border border-amber-500/30 bg-amber-500/10 text-3xl">
+              {activeModule?.icon}
+            </div>
+
             <div>
               <p className="text-xs font-bold uppercase tracking-[0.22em] text-amber-400">
-                Fleet Fuel PRO
+                Report Module
               </p>
               <h1 className="mt-1 text-2xl font-black text-white sm:text-3xl">
-                Reports
+                {activeModule?.title} Reports
               </h1>
-              <p className="mt-2 text-sm text-slate-400">
-                Select a report, apply its filters, then print or export the
-                detailed results.
+              <p className="mt-2 max-w-4xl text-sm leading-6 text-slate-400">
+                {activeModule?.description}
               </p>
             </div>
-
-            <div className="rounded-xl border border-slate-700 bg-slate-950/70 px-4 py-3 text-sm">
-              <p className="text-xs uppercase tracking-wider text-slate-500">
-                Current Scope
-              </p>
-              <p className="mt-1 font-bold text-slate-200">
-                {currentCompany?.name || "Current Company"}
-              </p>
-              <p className="mt-1 text-xs text-slate-500">
-                {currentUser?.role || "User"} · {projects.length} accessible
-                project{projects.length === 1 ? "" : "s"}
-              </p>
-            </div>
-          </div>
-        </section>
-
-        <section className="rounded-2xl border border-amber-500/30 bg-slate-900/80 p-5 shadow-xl shadow-black/10">
-          <div>
-            <div className="mb-3 inline-flex items-center rounded-full border border-emerald-500/30 bg-emerald-500/10 px-3 py-1 text-xs font-bold text-emerald-300">
-              QA Completed Module
-            </div>
-
-            <h2 className="text-xl font-extrabold text-white sm:text-2xl">
-              Operations Reports
-            </h2>
-
-            <p className="mt-2 max-w-3xl text-sm leading-6 text-slate-400">
-              Detailed operational reports without dashboards, charts or KPI
-              cards.
-            </p>
           </div>
         </section>
 
         <section className="grid gap-4 lg:grid-cols-2">
-          {OPERATIONS_REPORTS.map((report, index) => (
+          {(activeModule?.reports || []).map((report, index) => (
             <article
               key={report.id}
               className={`rounded-2xl border p-5 transition ${
@@ -2262,7 +2436,7 @@ export default function ReportsPage({
                           : "border-slate-700 bg-slate-950/70 text-slate-500"
                       }`}
                     >
-                      {report.available ? "Ready for QA" : "Coming Next"}
+                      {report.available ? "Ready for QA" : "Coming Soon"}
                     </span>
                   </div>
 
@@ -2281,7 +2455,7 @@ export default function ReportsPage({
                           : "cursor-not-allowed border border-slate-700 bg-slate-800 text-slate-500"
                       }`}
                     >
-                      {report.available ? "Open Report" : "Not Available Yet"}
+                      {report.available ? "Open Report" : "Available Soon"}
                     </button>
                   </div>
                 </div>

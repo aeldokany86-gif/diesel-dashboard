@@ -168,6 +168,15 @@ export function mapBackendAssetForState(asset = {}) {
         ? "0"
         : String(asset.currentOdometer),
     currentOdometer: asset.currentOdometer ?? 0,
+    currentLifetimeOdometer:
+      asset.currentLifetimeOdometer === undefined ||
+      asset.currentLifetimeOdometer === null
+        ? 0
+        : Number(asset.currentLifetimeOdometer) || 0,
+    currentMeterCycle:
+      asset.currentMeterCycle === undefined || asset.currentMeterCycle === null
+        ? 1
+        : Number(asset.currentMeterCycle) || 1,
     fuelTank:
       asset.fuelTankCapacity === undefined || asset.fuelTankCapacity === null
         ? "0"
@@ -219,6 +228,16 @@ export function mapBackendStationForState(station = {}) {
       station.currentCounter === undefined || station.currentCounter === null
         ? 0
         : Number(station.currentCounter) || 0,
+    currentLifetimeCounter:
+      station.currentLifetimeCounter === undefined ||
+      station.currentLifetimeCounter === null
+        ? 0
+        : Number(station.currentLifetimeCounter) || 0,
+    currentCounterCycle:
+      station.currentCounterCycle === undefined ||
+      station.currentCounterCycle === null
+        ? 1
+        : Number(station.currentCounterCycle) || 1,
     openingCounter:
       station.currentCounter === undefined || station.currentCounter === null
         ? 0

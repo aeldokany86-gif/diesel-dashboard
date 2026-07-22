@@ -462,6 +462,23 @@ export default function OperationsPage({
 
     return lifetimeOffset + (Number(rawReading) || 0);
   };
+
+  const getStoredOperationLifetimeReading = (
+    row,
+    assetId,
+    rawReading,
+    operationDate
+  ) => {
+    const backendLifetime = Number(row?.__operation?.lifetimeOdometer);
+
+    if (Number.isFinite(backendLifetime)) {
+      return backendLifetime;
+    }
+
+    // Legacy fallback for operations created before lifetime snapshots existed.
+    return getAssetLifetimeReading(assetId, rawReading, operationDate);
+  };
+
   const getEffectiveLastStationCounter = (stationId) => {
     const station = stations.find((item) => isSameText(item.id, stationId));
     const stationCompanyId = station?.companyId || currentUser?.companyId || "";
@@ -1825,7 +1842,8 @@ const payload = mapFrontendOperationToBackendPayload({
       const diesel = parseFloat(row[dieselIndex]) || 0;
       const odometer = parseFloat(row[odometerIndex]) || 0;
       const operationDate = dateIndex !== -1 ? row[dateIndex] : null;
-      const lifetimeOdometer = getAssetLifetimeReading(
+      const lifetimeOdometer = getStoredOperationLifetimeReading(
+        row,
         equipmentNo,
         odometer,
         operationDate
