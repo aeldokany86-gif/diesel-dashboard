@@ -39,6 +39,8 @@ export default function OperationCorrectionModal({
       ? "Diesel Quantity"
       : editCell.field === "odometer"
       ? "Odometer"
+      : editCell.field === "stationCounter"
+      ? "Station Counter"
       : editCell.field === "station"
       ? editCell.isExternalDirectRefuel
         ? "External Station"

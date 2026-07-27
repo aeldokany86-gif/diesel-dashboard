@@ -41,6 +41,7 @@ import {
   updateAssetRecord,
   deleteAssetRecord,
   createAssetTransfer,
+  createBulkAssetTransfer,
   resetAssetOdometer,
 } from "../../services/assetsService";
 
@@ -440,6 +441,12 @@ useOutsideClick(assetSettingsRef, () => {
   const [projectEffectiveDate, setProjectEffectiveDate] = useState("");
   const [showProjectConfirm, setShowProjectConfirm] = useState(false);
 
+  const [selectedAssetIds, setSelectedAssetIds] = useState([]);
+  const [bulkTransferModalOpen, setBulkTransferModalOpen] = useState(false);
+  const [bulkTransferProjectValue, setBulkTransferProjectValue] = useState("");
+  const [bulkTransferEffectiveDate, setBulkTransferEffectiveDate] = useState("");
+  const [savingBulkTransfer, setSavingBulkTransfer] = useState(false);
+
   const [deleteTargetAsset, setDeleteTargetAsset] = useState(null);
   const [deleteReason, setDeleteReason] = useState("");
   const [showDeleteConfirm, setShowDeleteConfirm] = useState(false);
@@ -638,6 +645,159 @@ useOutsideClick(assetSettingsRef, () => {
 
     return searchableText.includes(search);
   });
+
+  const getAssetSelectionKey = (asset) =>
+    getBackendAssetId(asset) || asset?.id || "";
+
+  const selectedAssets = selectedAssetIds
+    .map((id) =>
+      visibleAssets.find(
+        (asset) =>
+          normalizeScopeValue(getAssetSelectionKey(asset)) ===
+          normalizeScopeValue(id)
+      )
+    )
+    .filter(Boolean);
+
+  const visibleSelectableAssetIds = filteredAssets
+    .filter(
+      (asset) =>
+        asset.status?.trim().toLowerCase() === "active" &&
+        Boolean(getBackendAssetId(asset))
+    )
+    .map(getAssetSelectionKey);
+
+  const allVisibleAssetsSelected =
+    visibleSelectableAssetIds.length > 0 &&
+    visibleSelectableAssetIds.every((id) => selectedAssetIds.includes(id));
+
+  const toggleAssetSelection = (asset) => {
+    const key = getAssetSelectionKey(asset);
+    if (!key) return;
+
+    setSelectedAssetIds((prev) =>
+      prev.includes(key)
+        ? prev.filter((item) => item !== key)
+        : [...prev, key]
+    );
+  };
+
+  const toggleVisibleAssetSelection = () => {
+    setSelectedAssetIds((prev) => {
+      if (allVisibleAssetsSelected) {
+        return prev.filter((id) => !visibleSelectableAssetIds.includes(id));
+      }
+
+      return Array.from(new Set([...prev, ...visibleSelectableAssetIds]));
+    });
+  };
+
+  const clearAssetSelection = () => {
+    setSelectedAssetIds([]);
+  };
+
+  const openBulkTransferModal = () => {
+    if (!canCurrentUserCreateAssetTransfer()) {
+      showToast?.("warning", "Only Officer or Manager can request asset transfer.");
+      return;
+    }
+
+    if (!selectedAssets.length) {
+      showToast?.("warning", "Please select at least one asset.");
+      return;
+    }
+
+    const invalidAsset = selectedAssets.find(
+      (asset) => asset.status?.trim().toLowerCase() !== "active"
+    );
+
+    if (invalidAsset) {
+      showToast?.("warning", "Only active assets can be transferred.");
+      return;
+    }
+
+    setBulkTransferProjectValue("");
+    setBulkTransferEffectiveDate("");
+    setBulkTransferModalOpen(true);
+  };
+
+  const closeBulkTransferModal = () => {
+    if (savingBulkTransfer) return;
+    setBulkTransferModalOpen(false);
+    setBulkTransferProjectValue("");
+    setBulkTransferEffectiveDate("");
+  };
+
+  const confirmBulkAssetTransfer = async () => {
+    if (savingBulkTransfer) return;
+
+    if (!bulkTransferProjectValue) {
+      showToast?.("warning", "Please select destination project.");
+      return;
+    }
+
+    if (!bulkTransferEffectiveDate) {
+      showToast?.("warning", "Please select project effective date.");
+      return;
+    }
+
+    const toProjectId = resolveProjectId(bulkTransferProjectValue);
+    const backendAssetIds = selectedAssets
+      .map(getBackendAssetId)
+      .filter(Boolean);
+
+    if (!toProjectId) {
+      showToast?.("warning", "Please select a valid project.");
+      return;
+    }
+
+    if (!backendAssetIds.length) {
+      showToast?.("warning", "Selected assets are not linked to backend.");
+      return;
+    }
+
+    setSavingBulkTransfer(true);
+
+    try {
+      const result = await createBulkAssetTransfer({
+        assetIds: backendAssetIds,
+        toProjectId,
+        requestedByUserId: currentUser?.id || "",
+        effectiveDate: bulkTransferEffectiveDate,
+      });
+
+      const createdTransfers = Array.isArray(result)
+        ? result
+        : result?.transfers || [];
+
+      createdTransfers.forEach((transfer) => {
+        onAssetTransferCreated?.(transfer);
+      });
+
+      trackActivity?.(
+        "Request Bulk Asset Transfer",
+        "assets",
+        `${backendAssetIds.length} assets transfer requested to ${bulkTransferProjectValue}.`
+      );
+
+      showToast?.(
+        "success",
+        `Bulk transfer request submitted for ${backendAssetIds.length} asset(s).`
+      );
+
+      clearAssetSelection();
+      closeBulkTransferModal();
+    } catch (error) {
+      showToast?.(
+        "warning",
+        error?.response?.data?.message ||
+          error?.message ||
+          "Failed to submit bulk asset transfer request."
+      );
+    } finally {
+      setSavingBulkTransfer(false);
+    }
+  };
 
   const dieselIndex = getHeaderIndex(headers, [
     "diesel_quantity",
@@ -1543,15 +1703,50 @@ const printAssetsReport = () => {
             <p className="text-sm text-slate-400">Fleet operational assets</p>
           </div>
 
-          <span className="text-sm text-slate-400">
-            {filteredAssets.length} assets
-          </span>
+          <div className="flex flex-wrap items-center justify-end gap-2">
+            {selectedAssetIds.length > 0 && (
+              <>
+                <span className="rounded-full border border-amber-500/40 bg-amber-500/10 px-3 py-1.5 text-xs font-bold text-amber-300">
+                  {selectedAssetIds.length} selected
+                </span>
+
+                <button
+                  type="button"
+                  onClick={clearAssetSelection}
+                  className="rounded-lg border border-slate-600 px-3 py-2 text-xs font-bold text-slate-200 hover:border-slate-400"
+                >
+                  Clear Selection
+                </button>
+
+                <button
+                  type="button"
+                  onClick={openBulkTransferModal}
+                  className="rounded-lg bg-amber-500 px-3 py-2 text-xs font-black text-slate-950 hover:bg-amber-400"
+                >
+                  Transfer Selected
+                </button>
+              </>
+            )}
+
+            <span className="text-sm text-slate-400">
+              {filteredAssets.length} assets
+            </span>
+          </div>
         </div>
 
         <div className="max-h-[520px] overflow-auto rounded-b-2xl">
           <table className="min-w-[760px] lg:min-w-[980px] w-full border-separate border-spacing-0 text-[11px] sm:text-xs lg:text-sm">
             <thead className="bg-slate-800 sticky top-0 z-[1] shadow-[0_8px_18px_rgba(0,0,0,0.22)]">
               <tr>
+                <Th>
+                  <input
+                    type="checkbox"
+                    checked={allVisibleAssetsSelected}
+                    onChange={toggleVisibleAssetSelection}
+                    aria-label="Select all visible assets"
+                    className="h-4 w-4 accent-amber-500"
+                  />
+                </Th>
                 <Th>#</Th>
                 <Th>Asset ID</Th>
                 <Th>Project</Th>
@@ -1569,6 +1764,20 @@ const printAssetsReport = () => {
                   key={makeTenantEntityKey(asset)}
                   className="odd:bg-slate-900/20 even:bg-slate-800/20 hover:bg-amber-400/10 transition-colors duration-200"
                 >
+                  <Td>
+                    <input
+                      type="checkbox"
+                      checked={selectedAssetIds.includes(getAssetSelectionKey(asset))}
+                      disabled={
+                        asset.status?.trim().toLowerCase() !== "active" ||
+                        !getBackendAssetId(asset)
+                      }
+                      onChange={() => toggleAssetSelection(asset)}
+                      aria-label={`Select asset ${asset.id}`}
+                      className="h-4 w-4 accent-amber-500 disabled:cursor-not-allowed disabled:opacity-40"
+                    />
+                  </Td>
+
                   <Td>{i + 1}</Td>
 
                   <Td>
@@ -1943,6 +2152,114 @@ const printAssetsReport = () => {
             </div>
           </div>
         </div>
+      )}
+
+      {bulkTransferModalOpen && (
+        <ModalPortal>
+          <div className="fleet-portal-modal-backdrop fixed inset-0 bg-black/60 flex items-center justify-center p-4">
+            <div className="fleet-portal-modal-panel bg-white text-black w-[min(680px,calc(100vw-2rem))] max-h-[92vh] overflow-y-auto rounded-xl shadow-2xl p-6">
+              <div className="flex items-center justify-between border-b pb-3">
+                <div>
+                  <h2 className="text-xl sm:text-2xl font-bold">
+                    Transfer Selected Assets
+                  </h2>
+                  <p className="mt-1 text-sm text-gray-500">
+                    {selectedAssets.length} asset(s) selected
+                  </p>
+                </div>
+
+                <button
+                  type="button"
+                  onClick={closeBulkTransferModal}
+                  disabled={savingBulkTransfer}
+                  className="text-2xl text-gray-500 hover:text-black disabled:opacity-50"
+                >
+                  ×
+                </button>
+              </div>
+
+              <div className="mt-5">
+                <label className="mb-2 block text-sm font-semibold text-gray-700">
+                  Selected Assets
+                </label>
+
+                <div className="max-h-44 overflow-y-auto rounded-lg border bg-gray-50 p-3">
+                  <div className="grid gap-2 sm:grid-cols-2">
+                    {selectedAssets.map((asset) => (
+                      <div
+                        key={getAssetSelectionKey(asset)}
+                        className="rounded-md border bg-white px-3 py-2 text-sm"
+                      >
+                        <div className="font-bold text-gray-900">{asset.id}</div>
+                        <div className="text-xs text-gray-500">
+                          Current project: {asset.project || "-"}
+                        </div>
+                      </div>
+                    ))}
+                  </div>
+                </div>
+              </div>
+
+              <div className="mt-5">
+                <label className="mb-2 block text-sm font-semibold text-gray-700">
+                  Destination Project
+                </label>
+                <select
+                  value={bulkTransferProjectValue}
+                  onChange={(e) => setBulkTransferProjectValue(e.target.value)}
+                  disabled={savingBulkTransfer}
+                  className="w-full rounded-lg border p-2.5"
+                >
+                  <option value="">Select Project</option>
+                  {projectOptions.map((project) => (
+                    <option key={project} value={project}>
+                      {project}
+                    </option>
+                  ))}
+                </select>
+              </div>
+
+              <div className="mt-5">
+                <label className="mb-2 block text-sm font-semibold text-gray-700">
+                  Effective Date
+                </label>
+                <input
+                  type="date"
+                  value={bulkTransferEffectiveDate}
+                  onChange={(e) => setBulkTransferEffectiveDate(e.target.value)}
+                  disabled={savingBulkTransfer}
+                  className="w-full rounded-lg border p-2.5"
+                />
+              </div>
+
+              <p className="mt-5 rounded-lg border border-yellow-200 bg-yellow-50 p-3 text-xs text-gray-600">
+                One bulk submission will create the required approval workflow
+                for every selected asset. Assets already assigned to the
+                destination project will be rejected by backend validation.
+              </p>
+
+              <div className="mt-6 flex justify-end gap-3 border-t pt-4">
+                <button
+                  type="button"
+                  onClick={closeBulkTransferModal}
+                  disabled={savingBulkTransfer}
+                  className="rounded-lg bg-gray-200 px-4 py-2 font-semibold disabled:opacity-50"
+                >
+                  Cancel
+                </button>
+
+                <button
+                  type="button"
+                  onClick={confirmBulkAssetTransfer}
+                  disabled={savingBulkTransfer}
+                  className="rounded-lg bg-amber-500 px-4 py-2 font-black text-slate-950 hover:bg-amber-400 disabled:cursor-not-allowed disabled:opacity-60"
+                >
+                  {savingBulkTransfer ? "Submitting..." : "Submit Bulk Transfer"}
+                </button>
+              </div>
+            </div>
+          </div>
+        </ModalPortal>
       )}
 
       {projectTargetAsset && (

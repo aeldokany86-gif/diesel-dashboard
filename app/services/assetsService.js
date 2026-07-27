@@ -45,12 +45,48 @@ export async function fetchPendingAssetTransfers() {
   return Array.isArray(response.data) ? response.data : [];
 }
 
+export async function fetchAssetTransferHistory(params = {}) {
+  const response = await api.get("/assets/transfers/history", {
+    params,
+  });
+
+  return Array.isArray(response.data) ? response.data : [];
+}
+
 export async function createAssetTransfer(assetId, payload) {
   if (!assetId) {
     throw new Error("Asset ID is required.");
   }
 
   const response = await api.post(`/assets/${assetId}/transfer`, payload);
+  return response.data;
+}
+
+
+export async function createBulkAssetTransfer(payload = {}) {
+  const assetIds = Array.isArray(payload.assetIds)
+    ? payload.assetIds.filter(Boolean)
+    : [];
+
+  if (!assetIds.length) {
+    throw new Error("At least one Asset ID is required.");
+  }
+
+  if (!payload.toProjectId) {
+    throw new Error("Destination Project ID is required.");
+  }
+
+  if (!payload.requestedByUserId) {
+    throw new Error("Requester User ID is required.");
+  }
+
+  const response = await api.post("/assets/transfers/bulk", {
+    assetIds,
+    toProjectId: payload.toProjectId,
+    requestedByUserId: payload.requestedByUserId,
+    effectiveDate: payload.effectiveDate || undefined,
+  });
+
   return response.data;
 }
 
@@ -70,4 +106,13 @@ export async function resetAssetOdometer(assetId, payload) {
 
   const response = await api.post(`/assets/${assetId}/reset-odometer`, payload);
   return response.data;
+}
+
+
+export async function fetchAssetMeterHistory(params = {}) {
+  const response = await api.get("/assets/reports/odometer-history", {
+    params,
+  });
+
+  return Array.isArray(response.data) ? response.data : [];
 }

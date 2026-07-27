@@ -5,6 +5,14 @@ import ReportToolbar from "./components/ReportToolbar";
 import { printReport } from "./utils/printReport";
 import { exportReportToExcel } from "./utils/exportReportToExcel";
 import { fetchStationStockMovements } from "../../services/stationsService";
+import StationsReportsPage from "./stations/StationsReportsPage";
+import {
+  fetchAssetTransferHistory,
+  fetchAssetMeterHistory,
+} from "../../services/assetsService";
+import {
+  fetchOdometerCorrectionHistory,
+} from "../../services/operationCorrectionsService";
 
 const OPERATIONS_REPORTS = [
   {
@@ -36,21 +44,45 @@ const ASSETS_REPORTS = [
     title: "Assets Master Report",
     description:
       "Complete asset register including asset ID, type, category, assigned project, status, current odometer, lifetime odometer and fuel tank capacity.",
-    available: false,
+    available: true,
   },
   {
-    id: "asset-movements",
-    title: "Asset Movement Report",
+    id: "asset-transfer-history",
+    title: "Asset Transfer History",
     description:
-      "Complete history of asset project assignments and transfers, including source project, destination project, effective date and approval status.",
-    available: false,
+      "Complete history of single and bulk asset transfers, including transfer reference, source project, destination project, requester, effective date and approval status.",
+    available: true,
   },
   {
-    id: "asset-utilization",
-    title: "Asset Utilization Report",
+    id: "asset-meter-history",
+    title: "Asset Meter History Report",
     description:
-      "Asset utilization analysis including lifetime odometer, fuel consumption, refueling activity and operational usage.",
-    available: false,
+      "Complete chronological history of asset odometer readings, resets, meter cycles and lifetime readings.",
+    available: true,
+  },
+];
+
+const STATIONS_REPORTS = [
+  {
+    id: "station-counter-meter-history",
+    title: "Station Counter Meter History Report",
+    description:
+      "Chronological history of station counter readings, operation events, counter resets, meter cycles and lifetime readings.",
+    available: true,
+  },
+  {
+    id: "station-master",
+    title: "Station Master Report",
+    description:
+      "Complete station register including project, type, status, capacity, stock balance, current counter, lifetime counter and counter cycle.",
+    available: true,
+  },
+  {
+    id: "station-transfer",
+    title: "Station Transfer Report",
+    description:
+      "Complete history of station transfer requests including source and destination projects, stock at transfer, requester, approvers, effective date and approval status.",
+    available: true,
   },
 ];
 
@@ -79,8 +111,8 @@ const REPORT_MODULES = [
     description:
       "Station master data, stock performance and reconciliation reports.",
     icon: "⛽",
-    reports: [],
-    available: false,
+    reports: STATIONS_REPORTS,
+    available: true,
   },
   {
     id: "team",
@@ -1553,12 +1585,2326 @@ function StationMovementsReport({
   );
 }
 
+const ASSETS_MASTER_FILTERS = {
+  project: "all",
+  assetType: "all",
+  category: "all",
+  status: "all",
+  search: "",
+};
+
+const ASSETS_MASTER_HEADERS = [
+  "Asset ID",
+  "Asset Type",
+  "Category",
+  "Assigned Project",
+  "Status",
+  "Current Odometer",
+  "Lifetime Odometer",
+  "Fuel Tank Capacity (L)",
+];
+
+function getAssetProjectLabel(asset, projects = []) {
+  const embeddedProject = asset?.project;
+  if (embeddedProject && typeof embeddedProject === "object") {
+    return getProjectLabel(embeddedProject);
+  }
+
+  const rawProject =
+    asset?.projectName ||
+    asset?.assignedProjectName ||
+    asset?.projectCode ||
+    asset?.projectId ||
+    asset?.assignedProjectId ||
+    "";
+
+  if (!rawProject) return "Unassigned";
+
+  const normalizedProject = normalizeValue(rawProject);
+  const matchedProject = projects.find((project) =>
+    [
+      project?.id,
+      project?.backendId,
+      project?.projectBackendId,
+      project?.name,
+      project?.projectName,
+      project?.code,
+      project?.projectCode,
+    ]
+      .filter(Boolean)
+      .map(normalizeValue)
+      .includes(normalizedProject)
+  );
+
+  return matchedProject ? getProjectLabel(matchedProject) : String(rawProject);
+}
+
+function getAssetTypeLabel(asset) {
+  return (
+    asset?.assetType?.name ||
+    asset?.assetTypeName ||
+    asset?.typeName ||
+    asset?.assetType ||
+    asset?.type ||
+    "-"
+  );
+}
+
+function getAssetCategoryLabel(asset) {
+  return (
+    asset?.category?.name ||
+    asset?.categoryName ||
+    asset?.assetCategory ||
+    asset?.category ||
+    "-"
+  );
+}
+
+function getAssetStatusLabel(asset) {
+  if (asset?.deletedAt) return "DELETED";
+  return asset?.status || asset?.assetStatus || "ACTIVE";
+}
+
+function getFirstAssetNumber(...values) {
+  const validNumbers = values
+    .map((value) => Number(value))
+    .filter((value) => Number.isFinite(value));
+
+  const nonZeroValue = validNumbers.find((value) => value !== 0);
+  return nonZeroValue ?? validNumbers[0] ?? 0;
+}
+
+function getAssetDataSources(asset) {
+  return [
+    asset,
+    asset?.backendAsset,
+    asset?.rawAsset,
+    asset?.asset,
+    asset?.data,
+    asset?._raw,
+  ].filter(Boolean);
+}
+
+function getAssetCurrentOdometer(asset) {
+  const sources = getAssetDataSources(asset);
+
+  return getFirstAssetNumber(
+    ...sources.flatMap((source) => [
+      source?.currentOdometerValue,
+      source?.currentOdometer,
+      source?.currentOdometerReading,
+      source?.currentReading,
+      source?.currentMeterReading,
+      source?.odometer,
+      source?.hourMeter,
+      source?.meterReading,
+    ])
+  );
+}
+
+function getAssetLifetimeOdometer(asset) {
+  const sources = getAssetDataSources(asset);
+  const storedLifetime = getFirstAssetNumber(
+    ...sources.flatMap((source) => [
+      source?.currentLifetimeOdometer,
+      source?.lifetimeOdometer,
+      source?.lifetimeOdometerReading,
+      source?.lifetimeMeterReading,
+      source?.totalLifetimeOdometer,
+      source?.totalDistance,
+      source?.lifetimeHours,
+    ])
+  );
+
+  const currentOdometer = getAssetCurrentOdometer(asset);
+  const currentMeterCycle = getFirstAssetNumber(
+    ...sources.flatMap((source) => [
+      source?.currentMeterCycle,
+      source?.meterCycle,
+      source?.assetMeterCycleNumber,
+    ])
+  ) || 1;
+
+  if (storedLifetime === 0 && currentMeterCycle === 1 && currentOdometer > 0) {
+    return currentOdometer;
+  }
+
+  return storedLifetime;
+}
+
+function getAssetTankCapacity(asset) {
+  return getNumericValue(
+    asset?.fuelTankCapacity,
+    asset?.tankCapacity,
+    asset?.dieselTankCapacity,
+    asset?.fuelCapacity
+  );
+}
+
+function AssetsMasterReport({
+  selectedReport,
+  currentUser,
+  currentCompany,
+  projects = [],
+  assets = [],
+  onBack,
+}) {
+  const [filtersOpen, setFiltersOpen] = useState(true);
+  const [reportGenerated, setReportGenerated] = useState(false);
+  const [draftFilters, setDraftFilters] = useState(ASSETS_MASTER_FILTERS);
+  const [appliedFilters, setAppliedFilters] = useState(ASSETS_MASTER_FILTERS);
+
+  const rows = useMemo(
+    () =>
+      (assets || []).map((asset, index) => ({
+        key:
+          asset?.backendId ||
+          asset?.assetBackendId ||
+          asset?.databaseId ||
+          asset?.id ||
+          `asset-${index}`,
+        assetId: getAssetLabel(asset),
+        assetType: getAssetTypeLabel(asset),
+        category: getAssetCategoryLabel(asset),
+        project: getAssetProjectLabel(asset, projects),
+        status: getAssetStatusLabel(asset),
+        currentOdometer: getAssetCurrentOdometer(asset),
+        lifetimeOdometer: getAssetLifetimeOdometer(asset),
+        tankCapacity: getAssetTankCapacity(asset),
+      })),
+    [assets, projects]
+  );
+
+  const projectOptions = useMemo(
+    () => [...new Set(rows.map((row) => row.project).filter(Boolean))].sort(),
+    [rows]
+  );
+
+  const assetTypeOptions = useMemo(
+    () => [...new Set(rows.map((row) => row.assetType).filter((value) => value && value !== "-"))].sort(),
+    [rows]
+  );
+
+  const categoryOptions = useMemo(
+    () => [...new Set(rows.map((row) => row.category).filter((value) => value && value !== "-"))].sort(),
+    [rows]
+  );
+
+  const statusOptions = useMemo(
+    () => [...new Set(rows.map((row) => row.status).filter(Boolean))].sort(),
+    [rows]
+  );
+
+  const filteredRows = useMemo(() => {
+    const search = normalizeValue(appliedFilters.search);
+
+    return rows.filter((row) => {
+      if (
+        appliedFilters.project !== "all" &&
+        normalizeValue(row.project) !== normalizeValue(appliedFilters.project)
+      ) return false;
+
+      if (
+        appliedFilters.assetType !== "all" &&
+        normalizeValue(row.assetType) !== normalizeValue(appliedFilters.assetType)
+      ) return false;
+
+      if (
+        appliedFilters.category !== "all" &&
+        normalizeValue(row.category) !== normalizeValue(appliedFilters.category)
+      ) return false;
+
+      if (
+        appliedFilters.status !== "all" &&
+        normalizeValue(row.status) !== normalizeValue(appliedFilters.status)
+      ) return false;
+
+      if (
+        search &&
+        ![
+          row.assetId,
+          row.assetType,
+          row.category,
+          row.project,
+          row.status,
+        ].some((value) => normalizeValue(value).includes(search))
+      ) return false;
+
+      return true;
+    });
+  }, [rows, appliedFilters]);
+
+  const totals = useMemo(
+    () => ({
+      assets: filteredRows.length,
+      active: filteredRows.filter((row) => normalizeValue(row.status) === "active").length,
+      inactive: filteredRows.filter((row) => normalizeValue(row.status) === "inactive").length,
+      deleted: filteredRows.filter((row) => normalizeValue(row.status) === "deleted").length,
+    }),
+    [filteredRows]
+  );
+
+  const filterSummary = useMemo(
+    () => [
+      { label: "Project", value: appliedFilters.project === "all" ? "All Projects" : appliedFilters.project },
+      { label: "Asset Type", value: appliedFilters.assetType === "all" ? "All Asset Types" : appliedFilters.assetType },
+      { label: "Category", value: appliedFilters.category === "all" ? "All Categories" : appliedFilters.category },
+      { label: "Status", value: appliedFilters.status === "all" ? "All Statuses" : formatOperationType(appliedFilters.status) },
+      { label: "Search", value: appliedFilters.search || "No search text" },
+    ],
+    [appliedFilters]
+  );
+
+  const reportMeta = {
+    title: selectedReport?.title || "Assets Master Report",
+    companyName: currentCompany?.name || "Fleet Fuel PRO",
+    generatedBy: getUserDisplayName(currentUser),
+    generatedAt: new Date().toLocaleString("en-GB"),
+    filters: filterSummary,
+  };
+
+  const handlePrint = () => {
+    printReport({
+      ...reportMeta,
+      totals: [
+        { label: "Total Assets", value: totals.assets },
+        { label: "Active Assets", value: totals.active },
+        { label: "Inactive Assets", value: totals.inactive },
+        { label: "Deleted Assets", value: totals.deleted },
+      ],
+      columns: ASSETS_MASTER_HEADERS,
+      rows: filteredRows.map((row) => [
+        row.assetId,
+        row.assetType,
+        row.category,
+        row.project,
+        formatOperationType(row.status),
+        formatNumber(row.currentOdometer),
+        formatNumber(row.lifetimeOdometer),
+        formatNumber(row.tankCapacity),
+      ]),
+      footerRow: [
+        "Total Assets",
+        "",
+        "",
+        "",
+        `${totals.assets} assets`,
+        "",
+        "",
+        "",
+      ],
+    });
+  };
+
+  const handleExport = () => {
+    exportReportToExcel({
+      fileName: "Assets_Master_Report",
+      sheetName: "Assets Master",
+      ...reportMeta,
+      rows: filteredRows.map((row) => ({
+        "Asset ID": row.assetId,
+        "Asset Type": row.assetType,
+        Category: row.category,
+        "Assigned Project": row.project,
+        Status: formatOperationType(row.status),
+        "Current Odometer": row.currentOdometer,
+        "Lifetime Odometer": row.lifetimeOdometer,
+        "Fuel Tank Capacity (L)": row.tankCapacity,
+      })),
+      totals: {
+        "Asset ID": "Total Assets",
+        Status: `${totals.assets} assets / ${totals.active} active / ${totals.inactive} inactive / ${totals.deleted} deleted`,
+      },
+    });
+  };
+
+  const applyFilters = () => {
+    setAppliedFilters(draftFilters);
+    setReportGenerated(true);
+    setFiltersOpen(false);
+  };
+
+  const resetFilters = () => {
+    setDraftFilters(ASSETS_MASTER_FILTERS);
+    setAppliedFilters(ASSETS_MASTER_FILTERS);
+  };
+
+  return (
+    <div className="min-h-full bg-slate-950 px-4 py-5 text-slate-100 sm:px-6 lg:px-8">
+      <div className="mx-auto max-w-[1800px] space-y-5">
+        <section className="rounded-2xl border border-slate-800 bg-slate-900/80 p-5 shadow-xl shadow-black/10">
+          <div className="flex flex-col gap-4 xl:flex-row xl:items-center xl:justify-between">
+            <div>
+              <button type="button" onClick={onBack} className="mb-4 inline-flex items-center gap-2 rounded-lg border border-slate-700 bg-slate-950/70 px-3 py-2 text-sm font-bold text-slate-300 transition hover:border-amber-500/50 hover:text-amber-300">
+                <span aria-hidden="true">←</span> Back to Reports
+              </button>
+              <p className="text-xs font-bold uppercase tracking-[0.22em] text-amber-400">Assets Reports</p>
+              <h1 className="mt-1 text-2xl font-black text-white sm:text-3xl">{selectedReport?.title}</h1>
+              <p className="mt-2 max-w-4xl text-sm leading-6 text-slate-400">{selectedReport?.description}</p>
+            </div>
+            <ReportToolbar onOpenFilters={() => setFiltersOpen(true)} onPrint={handlePrint} onExport={handleExport} disabled={!reportGenerated || !filteredRows.length} />
+          </div>
+        </section>
+
+        {!reportGenerated ? (
+          <section className="rounded-2xl border border-amber-500/30 bg-slate-900/80 px-6 py-14 text-center shadow-xl shadow-black/10">
+            <div className="mx-auto flex max-w-xl flex-col items-center">
+              <div className="flex h-16 w-16 items-center justify-center rounded-2xl border border-amber-500/30 bg-amber-500/10 text-3xl">🚜</div>
+              <h2 className="mt-5 text-xl font-black text-white sm:text-2xl">Select asset report filters first</h2>
+              <p className="mt-3 text-sm leading-6 text-slate-400">Choose the project, asset type, category and status, then generate the asset register.</p>
+              <button type="button" onClick={() => setFiltersOpen(true)} className="mt-6 rounded-xl border border-amber-500 bg-amber-500 px-5 py-3 text-sm font-extrabold text-slate-950 transition hover:bg-amber-400">Set Report Filters</button>
+            </div>
+          </section>
+        ) : (
+          <>
+            <section className="grid gap-3 sm:grid-cols-2 xl:grid-cols-5">
+              {filterSummary.map((item) => (
+                <div key={item.label} className="rounded-xl border border-slate-800 bg-slate-900/70 px-4 py-3">
+                  <p className="text-[11px] font-bold uppercase tracking-wider text-slate-500">{item.label}</p>
+                  <p className="mt-1 truncate text-sm font-extrabold text-slate-200">{item.value}</p>
+                </div>
+              ))}
+            </section>
+
+            <section className="grid gap-3 sm:grid-cols-2 xl:grid-cols-4">
+              {[
+                ["Total Assets", totals.assets],
+                ["Active Assets", totals.active],
+                ["Inactive Assets", totals.inactive],
+                ["Deleted Assets", totals.deleted],
+              ].map(([label, value]) => (
+                <div key={label} className="rounded-2xl border border-amber-500/25 bg-slate-900/80 p-4 shadow-lg shadow-black/10">
+                  <p className="text-xs font-bold uppercase tracking-wider text-amber-400">{label}</p>
+                  <p className="mt-2 text-2xl font-black text-white">{value}</p>
+                </div>
+              ))}
+            </section>
+
+            <section className="overflow-hidden rounded-2xl border border-slate-800 bg-slate-900/80 shadow-xl shadow-black/10">
+              <div className="flex flex-col gap-2 border-b border-slate-800 px-5 py-4 sm:flex-row sm:items-center sm:justify-between">
+                <div>
+                  <h2 className="font-extrabold text-white">Assets Master Register</h2>
+                  <p className="mt-1 text-xs text-slate-500">{filteredRows.length} asset{filteredRows.length === 1 ? "" : "s"} found</p>
+                </div>
+                <p className="text-xs font-bold text-amber-300">Master asset data</p>
+              </div>
+
+              <div className="overflow-x-auto">
+                <table className="min-w-[1350px] w-full table-fixed border-collapse text-sm">
+                  <colgroup>
+                    <col className="w-[14%]" />
+                    <col className="w-[14%]" />
+                    <col className="w-[13%]" />
+                    <col className="w-[13%]" />
+                    <col className="w-[10%]" />
+                    <col className="w-[12%]" />
+                    <col className="w-[12%]" />
+                    <col className="w-[12%]" />
+                  </colgroup>
+                  <thead className="bg-slate-950/90">
+                    <tr>{ASSETS_MASTER_HEADERS.map((header, index) => <th key={header} className={`whitespace-nowrap border-b border-slate-800 px-3 py-3 text-[11px] font-black uppercase tracking-wider text-slate-400 ${index >= 5 ? "text-right" : "text-left"}`}>{header}</th>)}</tr>
+                  </thead>
+                  <tbody>
+                    {filteredRows.length ? filteredRows.map((row) => (
+                      <tr key={row.key} className="border-b border-slate-800/70 transition hover:bg-slate-800/30">
+                        <td className="whitespace-nowrap px-3 py-3 font-extrabold text-amber-300">{row.assetId}</td>
+                        <td className="whitespace-nowrap px-3 py-3 text-slate-300">{row.assetType}</td>
+                        <td className="whitespace-nowrap px-3 py-3 text-slate-300">{row.category}</td>
+                        <td className="whitespace-nowrap px-3 py-3 font-bold text-white">{row.project}</td>
+                        <td className="whitespace-nowrap px-3 py-3 font-bold text-slate-300">{formatOperationType(row.status)}</td>
+                        <td className="whitespace-nowrap px-3 py-3 text-right font-extrabold text-white">{formatNumber(row.currentOdometer)}</td>
+                        <td className="whitespace-nowrap px-3 py-3 text-right font-extrabold text-amber-300">{formatNumber(row.lifetimeOdometer)}</td>
+                        <td className="whitespace-nowrap px-3 py-3 text-right font-extrabold text-emerald-300">{formatNumber(row.tankCapacity)}</td>
+                      </tr>
+                    )) : (
+                      <tr><td colSpan={ASSETS_MASTER_HEADERS.length} className="px-6 py-12 text-center text-slate-500">No assets match the selected filters.</td></tr>
+                    )}
+                  </tbody>
+                  <tfoot className="bg-slate-950/80">
+                    <tr className="font-black text-white"><td className="px-3 py-3" colSpan={4}>Total Assets</td><td className="px-3 py-3 text-amber-300">{filteredRows.length}</td><td colSpan={3} /></tr>
+                  </tfoot>
+                </table>
+              </div>
+            </section>
+          </>
+        )}
+
+        {filtersOpen ? (
+          <div className="fixed inset-0 z-[120] bg-black/70 backdrop-blur-sm">
+            <button type="button" aria-label="Close filters" onClick={() => reportGenerated && setFiltersOpen(false)} className="absolute inset-0 h-full w-full" />
+            <aside className="absolute right-0 top-0 z-10 flex h-full w-full max-w-md flex-col border-l border-slate-800 bg-slate-900 shadow-2xl shadow-black/50">
+              <div className="flex items-start justify-between border-b border-slate-800 px-5 py-4">
+                <div><p className="text-xs font-bold uppercase tracking-[0.2em] text-amber-400">Report Setup</p><h2 className="mt-1 text-xl font-black text-white">Assets Master Filters</h2></div>
+                {reportGenerated ? <button type="button" onClick={() => setFiltersOpen(false)} className="rounded-lg border border-slate-700 px-3 py-2 text-sm font-bold text-slate-400 hover:text-white">Close</button> : null}
+              </div>
+
+              <div className="flex-1 space-y-4 overflow-y-auto px-5 py-5">
+                <label className="block"><span className="mb-2 block text-sm font-bold text-slate-300">Asset Search</span><input type="text" value={draftFilters.search} onChange={(event) => setDraftFilters((previous) => ({ ...previous, search: event.target.value }))} placeholder="Asset ID, type, category or project" className="w-full rounded-xl border border-slate-700 bg-slate-950 px-3 py-2.5 text-sm text-white outline-none focus:border-amber-500" /></label>
+                <label className="block"><span className="mb-2 block text-sm font-bold text-slate-300">Project</span><select value={draftFilters.project} onChange={(event) => setDraftFilters((previous) => ({ ...previous, project: event.target.value }))} className="w-full rounded-xl border border-slate-700 bg-slate-950 px-3 py-2.5 text-sm text-white outline-none focus:border-amber-500"><option value="all">All Projects</option>{projectOptions.map((project) => <option key={project} value={project}>{project}</option>)}</select></label>
+                <label className="block"><span className="mb-2 block text-sm font-bold text-slate-300">Asset Type</span><select value={draftFilters.assetType} onChange={(event) => setDraftFilters((previous) => ({ ...previous, assetType: event.target.value }))} className="w-full rounded-xl border border-slate-700 bg-slate-950 px-3 py-2.5 text-sm text-white outline-none focus:border-amber-500"><option value="all">All Asset Types</option>{assetTypeOptions.map((assetType) => <option key={assetType} value={assetType}>{assetType}</option>)}</select></label>
+                <label className="block"><span className="mb-2 block text-sm font-bold text-slate-300">Category</span><select value={draftFilters.category} onChange={(event) => setDraftFilters((previous) => ({ ...previous, category: event.target.value }))} className="w-full rounded-xl border border-slate-700 bg-slate-950 px-3 py-2.5 text-sm text-white outline-none focus:border-amber-500"><option value="all">All Categories</option>{categoryOptions.map((category) => <option key={category} value={category}>{category}</option>)}</select></label>
+                <label className="block"><span className="mb-2 block text-sm font-bold text-slate-300">Status</span><select value={draftFilters.status} onChange={(event) => setDraftFilters((previous) => ({ ...previous, status: event.target.value }))} className="w-full rounded-xl border border-slate-700 bg-slate-950 px-3 py-2.5 text-sm text-white outline-none focus:border-amber-500"><option value="all">All Statuses</option>{statusOptions.map((status) => <option key={status} value={status}>{formatOperationType(status)}</option>)}</select></label>
+              </div>
+
+              <div className="grid grid-cols-2 gap-3 border-t border-slate-800 px-5 py-4">
+                <button type="button" onClick={resetFilters} className="rounded-xl border border-slate-700 bg-slate-950 px-4 py-2.5 text-sm font-extrabold text-slate-300 hover:border-slate-500 hover:text-white">Reset</button>
+                <button type="button" onClick={applyFilters} className="rounded-xl border border-amber-500 bg-amber-500 px-4 py-2.5 text-sm font-extrabold text-slate-950 hover:bg-amber-400">{reportGenerated ? "Update Report" : "Generate Report"}</button>
+              </div>
+            </aside>
+          </div>
+        ) : null}
+      </div>
+    </div>
+  );
+}
+
+
+const ASSET_TRANSFER_FILTERS = {
+  dateFrom: "",
+  dateTo: "",
+  assetId: "all",
+  sourceProjectId: "all",
+  destinationProjectId: "all",
+  requestedBy: "all",
+  transferType: "all",
+  status: "all",
+  transferReference: "",
+};
+
+const ASSET_TRANSFER_HEADERS = [
+  "Transfer Reference",
+  "Asset ID",
+  "Transfer Type",
+  "From Project",
+  "To Project",
+  "Requested By",
+  "Requested Date",
+  "Approved / Rejected Date",
+  "Effective Date",
+  "Status",
+];
+
+function getTransferAsset(transfer) {
+  return transfer?.asset || transfer?.payload?.transfer?.asset || null;
+}
+
+function getTransferProject(transfer, side) {
+  if (side === "from") {
+    return transfer?.fromProject || transfer?.payload?.transfer?.fromProject || null;
+  }
+
+  return transfer?.toProject || transfer?.payload?.transfer?.toProject || null;
+}
+
+function getTransferRequester(transfer) {
+  return (
+    transfer?.requestedBy ||
+    transfer?.requester ||
+    transfer?.requestedByUser ||
+    transfer?.payload?.transfer?.requestedBy ||
+    transfer?.payload?.transfer?.requester ||
+    null
+  );
+}
+
+function getTransferBatchId(transfer) {
+  return (
+    transfer?.transferBatchId ||
+    transfer?.batchId ||
+    transfer?.payload?.transferBatchId ||
+    transfer?.payload?.transfer?.transferBatchId ||
+    null
+  );
+}
+
+function getTransferId(transfer) {
+  return (
+    transfer?.id ||
+    transfer?.assetTransferId ||
+    transfer?.payload?.assetTransferId ||
+    transfer?.payload?.transfer?.id ||
+    ""
+  );
+}
+
+function makeTransferReference(transfer) {
+  const batchId = getTransferBatchId(transfer);
+  if (batchId) return batchId;
+
+  const id = String(getTransferId(transfer) || "").replace(/^ASSET-TRANSFER-/i, "");
+  return id ? `ATR-${id.slice(-8).toUpperCase()}` : "ATR-UNKNOWN";
+}
+
+function getTransferUserLabel(transfer) {
+  const requester = getTransferRequester(transfer);
+
+  return (
+    requester?.fullName ||
+    requester?.name ||
+    requester?.email ||
+    transfer?.requestedByName ||
+    transfer?.requesterName ||
+    transfer?.requestedByUserName ||
+    transfer?.requestedByUserId ||
+    "-"
+  );
+}
+
+function getTransferProjectLabel(transfer, side) {
+  const project = getTransferProject(transfer, side);
+
+  if (project) return getProjectLabel(project);
+
+  return (
+    (side === "from"
+      ? transfer?.fromProjectName || transfer?.fromProjectId
+      : transfer?.toProjectName || transfer?.toProjectId) ||
+    "-"
+  );
+}
+
+function getTransferAssetLabel(transfer) {
+  const asset = getTransferAsset(transfer);
+
+  return (
+    asset?.assetId ||
+    asset?.equipmentNo ||
+    asset?.equipmentNumber ||
+    transfer?.assetCode ||
+    transfer?.assetName ||
+    transfer?.assetId ||
+    "-"
+  );
+}
+
+function AssetTransferHistoryReport({
+  selectedReport,
+  currentUser,
+  currentCompany,
+  projects = [],
+  assets = [],
+  onBack,
+}) {
+  const [filtersOpen, setFiltersOpen] = useState(true);
+  const [reportGenerated, setReportGenerated] = useState(false);
+  const [draftFilters, setDraftFilters] = useState(ASSET_TRANSFER_FILTERS);
+  const [appliedFilters, setAppliedFilters] = useState(ASSET_TRANSFER_FILTERS);
+  const [transferHistory, setTransferHistory] = useState([]);
+  const [loading, setLoading] = useState(false);
+  const [error, setError] = useState("");
+  const [selectedTransferReference, setSelectedTransferReference] = useState(null);
+
+  const rows = useMemo(
+    () =>
+      (transferHistory || []).map((transfer, index) => {
+        const batchId = getTransferBatchId(transfer);
+        const sourceProject = getTransferProject(transfer, "from");
+        const destinationProject = getTransferProject(transfer, "to");
+        const asset = getTransferAsset(transfer);
+        const requester = getTransferRequester(transfer);
+
+        return {
+          key: getTransferId(transfer) || `asset-transfer-${index}`,
+          transferReference: makeTransferReference(transfer),
+          batchId: batchId || "-",
+          assetId: getTransferAssetLabel(transfer),
+          assetBackendId: asset?.id || transfer?.assetId || "",
+          transferType: batchId ? "BULK" : "SINGLE",
+          sourceProject: getTransferProjectLabel(transfer, "from"),
+          sourceProjectId:
+            sourceProject?.id || transfer?.fromProjectId || "",
+          destinationProject: getTransferProjectLabel(transfer, "to"),
+          destinationProjectId:
+            destinationProject?.id || transfer?.toProjectId || "",
+          requestedBy: getTransferUserLabel(transfer),
+          requestedById:
+            requester?.id || transfer?.requestedByUserId || "",
+          requestedDate:
+            transfer?.requestedAt ||
+            transfer?.createdAt ||
+            transfer?.payload?.transfer?.createdAt ||
+            "",
+          approvedDate:
+            transfer?.approvedAt ||
+            transfer?.payload?.transfer?.approvedAt ||
+            "",
+          rejectedDate:
+            transfer?.rejectedAt ||
+            transfer?.payload?.transfer?.rejectedAt ||
+            "",
+          reviewDate:
+            transfer?.approvedAt ||
+            transfer?.payload?.transfer?.approvedAt ||
+            transfer?.rejectedAt ||
+            transfer?.payload?.transfer?.rejectedAt ||
+            "",
+          effectiveDate:
+            transfer?.effectiveDate ||
+            transfer?.payload?.transfer?.effectiveDate ||
+            "",
+          status:
+            transfer?.status ||
+            transfer?.payload?.transfer?.status ||
+            "PENDING",
+        };
+      }),
+    [transferHistory]
+  );
+
+  const selectedTransferGroup = useMemo(() => {
+    if (!selectedTransferReference) return null;
+
+    const matchedRows = rows.filter(
+      (row) =>
+        normalizeValue(row.transferReference) ===
+        normalizeValue(selectedTransferReference)
+    );
+
+    if (!matchedRows.length) return null;
+
+    const firstRow = matchedRows[0];
+
+    return {
+      transferReference: firstRow.transferReference,
+      transferType: firstRow.transferType,
+      batchId: firstRow.batchId,
+      sourceProject: firstRow.sourceProject,
+      destinationProject: firstRow.destinationProject,
+      requestedBy: firstRow.requestedBy,
+      requestedDate: firstRow.requestedDate,
+      reviewDate: firstRow.reviewDate,
+      effectiveDate: firstRow.effectiveDate,
+      status: firstRow.status,
+      assets: matchedRows.map((row) => ({
+        key: row.key,
+        assetId: row.assetId,
+        status: row.status,
+      })),
+    };
+  }, [rows, selectedTransferReference]);
+
+  const requesterOptions = useMemo(() => {
+    const options = new Map();
+
+    rows.forEach((row) => {
+      const key = row.requestedById || row.requestedBy;
+      if (key && row.requestedBy && row.requestedBy !== "-") {
+        options.set(String(key), row.requestedBy);
+      }
+    });
+
+    return [...options.entries()]
+      .map(([value, label]) => ({ value, label }))
+      .sort((a, b) => a.label.localeCompare(b.label));
+  }, [rows]);
+
+  const filteredRows = useMemo(() => {
+    const transferReferenceSearch = normalizeValue(
+      appliedFilters.transferReference
+    );
+    return rows.filter((row) => {
+      const requestedDate = row.requestedDate
+        ? new Date(row.requestedDate)
+        : null;
+
+      if (
+        appliedFilters.dateFrom &&
+        (!requestedDate ||
+          requestedDate < new Date(`${appliedFilters.dateFrom}T00:00:00`))
+      ) {
+        return false;
+      }
+
+      if (
+        appliedFilters.dateTo &&
+        (!requestedDate ||
+          requestedDate > new Date(`${appliedFilters.dateTo}T23:59:59`))
+      ) {
+        return false;
+      }
+
+      if (
+        appliedFilters.assetId !== "all" &&
+        normalizeValue(row.assetBackendId || row.assetId) !==
+          normalizeValue(appliedFilters.assetId)
+      ) {
+        return false;
+      }
+
+      if (
+        appliedFilters.sourceProjectId !== "all" &&
+        normalizeValue(row.sourceProjectId) !==
+          normalizeValue(appliedFilters.sourceProjectId)
+      ) {
+        return false;
+      }
+
+      if (
+        appliedFilters.destinationProjectId !== "all" &&
+        normalizeValue(row.destinationProjectId) !==
+          normalizeValue(appliedFilters.destinationProjectId)
+      ) {
+        return false;
+      }
+
+      if (
+        appliedFilters.requestedBy !== "all" &&
+        ![
+          normalizeValue(row.requestedById),
+          normalizeValue(row.requestedBy),
+        ].includes(normalizeValue(appliedFilters.requestedBy))
+      ) {
+        return false;
+      }
+
+      if (
+        appliedFilters.transferType !== "all" &&
+        normalizeValue(row.transferType) !==
+          normalizeValue(appliedFilters.transferType)
+      ) {
+        return false;
+      }
+
+      if (
+        appliedFilters.status !== "all" &&
+        normalizeValue(row.status) !== normalizeValue(appliedFilters.status)
+      ) {
+        return false;
+      }
+
+      if (
+        transferReferenceSearch &&
+        !normalizeValue(row.transferReference).includes(transferReferenceSearch)
+      ) {
+        return false;
+      }
+
+
+      return true;
+    });
+  }, [rows, appliedFilters]);
+
+  const totals = useMemo(
+    () => ({
+      records: filteredRows.length,
+      singleTransfers: filteredRows.filter(
+        (row) => row.transferType === "SINGLE"
+      ).length,
+      bulkAssets: filteredRows.filter(
+        (row) => row.transferType === "BULK"
+      ).length,
+      batches: new Set(
+        filteredRows
+          .map((row) => row.batchId)
+          .filter((value) => value && value !== "-")
+      ).size,
+    }),
+    [filteredRows]
+  );
+
+  const filterSummary = useMemo(() => {
+    const asset = assets.find(
+      (item) =>
+        normalizeValue(getAssetFilterValue(item)) ===
+        normalizeValue(appliedFilters.assetId)
+    );
+    const sourceProject = projects.find(
+      (item) =>
+        normalizeValue(getProjectBackendId(item)) ===
+        normalizeValue(appliedFilters.sourceProjectId)
+    );
+    const destinationProject = projects.find(
+      (item) =>
+        normalizeValue(getProjectBackendId(item)) ===
+        normalizeValue(appliedFilters.destinationProjectId)
+    );
+    const requester = requesterOptions.find(
+      (item) =>
+        normalizeValue(item.value) ===
+        normalizeValue(appliedFilters.requestedBy)
+    );
+
+    return [
+      {
+        label: "Period",
+        value:
+          appliedFilters.dateFrom || appliedFilters.dateTo
+            ? `${formatReportDate(appliedFilters.dateFrom)} → ${formatReportDate(
+                appliedFilters.dateTo
+              )}`
+            : "All dates",
+      },
+      {
+        label: "Asset",
+        value:
+          appliedFilters.assetId === "all"
+            ? "All Assets"
+            : getAssetLabel(asset),
+      },
+      {
+        label: "Source Project",
+        value:
+          appliedFilters.sourceProjectId === "all"
+            ? "All Projects"
+            : getProjectLabel(sourceProject),
+      },
+      {
+        label: "Destination Project",
+        value:
+          appliedFilters.destinationProjectId === "all"
+            ? "All Projects"
+            : getProjectLabel(destinationProject),
+      },
+      {
+        label: "Requested By",
+        value:
+          appliedFilters.requestedBy === "all"
+            ? "All Requesters"
+            : requester?.label || appliedFilters.requestedBy,
+      },
+      {
+        label: "Transfer Type",
+        value:
+          appliedFilters.transferType === "all"
+            ? "Single & Bulk"
+            : formatOperationType(appliedFilters.transferType),
+      },
+      {
+        label: "Status",
+        value:
+          appliedFilters.status === "all"
+            ? "All Statuses"
+            : formatOperationType(appliedFilters.status),
+      },
+      {
+        label: "Transfer Ref",
+        value: appliedFilters.transferReference || "All References",
+      },
+    ];
+  }, [
+    appliedFilters,
+    assets,
+    projects,
+    requesterOptions,
+  ]);
+
+  const reportMeta = {
+    title: selectedReport?.title || "Asset Transfer History",
+    companyName: currentCompany?.name || "Fleet Fuel PRO",
+    generatedBy: getUserDisplayName(currentUser),
+    generatedAt: new Date().toLocaleString("en-GB"),
+    filters: filterSummary,
+  };
+
+  const handlePrint = () => {
+    printReport({
+      ...reportMeta,
+      totals: [
+        { label: "Transfer Records", value: totals.records },
+        { label: "Single Transfers", value: totals.singleTransfers },
+        { label: "Bulk Assets", value: totals.bulkAssets },
+        { label: "Bulk Batches", value: totals.batches },
+      ],
+      columns: ASSET_TRANSFER_HEADERS,
+      rows: filteredRows.map((row) => [
+        row.transferReference,
+        row.assetId,
+        formatOperationType(row.transferType),
+        row.sourceProject,
+        row.destinationProject,
+        row.requestedBy,
+        formatDateTime(row.requestedDate),
+        formatDateTime(row.reviewDate),
+        row.effectiveDate
+          ? new Date(row.effectiveDate).toLocaleDateString("en-GB")
+          : "-",
+        formatOperationType(row.status),
+      ]),
+    });
+  };
+
+  const handleExport = () => {
+    exportReportToExcel({
+      fileName: "Asset_Transfer_History",
+      sheetName: "Asset Transfers",
+      ...reportMeta,
+      rows: filteredRows.map((row) => ({
+        "Transfer Ref": row.transferReference,
+        "Batch ID": row.batchId === "-" ? "" : row.batchId,
+        "Asset ID": row.assetId,
+        "Transfer Type": formatOperationType(row.transferType),
+        "From Project": row.sourceProject,
+        "To Project": row.destinationProject,
+        "Requested By": row.requestedBy,
+        "Requested Date": formatDateTime(row.requestedDate),
+        "Approved / Rejected Date": formatDateTime(row.reviewDate),
+        "Effective Date": row.effectiveDate
+          ? new Date(row.effectiveDate).toLocaleDateString("en-GB")
+          : "-",
+        Status: formatOperationType(row.status),
+      })),
+      totals: {
+        "Transfer Ref": "Totals",
+        "Asset ID": `${totals.records} records`,
+        "Transfer Type": `${totals.singleTransfers} single / ${totals.bulkAssets} bulk assets`,
+        Status: `${totals.batches} bulk batches`,
+      },
+    });
+  };
+
+  const handleFilterChange = (field, value) => {
+    setDraftFilters((previous) => ({ ...previous, [field]: value }));
+  };
+
+  const applyFilters = async () => {
+    setLoading(true);
+    setError("");
+
+    try {
+      const companyId =
+        currentCompany?.backendId ||
+        currentCompany?.companyBackendId ||
+        currentCompany?.id ||
+        currentUser?.companyId ||
+        "";
+
+      const result = await fetchAssetTransferHistory({
+        companyId,
+      });
+
+      setTransferHistory(Array.isArray(result) ? result : []);
+      setAppliedFilters(draftFilters);
+      setReportGenerated(true);
+      setFiltersOpen(false);
+    } catch (requestError) {
+      setError(
+        requestError?.response?.data?.message ||
+          requestError?.message ||
+          "Failed to load asset transfer history."
+      );
+    } finally {
+      setLoading(false);
+    }
+  };
+
+  const resetFilters = () => {
+    setDraftFilters(ASSET_TRANSFER_FILTERS);
+    setAppliedFilters(ASSET_TRANSFER_FILTERS);
+  };
+
+  return (
+    <div className="min-h-full bg-slate-950 px-4 py-5 text-slate-100 sm:px-6 lg:px-8">
+      <div className="mx-auto max-w-[1900px] space-y-5">
+        <section className="rounded-2xl border border-slate-800 bg-slate-900/80 p-5 shadow-xl shadow-black/10">
+          <div className="flex flex-col gap-4 xl:flex-row xl:items-center xl:justify-between">
+            <div>
+              <button
+                type="button"
+                onClick={onBack}
+                className="mb-4 inline-flex items-center gap-2 rounded-lg border border-slate-700 bg-slate-950/70 px-3 py-2 text-sm font-bold text-slate-300 transition hover:border-amber-500/50 hover:text-amber-300"
+              >
+                <span aria-hidden="true">←</span>
+                Back to Reports
+              </button>
+
+              <p className="text-xs font-bold uppercase tracking-[0.22em] text-amber-400">
+                Assets Reports
+              </p>
+              <h1 className="mt-1 text-2xl font-black text-white sm:text-3xl">
+                {selectedReport?.title}
+              </h1>
+              <p className="mt-2 max-w-4xl text-sm leading-6 text-slate-400">
+                {selectedReport?.description}
+              </p>
+            </div>
+
+            <ReportToolbar
+              onOpenFilters={() => setFiltersOpen(true)}
+              onPrint={handlePrint}
+              onExport={handleExport}
+              disabled={!reportGenerated || !filteredRows.length}
+            />
+          </div>
+        </section>
+
+        {error ? (
+          <section className="rounded-2xl border border-red-500/30 bg-red-500/10 px-5 py-4 text-sm font-bold text-red-200">
+            {error}
+          </section>
+        ) : null}
+
+        {!reportGenerated ? (
+          <section className="rounded-2xl border border-amber-500/30 bg-slate-900/80 px-6 py-14 text-center shadow-xl shadow-black/10">
+            <div className="mx-auto flex max-w-xl flex-col items-center">
+              <div className="flex h-16 w-16 items-center justify-center rounded-2xl border border-amber-500/30 bg-amber-500/10 text-3xl">
+                🔁
+              </div>
+              <h2 className="mt-5 text-xl font-black text-white sm:text-2xl">
+                Select asset transfer filters first
+              </h2>
+              <p className="mt-3 text-sm leading-6 text-slate-400">
+                Choose the period, asset, source project, destination project,
+                requester, transfer type and status, then generate the report.
+              </p>
+              <button
+                type="button"
+                onClick={() => setFiltersOpen(true)}
+                className="mt-6 rounded-xl border border-amber-500 bg-amber-500 px-5 py-3 text-sm font-extrabold text-slate-950 transition hover:bg-amber-400"
+              >
+                Set Report Filters
+              </button>
+            </div>
+          </section>
+        ) : (
+          <>
+            <section className="grid gap-3 sm:grid-cols-2 xl:grid-cols-3 2xl:grid-cols-5">
+              {filterSummary.map((item) => (
+                <div
+                  key={item.label}
+                  className="rounded-xl border border-slate-800 bg-slate-900/70 px-4 py-3"
+                >
+                  <p className="text-[11px] font-bold uppercase tracking-wider text-slate-500">
+                    {item.label}
+                  </p>
+                  <p className="mt-1 truncate text-sm font-extrabold text-slate-200">
+                    {item.value}
+                  </p>
+                </div>
+              ))}
+            </section>
+
+            <section className="grid gap-3 sm:grid-cols-2 xl:grid-cols-4">
+              {[
+                ["Transfer Records", totals.records],
+                ["Single Transfer Records", totals.singleTransfers],
+                ["Bulk Transfer Records", totals.bulkAssets],
+                ["Unique Bulk Batches", totals.batches],
+              ].map(([label, value]) => (
+                <div
+                  key={label}
+                  className="rounded-2xl border border-amber-500/25 bg-slate-900/80 p-4 shadow-lg shadow-black/10"
+                >
+                  <p className="text-xs font-bold uppercase tracking-wider text-amber-400">
+                    {label}
+                  </p>
+                  <p className="mt-2 text-2xl font-black text-white">{value}</p>
+                </div>
+              ))}
+            </section>
+
+            <section className="overflow-hidden rounded-2xl border border-slate-800 bg-slate-900/80 shadow-xl shadow-black/10">
+              <div className="flex flex-col gap-2 border-b border-slate-800 px-5 py-4 sm:flex-row sm:items-center sm:justify-between">
+                <div>
+                  <h2 className="font-extrabold text-white">
+                    Asset Transfer Records
+                  </h2>
+                  <p className="mt-1 text-xs text-slate-500">
+                    {filteredRows.length} transfer record
+                    {filteredRows.length === 1 ? "" : "s"} found
+                  </p>
+                </div>
+                <p className="text-xs font-bold text-amber-300">
+                  Single and bulk transfers
+                </p>
+              </div>
+
+              <div className="overflow-x-auto">
+                <table className="min-w-[1500px] w-full border-collapse text-sm">
+                  <thead className="bg-slate-950/90">
+                    <tr>
+                      {ASSET_TRANSFER_HEADERS.map((header) => (
+                        <th
+                          key={header}
+                          className="whitespace-nowrap border-b border-slate-800 px-3 py-3 text-left text-[11px] font-black uppercase tracking-wider text-slate-400"
+                        >
+                          {header}
+                        </th>
+                      ))}
+                    </tr>
+                  </thead>
+                  <tbody>
+                    {filteredRows.length ? (
+                      filteredRows.map((row) => (
+                        <tr
+                          key={row.key}
+                          className="border-b border-slate-800/70 transition hover:bg-slate-800/30"
+                        >
+                          <td className="whitespace-nowrap px-3 py-3">
+                            <button
+                              type="button"
+                              onClick={() =>
+                                setSelectedTransferReference(row.transferReference)
+                              }
+                              className="font-extrabold text-amber-300 underline-offset-4 transition hover:text-amber-200 hover:underline"
+                            >
+                              {row.transferReference}
+                            </button>
+                          </td>
+                          <td className="whitespace-nowrap px-3 py-3 font-extrabold text-white">
+                            {row.assetId}
+                          </td>
+                          <td className="whitespace-nowrap px-3 py-3 text-slate-300">
+                            {formatOperationType(row.transferType)}
+                          </td>
+                          <td className="whitespace-nowrap px-3 py-3 text-slate-300">
+                            {row.sourceProject}
+                          </td>
+                          <td className="whitespace-nowrap px-3 py-3 text-slate-300">
+                            {row.destinationProject}
+                          </td>
+                          <td className="whitespace-nowrap px-3 py-3 text-slate-300">
+                            {row.requestedBy}
+                          </td>
+                          <td className="whitespace-nowrap px-3 py-3 text-slate-300">
+                            {formatDateTime(row.requestedDate)}
+                          </td>
+                          <td className="whitespace-nowrap px-3 py-3 text-slate-300">
+                            {formatDateTime(row.reviewDate)}
+                          </td>
+                          <td className="whitespace-nowrap px-3 py-3 text-slate-300">
+                            {row.effectiveDate
+                              ? new Date(row.effectiveDate).toLocaleDateString("en-GB")
+                              : "-"}
+                          </td>
+                          <td className="whitespace-nowrap px-3 py-3">
+                            <span
+                              className={`inline-flex rounded-full border px-2.5 py-1 text-xs font-extrabold ${
+                                normalizeValue(row.status) === "approved"
+                                  ? "border-emerald-500/30 bg-emerald-500/10 text-emerald-300"
+                                  : normalizeValue(row.status) === "rejected"
+                                    ? "border-red-500/30 bg-red-500/10 text-red-300"
+                                    : normalizeValue(row.status) === "partially_approved"
+                                      ? "border-orange-500/30 bg-orange-500/10 text-orange-300"
+                                      : "border-amber-500/30 bg-amber-500/10 text-amber-300"
+                              }`}
+                            >
+                              {formatOperationType(row.status)}
+                            </span>
+                          </td>
+                        </tr>
+                      ))
+                    ) : (
+                      <tr>
+                        <td
+                          colSpan={ASSET_TRANSFER_HEADERS.length}
+                          className="px-6 py-12 text-center text-slate-500"
+                        >
+                          No asset transfers match the selected filters.
+                        </td>
+                      </tr>
+                    )}
+                  </tbody>
+                </table>
+              </div>
+            </section>
+          </>
+        )}
+
+        {selectedTransferGroup ? (
+          <div className="fixed inset-0 z-[125] flex items-center justify-center bg-black/75 px-4 py-6 backdrop-blur-sm">
+            <button
+              type="button"
+              aria-label="Close transfer details"
+              onClick={() => setSelectedTransferReference(null)}
+              className="absolute inset-0 h-full w-full"
+            />
+
+            <section className="relative z-10 max-h-[90vh] w-full max-w-4xl overflow-hidden rounded-2xl border border-slate-700 bg-slate-900 shadow-2xl shadow-black/60">
+              <div className="flex items-start justify-between gap-4 border-b border-slate-800 px-5 py-4">
+                <div>
+                  <p className="text-xs font-black uppercase tracking-[0.2em] text-amber-400">
+                    Transfer Details
+                  </p>
+                  <h2 className="mt-1 break-all text-xl font-black text-white sm:text-2xl">
+                    {selectedTransferGroup.transferReference}
+                  </h2>
+                  <p className="mt-2 text-sm text-slate-400">
+                    {selectedTransferGroup.transferType === "BULK"
+                      ? `${selectedTransferGroup.assets.length} assets included in this batch`
+                      : "Single asset transfer"}
+                  </p>
+                </div>
+
+                <button
+                  type="button"
+                  onClick={() => setSelectedTransferReference(null)}
+                  className="rounded-lg border border-slate-700 px-3 py-2 text-sm font-bold text-slate-300 transition hover:border-slate-500 hover:text-white"
+                >
+                  Close
+                </button>
+              </div>
+
+              <div className="max-h-[calc(90vh-88px)] overflow-y-auto px-5 py-5">
+                <section className="grid gap-3 sm:grid-cols-2 lg:grid-cols-3">
+                  {[
+                    ["Transfer Type", formatOperationType(selectedTransferGroup.transferType)],
+                    ["From Project", selectedTransferGroup.sourceProject],
+                    ["To Project", selectedTransferGroup.destinationProject],
+                    ["Requested By", selectedTransferGroup.requestedBy],
+                    ["Requested Date", formatDateTime(selectedTransferGroup.requestedDate)],
+                    [
+                      "Approved / Rejected Date",
+                      formatDateTime(selectedTransferGroup.reviewDate),
+                    ],
+                    [
+                      "Effective Date",
+                      selectedTransferGroup.effectiveDate
+                        ? new Date(
+                            selectedTransferGroup.effectiveDate
+                          ).toLocaleDateString("en-GB")
+                        : "-",
+                    ],
+                    ["Status", formatOperationType(selectedTransferGroup.status)],
+                    ["Assets Count", selectedTransferGroup.assets.length],
+                  ].map(([label, value]) => (
+                    <div
+                      key={label}
+                      className="rounded-xl border border-slate-800 bg-slate-950/60 px-4 py-3"
+                    >
+                      <p className="text-[11px] font-black uppercase tracking-wider text-slate-500">
+                        {label}
+                      </p>
+                      <p className="mt-1 break-words text-sm font-extrabold text-slate-200">
+                        {value}
+                      </p>
+                    </div>
+                  ))}
+                </section>
+
+                <section className="mt-5 overflow-hidden rounded-2xl border border-slate-800">
+                  <div className="flex items-center justify-between border-b border-slate-800 bg-slate-950/60 px-4 py-3">
+                    <div>
+                      <h3 className="font-extrabold text-white">
+                        Assets Included
+                      </h3>
+                      <p className="mt-1 text-xs text-slate-500">
+                        All assets linked to this transfer reference
+                      </p>
+                    </div>
+                    <span className="rounded-full border border-amber-500/30 bg-amber-500/10 px-3 py-1 text-xs font-black text-amber-300">
+                      {selectedTransferGroup.assets.length}
+                    </span>
+                  </div>
+
+                  <div className="overflow-x-auto">
+                    <table className="w-full min-w-[520px] border-collapse text-sm">
+                      <thead className="bg-slate-950/90">
+                        <tr>
+                          {["No.", "Asset ID", "Status"].map((header) => (
+                            <th
+                              key={header}
+                              className="border-b border-slate-800 px-4 py-3 text-left text-[11px] font-black uppercase tracking-wider text-slate-400"
+                            >
+                              {header}
+                            </th>
+                          ))}
+                        </tr>
+                      </thead>
+                      <tbody>
+                        {selectedTransferGroup.assets.map((asset, index) => (
+                          <tr
+                            key={asset.key}
+                            className="border-b border-slate-800/70 last:border-b-0"
+                          >
+                            <td className="px-4 py-3 text-slate-500">
+                              {index + 1}
+                            </td>
+                            <td className="px-4 py-3 font-extrabold text-white">
+                              {asset.assetId}
+                            </td>
+                            <td className="px-4 py-3">
+                              <span
+                                className={`inline-flex rounded-full border px-2.5 py-1 text-xs font-extrabold ${
+                                  normalizeValue(asset.status) === "approved"
+                                    ? "border-emerald-500/30 bg-emerald-500/10 text-emerald-300"
+                                    : normalizeValue(asset.status) === "rejected"
+                                      ? "border-red-500/30 bg-red-500/10 text-red-300"
+                                      : normalizeValue(asset.status) ===
+                                          "partially_approved"
+                                        ? "border-orange-500/30 bg-orange-500/10 text-orange-300"
+                                        : "border-amber-500/30 bg-amber-500/10 text-amber-300"
+                                }`}
+                              >
+                                {formatOperationType(asset.status)}
+                              </span>
+                            </td>
+                          </tr>
+                        ))}
+                      </tbody>
+                    </table>
+                  </div>
+                </section>
+              </div>
+            </section>
+          </div>
+        ) : null}
+
+        {filtersOpen ? (
+          <div className="fixed inset-0 z-[120] bg-black/70 backdrop-blur-sm">
+            <button
+              type="button"
+              aria-label="Close filters"
+              onClick={() => reportGenerated && setFiltersOpen(false)}
+              className="absolute inset-0 h-full w-full"
+            />
+
+            <aside className="absolute right-0 top-0 z-10 flex h-full w-full max-w-md flex-col border-l border-slate-800 bg-slate-900 shadow-2xl shadow-black/50">
+              <div className="flex items-start justify-between border-b border-slate-800 px-5 py-4">
+                <div>
+                  <p className="text-xs font-bold uppercase tracking-[0.2em] text-amber-400">
+                    Report Setup
+                  </p>
+                  <h2 className="mt-1 text-xl font-black text-white">
+                    Asset Transfer Filters
+                  </h2>
+                </div>
+
+                {reportGenerated ? (
+                  <button
+                    type="button"
+                    onClick={() => setFiltersOpen(false)}
+                    className="rounded-lg border border-slate-700 px-3 py-2 text-sm font-bold text-slate-400 hover:text-white"
+                  >
+                    Close
+                  </button>
+                ) : null}
+              </div>
+
+              <div className="flex-1 space-y-4 overflow-y-auto px-5 py-5">
+                <div className="grid grid-cols-2 gap-3">
+                  <label className="block">
+                    <span className="mb-2 block text-sm font-bold text-slate-300">
+                      Date From
+                    </span>
+                    <input
+                      type="date"
+                      value={draftFilters.dateFrom}
+                      onChange={(event) =>
+                        handleFilterChange("dateFrom", event.target.value)
+                      }
+                      className="w-full rounded-xl border border-slate-700 bg-slate-950 px-3 py-2.5 text-sm text-white outline-none focus:border-amber-500"
+                    />
+                  </label>
+                  <label className="block">
+                    <span className="mb-2 block text-sm font-bold text-slate-300">
+                      Date To
+                    </span>
+                    <input
+                      type="date"
+                      value={draftFilters.dateTo}
+                      onChange={(event) =>
+                        handleFilterChange("dateTo", event.target.value)
+                      }
+                      className="w-full rounded-xl border border-slate-700 bg-slate-950 px-3 py-2.5 text-sm text-white outline-none focus:border-amber-500"
+                    />
+                  </label>
+                </div>
+
+                <label className="block">
+                  <span className="mb-2 block text-sm font-bold text-slate-300">
+                    Asset
+                  </span>
+                  <select
+                    value={draftFilters.assetId}
+                    onChange={(event) =>
+                      handleFilterChange("assetId", event.target.value)
+                    }
+                    className="w-full rounded-xl border border-slate-700 bg-slate-950 px-3 py-2.5 text-sm text-white outline-none focus:border-amber-500"
+                  >
+                    <option value="all">All Assets</option>
+                    {assets.map((asset) => (
+                      <option
+                        key={getAssetFilterValue(asset) || getAssetLabel(asset)}
+                        value={getAssetFilterValue(asset)}
+                      >
+                        {getAssetLabel(asset)}
+                      </option>
+                    ))}
+                  </select>
+                </label>
+
+                <label className="block">
+                  <span className="mb-2 block text-sm font-bold text-slate-300">
+                    Transfer Reference
+                  </span>
+                  <input
+                    type="text"
+                    value={draftFilters.transferReference}
+                    onChange={(event) =>
+                      handleFilterChange(
+                        "transferReference",
+                        event.target.value
+                      )
+                    }
+                    placeholder="ATB-... or ATR-..."
+                    className="w-full rounded-xl border border-slate-700 bg-slate-950 px-3 py-2.5 text-sm text-white outline-none focus:border-amber-500"
+                  />
+                </label>
+
+                <label className="block">
+                  <span className="mb-2 block text-sm font-bold text-slate-300">
+                    Source Project
+                  </span>
+                  <select
+                    value={draftFilters.sourceProjectId}
+                    onChange={(event) =>
+                      handleFilterChange(
+                        "sourceProjectId",
+                        event.target.value
+                      )
+                    }
+                    className="w-full rounded-xl border border-slate-700 bg-slate-950 px-3 py-2.5 text-sm text-white outline-none focus:border-amber-500"
+                  >
+                    <option value="all">All Projects</option>
+                    {projects.map((project) => (
+                      <option
+                        key={
+                          getProjectBackendId(project) ||
+                          getProjectLabel(project)
+                        }
+                        value={getProjectBackendId(project)}
+                      >
+                        {getProjectLabel(project)}
+                      </option>
+                    ))}
+                  </select>
+                </label>
+
+                <label className="block">
+                  <span className="mb-2 block text-sm font-bold text-slate-300">
+                    Destination Project
+                  </span>
+                  <select
+                    value={draftFilters.destinationProjectId}
+                    onChange={(event) =>
+                      handleFilterChange(
+                        "destinationProjectId",
+                        event.target.value
+                      )
+                    }
+                    className="w-full rounded-xl border border-slate-700 bg-slate-950 px-3 py-2.5 text-sm text-white outline-none focus:border-amber-500"
+                  >
+                    <option value="all">All Projects</option>
+                    {projects.map((project) => (
+                      <option
+                        key={
+                          getProjectBackendId(project) ||
+                          getProjectLabel(project)
+                        }
+                        value={getProjectBackendId(project)}
+                      >
+                        {getProjectLabel(project)}
+                      </option>
+                    ))}
+                  </select>
+                </label>
+
+                <label className="block">
+                  <span className="mb-2 block text-sm font-bold text-slate-300">
+                    Requested By
+                  </span>
+                  <select
+                    value={draftFilters.requestedBy}
+                    onChange={(event) =>
+                      handleFilterChange("requestedBy", event.target.value)
+                    }
+                    className="w-full rounded-xl border border-slate-700 bg-slate-950 px-3 py-2.5 text-sm text-white outline-none focus:border-amber-500"
+                  >
+                    <option value="all">All Requesters</option>
+                    {requesterOptions.map((requester) => (
+                      <option key={requester.value} value={requester.value}>
+                        {requester.label}
+                      </option>
+                    ))}
+                  </select>
+                </label>
+
+                <label className="block">
+                  <span className="mb-2 block text-sm font-bold text-slate-300">
+                    Transfer Type
+                  </span>
+                  <select
+                    value={draftFilters.transferType}
+                    onChange={(event) =>
+                      handleFilterChange("transferType", event.target.value)
+                    }
+                    className="w-full rounded-xl border border-slate-700 bg-slate-950 px-3 py-2.5 text-sm text-white outline-none focus:border-amber-500"
+                  >
+                    <option value="all">Single & Bulk</option>
+                    <option value="SINGLE">Single Transfer</option>
+                    <option value="BULK">Bulk Transfer</option>
+                  </select>
+                </label>
+
+                <label className="block">
+                  <span className="mb-2 block text-sm font-bold text-slate-300">
+                    Status
+                  </span>
+                  <select
+                    value={draftFilters.status}
+                    onChange={(event) =>
+                      handleFilterChange("status", event.target.value)
+                    }
+                    className="w-full rounded-xl border border-slate-700 bg-slate-950 px-3 py-2.5 text-sm text-white outline-none focus:border-amber-500"
+                  >
+                    <option value="all">All Statuses</option>
+                    <option value="PENDING">Pending</option>
+                    <option value="PARTIALLY_APPROVED">
+                      Partially Approved
+                    </option>
+                    <option value="APPROVED">Approved</option>
+                    <option value="REJECTED">Rejected</option>
+                  </select>
+                </label>
+              </div>
+
+              <div className="grid grid-cols-2 gap-3 border-t border-slate-800 px-5 py-4">
+                <button
+                  type="button"
+                  onClick={resetFilters}
+                  disabled={loading}
+                  className="rounded-xl border border-slate-700 bg-slate-950 px-4 py-2.5 text-sm font-extrabold text-slate-300 hover:border-slate-500 hover:text-white disabled:opacity-50"
+                >
+                  Reset
+                </button>
+                <button
+                  type="button"
+                  onClick={applyFilters}
+                  disabled={loading}
+                  className="rounded-xl border border-amber-500 bg-amber-500 px-4 py-2.5 text-sm font-extrabold text-slate-950 hover:bg-amber-400 disabled:cursor-wait disabled:opacity-60"
+                >
+                  {loading
+                    ? "Generating..."
+                    : reportGenerated
+                      ? "Update Report"
+                      : "Generate Report"}
+                </button>
+              </div>
+            </aside>
+          </div>
+        ) : null}
+      </div>
+    </div>
+  );
+}
+
+
+const ASSET_METER_HISTORY_FILTERS = {
+  dateFrom: "",
+  dateTo: "",
+  projectId: "all",
+  assetId: "all",
+  eventType: "all",
+  meterCycle: "all",
+};
+
+const ASSET_METER_HISTORY_HEADERS = [
+  "Date",
+  "Asset",
+  "Project",
+  "Event Source",
+  "Meter Cycle",
+  "Previous Reading",
+  "Current Reading",
+  "Lifetime Reading",
+  "Reason",
+  "Reference",
+  "Performed By",
+];
+
+function getCompanyBackendId(currentCompany, currentUser) {
+  return (
+    currentCompany?.backendId ||
+    currentCompany?.companyBackendId ||
+    currentCompany?.databaseId ||
+    currentCompany?.id ||
+    currentUser?.companyId ||
+    ""
+  );
+}
+
+function getOperationAssetBackendId(operation) {
+  return (
+    operation?.assetId ||
+    operation?.asset?.id ||
+    operation?.assetBackendId ||
+    operation?.destinationAssetId ||
+    ""
+  );
+}
+
+function getOperationAssetCode(operation, row, headers = []) {
+  return (
+    operation?.asset?.assetId ||
+    operation?.assetCode ||
+    operation?.equipmentNo ||
+    getRowValue(row, headers, [
+      "asset_id",
+      "asset",
+      "equipment_no",
+      "equipment_number",
+      "destination_id",
+      "destination",
+    ]) ||
+    "-"
+  );
+}
+
+function getMeterEventLabel(eventType) {
+  if (eventType === "RESET") return "Odometer Reset";
+  if (eventType === "CORRECTION") return "Odometer Correction";
+  return "Refuel Operation";
+}
+
+function AssetMeterHistoryReport({
+  selectedReport,
+  currentUser,
+  currentCompany,
+  projects = [],
+  assets = [],
+  data = [],
+  headers = [],
+  onBack,
+}) {
+  const [filtersOpen, setFiltersOpen] = useState(true);
+  const [reportGenerated, setReportGenerated] = useState(false);
+  const [draftFilters, setDraftFilters] = useState(ASSET_METER_HISTORY_FILTERS);
+  const [appliedFilters, setAppliedFilters] = useState(ASSET_METER_HISTORY_FILTERS);
+  const [resetEvents, setResetEvents] = useState([]);
+  const [correctionEvents, setCorrectionEvents] = useState([]);
+  const [loading, setLoading] = useState(false);
+  const [error, setError] = useState("");
+
+  const availableAssets = useMemo(() => {
+    if (draftFilters.projectId === "all") return assets;
+
+    return assets.filter((asset) => {
+      const projectId =
+        asset?.projectId || asset?.project?.id || asset?.projectBackendId || "";
+      return normalizeValue(projectId) === normalizeValue(draftFilters.projectId);
+    });
+  }, [assets, draftFilters.projectId]);
+
+  const operationEvents = useMemo(() => {
+    return (data || [])
+      .map((row, index) => {
+        const operation = getEmbeddedOperation(row);
+        const reading = getNumericValue(
+          operation?.odometer,
+          operation?.currentOdometer,
+          operation?.meterReading,
+          getRowValue(row, headers, [
+            "odometer",
+            "odometer_reading",
+            "meter_reading",
+            "current_odometer",
+          ])
+        );
+
+        const hasReading = [
+          operation?.odometer,
+          operation?.currentOdometer,
+          operation?.meterReading,
+          getRowValue(row, headers, [
+            "odometer",
+            "odometer_reading",
+            "meter_reading",
+            "current_odometer",
+          ]),
+        ].some((value) => value !== undefined && value !== null && value !== "");
+
+        if (!hasReading) return null;
+
+        const eventDate =
+          operation?.transactionDateTime ||
+          operation?.transactionDate ||
+          operation?.createdAt ||
+          getRowValue(row, headers, [
+            "transaction_datetime",
+            "transaction_date",
+            "operation_date",
+            "date",
+            "created_at",
+          ]);
+
+        const assetBackendId = getOperationAssetBackendId(operation);
+        const assetCode = getOperationAssetCode(operation, row, headers);
+        const projectId =
+          operation?.asset?.projectId ||
+          operation?.asset?.project?.id ||
+          operation?.projectId ||
+          "";
+        const projectName =
+          operation?.asset?.project?.name ||
+          operation?.asset?.project?.code ||
+          operation?.project?.name ||
+          resolveProjectLabel({
+            source: "",
+            destination: assetCode,
+            projects,
+            assets,
+            stations: [],
+          });
+
+        const previousReading = getNumericValue(
+          operation?.previousOdometer,
+          operation?.previousMeterReading,
+          operation?.lastOdometer,
+          getRowValue(row, headers, [
+            "previous_odometer",
+            "previous_meter_reading",
+            "last_odometer",
+          ])
+        );
+
+        return {
+          id: operation?.id || `operation-meter-${index}`,
+          eventType: "REFUEL",
+          eventSource: "REFUEL_OPERATION",
+          eventDate,
+          assetBackendId,
+          assetId: assetCode,
+          projectId,
+          projectCode: operation?.asset?.project?.code || "",
+          projectName: projectName || "-",
+          previousReading,
+          currentReading: reading,
+          lifetimeReading: getNumericValue(
+            operation?.lifetimeOdometer,
+            operation?.assetLifetimeOdometer,
+            getRowValue(row, headers, [
+              "lifetime_odometer",
+              "asset_lifetime_odometer",
+            ])
+          ),
+          previousMeterCycle: getNumericValue(operation?.assetMeterCycleNumber) || 1,
+          meterCycle: getNumericValue(operation?.assetMeterCycleNumber) || 1,
+          reason: "Refuel operation meter reading",
+          reference:
+            operation?.operationNo ||
+            getRowValue(row, headers, [
+              "operation_id",
+              "operation_no",
+              "operation no",
+            ]) ||
+            "-",
+          performedBy:
+            operation?.createdBy?.fullName ||
+            operation?.createdBy?.email ||
+            "-",
+        };
+      })
+      .filter(Boolean);
+  }, [data, headers, projects, assets]);
+
+  const rows = useMemo(() => {
+    /*
+      Build one chronological meter timeline per asset before applying the
+      visible report filters. Corrections remain independent audit events.
+
+      The operations endpoint exposes the operation's final corrected value.
+      To preserve the true audit trail, the first odometer correction for an
+      operation restores that operation event's original reading from the
+      correction old value. The correction row then shows old → new.
+    */
+    const correctionsByOperation = new Map();
+
+    (correctionEvents || []).forEach((correction) => {
+      const operationKey = normalizeValue(
+        correction?.operationBackendId ||
+          correction?.operationId ||
+          correction?.operationNo ||
+          correction?.operationReference ||
+          ""
+      );
+
+      if (!operationKey) return;
+
+      const operationCorrections = correctionsByOperation.get(operationKey) || [];
+      operationCorrections.push(correction);
+      correctionsByOperation.set(operationKey, operationCorrections);
+    });
+
+    correctionsByOperation.forEach((items) => {
+      items.sort(
+        (a, b) =>
+          new Date(a.eventDate || a.appliedAt || a.createdAt).getTime() -
+          new Date(b.eventDate || b.appliedAt || b.createdAt).getTime()
+      );
+    });
+
+    const restoredOperationEvents = operationEvents.map((event) => {
+      const possibleKeys = [event?.id, event?.reference]
+        .filter(Boolean)
+        .map(normalizeValue);
+
+      const firstCorrection = possibleKeys
+        .map((key) => correctionsByOperation.get(key)?.[0])
+        .find(Boolean);
+
+      if (!firstCorrection) return event;
+
+      const originalReading = Number(firstCorrection.previousReading);
+
+      return Number.isFinite(originalReading)
+        ? {
+            ...event,
+            currentReading: originalReading,
+            operationalCurrentReading: Number(event.currentReading),
+          }
+        : event;
+    });
+
+    const eventsByAsset = new Map();
+
+    [
+      ...restoredOperationEvents,
+      ...(correctionEvents || []),
+      ...(resetEvents || []),
+    ].forEach((event) => {
+      const assetKey = normalizeValue(
+        event?.assetBackendId || event?.assetId || "unknown-asset"
+      );
+      const assetEvents = eventsByAsset.get(assetKey) || [];
+      assetEvents.push({ ...event });
+      eventsByAsset.set(assetKey, assetEvents);
+    });
+
+    const timeline = [];
+
+    eventsByAsset.forEach((assetEvents) => {
+      const orderedEvents = [...assetEvents].sort((a, b) => {
+        const timeDifference =
+          new Date(a.eventDate || a.createdAt).getTime() -
+          new Date(b.eventDate || b.createdAt).getTime();
+
+        if (timeDifference !== 0) return timeDifference;
+
+        // Deterministic ordering for equal timestamps: refuel first, then its
+        // correction, then reset. This preserves operation → correction → reset.
+        const eventPriority = { REFUEL: 1, CORRECTION: 2, RESET: 3 };
+        return (eventPriority[a.eventType] || 9) - (eventPriority[b.eventType] || 9);
+      });
+
+      /*
+        Keep the audit timeline and the operational meter chain separate.
+
+        Corrections are displayed using their own application date, but they
+        must not become the previous reading for a later refuel merely because
+        the correction was applied later. Refuel and reset events alone advance
+        the operational meter state.
+
+        A corrected refuel may be displayed with its original reading so the
+        audit trail remains visible, while `operationalCurrentReading` keeps the
+        final corrected value that subsequent refuels and resets must follow.
+      */
+      let lastOperationalReading = null;
+
+      orderedEvents.forEach((event) => {
+        const displayedCurrentReading = Number(event.currentReading);
+        const operationalCurrentReading = Number(
+          event.operationalCurrentReading ?? event.currentReading
+        );
+        const storedPreviousReading = Number(event.previousReading);
+
+        const nextEvent = { ...event };
+
+        if (event.eventType === "REFUEL") {
+          nextEvent.previousReading =
+            lastOperationalReading !== null
+              ? lastOperationalReading
+              : Number.isFinite(storedPreviousReading)
+                ? storedPreviousReading
+                : 0;
+
+          if (Number.isFinite(operationalCurrentReading)) {
+            lastOperationalReading = operationalCurrentReading;
+          }
+        } else if (event.eventType === "RESET") {
+          nextEvent.previousReading =
+            lastOperationalReading !== null
+              ? lastOperationalReading
+              : Number.isFinite(storedPreviousReading)
+                ? storedPreviousReading
+                : 0;
+
+          if (Number.isFinite(displayedCurrentReading)) {
+            lastOperationalReading = displayedCurrentReading;
+          }
+        }
+
+        // CORRECTION remains an independent audit event. It does not advance
+        // the operational chain because its final value is already reflected
+        // in the corrected refuel event's operationalCurrentReading.
+        timeline.push(nextEvent);
+      });
+    });
+
+    const selectedAsset =
+      appliedFilters.assetId === "all"
+        ? null
+        : assets.find(
+            (asset) =>
+              normalizeValue(getAssetFilterValue(asset)) ===
+              normalizeValue(appliedFilters.assetId)
+          );
+
+    const selectedAssetCandidates = new Set(
+      [
+        normalizeValue(appliedFilters.assetId),
+        ...(selectedAsset ? getAssetCandidates(selectedAsset) : []),
+      ].filter(Boolean)
+    );
+
+    return timeline
+      .filter((row) => {
+        const rowDateValue = row.eventDate || row.createdAt;
+        const rowDate = rowDateValue ? new Date(rowDateValue) : null;
+
+        if (
+          appliedFilters.dateFrom &&
+          (!rowDate || rowDate < new Date(`${appliedFilters.dateFrom}T00:00:00`))
+        ) return false;
+
+        if (
+          appliedFilters.dateTo &&
+          (!rowDate || rowDate > new Date(`${appliedFilters.dateTo}T23:59:59.999`))
+        ) return false;
+
+        if (
+          appliedFilters.projectId !== "all" &&
+          normalizeValue(row.projectId) !== normalizeValue(appliedFilters.projectId)
+        ) return false;
+
+        if (appliedFilters.assetId !== "all") {
+          const rowAssetCandidates = [
+            row.assetBackendId,
+            row.assetId,
+            row.assetCode,
+          ]
+            .filter(Boolean)
+            .map(normalizeValue);
+
+          if (!rowAssetCandidates.some((value) => selectedAssetCandidates.has(value))) {
+            return false;
+          }
+        }
+
+        if (
+          appliedFilters.eventType !== "all" &&
+          normalizeValue(row.eventType) !== normalizeValue(appliedFilters.eventType)
+        ) return false;
+
+        if (
+          appliedFilters.meterCycle !== "all" &&
+          String(row.meterCycle) !== String(appliedFilters.meterCycle)
+        ) return false;
+
+        return true;
+      })
+      .sort(
+        (a, b) =>
+          new Date(b.eventDate || b.createdAt).getTime() -
+          new Date(a.eventDate || a.createdAt).getTime()
+      );
+  }, [operationEvents, correctionEvents, resetEvents, appliedFilters, assets]);
+
+  const meterCycleOptions = useMemo(
+    () =>
+      [...new Set(rows.map((row) => Number(row.meterCycle)).filter(Number.isFinite))]
+        .sort((a, b) => a - b),
+    [rows]
+  );
+
+  const totals = useMemo(
+    () => ({
+      events: rows.length,
+      refuels: rows.filter((row) => row.eventType === "REFUEL").length,
+      corrections: rows.filter((row) => row.eventType === "CORRECTION").length,
+      resets: rows.filter((row) => row.eventType === "RESET").length,
+    }),
+    [rows]
+  );
+
+  const filterSummary = useMemo(() => {
+    const selectedProject = projects.find(
+      (project) =>
+        normalizeValue(getProjectBackendId(project)) ===
+        normalizeValue(appliedFilters.projectId)
+    );
+    const selectedAsset = assets.find(
+      (asset) =>
+        normalizeValue(getAssetFilterValue(asset)) ===
+        normalizeValue(appliedFilters.assetId)
+    );
+
+    return [
+      {
+        label: "Period",
+        value:
+          appliedFilters.dateFrom || appliedFilters.dateTo
+            ? `${formatReportDate(appliedFilters.dateFrom)} → ${formatReportDate(appliedFilters.dateTo)}`
+            : "All dates",
+      },
+      {
+        label: "Project",
+        value:
+          appliedFilters.projectId === "all"
+            ? "All Projects"
+            : getProjectLabel(selectedProject),
+      },
+      {
+        label: "Asset",
+        value:
+          appliedFilters.assetId === "all"
+            ? "All Assets"
+            : getAssetLabel(selectedAsset),
+      },
+      {
+        label: "Event Type",
+        value:
+          appliedFilters.eventType === "all"
+            ? "All Events"
+            : formatOperationType(appliedFilters.eventType),
+      },
+      {
+        label: "Meter Cycle",
+        value:
+          appliedFilters.meterCycle === "all"
+            ? "All Cycles"
+            : `Cycle ${appliedFilters.meterCycle}`,
+      },
+    ];
+  }, [appliedFilters, projects, assets]);
+
+  const reportMeta = {
+    title: selectedReport?.title || "Asset Meter History Report",
+    companyName: currentCompany?.name || "Fleet Fuel PRO",
+    generatedBy: getUserDisplayName(currentUser),
+    generatedAt: new Date().toLocaleString("en-GB"),
+    filters: filterSummary,
+  };
+
+  const loadReport = async () => {
+    setLoading(true);
+    setError("");
+
+    try {
+      const companyId = getCompanyBackendId(currentCompany, currentUser);
+      if (!companyId) throw new Error("Company ID is required to generate this report.");
+
+      const reportParams = {
+        companyId,
+        projectId: draftFilters.projectId === "all" ? "" : draftFilters.projectId,
+        assetId: draftFilters.assetId === "all" ? "" : draftFilters.assetId,
+        dateFrom: draftFilters.dateFrom,
+        dateTo: draftFilters.dateTo,
+      };
+
+      const [resetResult, correctionResult] = await Promise.all([
+        fetchAssetMeterHistory(reportParams),
+        fetchOdometerCorrectionHistory(reportParams),
+      ]);
+
+      setResetEvents(Array.isArray(resetResult) ? resetResult : []);
+      setCorrectionEvents(
+        Array.isArray(correctionResult) ? correctionResult : []
+      );
+      setAppliedFilters(draftFilters);
+      setReportGenerated(true);
+      setFiltersOpen(false);
+    } catch (requestError) {
+      setError(
+        requestError?.response?.data?.message ||
+          requestError?.message ||
+          "Failed to load asset meter history."
+      );
+    } finally {
+      setLoading(false);
+    }
+  };
+
+  const handlePrint = () => {
+    printReport({
+      ...reportMeta,
+      totals: [
+        { label: "Total Meter Events", value: totals.events },
+        { label: "Refuel Readings", value: totals.refuels },
+        { label: "Odometer Corrections", value: totals.corrections },
+        { label: "Meter Resets", value: totals.resets },
+      ],
+      columns: ASSET_METER_HISTORY_HEADERS,
+      rows: rows.map((row) => [
+        formatDateTime(row.eventDate || row.createdAt),
+        row.assetId || "-",
+        row.projectName || row.projectCode || "-",
+        getMeterEventLabel(row.eventType),
+        formatNumber(row.meterCycle, 0),
+        formatNumber(row.previousReading),
+        formatNumber(row.currentReading),
+        formatNumber(row.lifetimeReading),
+        row.reason || "-",
+        row.reference || "-",
+        row.performedBy || "-",
+      ]),
+    });
+  };
+
+  const handleExport = () => {
+    exportReportToExcel({
+      fileName: "Asset_Meter_History_Report",
+      sheetName: "Meter History",
+      ...reportMeta,
+      rows: rows.map((row) => ({
+        Date: formatDateTime(row.eventDate || row.createdAt),
+        Asset: row.assetId || "-",
+        Project: row.projectName || row.projectCode || "-",
+        "Event Source": getMeterEventLabel(row.eventType),
+        "Meter Cycle": row.meterCycle,
+        "Previous Reading": row.previousReading,
+        "Current Reading": row.currentReading,
+        "Lifetime Reading": row.lifetimeReading,
+        Reason: row.reason || "",
+        Reference: row.reference || "",
+        "Performed By": row.performedBy || "",
+      })),
+      totals: {
+        Date: "Totals",
+        Asset: `${totals.events} events`,
+        Project: `${totals.refuels} refuel readings`,
+        "Event Source": `${totals.corrections} corrections`,
+        "Meter Cycle": `${totals.resets} resets`,
+      },
+    });
+  };
+
+  const handleFilterChange = (field, value) => {
+    setDraftFilters((previous) => {
+      const next = { ...previous, [field]: value };
+      if (field === "projectId") next.assetId = "all";
+      return next;
+    });
+  };
+
+  const resetFilters = () => {
+    setDraftFilters(ASSET_METER_HISTORY_FILTERS);
+    setAppliedFilters(ASSET_METER_HISTORY_FILTERS);
+  };
+
+  return (
+    <div className="min-h-full bg-slate-950 px-4 py-5 text-slate-100 sm:px-6 lg:px-8">
+      <div className="mx-auto max-w-[1800px] space-y-5">
+        <section className="rounded-2xl border border-slate-800 bg-slate-900/80 p-5 shadow-xl shadow-black/10">
+          <div className="flex flex-col gap-4 xl:flex-row xl:items-center xl:justify-between">
+            <div>
+              <button type="button" onClick={onBack} className="mb-4 inline-flex items-center gap-2 rounded-lg border border-slate-700 bg-slate-950/70 px-3 py-2 text-sm font-bold text-slate-300 transition hover:border-amber-500/50 hover:text-amber-300">
+                <span aria-hidden="true">←</span> Back to Reports
+              </button>
+              <p className="text-xs font-bold uppercase tracking-[0.22em] text-amber-400">Assets Reports</p>
+              <h1 className="mt-1 text-2xl font-black text-white sm:text-3xl">{selectedReport?.title}</h1>
+              <p className="mt-2 max-w-4xl text-sm leading-6 text-slate-400">{selectedReport?.description}</p>
+            </div>
+            <ReportToolbar onOpenFilters={() => setFiltersOpen(true)} onPrint={handlePrint} onExport={handleExport} disabled={!reportGenerated || !rows.length} />
+          </div>
+        </section>
+
+        {error ? <section className="rounded-2xl border border-red-500/30 bg-red-500/10 px-5 py-4 text-sm font-bold text-red-200">{error}</section> : null}
+
+        {!reportGenerated ? (
+          <section className="rounded-2xl border border-amber-500/30 bg-slate-900/80 px-6 py-14 text-center shadow-xl shadow-black/10">
+            <div className="mx-auto flex max-w-xl flex-col items-center">
+              <div className="flex h-16 w-16 items-center justify-center rounded-2xl border border-amber-500/30 bg-amber-500/10 text-3xl">⏱️</div>
+              <h2 className="mt-5 text-xl font-black text-white sm:text-2xl">Select asset meter filters first</h2>
+              <p className="mt-3 text-sm leading-6 text-slate-400">Choose the period, project, asset, event type and meter cycle, then generate the complete meter history.</p>
+              <button type="button" onClick={() => setFiltersOpen(true)} className="mt-6 rounded-xl border border-amber-500 bg-amber-500 px-5 py-3 text-sm font-extrabold text-slate-950 transition hover:bg-amber-400">Set Report Filters</button>
+            </div>
+          </section>
+        ) : (
+          <>
+            <section className="grid gap-3 sm:grid-cols-2 xl:grid-cols-5">
+              {filterSummary.map((item) => <div key={item.label} className="rounded-xl border border-slate-800 bg-slate-900/70 px-4 py-3"><p className="text-[11px] font-bold uppercase tracking-wider text-slate-500">{item.label}</p><p className="mt-1 truncate text-sm font-extrabold text-slate-200">{item.value}</p></div>)}
+            </section>
+
+            <section className="grid gap-3 sm:grid-cols-2 xl:grid-cols-4">
+              {[
+                ["Total Meter Events", totals.events],
+                ["Refuel Readings", totals.refuels],
+                ["Odometer Corrections", totals.corrections],
+                ["Meter Resets", totals.resets],
+              ].map(([label, value]) => <div key={label} className="rounded-2xl border border-amber-500/25 bg-slate-900/80 p-4 shadow-lg shadow-black/10"><p className="text-xs font-bold uppercase tracking-wider text-amber-400">{label}</p><p className="mt-2 text-2xl font-black text-white">{value}</p></div>)}
+            </section>
+
+            <section className="overflow-hidden rounded-2xl border border-slate-800 bg-slate-900/80 shadow-xl shadow-black/10">
+              <div className="flex flex-col gap-2 border-b border-slate-800 px-5 py-4 sm:flex-row sm:items-center sm:justify-between"><div><h2 className="font-extrabold text-white">Asset Meter Timeline</h2><p className="mt-1 text-xs text-slate-500">{rows.length} meter event{rows.length === 1 ? "" : "s"} found</p></div><p className="text-xs font-bold text-amber-300">Refuel readings, corrections and odometer resets</p></div>
+              <div className="overflow-x-auto">
+                <table className="min-w-[1750px] w-full border-collapse text-sm">
+                  <thead className="bg-slate-950/90"><tr>{ASSET_METER_HISTORY_HEADERS.map((header) => <th key={header} className="whitespace-nowrap border-b border-slate-800 px-3 py-3 text-left text-[11px] font-black uppercase tracking-wider text-slate-400">{header}</th>)}</tr></thead>
+                  <tbody>
+                    {rows.length ? rows.map((row) => {
+                      const isReset = row.eventType === "RESET";
+                      const isCorrection = row.eventType === "CORRECTION";
+                      const badgeClass = isReset
+                        ? "border-purple-400/40 bg-purple-500/10 text-purple-300"
+                        : isCorrection
+                          ? "border-sky-400/40 bg-sky-500/10 text-sky-300"
+                          : "border-emerald-400/40 bg-emerald-500/10 text-emerald-300";
+                      const badgeLabel = isReset
+                        ? "🔄 Odometer Reset"
+                        : isCorrection
+                          ? "✏️ Odometer Correction"
+                          : "⛽ Refuel Operation";
+                      return <tr key={`${row.eventType}-${row.id}`} className="border-b border-slate-800/70 transition hover:bg-slate-800/30">
+                        <td className="whitespace-nowrap px-3 py-3 text-slate-300">{formatDateTime(row.eventDate || row.createdAt)}</td>
+                        <td className="whitespace-nowrap px-3 py-3 font-extrabold text-white">{row.assetId || "-"}</td>
+                        <td className="whitespace-nowrap px-3 py-3 text-slate-300">{row.projectName || row.projectCode || "-"}</td>
+                        <td className="whitespace-nowrap px-3 py-3"><span className={`inline-flex rounded-full border px-2.5 py-1 text-xs font-extrabold ${badgeClass}`}>{badgeLabel}</span></td>
+                        <td className="whitespace-nowrap px-3 py-3 text-center font-black text-amber-300">{formatNumber(row.meterCycle, 0)}</td>
+                        <td className="whitespace-nowrap px-3 py-3 text-right text-slate-300">{formatNumber(row.previousReading)}</td>
+                        <td className="whitespace-nowrap px-3 py-3 text-right font-extrabold text-white">{formatNumber(row.currentReading)}</td>
+                        <td className="whitespace-nowrap px-3 py-3 text-right font-black text-amber-300">{formatNumber(row.lifetimeReading)}</td>
+                        <td className="max-w-[280px] px-3 py-3 text-slate-400">{row.reason || "-"}</td>
+                        <td className="whitespace-nowrap px-3 py-3 font-bold text-slate-300">{row.reference || "-"}</td>
+                        <td className="whitespace-nowrap px-3 py-3 text-slate-300">{row.performedBy || "-"}</td>
+                      </tr>;
+                    }) : <tr><td colSpan={ASSET_METER_HISTORY_HEADERS.length} className="px-6 py-12 text-center text-slate-500">No asset meter events match the selected filters.</td></tr>}
+                  </tbody>
+                </table>
+              </div>
+            </section>
+          </>
+        )}
+
+        {filtersOpen ? (
+          <div className="fixed inset-0 z-[120] bg-black/70 backdrop-blur-sm">
+            <button type="button" aria-label="Close filters" onClick={() => reportGenerated && setFiltersOpen(false)} className="absolute inset-0 h-full w-full" />
+            <aside className="absolute right-0 top-0 z-10 flex h-full w-full max-w-md flex-col border-l border-slate-800 bg-slate-900 shadow-2xl shadow-black/50">
+              <div className="flex items-start justify-between border-b border-slate-800 px-5 py-4"><div><p className="text-xs font-bold uppercase tracking-[0.2em] text-amber-400">Report Setup</p><h2 className="mt-1 text-xl font-black text-white">Asset Meter Filters</h2></div>{reportGenerated ? <button type="button" onClick={() => setFiltersOpen(false)} className="rounded-lg border border-slate-700 px-3 py-2 text-sm font-bold text-slate-400 hover:text-white">Close</button> : null}</div>
+              <div className="flex-1 space-y-4 overflow-y-auto px-5 py-5">
+                <div className="grid grid-cols-2 gap-3">
+                  <label className="block"><span className="mb-2 block text-sm font-bold text-slate-300">Date From</span><input type="date" value={draftFilters.dateFrom} onChange={(e) => handleFilterChange("dateFrom", e.target.value)} className="w-full rounded-xl border border-slate-700 bg-slate-950 px-3 py-2.5 text-sm text-white outline-none focus:border-amber-500" /></label>
+                  <label className="block"><span className="mb-2 block text-sm font-bold text-slate-300">Date To</span><input type="date" value={draftFilters.dateTo} onChange={(e) => handleFilterChange("dateTo", e.target.value)} className="w-full rounded-xl border border-slate-700 bg-slate-950 px-3 py-2.5 text-sm text-white outline-none focus:border-amber-500" /></label>
+                </div>
+                <label className="block"><span className="mb-2 block text-sm font-bold text-slate-300">Project</span><select value={draftFilters.projectId} onChange={(e) => handleFilterChange("projectId", e.target.value)} className="w-full rounded-xl border border-slate-700 bg-slate-950 px-3 py-2.5 text-sm text-white outline-none focus:border-amber-500"><option value="all">All Projects</option>{projects.map((project) => <option key={getProjectBackendId(project) || getProjectLabel(project)} value={getProjectBackendId(project)}>{getProjectLabel(project)}</option>)}</select></label>
+                <label className="block"><span className="mb-2 block text-sm font-bold text-slate-300">Asset</span><select value={draftFilters.assetId} onChange={(e) => handleFilterChange("assetId", e.target.value)} className="w-full rounded-xl border border-slate-700 bg-slate-950 px-3 py-2.5 text-sm text-white outline-none focus:border-amber-500"><option value="all">All Assets</option>{availableAssets.map((asset) => <option key={getAssetFilterValue(asset) || getAssetLabel(asset)} value={getAssetFilterValue(asset)}>{getAssetLabel(asset)}</option>)}</select></label>
+                <label className="block"><span className="mb-2 block text-sm font-bold text-slate-300">Event Type</span><select value={draftFilters.eventType} onChange={(e) => handleFilterChange("eventType", e.target.value)} className="w-full rounded-xl border border-slate-700 bg-slate-950 px-3 py-2.5 text-sm text-white outline-none focus:border-amber-500"><option value="all">All Events</option><option value="REFUEL">Refuel Operation</option><option value="CORRECTION">Odometer Correction</option><option value="RESET">Odometer Reset</option></select></label>
+                <label className="block"><span className="mb-2 block text-sm font-bold text-slate-300">Meter Cycle</span><select value={draftFilters.meterCycle} onChange={(e) => handleFilterChange("meterCycle", e.target.value)} className="w-full rounded-xl border border-slate-700 bg-slate-950 px-3 py-2.5 text-sm text-white outline-none focus:border-amber-500"><option value="all">All Cycles</option>{meterCycleOptions.map((cycle) => <option key={cycle} value={cycle}>Cycle {cycle}</option>)}</select></label>
+              </div>
+              <div className="grid grid-cols-2 gap-3 border-t border-slate-800 px-5 py-4"><button type="button" onClick={resetFilters} disabled={loading} className="rounded-xl border border-slate-700 bg-slate-950 px-4 py-2.5 text-sm font-extrabold text-slate-300 hover:border-slate-500 hover:text-white disabled:opacity-50">Reset</button><button type="button" onClick={loadReport} disabled={loading} className="rounded-xl border border-amber-500 bg-amber-500 px-4 py-2.5 text-sm font-extrabold text-slate-950 hover:bg-amber-400 disabled:cursor-wait disabled:opacity-60">{loading ? "Generating..." : reportGenerated ? "Update Report" : "Generate Report"}</button></div>
+            </aside>
+          </div>
+        ) : null}
+      </div>
+    </div>
+  );
+}
+
 export default function ReportsPage({
   currentUser,
   currentCompany,
   projects = [],
   assets = [],
   stations = [],
+  assetTransferRequests = [],
   data = [],
   headers = [],
   currency = "SAR",
@@ -1863,6 +4209,66 @@ export default function ReportsPage({
     setReportGenerated(true);
     setFiltersOpen(false);
   };
+
+  if (
+    [
+      "station-counter-meter-history",
+      "station-master",
+      "station-transfer",
+    ].includes(selectedReport?.id)
+  ) {
+    return (
+      <StationsReportsPage
+        selectedReport={selectedReport}
+        currentUser={currentUser}
+        currentCompany={currentCompany}
+        projects={projects}
+        stations={stations}
+        onBack={handleBackToReports}
+      />
+    );
+  }
+
+  if (selectedReport?.id === "assets-master") {
+    return (
+      <AssetsMasterReport
+        selectedReport={selectedReport}
+        currentUser={currentUser}
+        currentCompany={currentCompany}
+        projects={projects}
+        assets={assets}
+        onBack={handleBackToReports}
+      />
+    );
+  }
+
+  if (selectedReport?.id === "asset-transfer-history") {
+    return (
+      <AssetTransferHistoryReport
+        selectedReport={selectedReport}
+        currentUser={currentUser}
+        currentCompany={currentCompany}
+        projects={projects}
+        assets={assets}
+        onBack={handleBackToReports}
+      />
+    );
+  }
+
+  if (selectedReport?.id === "asset-meter-history") {
+    return (
+      <AssetMeterHistoryReport
+        selectedReport={selectedReport}
+        currentUser={currentUser}
+        currentCompany={currentCompany}
+        projects={projects}
+        assets={assets}
+        data={data}
+        headers={headers}
+        onBack={handleBackToReports}
+      />
+    );
+  }
 
   if (selectedReport?.id === "fuel-suppliers") {
     return (

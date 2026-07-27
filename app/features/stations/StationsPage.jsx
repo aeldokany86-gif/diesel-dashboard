@@ -45,6 +45,7 @@ import {
   deleteStationRecord,
   createStationTransfer,
   zeroStationBalance,
+  resetStationCounter,
 } from "../../services/stationsService";
 
 function notifyUser(showToastFn, type, message) {
@@ -245,6 +246,7 @@ const [deletingStation, setDeletingStation] = useState(null);
   const [stationCounterResetValue, setStationCounterResetValue] = useState("");
   const [stationCounterResetDate, setStationCounterResetDate] = useState("");
   const [stationCounterResetReason, setStationCounterResetReason] = useState("");
+  const [stationCounterResetLoading, setStationCounterResetLoading] = useState(false);
 
 const getLatestStationResetRecord = (stationId, companyId = "") => {
     return (stationCounterResetHistory || [])
@@ -261,16 +263,57 @@ const getLatestStationResetRecord = (stationId, companyId = "") => {
   };
 
   const getEffectiveStationCounter = (station) => {
-    const latestReset = getLatestStationResetRecord(station.id, station.companyId || currentUser?.companyId || "");
-    const latestOperationEntry = stationCurrentCounterMap?.get?.(normalizeScopeValue(station.id));
-    const latestOperationTime = latestOperationEntry?.operationTime || 0;
-    const latestResetTime = latestReset ? new Date(latestReset.effectiveFrom || latestReset.createdAt).getTime() || 0 : 0;
+    const backendCounter =
+      station?.currentCounter ??
+      station?.current_counter ??
+      station?.counter;
 
-    if (latestReset && latestResetTime > latestOperationTime) {
-      return parseFloat(latestReset.newReading ?? latestReset.resetReading ?? latestReset.reading) || 0;
+    if (backendCounter !== undefined && backendCounter !== null && backendCounter !== "") {
+      const parsedBackendCounter = Number(backendCounter);
+      if (Number.isFinite(parsedBackendCounter)) {
+        return parsedBackendCounter;
+      }
     }
 
-    return latestOperationEntry?.value ?? parseFloat(station.openingCounter) ?? parseFloat(station.counter) ?? 0;
+    const latestReset = getLatestStationResetRecord(
+      station.id,
+      station.companyId || currentUser?.companyId || ""
+    );
+    const latestOperationEntry = stationCurrentCounterMap?.get?.(
+      normalizeScopeValue(station.id)
+    );
+    const latestOperationTime = latestOperationEntry?.operationTime || 0;
+    const latestResetTime = latestReset
+      ? new Date(latestReset.effectiveFrom || latestReset.createdAt).getTime() || 0
+      : 0;
+
+    if (latestReset && latestResetTime > latestOperationTime) {
+      return (
+        Number(
+          latestReset.newReading ??
+            latestReset.resetReading ??
+            latestReset.reading
+        ) || 0
+      );
+    }
+
+    return (
+      latestOperationEntry?.value ??
+      Number(station.openingCounter) ??
+      0
+    );
+  };
+
+  const getStationLifetimeCounter = (station) => {
+    const value =
+      station?.currentLifetimeCounter ??
+      station?.current_lifetime_counter ??
+      station?.lifetimeCounter ??
+      station?.lifetime_counter ??
+      0;
+
+    const parsed = Number(value);
+    return Number.isFinite(parsed) ? parsed : 0;
   };
 
 
@@ -315,80 +358,165 @@ const getLatestStationResetRecord = (stationId, companyId = "") => {
       );
   };
 
-  const getTotalPumpedLitersFromCounter = (station) => {
-    const companyId = station.companyId || currentUser?.companyId || "";
-    const openingCounter = parseFloat(station.openingCounter) || 0;
+  const getTotalPumpedLitersFromOperations = (station) => {
+    if (dieselIndex === -1 || typeIndex === -1 || sourceIndex === -1) {
+      return 0;
+    }
 
-    const resets = (stationCounterResetHistory || [])
-      .filter((item) => {
-        const sameStation = isSameText(item.stationId || item.entityId, station.id);
-        const sameCompany =
-          !companyId || !item.companyId || companyMatches(item.companyId, companyId);
-        return sameStation && sameCompany;
-      })
-      .map((item, index) => ({
-        kind: "reset",
-        reading: parseFloat(item.newReading ?? item.resetReading ?? item.reading) || 0,
-        operationTime: new Date(item.effectiveFrom || item.createdAt).getTime() || 0,
-        index,
-      }));
+    return (data || []).reduce((sum, row) => {
+      const type = row?.[typeIndex];
+      const source = row?.[sourceIndex];
+      const quantity = Number(row?.[dieselIndex]);
 
-    const operationReadings = getStationCounterRows(station.id).map((item) => ({
-      kind: "operation",
-      reading: item.reading,
-      operationTime: item.operationTime,
-      index: item.originalIndex,
-    }));
-
-    const timeline = [...operationReadings, ...resets].sort(
-      (a, b) => a.operationTime - b.operationTime || a.index - b.index
-    );
-
-    let total = 0;
-    let lastReading = openingCounter;
-
-    timeline.forEach((item) => {
-      if (item.kind === "reset") {
-        lastReading = item.reading;
-        return;
+      if (!Number.isFinite(quantity) || quantity <= 0) {
+        return sum;
       }
 
-      if (item.reading >= lastReading) {
-        total += item.reading - lastReading;
-      }
+      const isOutboundOperation =
+        (isSameText(type, "Direct_Refuel") ||
+          isSameText(type, "Internal_Transfer") ||
+          isSameText(type, "External_Transfer")) &&
+        isSameText(source, station.id);
 
-      lastReading = item.reading;
-    });
-
-    return total;
+      return isOutboundOperation ? sum + quantity : sum;
+    }, 0);
   };
 
-const saveStationCounterReset = ({ station, newReading, effectiveFrom, reason }) => {
-    if (!station) return;
 
-    const record = {
-      id: `SCR-${Date.now()}-${Math.floor(Math.random() * 1000)}`,
-      stationId: station.id,
-      entityId: station.id,
-      companyId: station.companyId || currentUser?.companyId || "",
-      oldReading: station.currentCounter ?? getEffectiveStationCounter(station),
-      newReading: parseFloat(newReading) || 0,
-      effectiveFrom: effectiveFrom || new Date().toISOString(),
-      reason: reason || "Station counter reset",
-      createdBy: currentUser?.fullName || currentUser?.name || "System",
-      createdAt: new Date().toISOString(),
-      source: "station_counter_reset",
-    };
+const saveStationCounterReset = async ({
+    station,
+    newReading,
+    effectiveFrom,
+    reason,
+  }) => {
+    if (!station || stationCounterResetLoading) return false;
 
-    if (typeof setStationCounterResetHistory === "function") {
-      setStationCounterResetHistory((prev) => [record, ...prev]);
+    const backendId =
+      station?.backendId ||
+      station?.stationBackendId ||
+      station?.databaseId ||
+      station?.prismaId ||
+      "";
+
+    if (!backendId) {
+      notifyUser(
+        showToast,
+        "warning",
+        "This station is not linked to backend yet. Refresh and try again."
+      );
+      return false;
     }
 
-    if (trackActivity) {
-      trackActivity("Reset Station Counter", "stations", `${station.id} counter reset from ${record.oldReading} to ${record.newReading}.`);
+    const parsedNewReading = Number(newReading);
+    if (!Number.isFinite(parsedNewReading) || parsedNewReading < 0) {
+      notifyUser(
+        showToast,
+        "warning",
+        "New counter reading must be a valid zero or positive number."
+      );
+      return false;
     }
 
-    notifyUser(showToast, "success", "Station counter reset saved locally.");
+    const cleanReason = String(reason || "").trim();
+    if (!cleanReason) {
+      notifyUser(showToast, "warning", "Please enter reset reason.");
+      return false;
+    }
+
+    if (!canUseNetwork(showToast)) return false;
+
+    const oldReading = Number(
+      station.currentCounter ?? getEffectiveStationCounter(station) ?? 0
+    );
+
+    setStationCounterResetLoading(true);
+
+    try {
+      const result = await resetStationCounter(backendId, {
+        newCounter: parsedNewReading,
+        reason: cleanReason,
+        effectiveAt: effectiveFrom || new Date().toISOString(),
+        createdByUserId: currentUser?.id || undefined,
+      });
+
+      if (result?.station) {
+        const mappedStation = mapBackendStationForState(result.station);
+
+        setStations((previous) =>
+          (previous || []).map((item) =>
+            normalizeScopeValue(
+              item?.backendId ||
+                item?.stationBackendId ||
+                item?.databaseId ||
+                item?.prismaId
+            ) === normalizeScopeValue(backendId) ||
+            tenantEntityMatches(item, station.id, station.companyId)
+              ? { ...item, ...mappedStation }
+              : item
+          )
+        );
+      }
+
+      if (
+        result?.resetRecord &&
+        typeof setStationCounterResetHistory === "function"
+      ) {
+        const resetRecord = result.resetRecord;
+
+        setStationCounterResetHistory((previous) => [
+          {
+            ...resetRecord,
+            stationId: station.id,
+            entityId: station.id,
+            companyId:
+              resetRecord.companyId ||
+              station.companyId ||
+              currentUser?.companyId ||
+              "",
+            oldReading: resetRecord.oldCounter,
+            newReading: resetRecord.newCounter,
+            effectiveFrom:
+              resetRecord.effectiveAt ||
+              resetRecord.createdAt ||
+              effectiveFrom,
+            createdBy:
+              resetRecord.createdBy?.fullName ||
+              resetRecord.createdBy?.name ||
+              currentUser?.fullName ||
+              currentUser?.name ||
+              "System",
+            source: "station_counter_reset_backend",
+          },
+          ...(previous || []),
+        ]);
+      }
+
+      trackActivity?.(
+        "Reset Station Counter",
+        "stations",
+        `${station.id} counter reset from ${formatNumber(oldReading)} to ${formatNumber(parsedNewReading)}.`
+      );
+
+      notifyUser(
+        showToast,
+        "success",
+        "Station counter reset completed successfully."
+      );
+
+      return true;
+    } catch (error) {
+      notifyUser(
+        showToast,
+        "warning",
+        getFriendlyApiErrorMessage(
+          error,
+          "Failed to reset station counter."
+        )
+      );
+      return false;
+    } finally {
+      setStationCounterResetLoading(false);
+    }
   };
 
 const [showForm, setShowForm] = useState(false);
@@ -407,14 +535,12 @@ const [showForm, setShowForm] = useState(false);
   const [zeroBalanceReason, setZeroBalanceReason] = useState("Daily reconciliation after station emptying");
   const [selectedStationHistory, setSelectedStationHistory] = useState(null);
     const [editingProjectStation, setEditingProjectStation] = useState(null);
+  const [stationTransferStockConfirmation, setStationTransferStockConfirmation] = useState(null);
   const [newStationProject, setNewStationProject] = useState("");
     const [newStationOpeningCounter, setNewStationOpeningCounter] = useState("0");
-const [stationProjectEffectiveDate, setStationProjectEffectiveDate] = useState("");
-  const [stationProjectReason, setStationProjectReason] = useState("");
 const [showConfirm, setShowConfirm] = useState(false);
   const [showPassword, setShowPassword] = useState(false);
   const [localAdjustments, setLocalAdjustments] = useState([]);
-  const [stationProjectHistory, setStationProjectHistory] = useState([]);
   const [localStationStatusUpdates, setLocalStationStatusUpdates] = useState({});
   const [localStations, setLocalStations] = useState([]);
   const [stationSaveLoading, setStationSaveLoading] = useState(false);
@@ -426,8 +552,6 @@ const [showConfirm, setShowConfirm] = useState(false);
     openingBalance: "",
     status: "Active",
   });
-
-  const [projectEditStation, setProjectEditStation] = useState(null);
 
 
   const [statusEditStation, setStatusEditStation] = useState(null);
@@ -817,27 +941,7 @@ const [showConfirm, setShowConfirm] = useState(false);
     return "-";
   };
 
-  const getStationProjectAtDate = (station, rawDate) => {
-    const operationDate = rawDate ? new Date(rawDate) : new Date();
-
-    const stationHistory = stationProjectHistory
-      .filter((item) => isSameText(item.stationId, station.id))
-      .filter((item) => {
-        const effectiveDate = new Date(item.effectiveFrom);
-        return (
-          !Number.isNaN(effectiveDate.getTime()) &&
-          !Number.isNaN(operationDate.getTime()) &&
-          effectiveDate <= operationDate
-        );
-      })
-      .sort((a, b) => new Date(b.effectiveFrom) - new Date(a.effectiveFrom));
-
-    return stationHistory[0]?.newProject || station.project || "-";
-  };
-
-  const getCurrentStationProject = (station) => {
-    return getStationProjectAtDate(station, new Date().toISOString());
-  };
+  const getCurrentStationProject = (station) => station?.project || "-";
 
   const getCurrentStationStatus = (station) => {
     return localStationStatusUpdates[station.id]?.status || station.status || "Active";
@@ -868,9 +972,59 @@ const [showConfirm, setShowConfirm] = useState(false);
 
   const closeStationProjectTransferModal = () => {
     setEditingProjectStation(null);
+    setStationTransferStockConfirmation(null);
     setNewStationProject("");
-    setStationProjectEffectiveDate("");
-    setStationProjectReason("");
+  };
+
+  const createStationProjectTransferRequest = async ({
+    station,
+    backendId,
+    toProjectId,
+    currentStock,
+    transferWithStockConfirmed,
+  }) => {
+    const stockSnapshotNote = transferWithStockConfirmed
+      ? `Station transfer requested with current stock balance of ${formatNumber(currentStock)} L.`
+      : "Station transfer requested with zero stock balance.";
+
+    try {
+      const createdTransfer = await createStationTransfer(backendId, {
+        toProjectId,
+        requestedByUserId: currentUser?.id || "",
+        stockAtRequest: currentStock,
+        transferWithStockConfirmed,
+        stockSnapshotNote,
+      });
+
+      onStationTransferCreated?.(createdTransfer);
+
+      trackActivity?.(
+        "Request Station Transfer",
+        "stations",
+        `${station.id} transfer requested from ${station.project || "-"} to ${newStationProject}. ${stockSnapshotNote}`
+      );
+
+      showToast?.(
+        "warning",
+        "Station transfer request submitted for project manager approval."
+      );
+      closeStationProjectTransferModal();
+      return true;
+    } catch (error) {
+      const backendMessage =
+        error?.response?.data?.message ||
+        error?.response?.data?.error ||
+        error?.message ||
+        "Failed to submit station transfer request.";
+
+      showToast?.(
+        "warning",
+        Array.isArray(backendMessage)
+          ? backendMessage.join(" / ")
+          : backendMessage
+      );
+      return false;
+    }
   };
 
   const submitStationProjectTransferRequest = async () => {
@@ -886,16 +1040,15 @@ const [showConfirm, setShowConfirm] = useState(false);
       return;
     }
 
-    if (!stationProjectEffectiveDate) {
-      showToast?.("warning", "Please select effective date and time.");
-      return;
-    }
 
     const backendId = getStationBackendId(editingProjectStation);
     const toProjectId = resolveStationProjectId(newStationProject);
 
     if (!backendId) {
-      showToast?.("warning", "This station is not linked to backend yet. Refresh and try again.");
+      showToast?.(
+        "warning",
+        "This station is not linked to backend yet. Refresh and try again."
+      );
       closeStationProjectTransferModal();
       return;
     }
@@ -905,34 +1058,57 @@ const [showConfirm, setShowConfirm] = useState(false);
       return;
     }
 
-    try {
-      const createdTransfer = await createStationTransfer(backendId, {
-        toProjectId,
-        requestedByUserId: currentUser?.id || "",
-        effectiveDate: stationProjectEffectiveDate || undefined,
-      });
+    const currentStock = Number(editingProjectStation.currentStock);
 
-      onStationTransferCreated?.(createdTransfer);
-
-      trackActivity?.(
-        "Request Station Transfer",
-        "stations",
-        `${editingProjectStation.id} transfer requested from ${editingProjectStation.project || "-"} to ${newStationProject}.`
-      );
-
-      showToast?.("warning", "Station transfer request submitted for project manager approval.");
-      closeStationProjectTransferModal();
-    } catch (error) {
-      const backendMessage =
-        error?.response?.data?.message ||
-        error?.response?.data?.error ||
-        error?.message ||
-        "Failed to submit station transfer request.";
-
+    if (!Number.isFinite(currentStock)) {
       showToast?.(
         "warning",
-        Array.isArray(backendMessage) ? backendMessage.join(" / ") : backendMessage
+        "Station stock could not be verified. Refresh the page and try again."
       );
+      return;
+    }
+
+    const transferWithStock = Math.abs(currentStock) > 0.000001;
+
+    if (transferWithStock) {
+      setStationTransferStockConfirmation({
+        station: editingProjectStation,
+        backendId,
+        toProjectId,
+        currentStock,
+      });
+      return;
+    }
+
+    await createStationProjectTransferRequest({
+      station: editingProjectStation,
+      backendId,
+      toProjectId,
+      currentStock,
+      transferWithStockConfirmed: false,
+    });
+  };
+
+  const confirmStationTransferWithStock = async () => {
+    if (!stationTransferStockConfirmation) return;
+
+    const {
+      station,
+      backendId,
+      toProjectId,
+      currentStock,
+    } = stationTransferStockConfirmation;
+
+    const created = await createStationProjectTransferRequest({
+      station,
+      backendId,
+      toProjectId,
+      currentStock,
+      transferWithStockConfirmed: true,
+    });
+
+    if (created) {
+      setStationTransferStockConfirmation(null);
     }
   };
 
@@ -950,84 +1126,6 @@ const [showConfirm, setShowConfirm] = useState(false);
     });
   };
 
-  const openProjectChange = (station) => {
-    if (!hasPermission("stations", "edit")) {
-      showToast?.("warning", "Read-only access: you cannot change station project.");
-      return;
-    }
-
-    setProjectEditStation(station);
-    setNewStationProject(getCurrentStationProject(station));
-    setStationProjectEffectiveDate("");
-  };
-
-  const confirmStationProjectChange = () => {
-    if (!projectEditStation) return;
-
-    if (!newStationProject) {
-      showToast?.("warning", "Please select a new project.");
-      return;
-    }
-
-    if (!stationProjectEffectiveDate) {
-      showToast?.("warning", "Please select effective date and time.");
-      return;
-    }
-
-
-    const oldProject = getCurrentStationProject(projectEditStation);
-
-    if (isOfficerUser(currentUser)) {
-      submitApprovalRequest?.({
-        type: "master_data_change",
-        module: "stations",
-        title: `Station ${projectEditStation.id} project change`,
-        details: `Project change from ${oldProject || "-"} to ${newStationProject}`,
-        payload: {
-          entity: "station",
-          id: projectEditStation.id,
-          field: "project",
-          oldValue: oldProject,
-          newValue: newStationProject,
-          project: oldProject,
-          changedFields: [
-            { field: "project", oldValue: oldProject, newValue: newStationProject, sensitive: true },
-          ],
-        },
-      });
-
-      setProjectEditStation(null);
-      setNewStationProject("");
-      setStationProjectEffectiveDate("");
-      showToast?.("warning", "Station project change sent for manager approval.");
-      return;
-    }
-
-    setStationProjectHistory((prev) => [
-      ...prev,
-      {
-        stationId: projectEditStation.id,
-        oldProject,
-        newProject: newStationProject,
-        effectiveFrom: stationProjectEffectiveDate,
-        changedBy: currentUser?.fullName || currentUser?.name || "System",
-        changedAt: new Date().toISOString(),
-        type: "station_project_change",
-      },
-    ]);
-
-    trackActivity?.(
-      "Station Project Change",
-      "stations",
-      `${projectEditStation.id} project changed from ${oldProject || "-"} to ${newStationProject} effective ${stationProjectEffectiveDate}.`
-    );
-
-    setProjectEditStation(null);
-    setNewStationProject("");
-    setStationProjectEffectiveDate("");
-
-    showToast?.("success", "Station project change saved with effective date.");
-  };
 
   const openStatusChange = (station) => {
     if (!hasPermission("stations", "edit")) {
@@ -1234,6 +1332,26 @@ const [showConfirm, setShowConfirm] = useState(false);
   };
 
   const proceedStationDeleteConfirm = () => {
+    if (!deleteTargetStation) return;
+
+    const currentStock = Number(deleteTargetStation.currentStock);
+
+    if (!Number.isFinite(currentStock)) {
+      showToast?.(
+        "warning",
+        "Station stock could not be verified. Refresh the page and try again."
+      );
+      return;
+    }
+
+    if (Math.abs(currentStock) > 0.000001) {
+      showToast?.(
+        "warning",
+        `Cannot delete station ${deleteTargetStation.id} because its current stock is ${formatNumber(currentStock)} L. Adjust the balance to zero before deletion.`
+      );
+      return;
+    }
+
     if (!stationDeleteReason) {
       showToast
         ? showToast("warning", "Please enter deletion reason.")
@@ -1258,6 +1376,24 @@ const [showConfirm, setShowConfirm] = useState(false);
 
     if (!hasPermission("stations", "delete")) {
       showToast?.("warning", "Read-only access: you cannot delete stations.");
+      return;
+    }
+
+    const currentStock = Number(deleteTargetStation.currentStock);
+
+    if (!Number.isFinite(currentStock)) {
+      showToast?.(
+        "warning",
+        "Station stock could not be verified. Refresh the page and try again."
+      );
+      return;
+    }
+
+    if (Math.abs(currentStock) > 0.000001) {
+      showToast?.(
+        "warning",
+        `Cannot delete station ${deleteTargetStation.id} because its current stock is ${formatNumber(currentStock)} L. Adjust the balance to zero before deletion.`
+      );
       return;
     }
 
@@ -1529,8 +1665,10 @@ const getLatestStationCounter = (stationId, fallbackValue = 0) => {
 
   const stationsWithBalance = realStations.map((station) => {
     const currentStock = calculateStationBalance(station);
-        const currentCounter = getEffectiveStationCounter(station);
-    const totalPumpedFromCounter = getTotalPumpedLitersFromCounter(station);
+    const currentCounter = getEffectiveStationCounter(station);
+    const lifetimeCounter = getStationLifetimeCounter(station);
+    const totalPumpedFromOperations =
+      getTotalPumpedLitersFromOperations(station);
     const percentage =
       station.capacity > 0
         ? Math.max(0, Math.min(100, (currentStock / station.capacity) * 100))
@@ -1542,7 +1680,8 @@ const getLatestStationCounter = (stationId, fallbackValue = 0) => {
       originalProject: station.project,
       status: getCurrentStationStatus(station),
       currentCounter,
-      totalPumpedFromCounter,
+      lifetimeCounter,
+      totalPumpedFromOperations,
       currentStock,
       percentage,
     };
@@ -2291,9 +2430,7 @@ const getLatestStationCounter = (stationId, fallbackValue = 0) => {
 
                       setEditingProjectStation(station);
                       setNewStationProject(station.project || "");
-                      setStationProjectEffectiveDate("");
-                      setStationProjectReason("");
-                    }}
+                                                        }}
                     className={`mt-3 border border-slate-700/80 rounded-2xl bg-slate-950/50 px-4 py-3 min-w-[170px] shadow-lg transition-all duration-300 text-left ${
                       canCurrentUserCreateStationTransfer()
                         ? "hover:border-yellow-400 hover:bg-slate-900 cursor-pointer"
@@ -2324,6 +2461,15 @@ const getLatestStationCounter = (stationId, fallbackValue = 0) => {
                     </button>
 
                     <FlowmeterCounterDisplay value={station.currentCounter} />
+
+                    <div className="mt-3 flex items-center justify-between gap-3 rounded-lg border border-slate-700/80 bg-slate-950/60 px-3 py-2">
+                      <span className="text-[10px] uppercase tracking-[0.16em] text-slate-400">
+                        Lifetime Counter
+                      </span>
+                      <span className="text-sm font-bold text-amber-300 tabular-nums">
+                        {formatNumber(station.lifetimeCounter)}
+                      </span>
+                    </div>
                   </div>
                 </div>
                 </div>
@@ -2367,7 +2513,9 @@ const getLatestStationCounter = (stationId, fallbackValue = 0) => {
 
                 <div>
                   <p className="text-[11px] text-gray-400 whitespace-nowrap">Total Pumped</p>
-                  <p className="text-base lg:text-lg font-semibold text-slate-100 whitespace-nowrap">{formatNumber(station.totalPumpedFromCounter)} L</p>
+                  <p className="text-base lg:text-lg font-semibold text-slate-100 whitespace-nowrap">
+                    {formatNumber(station.totalPumpedFromOperations)} L
+                  </p>
                 </div>
 
                 <div className="sm:text-right">
@@ -2587,20 +2735,6 @@ const getLatestStationCounter = (stationId, fallbackValue = 0) => {
               </select>
             </div>
 
-            <div className="mb-4">
-              <label className="font-medium text-gray-700">
-                Effective Date & Time
-              </label>
-
-              <input
-                type="datetime-local"
-                value={stationProjectEffectiveDate}
-                onChange={(e) =>
-                  setStationProjectEffectiveDate(e.target.value)
-                }
-                className="border rounded-lg p-3 w-full mt-2"
-              />
-            </div>
 
             <div className="flex justify-end gap-3 border-t border-slate-700/80 px-6 py-5 bg-slate-950/90">
               <button
@@ -2615,6 +2749,66 @@ const getLatestStationCounter = (stationId, fallbackValue = 0) => {
                 className="bg-yellow-500 text-black px-4 py-2 rounded-lg font-semibold"
               >
                 Submit Transfer Request
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
+
+      {stationTransferStockConfirmation && (
+        <div className="fleet-modal-backdrop fixed inset-0 z-[10010] bg-black/60 flex items-center justify-center p-4">
+          <div className="bg-white text-black w-full max-w-[520px] rounded-xl shadow-xl p-6">
+            <div className="flex justify-between items-center mb-6 border-b pb-3">
+              <h2 className="text-xl sm:text-2xl font-bold">
+                Confirm Station Transfer
+              </h2>
+              <button
+                onClick={() => setStationTransferStockConfirmation(null)}
+                className="text-gray-500 hover:text-black text-xl"
+              >
+                ×
+              </button>
+            </div>
+
+            <div className="bg-amber-50 border border-amber-300 p-4 rounded-lg space-y-2">
+              <p>
+                <strong>Station:</strong>{" "}
+                {stationTransferStockConfirmation.station?.id || "-"}
+              </p>
+              <p>
+                <strong>Current Project:</strong>{" "}
+                {stationTransferStockConfirmation.station?.project || "-"}
+              </p>
+              <p>
+                <strong>New Project:</strong> {newStationProject || "-"}
+              </p>
+              <p>
+                <strong>Current Stock:</strong>{" "}
+                {formatNumber(
+                  stationTransferStockConfirmation.currentStock
+                )}{" "}
+                L
+              </p>
+            </div>
+
+            <p className="mt-4 text-sm text-gray-700">
+              This station currently contains fuel stock. Do you want to
+              transfer the station with its current stock balance?
+            </p>
+
+            <div className="flex justify-end gap-3 mt-6 border-t pt-4">
+              <button
+                onClick={() => setStationTransferStockConfirmation(null)}
+                className="rounded-xl border border-slate-600 bg-slate-900 px-5 py-2.5 font-bold text-slate-200 hover:bg-slate-800 transition"
+              >
+                Cancel
+              </button>
+
+              <button
+                onClick={confirmStationTransferWithStock}
+                className="bg-amber-500 hover:bg-amber-400 text-black px-4 py-2 rounded-lg font-bold"
+              >
+                Transfer With Current Stock
               </button>
             </div>
           </div>
@@ -2701,8 +2895,9 @@ const getLatestStationCounter = (stationId, fallbackValue = 0) => {
                 </div>
 
                 <button
-                  onClick={() => setCounterResetStation(null)}
-                  className="text-slate-400 hover:text-red-400 text-2xl"
+                  onClick={() => !stationCounterResetLoading && setCounterResetStation(null)}
+                  disabled={stationCounterResetLoading}
+                  className="text-slate-400 hover:text-red-400 text-2xl disabled:cursor-wait disabled:opacity-50"
                 >
                   ×
                 </button>
@@ -2755,34 +2950,44 @@ const getLatestStationCounter = (stationId, fallbackValue = 0) => {
 
                 <div className="flex justify-end gap-3 pt-3 border-t border-slate-700">
                   <button
-                    onClick={() => setCounterResetStation(null)}
-                    className="px-4 py-2 rounded-xl bg-slate-800 hover:bg-slate-700"
+                    onClick={() => !stationCounterResetLoading && setCounterResetStation(null)}
+                    disabled={stationCounterResetLoading}
+                    className="px-4 py-2 rounded-xl bg-slate-800 hover:bg-slate-700 disabled:cursor-wait disabled:opacity-50"
                   >
                     Cancel
                   </button>
 
                   <button
-                    onClick={() => {
+                    onClick={async () => {
                       if (!stationCounterResetValue) {
                         notifyUser(showToast, "warning", "Please enter new counter reading.");
                         return;
                       }
 
-                      saveStationCounterReset({
+                      if (!stationCounterResetReason.trim()) {
+                        notifyUser(showToast, "warning", "Please enter reset reason.");
+                        return;
+                      }
+
+                      const saved = await saveStationCounterReset({
                         station: counterResetStation,
                         newReading: stationCounterResetValue,
-                        effectiveFrom: stationCounterResetDate || new Date().toISOString(),
+                        effectiveFrom:
+                          stationCounterResetDate || new Date().toISOString(),
                         reason: stationCounterResetReason,
                       });
+
+                      if (!saved) return;
 
                       setCounterResetStation(null);
                       setStationCounterResetValue("");
                       setStationCounterResetDate("");
                       setStationCounterResetReason("");
                     }}
-                    className="px-4 py-2 rounded-xl bg-yellow-500 text-black font-bold hover:bg-yellow-400"
+                    disabled={stationCounterResetLoading}
+                    className="px-4 py-2 rounded-xl bg-yellow-500 text-black font-bold hover:bg-yellow-400 disabled:cursor-wait disabled:opacity-60"
                   >
-                    Save Reset
+                    {stationCounterResetLoading ? "Saving..." : "Save Reset"}
                   </button>
                 </div>
               </div>
@@ -2894,77 +3099,6 @@ const getLatestStationCounter = (stationId, fallbackValue = 0) => {
           </div>
         </div>
         </ModalPortal>
-      )}
-
-      {projectEditStation && (
-        <div className="fleet-modal-backdrop fixed inset-0 z-[9998] bg-black/60 flex items-center justify-center z-50">
-          <div className="bg-white text-black w-[560px] rounded-xl shadow-xl p-6">
-            <div className="flex justify-between items-center mb-6 border-b pb-3">
-              <h2 className="text-xl sm:text-2xl font-bold">Change Station Project</h2>
-              <button onClick={() => setProjectEditStation(null)}>×</button>
-            </div>
-
-            <div className="grid grid-cols-1 gap-4">
-              <div className="bg-gray-100 p-4 rounded-lg">
-                <p>
-                  <strong>Station:</strong> {projectEditStation.id}
-                </p>
-                <p>
-                  <strong>Current Project:</strong>{" "}
-                  {getCurrentStationProject(projectEditStation) || "-"}
-                </p>
-              </div>
-
-              <div className="grid grid-cols-1 sm:grid-cols-3 items-start sm:items-center gap-2 sm:gap-4">
-                <label className="font-medium text-gray-700">New Project</label>
-                <select
-                  value={newStationProject}
-                  onChange={(e) => setNewStationProject(e.target.value)}
-                  className="col-span-2 border rounded-lg p-2"
-                >
-                  <option value="">Select Project</option>
-                  {transferProjectOptions.map((project) => (
-                    <option key={project} value={project}>
-                      {project}
-                    </option>
-                  ))}
-                </select>
-              </div>
-
-              <div className="grid grid-cols-1 sm:grid-cols-3 items-start sm:items-center gap-2 sm:gap-4">
-                <label className="font-medium text-gray-700">
-                  Effective Date & Time
-                </label>
-                <input
-                  type="datetime-local"
-                  value={stationProjectEffectiveDate}
-                  onChange={(e) => setStationProjectEffectiveDate(e.target.value)}
-                  className="col-span-2 border rounded-lg p-2"
-                />
-              </div>
-
-              <div className="grid grid-cols-1 sm:grid-cols-3 items-start sm:items-center gap-2 sm:gap-4">
-
-              </div>
-            </div>
-
-            <div className="flex justify-end gap-3 mt-6 border-t pt-4">
-              <button
-                onClick={() => setProjectEditStation(null)}
-                className="rounded-xl border border-slate-600 bg-slate-900 px-5 py-2.5 font-bold text-slate-200 hover:bg-slate-800 transition"
-              >
-                Cancel
-              </button>
-
-              <button
-                onClick={confirmStationProjectChange}
-                className="bg-red-600 text-white px-4 py-2 rounded-lg"
-              >
-                Save Project Change
-              </button>
-            </div>
-          </div>
-        </div>
       )}
 
       {statusEditStation && (

@@ -35,3 +35,12 @@ export async function reviewOperationCorrection(
 
   return response.data;
 }
+
+export async function fetchOdometerCorrectionHistory(params = {}) {
+  const response = await api.get(
+    "/operation-corrections/reports/odometer-history",
+    { params }
+  );
+
+  return Array.isArray(response.data) ? response.data : [];
+}

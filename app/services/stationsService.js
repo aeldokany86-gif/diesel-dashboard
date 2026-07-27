@@ -1,8 +1,14 @@
 import api from "./api";
 
-export async function fetchStations({ companyId = "" } = {}) {
+export async function fetchStations({
+  companyId = "",
+  includeDeleted = false,
+} = {}) {
   const response = await api.get("/stations", {
-    params: companyId ? { companyId } : {},
+    params: {
+      ...(companyId ? { companyId } : {}),
+      ...(includeDeleted ? { includeDeleted: true } : {}),
+    },
   });
 
   return Array.isArray(response.data) ? response.data : [];
@@ -40,9 +46,54 @@ export async function deleteStationRecord(stationId) {
   return response.data;
 }
 
+export async function resetStationCounter(stationId, payload) {
+  if (!stationId) {
+    throw new Error("Station backend ID is required.");
+  }
+
+  const response = await api.post(
+    `/stations/${stationId}/reset-counter`,
+    payload
+  );
+
+  return response.data;
+}
+
 export async function fetchPendingStationTransfers() {
   const response = await api.get("/stations/transfers/pending");
   return Array.isArray(response.data) ? response.data : [];
+}
+
+export async function fetchStationTransferReport({
+  companyId = "",
+  fromProjectId = "",
+  toProjectId = "",
+  stationId = "",
+  status = "ALL",
+  dateFrom = "",
+  dateTo = "",
+} = {}) {
+  const response = await api.get("/stations/transfers/report", {
+    params: {
+      ...(companyId ? { companyId } : {}),
+      ...(fromProjectId ? { fromProjectId } : {}),
+      ...(toProjectId ? { toProjectId } : {}),
+      ...(stationId ? { stationId } : {}),
+      ...(status && status !== "ALL" ? { status } : {}),
+      ...(dateFrom ? { dateFrom } : {}),
+      ...(dateTo ? { dateTo } : {}),
+    },
+  });
+
+  return response.data || {
+    summary: {
+      totalTransfers: 0,
+      pending: 0,
+      approved: 0,
+      rejected: 0,
+    },
+    rows: [],
+  };
 }
 
 export async function createStationTransfer(stationId, payload) {
@@ -100,6 +151,28 @@ export async function fetchStationStockMovements({
       ...(dateTo ? { dateTo } : {}),
       ...(movementType && movementType !== "all" ? { movementType } : {}),
       ...(direction && direction !== "all" ? { direction } : {}),
+    },
+  });
+
+  return Array.isArray(response.data) ? response.data : [];
+}
+
+export async function fetchStationCounterMeterHistory({
+  companyId = "",
+  projectId = "",
+  stationId = "",
+  dateFrom = "",
+  dateTo = "",
+  eventType = "ALL",
+} = {}) {
+  const response = await api.get("/stations/counter-meter-history", {
+    params: {
+      ...(companyId ? { companyId } : {}),
+      ...(projectId ? { projectId } : {}),
+      ...(stationId ? { stationId } : {}),
+      ...(dateFrom ? { dateFrom } : {}),
+      ...(dateTo ? { dateTo } : {}),
+      ...(eventType && eventType !== "ALL" ? { eventType } : {}),
     },
   });
 

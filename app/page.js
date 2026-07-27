@@ -1160,7 +1160,17 @@ useEffect(() => {
   };
 
   const upsertAssetTransferRequest = (transfer) => {
-    const mappedTransfer = mapBackendAssetTransferForState(transfer);
+    const mappedTransfer = {
+      ...mapBackendAssetTransferForState(transfer),
+      // Keep the backend batch reference so ApprovalsPage can group every
+      // transfer created by one bulk action into a single approval card.
+      transferBatchId:
+        transfer?.transferBatchId ||
+        transfer?.batchId ||
+        transfer?.payload?.transferBatchId ||
+        null,
+    };
+
     if (!mappedTransfer.id) return mappedTransfer;
 
     setAssetTransferRequests((prev) => [
@@ -1177,7 +1187,16 @@ useEffect(() => {
     try {
       const backendTransfers = await fetchPendingAssetTransfers();
       const mappedTransfers = backendTransfers
-        .map(mapBackendAssetTransferForState)
+        .map((transfer) => ({
+          ...mapBackendAssetTransferForState(transfer),
+          // The state mapper normalizes transfer data but may omit the batch
+          // reference. Preserve it explicitly for grouped approvals.
+          transferBatchId:
+            transfer?.transferBatchId ||
+            transfer?.batchId ||
+            transfer?.payload?.transferBatchId ||
+            null,
+        }))
         .filter((transfer) => transfer.id);
 
       setAssetTransferRequests(mappedTransfers);
@@ -2732,10 +2751,14 @@ useEffect(() => {
         id: `ASSET-TRANSFER-${transfer.id}`,
         type: "asset_transfer",
         module: "assets",
+        // A shared transferBatchId is the group identity for bulk transfers.
+        // Single transfers keep null and therefore remain independent cards.
+        transferBatchId: transfer.transferBatchId || null,
         title: `Asset Transfer: ${transfer.assetName || transfer.assetId || "Asset"}`,
         payload: {
           transfer,
           assetTransferId: transfer.id,
+          transferBatchId: transfer.transferBatchId || null,
         },
         details: `Transfer ${transfer.assetName || transfer.assetId || "asset"} from ${transfer.fromProjectName || "-"} to ${transfer.toProjectName || "-"}.`,
         status: "Pending",
@@ -3009,6 +3032,7 @@ if (page === "reports") {
       projects={scopedProjects}
       assets={scopedAssets}
       stations={scopedStations}
+      assetTransferRequests={assetTransferRequests}
       currency={currency}
       currentUser={currentUser}
       currentCompany={currentCompany}
