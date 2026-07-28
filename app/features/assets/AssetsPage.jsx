@@ -239,7 +239,7 @@ export default function AssetsPage({
     return latestOperationEntry?.value ?? parseFloat(asset.odometer) ?? 0;
   };
 
-const assetCurrentOdometerMap = useMemo(() => {
+  const assetCurrentOdometerMap = useMemo(() => {
     const map = new Map();
 
     const typeIndexLocal = getHeaderIndex(headers, [
@@ -325,12 +325,8 @@ const assetCurrentOdometerMap = useMemo(() => {
     return map;
   }, [data, headers]);
 
-  const getLatestAssetOdometer = (assetId, fallbackValue = 0) => {
-    const latest = assetCurrentOdometerMap.get(normalizeScopeValue(assetId));
-    return latest?.value ?? fallbackValue ?? 0;
-  };
 
-const [showForm, setShowForm] = useState(false);
+  const [showForm, setShowForm] = useState(false);
   const [searchTerm, setSearchTerm] = useState("");
   const [newAsset, setNewAsset] = useState({
     id: "",
@@ -346,12 +342,12 @@ const [showForm, setShowForm] = useState(false);
   const [useCustomCategory, setUseCustomCategory] = useState(false);
   const [customCategory, setCustomCategory] = useState("");
 
-const [showAssetSettings, setShowAssetSettings] = useState(false);
-const [showExportMenu, setShowExportMenu] = useState(false);
-const assetSettingsRef = useRef(null);
+  const [showAssetSettings, setShowAssetSettings] = useState(false);
+  const [showExportMenu, setShowExportMenu] = useState(false);
+  const assetSettingsRef = useRef(null);
   const assetSettingsMenuAlign = useSmartDropdownPosition(assetSettingsRef, showAssetSettings, 224);
 
-useOutsideClick(assetSettingsRef, () => {
+  useOutsideClick(assetSettingsRef, () => {
   setShowAssetSettings(false);
   setShowExportMenu(false);
 });
@@ -395,41 +391,6 @@ useOutsideClick(assetSettingsRef, () => {
     return mappedAsset;
   };
 
-  const removeAssetFromState = (assetOrId) => {
-    const backendId =
-      typeof assetOrId === "string"
-        ? assetOrId
-        : getBackendAssetId(assetOrId);
-
-    const assetId =
-      typeof assetOrId === "string"
-        ? ""
-        : assetOrId?.assetId || assetOrId?.id || "";
-
-    const normalizedBackendId = normalizeScopeValue(backendId);
-    const normalizedAssetId = normalizeScopeValue(assetId);
-
-    if (typeof setAssets === "function") {
-      setAssets((prev) =>
-        (prev || []).filter((item) => {
-          const candidates = [
-            item.backendId,
-            item.assetBackendId,
-            item.id,
-            item.assetId,
-          ]
-            .filter(Boolean)
-            .map(normalizeScopeValue);
-
-          return !(
-            (normalizedBackendId && candidates.includes(normalizedBackendId)) ||
-            (normalizedAssetId && candidates.includes(normalizedAssetId))
-          );
-        })
-      );
-    }
-
-  };
 
   const [selectedAsset, setSelectedAsset] = useState(null);
 
@@ -438,13 +399,11 @@ useOutsideClick(assetSettingsRef, () => {
 
   const [projectTargetAsset, setProjectTargetAsset] = useState(null);
   const [selectedProjectValue, setSelectedProjectValue] = useState("");
-  const [projectEffectiveDate, setProjectEffectiveDate] = useState("");
   const [showProjectConfirm, setShowProjectConfirm] = useState(false);
 
   const [selectedAssetIds, setSelectedAssetIds] = useState([]);
   const [bulkTransferModalOpen, setBulkTransferModalOpen] = useState(false);
   const [bulkTransferProjectValue, setBulkTransferProjectValue] = useState("");
-  const [bulkTransferEffectiveDate, setBulkTransferEffectiveDate] = useState("");
   const [savingBulkTransfer, setSavingBulkTransfer] = useState(false);
 
   const [deleteTargetAsset, setDeleteTargetAsset] = useState(null);
@@ -717,7 +676,6 @@ useOutsideClick(assetSettingsRef, () => {
     }
 
     setBulkTransferProjectValue("");
-    setBulkTransferEffectiveDate("");
     setBulkTransferModalOpen(true);
   };
 
@@ -725,7 +683,6 @@ useOutsideClick(assetSettingsRef, () => {
     if (savingBulkTransfer) return;
     setBulkTransferModalOpen(false);
     setBulkTransferProjectValue("");
-    setBulkTransferEffectiveDate("");
   };
 
   const confirmBulkAssetTransfer = async () => {
@@ -733,11 +690,6 @@ useOutsideClick(assetSettingsRef, () => {
 
     if (!bulkTransferProjectValue) {
       showToast?.("warning", "Please select destination project.");
-      return;
-    }
-
-    if (!bulkTransferEffectiveDate) {
-      showToast?.("warning", "Please select project effective date.");
       return;
     }
 
@@ -763,7 +715,6 @@ useOutsideClick(assetSettingsRef, () => {
         assetIds: backendAssetIds,
         toProjectId,
         requestedByUserId: currentUser?.id || "",
-        effectiveDate: bulkTransferEffectiveDate,
       });
 
       const createdTransfers = Array.isArray(result)
@@ -916,7 +867,6 @@ useOutsideClick(assetSettingsRef, () => {
 
     setProjectTargetAsset(asset);
     setSelectedProjectValue(asset.project || "");
-    setProjectEffectiveDate("");
   };
 
   const resetProjectWorkflow = () => {
@@ -930,13 +880,6 @@ useOutsideClick(assetSettingsRef, () => {
       showToast
         ? showToast("warning", "Please select a project.")
         : notifyUser(typeof showToast !== "undefined" ? showToast : null, inferToastTypeFromMessage("Please select a project."), "Please select a project.");
-      return;
-    }
-
-    if (!projectEffectiveDate) {
-      showToast
-        ? showToast("warning", "Please select project effective date.")
-        : notifyUser(typeof showToast !== "undefined" ? showToast : null, inferToastTypeFromMessage("Please select project effective date."), "Please select project effective date.");
       return;
     }
 
@@ -973,7 +916,6 @@ useOutsideClick(assetSettingsRef, () => {
       const createdTransfer = await createAssetTransfer(backendAssetId, {
         toProjectId,
         requestedByUserId: currentUser?.id || "",
-        effectiveDate: projectEffectiveDate || undefined,
       });
 
       onAssetTransferCreated?.(createdTransfer);
@@ -1342,7 +1284,7 @@ useOutsideClick(assetSettingsRef, () => {
       : notifyUser(typeof showToast !== "undefined" ? showToast : null, inferToastTypeFromMessage("Odometer reset request submitted for project manager approval."), "Odometer reset request submitted for project manager approval.");
   };
 
-const exportAssetsToCSV = () => {
+  const exportAssetsToCSV = () => {
   const csvHeaders = [
     "Asset ID",
     "Project",
@@ -1387,13 +1329,13 @@ const exportAssetsToCSV = () => {
     : notifyUser(typeof showToast !== "undefined" ? showToast : null, inferToastTypeFromMessage("Assets data exported successfully."), "Assets data exported successfully.");
 };
 
-const exportAssetsToPDF = () => {
+  const exportAssetsToPDF = () => {
   showToast
     ? showToast("warning", "PDF export will be added in the next step.")
     : notifyUser(typeof showToast !== "undefined" ? showToast : null, inferToastTypeFromMessage("PDF export will be added in the next step."), "PDF export will be added in the next step.");
 };
 
-const escapePrintValue = (value) => {
+  const escapePrintValue = (value) => {
   return String(value ?? "-")
     .replace(/&/g, "&amp;")
     .replace(/</g, "&lt;")
@@ -1402,7 +1344,7 @@ const escapePrintValue = (value) => {
     .replace(/'/g, "&#039;");
 };
 
-const printAssetsReport = () => {
+  const printAssetsReport = () => {
   const reportDate = new Date().toLocaleString();
 
   const tableRowsHtml = filteredAssets
@@ -1522,7 +1464,7 @@ const printAssetsReport = () => {
   return (
     <div className="bg-gray-900 min-h-screen text-white overflow-y-auto h-screen">
       <style jsx global>{`
-        /* Projects page live theme and pointer fixes */
+        /* Shared pointer behavior for interactive Assets controls */
         button,
         a,
         select,
@@ -1545,52 +1487,6 @@ const printAssetsReport = () => {
           cursor: not-allowed !important;
         }
 
-        [data-theme="light"] .project-card-print {
-          background: linear-gradient(135deg, #ffffff 0%, #f8fafc 100%) !important;
-          color: #0f172a !important;
-          border-color: #cbd5e1 !important;
-          box-shadow: 0 18px 35px rgba(15, 23, 42, 0.10) !important;
-        }
-
-        [data-theme="light"] .project-card-accent {
-          background: linear-gradient(90deg, rgba(245, 158, 11, 0.95), rgba(37, 99, 235, 0.50), transparent) !important;
-        }
-
-        [data-theme="light"] .project-card-print .project-title {
-          color: #1e3a8a !important;
-        }
-
-        [data-theme="light"] .project-card-print .project-title:hover {
-          color: #b45309 !important;
-        }
-
-        [data-theme="light"] .project-card-print .project-id,
-        [data-theme="light"] .project-card-print .label,
-        [data-theme="light"] .project-card-print .text-slate-500,
-        [data-theme="light"] .project-card-print .text-slate-400,
-        [data-theme="light"] .project-card-print .text-gray-400 {
-          color: #64748b !important;
-        }
-
-        [data-theme="light"] .project-card-print .value,
-        [data-theme="light"] .project-card-print .text-slate-300,
-        [data-theme="light"] .project-card-print .text-slate-200,
-        [data-theme="light"] .project-card-print .text-slate-100,
-        [data-theme="light"] .project-card-print .text-white {
-          color: #0f172a !important;
-        }
-
-        [data-theme="light"] .project-card-print .metric {
-          background: #f8fafc !important;
-          border-color: #cbd5e1 !important;
-          box-shadow: inset 0 1px 0 rgba(255, 255, 255, 0.85) !important;
-        }
-
-        [data-theme="light"] .project-card-print .border-slate-700\/80,
-        [data-theme="light"] .project-card-print .border-slate-700,
-        [data-theme="light"] .project-card-print .border-gray-700 {
-          border-color: #cbd5e1 !important;
-        }
       `}</style>
       <div className="fleet-page-shell w-full max-w-[1920px] mx-auto px-2 sm:px-3 lg:px-4 xl:px-5 2xl:px-8 py-3 sm:py-4 lg:py-5 text-[12px] lg:text-[13px]">
       <div className="flex justify-between items-center mb-4 gap-4">
@@ -2219,23 +2115,10 @@ const printAssetsReport = () => {
                 </select>
               </div>
 
-              <div className="mt-5">
-                <label className="mb-2 block text-sm font-semibold text-gray-700">
-                  Effective Date
-                </label>
-                <input
-                  type="date"
-                  value={bulkTransferEffectiveDate}
-                  onChange={(e) => setBulkTransferEffectiveDate(e.target.value)}
-                  disabled={savingBulkTransfer}
-                  className="w-full rounded-lg border p-2.5"
-                />
-              </div>
-
               <p className="mt-5 rounded-lg border border-yellow-200 bg-yellow-50 p-3 text-xs text-gray-600">
                 One bulk submission will create the required approval workflow
-                for every selected asset. Assets already assigned to the
-                destination project will be rejected by backend validation.
+                for every selected asset. The transfer takes effect when the
+                final required approval is completed.
               </p>
 
               <div className="mt-6 flex justify-end gap-3 border-t pt-4">
@@ -2284,18 +2167,9 @@ const printAssetsReport = () => {
               ))}
             </select>
 
-            <label className="block text-sm font-medium text-gray-700 mb-2">
-              Effective Date
-            </label>
-            <input
-              type="date"
-              value={projectEffectiveDate}
-              onChange={(e) => setProjectEffectiveDate(e.target.value)}
-              className="border rounded-lg p-2 w-full mb-6"
-            />
-
-            <p className="text-xs text-gray-500 mb-5 bg-yellow-50 border border-yellow-200 rounded-lg p-3">
-              Operations before this date will remain assigned to the old project. Operations on or after this date will be assigned to the new project when project history is connected.
+            <p className="mb-5 rounded-lg border border-yellow-200 bg-yellow-50 p-3 text-xs text-gray-600">
+              The asset will move to the destination project when the final
+              required approval is completed.
             </p>
 
             <div className="flex justify-end gap-3">
@@ -2303,7 +2177,6 @@ const printAssetsReport = () => {
                 onClick={() => {
                   setProjectTargetAsset(null);
                   setSelectedProjectValue("");
-                  setProjectEffectiveDate("");
                 }}
                 className="bg-gray-200 px-4 py-2 rounded"
               >
@@ -2337,9 +2210,6 @@ const printAssetsReport = () => {
               </p>
               <p>
                 <strong>New Project:</strong> {selectedProjectValue}
-              </p>
-              <p>
-                <strong>Effective Date:</strong> {projectEffectiveDate}
               </p>
             </div>
 

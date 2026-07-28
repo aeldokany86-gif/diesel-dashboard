@@ -84,7 +84,6 @@ export async function createBulkAssetTransfer(payload = {}) {
     assetIds,
     toProjectId: payload.toProjectId,
     requestedByUserId: payload.requestedByUserId,
-    effectiveDate: payload.effectiveDate || undefined,
   });
 
   return response.data;

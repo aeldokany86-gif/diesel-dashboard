@@ -37,10 +37,6 @@ import {
   getAllowedTransactionTypesForUser,
   isAssetRefuelTransactionType,
   isExternalDirectRefuelTransactionType,
-  isExternalSupplyTransactionType,
-  isExternalTransferTransactionType,
-  isExternalSourceOperation,
-  isStationCounterTransactionType,
 } from "../../lib/operationHelpers";
 
 import {
@@ -49,7 +45,6 @@ import {
 } from "../../services/operationsService";
 
 import { createOperationCorrection } from "../../services/operationCorrectionsService";
-import { updateProjectFuelPrice } from "../../services/projectsService";
 import OperationCorrectionModal from "./OperationCorrectionModal";
 import AddOperationModal from "./AddOperationModal";
 import useOperationsData from "./hooks/useOperationsData";
@@ -135,20 +130,7 @@ function canUseNetwork(showToastFn) {
   return false;
 }
 
-function formatProjectFuelPriceDate(value) {
-  if (!value) return "-";
 
-  const date = new Date(value);
-  if (Number.isNaN(date.getTime())) return "-";
-
-  return date.toLocaleString("en-GB", {
-    year: "numeric",
-    month: "2-digit",
-    day: "2-digit",
-    hour: "2-digit",
-    minute: "2-digit",
-  });
-}
 
 function isOfficerUser(user) {
   return user?.role === "Officer";
@@ -170,34 +152,7 @@ function userCanAccessAllProjects(user) {
   return scope.includes("All") && !["Operator", "Supervisor"].includes(user.role);
 }
 
-function isProjectAllowedForUser(user, projectValue, projects = []) {
-  if (userCanAccessAllProjects(user)) return true;
 
-  const scope = getUserProjectScope(user);
-  if (!scope.length || !projectValue) return false;
-
-  const normalizedScope = scope.map(normalizeScopeValue);
-  const normalizedProjectValue = normalizeScopeValue(projectValue);
-
-  if (normalizedScope.includes(normalizedProjectValue)) return true;
-
-  const matchedProject = projects.find((project) => {
-    const projectId = normalizeScopeValue(project.id);
-    const projectName = normalizeScopeValue(project.name);
-
-    return (
-      projectId === normalizedProjectValue ||
-      projectName === normalizedProjectValue
-    );
-  });
-
-  if (!matchedProject) return false;
-
-  return (
-    normalizedScope.includes(normalizeScopeValue(matchedProject.id)) ||
-    normalizedScope.includes(normalizeScopeValue(matchedProject.name))
-  );
-}
 
 function useOutsideClick(ref, handler) {
   useEffect(() => {
@@ -228,12 +183,11 @@ export default function OperationsPage({
   literPrice = 2.33,
   getLiterPriceByDate,
   currency = "SAR",
-  assetProjectHistory = [],
   currentUser,
-  contextCompanyId = "",
+  activeProjectScopeLabel = "",
+  activeProjectScopeValues = [],
   hasPermission = () => false,
   trackActivity = () => {},
-  submitApprovalRequest = () => {},
   projects = [],
   showToast,
   onOperationsWorkspaceRefresh,
@@ -479,98 +433,9 @@ export default function OperationsPage({
     return getAssetLifetimeReading(assetId, rawReading, operationDate);
   };
 
-  const getEffectiveLastStationCounter = (stationId) => {
-    const station = stations.find((item) => isSameText(item.id, stationId));
-    const stationCompanyId = station?.companyId || currentUser?.companyId || "";
-    const latestReset = getLatestResetRecordForEntity(
-      stationCounterResetHistory,
-      station,
-      stationId,
-      stationCompanyId
-    );
-    const resetTime = latestReset
-      ? getResetEffectiveTime(latestReset)
-      : 0;
 
-    const typeIndexLocal = getHeaderIndex(headers, [
-      "transaction_type",
-      "Transaction type",
-      "transaction type",
-      "operation_type",
-      "Operation type",
-    ]);
 
-    const destinationIndexLocal = getHeaderIndex(headers, [
-      "destination_id",
-      "Destination ID",
-      "destination id",
-      "destination",
-    ]);
-
-    const counterIndexLocal = getHeaderIndex(headers, [
-      "odometer_at_fueling",
-      "Odometer at fueling",
-      "odometer at fueling",
-    ]);
-
-    const dateIndexLocal = getHeaderIndex(headers, [
-      "transaction_datetime",
-      "Transaction datetime",
-      "transaction datetime",
-      "date",
-    ]);
-
-    const latestOperation = data
-      .map((row, originalIndex) => ({ row, originalIndex }))
-      .filter(({ row }) => {
-        if (
-          typeIndexLocal === -1 ||
-          destinationIndexLocal === -1 ||
-          counterIndexLocal === -1
-        ) {
-          return false;
-        }
-
-        const type = row[typeIndexLocal];
-        if (isSameText(type, "Direct_Refuel")) return false;
-
-        const rowTime =
-          dateIndexLocal !== -1
-            ? new Date(row[dateIndexLocal]).getTime() || 0
-            : 0;
-
-        const destination = row[destinationIndexLocal];
-
-        return (
-          rowTime >= resetTime &&
-          (isSameText(type, "Internal_Transfer") ||
-            isSameText(type, "External_Transfer") ||
-            isSameText(type, "External_Supply")) &&
-          isSameText(destination, stationId) &&
-          !Number.isNaN(parseFloat(row[counterIndexLocal]))
-        );
-      })
-      .sort((a, b) => {
-        const da =
-          dateIndexLocal !== -1
-            ? new Date(a.row[dateIndexLocal]).getTime() || 0
-            : 0;
-        const db =
-          dateIndexLocal !== -1
-            ? new Date(b.row[dateIndexLocal]).getTime() || 0
-            : 0;
-        return db - da || b.originalIndex - a.originalIndex;
-      })[0];
-
-    if (latestOperation) return parseFloat(latestOperation.row[counterIndexLocal]) || 0;
-    if (latestReset) {
-      return parseFloat(latestReset.newReading ?? latestReset.resetReading ?? latestReset.reading) || 0;
-    }
-
-    return parseFloat(station?.openingCounter) || parseFloat(station?.counter) || 0;
-  };
-
-const [showForm, setShowForm] = useState(false);
+  const [showForm, setShowForm] = useState(false);
   const [transactionType, setTransactionType] = useState("");
   const [stationMeterPhoto, setStationMeterPhoto] = useState(null);
   const [assetPhoto, setAssetPhoto] = useState(null);
@@ -633,8 +498,6 @@ const [showForm, setShowForm] = useState(false);
   const [selectedEquipmentHistory, setSelectedEquipmentHistory] = useState(null);
   const [operationPhotoViewer, setOperationPhotoViewer] = useState(null);
   const [operationPhotoViewerLoading, setOperationPhotoViewerLoading] = useState(false);
-  const [editedRows, setEditedRows] = useState({});
-  const [localAddedRows, setLocalAddedRows] = useState([]);
   const [auditLog, setAuditLog] = useState([]);
   const [editCell, setEditCell] = useState(null);
 
@@ -719,139 +582,7 @@ const [showForm, setShowForm] = useState(false);
     "fueler",
   ]);
 
-  const formatProjectFuelPriceDate = (rawDate) => {
-    if (!rawDate) return "-";
-    const date = new Date(rawDate);
-    if (Number.isNaN(date.getTime())) return "-";
 
-    return date.toLocaleString("en-GB", {
-      year: "numeric",
-      month: "2-digit",
-      day: "2-digit",
-      hour: "2-digit",
-      minute: "2-digit",
-    });
-  };
-
-  const openFuelPriceModal = (project) => {
-    if (!hasPermission("projects", "edit")) {
-      showToast?.("warning", "Read-only access: you cannot update project fuel price.");
-      return;
-    }
-
-    if (!project?.backendId) {
-      showToast?.("warning", "Project must be saved in backend before updating fuel price.");
-      return;
-    }
-
-    setSelectedProjectForFuelPrice(project);
-    setFuelPriceForm({
-      pricePerLiter:
-        project.currentFuelPrice === undefined || project.currentFuelPrice === null
-          ? ""
-          : String(project.currentFuelPrice),
-      effectiveFrom: project.fuelPriceEffectiveFrom
-        ? new Date(project.fuelPriceEffectiveFrom).toISOString().slice(0, 16)
-        : new Date().toISOString().slice(0, 16),
-      reason: "",
-    });
-    setFuelPriceModalOpen(true);
-  };
-
-  const closeFuelPriceModal = () => {
-    setFuelPriceModalOpen(false);
-    setSelectedProjectForFuelPrice(null);
-    setFuelPriceForm({
-      pricePerLiter: "",
-      effectiveFrom: "",
-      reason: "",
-    });
-    setFuelPriceSaving(false);
-  };
-
-  const saveProjectFuelPrice = async () => {
-    if (!selectedProjectForFuelPrice?.backendId) {
-      showToast?.("warning", "Project backend ID is required.");
-      return;
-    }
-
-    const pricePerLiter = Number(fuelPriceForm.pricePerLiter);
-
-    if (!Number.isFinite(pricePerLiter) || pricePerLiter <= 0) {
-      showToast?.("warning", "Fuel price must be greater than zero.");
-      return;
-    }
-
-    if (!fuelPriceForm.effectiveFrom) {
-      showToast?.("warning", "Effective date is required.");
-      return;
-    }
-
-    setFuelPriceSaving(true);
-
-    try {
-      const updatedPrice =
-        (await updateProjectFuelPrice(
-          selectedProjectForFuelPrice.backendId,
-          {
-            pricePerLiter,
-            effectiveFrom: new Date(fuelPriceForm.effectiveFrom).toISOString(),
-            reason: fuelPriceForm.reason?.trim() || "Project fuel price update",
-            ...(currentUser?.id ? { createdByUserId: currentUser.id } : {}),
-          }
-        )) || {};
-      const nextFuelPrice = Number(updatedPrice.pricePerLiter || pricePerLiter);
-      const nextCurrency =
-        updatedPrice.currency ||
-        selectedProjectForFuelPrice.fuelPriceCurrency ||
-        currentCompany?.currency ||
-        currency ||
-        "SAR";
-      const nextEffectiveFrom = updatedPrice.effectiveFrom || new Date(fuelPriceForm.effectiveFrom).toISOString();
-
-      const patchProject = (project) => ({
-        ...project,
-        currentFuelPrice: nextFuelPrice,
-        fuelPriceCurrency: nextCurrency,
-        fuelPriceEffectiveFrom: nextEffectiveFrom,
-      });
-
-      setLocalProjects((prev) => {
-        const key = normalizeScopeValue(selectedProjectForFuelPrice.id);
-        const exists = prev.some((project) => normalizeScopeValue(project.id) === key);
-
-        if (exists) {
-          return prev.map((project) =>
-            normalizeScopeValue(project.id) === key ? patchProject(project) : project
-          );
-        }
-
-        return [...prev, patchProject(selectedProjectForFuelPrice)];
-      });
-
-      if (selectedProject && normalizeScopeValue(selectedProject.id) === normalizeScopeValue(selectedProjectForFuelPrice.id)) {
-        setSelectedProject((prev) => (prev ? patchProject(prev) : prev));
-      }
-
-      trackActivity?.(
-        "Update Project Fuel Price",
-        "projects",
-        `${selectedProjectForFuelPrice.id} fuel price updated to ${nextFuelPrice} ${nextCurrency}/L.`
-      );
-
-      showToast?.("success", "Project fuel price updated successfully.");
-      closeFuelPriceModal();
-    } catch (error) {
-      const backendMessage = error?.response?.data?.message || "Failed to update project fuel price.";
-      notifyUser(
-        typeof showToast !== "undefined" ? showToast : null,
-        "warning",
-        Array.isArray(backendMessage) ? backendMessage.join(", ") : backendMessage
-      );
-    } finally {
-      setFuelPriceSaving(false);
-    }
-  };
 
   const operationIdIndex = getHeaderIndex(headers, [
     "operation_id",
@@ -1013,54 +744,12 @@ const [showForm, setShowForm] = useState(false);
     );
   };
 
-  const getAssetProjectByDate = (assetId, transactionDate) => {
+  const getAssetProject = (assetId) => {
     const asset = getAsset(assetId);
-
-    const operationDate = parseOperationDate(transactionDate);
-
-    if (!assetId || !operationDate) {
-      return asset?.project || "-";
-    }
-
-    const history = assetProjectHistory
-      .filter((item) => {
-        const historyCandidates = buildLookupCandidates(item.assetId, item.assetBackendId, item.backendId);
-        const assetCandidates = buildLookupCandidates(assetId, asset?.id, asset?.assetId, asset?.backendId, asset?.assetBackendId);
-        return historyCandidates.some((candidate) => assetCandidates.includes(candidate));
-      })
-      .filter((item) => item.effectiveDate)
-      .sort(
-        (a, b) => new Date(a.effectiveDate) - new Date(b.effectiveDate)
-      );
-
-    if (history.length === 0) {
-      return asset?.project || "-";
-    }
-
-    let project = history[0]?.oldProject || asset?.project || "-";
-
-    history.forEach((item) => {
-      const effectiveDate = new Date(item.effectiveDate);
-
-      if (
-        !Number.isNaN(effectiveDate.getTime()) &&
-        effectiveDate <= operationDate
-      ) {
-        project = item.newProject || project;
-      }
-    });
-
-    return project || asset?.project || "-";
+    return asset?.project || asset?.projectName || asset?.projectId || "-";
   };
 
-  const destinationOptions =
-    isAssetRefuelTransactionType(transactionType)
-      ? assets.map((a) => a.id)
-      : transactionType === "Internal_Transfer"
-      ? stations.map((s) => s.id)
-      : transactionType === "External_Supply" || transactionType === "External_Transfer"
-      ? stations.map((s) => s.id)
-      : [];
+
 
   const closeForm = () => {
     setShowForm(false);
@@ -1122,7 +811,6 @@ const payload = mapFrontendOperationToBackendPayload({
       // Close the form immediately and refresh the operations list in the background.
       closeForm();
       showToast?.(toastType, backendMessage);
-      setLocalAddedRows([]);
 
       trackActivity(
         "Add Operation",
@@ -1143,41 +831,7 @@ const payload = mapFrontendOperationToBackendPayload({
     }
   };
 
-  const deleteProject = async (project) => {
-    if (!hasPermission("projects", "delete")) {
-      showToast?.("warning", "Read-only access: you cannot delete projects.");
-      return;
-    }
 
-    const projectLabel = project?.name || project?.id || "this project";
-    const confirmed = window.confirm(
-      `Are you sure you want to delete ${projectLabel}?\n\nThis will hide the project from active screens, but it will remain in the database for audit history.`
-    );
-
-    if (!confirmed) return;
-
-    try {
-      if (typeof onDeleteProject === "function" && project?.backendId) {
-        await onDeleteProject(project);
-      } else {
-        setLocalProjects((prev) => prev.filter((item) => !isSameText(item.id, project.id)));
-      }
-
-      if (selectedProject && isSameText(selectedProject.id, project.id)) {
-        setSelectedProject(null);
-      }
-
-      trackActivity?.("Delete Project", "projects", `${project.id} was soft deleted.`);
-      showToast?.("success", "Project deleted successfully.");
-    } catch (error) {
-      const backendMessage = error?.response?.data?.message || "Failed to delete project.";
-      notifyUser(
-        typeof showToast !== "undefined" ? showToast : null,
-        "warning",
-        Array.isArray(backendMessage) ? backendMessage.join(", ") : backendMessage
-      );
-    }
-  };
 
   const exportRowsToCSV = (fileName, csvHeaders, csvRows) => {
     const csvContent = [csvHeaders, ...csvRows]
@@ -1284,7 +938,6 @@ const payload = mapFrontendOperationToBackendPayload({
       [
         "#",
         "Equipment No.",
-        "Project",
         "Equipment Type",
         "Last Odometer",
         "Fuel Consumption",
@@ -1295,7 +948,6 @@ const payload = mapFrontendOperationToBackendPayload({
       equipmentSummary.map((item, i) => [
         i + 1,
         item.equipmentNo,
-        item.project,
         item.equipmentType,
         item.lastOdometer,
         item.fuelConsumption,
@@ -1451,44 +1103,10 @@ const payload = mapFrontendOperationToBackendPayload({
     );
   };
 
-  const applyEditsToRow = (row, originalIndex) => {
-    const updates = editedRows[originalIndex];
-    if (!updates) return row;
 
-    const newRow = [...row];
 
-    // Preserve hidden backend fields attached to the row array.
-    // Spreading an array drops custom properties like __operation / __attachments.
-    newRow.__operation = row.__operation;
-    newRow.__attachments = row.__attachments;
-
-    if (updates.destinationId !== undefined && destinationIndex !== -1) {
-      newRow[destinationIndex] = updates.destinationId;
-    }
-
-    if (updates.dieselQuantity !== undefined && dieselIndex !== -1) {
-      newRow[dieselIndex] = updates.dieselQuantity;
-    }
-
-    if (updates.odometer !== undefined && odometerIndex !== -1) {
-      newRow[odometerIndex] = updates.odometer;
-    }
-
-    if (updates.sourceStation !== undefined && sourceIndex !== -1) {
-      newRow[sourceIndex] = updates.sourceStation;
-    }
-
-    if (updates.fuelerId !== undefined && fuelerIndex !== -1) {
-      newRow[fuelerIndex] = updates.fuelerId;
-    }
-
-    return newRow;
-  };
-
-  const combinedData = [...data, ...localAddedRows];
-
-  const workingData = combinedData.map((row, originalIndex) => ({
-    row: applyEditsToRow(row, originalIndex),
+  const workingData = data.map((row, originalIndex) => ({
+    row,
     originalIndex,
   }));
 
@@ -1521,13 +1139,30 @@ const payload = mapFrontendOperationToBackendPayload({
 
   const getOperationProjectName = (item) => {
     const row = item?.row || [];
-    const rawProject = getAssetProjectByDate(row[destinationIndex], row[dateIndex]);
+    const operation = row?.__operation || {};
+
+    const snapshotName =
+      operation.projectNameAtOperation ||
+      operation.projectSnapshotName ||
+      "";
+
+    if (snapshotName) return snapshotName;
+
+    const snapshotId =
+      operation.projectIdAtOperation ||
+      operation.projectSnapshotId ||
+      "";
+
+    if (snapshotId) return getProjectDisplayName(snapshotId);
+
+    // Legacy fallback only for rows created before the project snapshot migration.
+    const rawProject = getAssetProject(row[destinationIndex]);
     return getProjectDisplayName(rawProject);
   };
 
   const getOperationLiterPrice = (item) => {
     const row = item?.row || [];
-    const rawProject = getAssetProjectByDate(row[destinationIndex], row[dateIndex]);
+    const rawProject = getAssetProject(row[destinationIndex]);
     return getProjectFuelPriceValue(rawProject, row[dateIndex]);
   };
 
@@ -2679,13 +2314,12 @@ const payload = mapFrontendOperationToBackendPayload({
         <div className="relative z-0 w-full max-h-[360px] overflow-auto overflow-x-auto [scrollbar-color:#334155_transparent]">
           <table
               id="equipment-summary-table"
-              className="min-w-[980px] lg:min-w-[1100px] xl:min-w-[1180px] 2xl:min-w-[1350px] w-full border-collapse text-[11px] sm:text-xs lg:text-sm"
+              className="min-w-[880px] lg:min-w-[1000px] xl:min-w-[1080px] 2xl:min-w-[1220px] w-full border-collapse text-[11px] sm:text-xs lg:text-sm"
             >
             <thead className="bg-slate-800 sticky top-0 z-[1] shadow-sm">
               <tr>
                 <Th>#</Th>
                 <Th>Equipment No.</Th>
-                <Th>Project</Th>
                 <Th>Equipment Type</Th>
                 <Th>Last Odometer</Th>
                 <Th>Fuel Consumption</Th>
@@ -2709,7 +2343,6 @@ const payload = mapFrontendOperationToBackendPayload({
                     </button>
                   </Td>
 
-                  <Td>{item.project}</Td>
                   <Td>{item.equipmentType}</Td>
                   <Td>{formatNumber(item.lastOdometer)}</Td>
                   <Td>{formatNumber(item.fuelConsumption)}</Td>
@@ -3122,10 +2755,7 @@ const payload = mapFrontendOperationToBackendPayload({
                           </Td>
 
                           <Td>
-                            {getAssetProjectByDate(
-                              row[destinationIndex],
-                              row[dateIndex]
-                            )}
+                            {getOperationProjectName(item)}
                           </Td>
 
                           <Td>
@@ -3321,6 +2951,8 @@ const payload = mapFrontendOperationToBackendPayload({
           assets={assets}
           projects={projects}
           currentUser={currentUser}
+          activeProjectScopeLabel={activeProjectScopeLabel}
+          activeProjectScopeValues={activeProjectScopeValues}
           transactionType={transactionType}
           setTransactionType={setTransactionType}
           stationMeterPhoto={stationMeterPhoto}

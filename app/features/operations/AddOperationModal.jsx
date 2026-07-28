@@ -149,6 +149,8 @@ export default function AddOperationModal({
   assets = [],
   projects = [],
   currentUser,
+  activeProjectScopeLabel = "",
+  activeProjectScopeValues = [],
   transactionType,
   setTransactionType,
   stationMeterPhoto,
@@ -183,7 +185,19 @@ export default function AddOperationModal({
   const userProjectScope = getUserProjectScope(currentUser);
   const isAllProjectsUser = userCanAccessAllProjects(currentUser);
 
+  const normalizedActiveProjectScopeValues = useMemo(
+    () =>
+      (activeProjectScopeValues || [])
+        .filter(Boolean)
+        .map(normalizeScopeValue),
+    [activeProjectScopeValues]
+  );
+
   const userProjectDisplayName = useMemo(() => {
+    if (activeProjectScopeLabel) {
+      return activeProjectScopeLabel;
+    }
+
     if (isAllProjectsUser) return "All Projects";
 
     const linkedProjectName =
@@ -221,10 +235,40 @@ export default function AddOperationModal({
       userProjectScope[0] ||
       "-"
     );
-  }, [currentUser, isAllProjectsUser, projects, userProjectScope]);
+  }, [
+    activeProjectScopeLabel,
+    currentUser,
+    isAllProjectsUser,
+    projects,
+    userProjectScope,
+  ]);
 
-  const isItemInUserProject = (projectValue) => {
-    return isAllProjectsUser || isProjectAllowedForUser(currentUser, projectValue, projects);
+  const isItemInUserProject = (projectValue, item = null) => {
+    if (normalizedActiveProjectScopeValues.includes("all")) return true;
+
+    if (normalizedActiveProjectScopeValues.length) {
+      const itemProjectValues = [
+        projectValue,
+        item?.projectId,
+        item?.projectName,
+        item?.projectCode,
+        item?.project?.id,
+        item?.project?.backendId,
+        item?.project?.name,
+        item?.project?.code,
+      ]
+        .filter(Boolean)
+        .map(normalizeScopeValue);
+
+      return itemProjectValues.some((value) =>
+        normalizedActiveProjectScopeValues.includes(value)
+      );
+    }
+
+    return (
+      isAllProjectsUser ||
+      isProjectAllowedForUser(currentUser, projectValue, projects)
+    );
   };
 
   const allowedTransactionTypes = getAllowedTransactionTypesForUser(currentUser);
@@ -253,7 +297,7 @@ export default function AddOperationModal({
     return (
       station.id &&
       !isSameText(station.id, "External_Supply") &&
-      isItemInUserProject(station.project) &&
+      isItemInUserProject(station.project, station) &&
       status === "active"
     );
   });
@@ -264,14 +308,14 @@ export default function AddOperationModal({
     return (
       station.id &&
       !isSameText(station.id, "External_Supply") &&
-      !isItemInUserProject(station.project) &&
+      !isItemInUserProject(station.project, station) &&
       status === "active"
     );
   });
 
   const currentProjectAssets = assets.filter((asset) => {
     const status = String(asset.status || "").trim().toLowerCase();
-    return asset.id && isItemInUserProject(asset.project) && status === "active";
+    return asset.id && isItemInUserProject(asset.project, asset) && status === "active";
   });
 
   const sourceStationOptions = isExternalSource

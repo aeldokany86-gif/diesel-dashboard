@@ -50,7 +50,7 @@ const ASSETS_REPORTS = [
     id: "asset-transfer-history",
     title: "Asset Transfer History",
     description:
-      "Complete history of single and bulk asset transfers, including transfer reference, source project, destination project, requester, effective date and approval status.",
+      "Complete history of single and bulk asset transfers, including transfer reference, source project, destination project, requester, transfer date and approval status.",
     available: true,
   },
   {
@@ -81,7 +81,7 @@ const STATIONS_REPORTS = [
     id: "station-transfer",
     title: "Station Transfer Report",
     description:
-      "Complete history of station transfer requests including source and destination projects, stock at transfer, requester, approvers, effective date and approval status.",
+      "Complete history of station transfer requests including source and destination projects, stock at transfer, requester, approvers, transfer date and approval status.",
     available: true,
   },
 ];
@@ -362,6 +362,54 @@ function findEntityProject(value, entities = []) {
     matchedEntity?.projectCode ||
     ""
   );
+}
+
+function resolveOperationProjectLabel({
+  embeddedOperation,
+  source,
+  destination,
+  projects = [],
+  assets = [],
+  stations = [],
+}) {
+  const snapshotName =
+    embeddedOperation?.projectNameAtOperation ||
+    embeddedOperation?.projectSnapshotName ||
+    "";
+
+  if (snapshotName) return snapshotName;
+
+  const snapshotId =
+    embeddedOperation?.projectIdAtOperation ||
+    embeddedOperation?.projectSnapshotId ||
+    "";
+
+  if (snapshotId) {
+    const normalizedSnapshotId = normalizeValue(snapshotId);
+    const matchedProject = projects.find((project) =>
+      [
+        project?.id,
+        project?.backendId,
+        project?.name,
+        project?.projectName,
+        project?.code,
+        project?.projectCode,
+      ]
+        .filter(Boolean)
+        .map(normalizeValue)
+        .includes(normalizedSnapshotId)
+    );
+
+    return matchedProject ? getProjectLabel(matchedProject) : snapshotId;
+  }
+
+  return resolveProjectLabel({
+    source,
+    destination,
+    projects,
+    assets,
+    stations,
+  });
 }
 
 function resolveProjectLabel({
@@ -685,7 +733,8 @@ function FuelSuppliersReport({
         const project =
           embeddedOperation?.destinationStation?.project?.name ||
           embeddedOperation?.project?.name ||
-          resolveProjectLabel({
+          resolveOperationProjectLabel({
+            embeddedOperation,
             source: "",
             destination: destinationLabel,
             projects,
@@ -2080,7 +2129,7 @@ const ASSET_TRANSFER_HEADERS = [
   "Requested By",
   "Requested Date",
   "Approved / Rejected Date",
-  "Effective Date",
+  "Transfer Date",
   "Status",
 ];
 
@@ -2238,9 +2287,11 @@ function AssetTransferHistoryReport({
             transfer?.rejectedAt ||
             transfer?.payload?.transfer?.rejectedAt ||
             "",
-          effectiveDate:
-            transfer?.effectiveDate ||
-            transfer?.payload?.transfer?.effectiveDate ||
+          transferDate:
+            transfer?.appliedAt ||
+            transfer?.payload?.transfer?.appliedAt ||
+            transfer?.approvedAt ||
+            transfer?.payload?.transfer?.approvedAt ||
             "",
           status:
             transfer?.status ||
@@ -2273,7 +2324,7 @@ function AssetTransferHistoryReport({
       requestedBy: firstRow.requestedBy,
       requestedDate: firstRow.requestedDate,
       reviewDate: firstRow.reviewDate,
-      effectiveDate: firstRow.effectiveDate,
+      transferDate: firstRow.transferDate,
       status: firstRow.status,
       assets: matchedRows.map((row) => ({
         key: row.key,
@@ -2515,9 +2566,7 @@ function AssetTransferHistoryReport({
         row.requestedBy,
         formatDateTime(row.requestedDate),
         formatDateTime(row.reviewDate),
-        row.effectiveDate
-          ? new Date(row.effectiveDate).toLocaleDateString("en-GB")
-          : "-",
+        formatDateTime(row.transferDate),
         formatOperationType(row.status),
       ]),
     });
@@ -2538,9 +2587,7 @@ function AssetTransferHistoryReport({
         "Requested By": row.requestedBy,
         "Requested Date": formatDateTime(row.requestedDate),
         "Approved / Rejected Date": formatDateTime(row.reviewDate),
-        "Effective Date": row.effectiveDate
-          ? new Date(row.effectiveDate).toLocaleDateString("en-GB")
-          : "-",
+        "Transfer Date": formatDateTime(row.transferDate),
         Status: formatOperationType(row.status),
       })),
       totals: {
@@ -2762,9 +2809,7 @@ function AssetTransferHistoryReport({
                             {formatDateTime(row.reviewDate)}
                           </td>
                           <td className="whitespace-nowrap px-3 py-3 text-slate-300">
-                            {row.effectiveDate
-                              ? new Date(row.effectiveDate).toLocaleDateString("en-GB")
-                              : "-"}
+                            {formatDateTime(row.transferDate)}
                           </td>
                           <td className="whitespace-nowrap px-3 py-3">
                             <span
@@ -2847,12 +2892,8 @@ function AssetTransferHistoryReport({
                       formatDateTime(selectedTransferGroup.reviewDate),
                     ],
                     [
-                      "Effective Date",
-                      selectedTransferGroup.effectiveDate
-                        ? new Date(
-                            selectedTransferGroup.effectiveDate
-                          ).toLocaleDateString("en-GB")
-                        : "-",
+                      "Transfer Date",
+                      formatDateTime(selectedTransferGroup.transferDate),
                     ],
                     ["Status", formatOperationType(selectedTransferGroup.status)],
                     ["Assets Count", selectedTransferGroup.assets.length],
@@ -3933,6 +3974,8 @@ export default function ReportsPage({
 
   const reportRows = useMemo(() => {
     return (data || []).map((row, index) => {
+      const embeddedOperation = getEmbeddedOperation(row);
+
       const operationNo = getRowValue(row, headers, [
         "operation_id",
         "operation no",
@@ -3967,7 +4010,8 @@ export default function ReportsPage({
         "external_station_name",
       ]);
 
-      const project = resolveProjectLabel({
+      const project = resolveOperationProjectLabel({
+        embeddedOperation,
         source,
         destination,
         projects,

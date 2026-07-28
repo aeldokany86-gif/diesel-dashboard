@@ -151,7 +151,7 @@ export default function ProjectsPage({
   onCreateProject,
   onUpdateProject,
   onDeleteProject,
-  refreshProjects,
+  onProjectFuelPriceUpdated,
   onAssignProjectManager,
   users = [],
   theme = "dark",
@@ -264,18 +264,27 @@ export default function ProjectsPage({
         fuelPriceEffectiveFrom: nextEffectiveFrom,
       });
 
-      setLocalProjects((prev) => {
-        const key = normalizeScopeValue(selectedProjectForFuelPrice.id);
-        const exists = prev.some((project) => normalizeScopeValue(project.id) === key);
+      if (typeof onProjectFuelPriceUpdated === "function") {
+        onProjectFuelPriceUpdated(selectedProjectForFuelPrice, {
+          currentFuelPrice: nextFuelPrice,
+          fuelPriceCurrency: nextCurrency,
+          fuelPriceEffectiveFrom: nextEffectiveFrom,
+        });
+      } else {
+        // Local-only fallback for standalone use without the parent state callback.
+        setLocalProjects((prev) => {
+          const key = normalizeScopeValue(selectedProjectForFuelPrice.id);
+          const exists = prev.some((project) => normalizeScopeValue(project.id) === key);
 
-        if (exists) {
-          return prev.map((project) =>
-            normalizeScopeValue(project.id) === key ? patchProject(project) : project
-          );
-        }
+          if (exists) {
+            return prev.map((project) =>
+              normalizeScopeValue(project.id) === key ? patchProject(project) : project
+            );
+          }
 
-        return [...prev, patchProject(selectedProjectForFuelPrice)];
-      });
+          return [...prev, patchProject(selectedProjectForFuelPrice)];
+        });
+      }
 
       if (
         selectedProject &&
@@ -334,13 +343,6 @@ export default function ProjectsPage({
   }, [shouldUseLocationDropdown, projectLocationOptions.join("|")]);
 
   useEffect(() => {
-    if (typeof refreshProjects !== "function") return;
-    if (!currentCompanyId || isPlatformContextValue(currentCompanyId)) return;
-
-    refreshProjects(currentCompanyId);
-  }, [currentCompanyId]);
-
-  useEffect(() => {
     async function loadProjectManagerOptions() {
       if (currentUser?.role !== "Admin") {
         setBackendProjectManagers([]);
@@ -348,6 +350,13 @@ export default function ProjectsPage({
       }
 
       if (!currentCompanyId || isPlatformContextValue(currentCompanyId)) {
+        setBackendProjectManagers([]);
+        return;
+      }
+
+      // page.js already supplies users. Avoid another Users API request
+      // every time ProjectsPage mounts when usable data is already present.
+      if (Array.isArray(users) && users.length > 0) {
         setBackendProjectManagers([]);
         return;
       }
@@ -378,7 +387,7 @@ export default function ProjectsPage({
     }
 
     loadProjectManagerOptions();
-  }, [currentUser?.role, currentCompanyId]);
+  }, [currentUser?.role, currentCompanyId, users]);
 
   const projectManagerOptions = useMemo(() => {
     const combinedUsers = uniqueUsersById([
@@ -563,18 +572,20 @@ export default function ProjectsPage({
     "odometer",
   ]);
 
-  const baseProjects = projects.map((project) => ({
-    ...project,
-    approvalStatus: project.approvalStatus || "Approved",
-  }));
+  const allProjects = useMemo(() => {
+    const baseProjects = projects.map((project) => ({
+      ...project,
+      approvalStatus: project.approvalStatus || "Approved",
+    }));
 
-  const allProjects = Object.values(
-    [...baseProjects, ...localProjects].reduce((acc, project) => {
-      if (!project?.id) return acc;
-      acc[normalizeText(project.id)] = project;
-      return acc;
-    }, {})
-  );
+    return Object.values(
+      [...baseProjects, ...localProjects].reduce((acc, project) => {
+        if (!project?.id) return acc;
+        acc[normalizeText(project.id)] = project;
+        return acc;
+      }, {})
+    );
+  }, [projects, localProjects]);
 
   const matchProject = (value, project) => {
     return isSameText(value, project.id) || isSameText(value, project.name);
@@ -652,29 +663,91 @@ export default function ProjectsPage({
     return project || asset?.project || "-";
   };
 
-  const getDirectRefuelOperations = (project) => {
-    return data
-      .map((row, originalIndex) => ({ row, originalIndex }))
-      .filter((item) => {
-        const row = item.row;
-        const operationType = typeIndex !== -1 ? row[typeIndex] : "";
-        const destination = destinationIndex !== -1 ? row[destinationIndex] : "";
-        const transactionDate = dateIndex !== -1 ? row[dateIndex] : "";
-        const assetProjectAtOperation = getAssetProjectByDate(
-          destination,
-          transactionDate
-        );
+  const directRefuelOperationsByProject = useMemo(() => {
+    const lookup = new Map();
 
-        return (
-          isSameText(operationType, "Direct_Refuel") &&
-          matchProject(assetProjectAtOperation, project)
-        );
-      })
-      .sort((a, b) => {
-        const da = dateIndex !== -1 ? parseProjectDate(a.row[dateIndex])?.getTime() || 0 : 0;
-        const db = dateIndex !== -1 ? parseProjectDate(b.row[dateIndex])?.getTime() || 0 : 0;
+    const addOperation = (projectValue, item) => {
+      const normalizedProject = normalizeScopeValue(projectValue);
+      if (!normalizedProject) return;
+
+      if (!lookup.has(normalizedProject)) {
+        lookup.set(normalizedProject, []);
+      }
+
+      lookup.get(normalizedProject).push(item);
+    };
+
+    data.forEach((row, originalIndex) => {
+      const operationType = typeIndex !== -1 ? row[typeIndex] : "";
+
+      if (!isSameText(operationType, "Direct_Refuel")) {
+        return;
+      }
+
+      const destination =
+        destinationIndex !== -1 ? row[destinationIndex] : "";
+      const transactionDate =
+        dateIndex !== -1 ? row[dateIndex] : "";
+
+      const embeddedOperation =
+        row?.__operation ||
+        row?.operation ||
+        row?.backendOperation ||
+        null;
+
+      const projectAtOperation =
+        embeddedOperation?.projectNameAtOperation ||
+        embeddedOperation?.projectIdAtOperation ||
+        getAssetProjectByDate(destination, transactionDate);
+
+      addOperation(projectAtOperation, {
+        row,
+        originalIndex,
+      });
+    });
+
+    lookup.forEach((items) => {
+      items.sort((a, b) => {
+        const da =
+          dateIndex !== -1
+            ? parseProjectDate(a.row[dateIndex])?.getTime() || 0
+            : 0;
+        const db =
+          dateIndex !== -1
+            ? parseProjectDate(b.row[dateIndex])?.getTime() || 0
+            : 0;
+
         return db - da;
       });
+    });
+
+    return lookup;
+  }, [
+    data,
+    typeIndex,
+    destinationIndex,
+    dateIndex,
+    assets,
+    assetProjectHistory,
+  ]);
+
+  const getDirectRefuelOperations = (project) => {
+    const projectKeys = [
+      project?.id,
+      project?.backendId,
+      project?.name,
+      project?.code,
+      project?.projectCode,
+    ]
+      .filter(Boolean)
+      .map(normalizeScopeValue);
+
+    for (const key of projectKeys) {
+      const operations = directRefuelOperationsByProject.get(key);
+      if (operations) return operations;
+    }
+
+    return [];
   };
 
   const getFilteredProjectOperations = (project) => {
@@ -686,7 +759,9 @@ export default function ProjectsPage({
     return operations.filter((item) => {
       const row = item.row;
       const searchableValues = [
-        operationIdIndex !== -1 ? row[operationIdIndex] : item.originalIndex + 1,
+        operationIdIndex !== -1
+          ? row[operationIdIndex]
+          : item.originalIndex + 1,
         dateIndex !== -1 ? row[dateIndex] : "",
         sourceIndex !== -1 ? row[sourceIndex] : "",
         fuelerIndex !== -1 ? row[fuelerIndex] : "",
@@ -706,66 +781,122 @@ export default function ProjectsPage({
     return getLiterPriceByDate ? getLiterPriceByDate(date) : 2.33;
   };
 
-  const getProjectDieselQuantity = (project) => {
-    return getDirectRefuelOperations(project).reduce((sum, item) => {
-      const diesel = dieselIndex !== -1 ? parseFloat(item.row[dieselIndex]) || 0 : 0;
-      return sum + diesel;
-    }, 0);
-  };
+  const projectSummary = useMemo(() => {
+    const now = new Date().toISOString();
 
-  const getProjectDieselCost = (project) => {
-    const projectFuelPrice = Number(project.currentFuelPrice || 0);
+    return allProjects.map((project) => {
+      const assignedAssetsCount = assets.filter((asset) => {
+        const currentProject = getAssetProjectByDate(asset.id, now);
+        return matchProject(currentProject, project);
+      }).length;
 
-    return getDirectRefuelOperations(project).reduce((sum, item) => {
-      const storedCost = getOperationTotalCostAtOperation(item.row);
+      const assignedStationsCount = stations.filter((station) =>
+        matchProject(station.project, project)
+      ).length;
 
-      if (storedCost > 0) {
-        return sum + storedCost;
-      }
+      const assignedFuelersCount = fuelers.filter((fueler) =>
+        matchProject(fueler.projectName, project)
+      ).length;
 
-      const diesel = dieselIndex !== -1 ? parseFloat(item.row[dieselIndex]) || 0 : 0;
-      const literPriceForProject = projectFuelPrice > 0 ? projectFuelPrice : getOperationLiterPrice(item.row);
-      return sum + diesel * literPriceForProject;
-    }, 0);
-  };
+      const directRefuelOperations =
+        getDirectRefuelOperations(project);
 
-  const projectSummarySource = allProjects;
+      let dieselQty = 0;
+      let dieselCost = 0;
+      const projectFuelPrice = Number(
+        project.currentFuelPrice || 0
+      );
 
-  const projectSummary = projectSummarySource.map((project) => {
-    const assignedAssets = getProjectAssets(project);
-    const assignedStations = getProjectStations(project);
-    const assignedFuelers = getProjectFuelers(project);
-    const directRefuelOperations = getDirectRefuelOperations(project);
-    const dieselQty = getProjectDieselQuantity(project);
-    const dieselCost = getProjectDieselCost(project);
+      directRefuelOperations.forEach((item) => {
+        const diesel =
+          dieselIndex !== -1
+            ? parseFloat(item.row[dieselIndex]) || 0
+            : 0;
 
-    return {
-      ...project,
-      projectManagerName: getProjectManagerDisplayName(project),
-      assignedAssetsCount: assignedAssets.length,
-      assignedStationsCount: assignedStations.length,
-      assignedFuelersCount: assignedFuelers.length,
-      operationsCount: directRefuelOperations.length,
-      dieselQty,
-      dieselCost,
-    };
-  });
+        dieselQty += diesel;
 
-  const filteredProjects = projectSummary.filter((project) => {
+        const storedCost =
+          getOperationTotalCostAtOperation(item.row);
+
+        if (storedCost > 0) {
+          dieselCost += storedCost;
+          return;
+        }
+
+        const fallbackPrice =
+          projectFuelPrice > 0
+            ? projectFuelPrice
+            : getOperationLiterPrice(item.row);
+
+        dieselCost += diesel * fallbackPrice;
+      });
+
+      return {
+        ...project,
+        projectManagerName:
+          getProjectManagerDisplayName(project),
+        assignedAssetsCount,
+        assignedStationsCount,
+        assignedFuelersCount,
+        operationsCount: directRefuelOperations.length,
+        dieselQty,
+        dieselCost,
+      };
+    });
+  }, [
+    allProjects,
+    assets,
+    stations,
+    fuelers,
+    assetProjectHistory,
+    directRefuelOperationsByProject,
+    dieselIndex,
+    dateIndex,
+    getLiterPriceByDate,
+    projectManagerOptions,
+  ]);
+
+  const filteredProjects = useMemo(() => {
     const search = searchTerm.trim().toLowerCase();
-    const matchesSearch =
-      !search ||
-      String(project.id || "").toLowerCase().includes(search) ||
-      String(project.name || "").toLowerCase().includes(search) ||
-      String(project.status || "").toLowerCase().includes(search);
 
-    return matchesSearch;
-  });
+    return projectSummary.filter((project) => {
+      return (
+        !search ||
+        String(project.id || "").toLowerCase().includes(search) ||
+        String(project.name || "").toLowerCase().includes(search) ||
+        String(project.status || "").toLowerCase().includes(search)
+      );
+    });
+  }, [projectSummary, searchTerm]);
 
-  const activeProjects = projectSummary.filter((p) => isSameText(p.status, "Active")).length;
-  const inactiveProjects = projectSummary.filter((p) => !isSameText(p.status, "Active")).length;
-  const totalDiesel = projectSummary.reduce((sum, project) => sum + project.dieselQty, 0);
-  const totalCost = projectSummary.reduce((sum, project) => sum + project.dieselCost, 0);
+  const projectTotals = useMemo(() => {
+    return projectSummary.reduce(
+      (totals, project) => {
+        if (isSameText(project.status, "Active")) {
+          totals.activeProjects += 1;
+        } else {
+          totals.inactiveProjects += 1;
+        }
+
+        totals.totalDiesel += project.dieselQty;
+        totals.totalCost += project.dieselCost;
+        return totals;
+      },
+      {
+        activeProjects: 0,
+        inactiveProjects: 0,
+        totalDiesel: 0,
+        totalCost: 0,
+      }
+    );
+  }, [projectSummary]);
+
+  const {
+    activeProjects,
+    inactiveProjects,
+    totalDiesel,
+    totalCost,
+  } = projectTotals;
 
   const closeForm = () => {
     setShowForm(false);

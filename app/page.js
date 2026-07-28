@@ -462,7 +462,62 @@ function getStationProjectValue(stationId, stations = []) {
   );
 }
 
-function getRowProjectValue(row, headers, assets = [], stations = []) {
+function getRowProjectValues(row, headers, assets = [], stations = []) {
+  const operation =
+    row?.__operation ||
+    row?.operation ||
+    row?.backendOperation ||
+    null;
+
+  const typeIndex = getHeaderIndex(headers, [
+    "transaction_type",
+    "Transaction type",
+    "transaction type",
+    "operation_type",
+    "Operation type",
+  ]);
+
+  const operationType = String(
+    operation?.type ||
+    (typeIndex !== -1 ? row[typeIndex] : "")
+  )
+    .trim()
+    .toUpperCase()
+    .replace(/[\s-]+/g, "_");
+
+  /*
+    Scope by the operation's primary historical project.
+    Source/destination snapshots are used together only for cross-project
+    External Transfer, where both project managers must be able to see it.
+  */
+  const primarySnapshotValues = [
+    operation?.projectIdAtOperation,
+    operation?.projectNameAtOperation,
+  ].filter(Boolean);
+
+  const crossProjectSnapshotValues =
+    operationType === "EXTERNAL_TRANSFER"
+      ? [
+          ...primarySnapshotValues,
+          operation?.sourceProjectIdAtOperation,
+          operation?.sourceProjectNameAtOperation,
+          operation?.destinationProjectIdAtOperation,
+          operation?.destinationProjectNameAtOperation,
+        ].filter(Boolean)
+      : primarySnapshotValues;
+
+  if (crossProjectSnapshotValues.length) {
+    return Array.from(
+      new Map(
+        crossProjectSnapshotValues.map((value) => [
+          normalizeScopeValue(value),
+          value,
+        ])
+      ).values()
+    );
+  }
+
+  // Legacy fallback only for operations created before project snapshots existed.
   const explicitProject = getValue(row, headers, [
     "project",
     "Project",
@@ -474,15 +529,7 @@ function getRowProjectValue(row, headers, assets = [], stations = []) {
     "Site",
   ]);
 
-  if (explicitProject) return explicitProject;
-
-  const typeIndex = getHeaderIndex(headers, [
-    "transaction_type",
-    "Transaction type",
-    "transaction type",
-    "operation_type",
-    "Operation type",
-  ]);
+  if (explicitProject) return [explicitProject];
 
   const sourceIndex = getHeaderIndex(headers, [
     "source_station",
@@ -514,36 +561,66 @@ function getRowProjectValue(row, headers, assets = [], stations = []) {
     "Target Equipment",
   ]);
 
-  const operationType = typeIndex !== -1 ? row[typeIndex] : "";
   const sourceStation = sourceIndex !== -1 ? row[sourceIndex] : "";
   const destination = destinationIndex !== -1 ? row[destinationIndex] : "";
   const assetValue = assetIndex !== -1 ? row[assetIndex] : "";
 
   if (isAssetRefuelTransactionType(operationType)) {
-    return (
+    const projectValue =
       getAssetProjectValue(assetValue, assets) ||
-      getAssetProjectValue(destination, assets)
-    );
+      getAssetProjectValue(destination, assets);
+
+    return projectValue ? [projectValue] : [];
   }
 
-  return (
-    getStationProjectValue(sourceStation, stations) ||
-    getStationProjectValue(destination, stations) ||
-    getAssetProjectValue(assetValue, assets) ||
-    getAssetProjectValue(destination, assets)
-  );
+  return [
+    getStationProjectValue(sourceStation, stations),
+    getStationProjectValue(destination, stations),
+    getAssetProjectValue(assetValue, assets),
+    getAssetProjectValue(destination, assets),
+  ].filter(Boolean);
+}
+
+function getRowProjectValue(row, headers, assets = [], stations = []) {
+  return getRowProjectValues(row, headers, assets, stations)[0] || "";
 }
 
 
 function inferRowCompanyId(row, headers, assets = [], stations = [], projects = []) {
-  const explicitCompanyId = getValue(row, headers, ["company_id", "Company ID", "company id", "company"]);
+  const explicitCompanyId =
+    row?.__operation?.companyId ||
+    getValue(row, headers, [
+      "company_id",
+      "Company ID",
+      "company id",
+      "company",
+    ]);
+
   if (explicitCompanyId) return explicitCompanyId;
 
-  const rowProject = getRowProjectValue(row, headers, assets, stations);
-  const matchedProject = projects.find((project) =>
-    normalizeScopeValue(project.id) === normalizeScopeValue(rowProject) ||
-    normalizeScopeValue(project.name) === normalizeScopeValue(rowProject)
-  );
+  const rowProjectValues = getRowProjectValues(
+    row,
+    headers,
+    assets,
+    stations
+  ).map(normalizeScopeValue);
+
+  const matchedProject = projects.find((project) => {
+    const projectValues = [
+      project?.id,
+      project?.backendId,
+      project?.projectId,
+      project?.code,
+      project?.name,
+      project?.projectName,
+    ]
+      .filter(Boolean)
+      .map(normalizeScopeValue);
+
+    return projectValues.some((value) =>
+      rowProjectValues.includes(value)
+    );
+  });
 
   return matchedProject?.companyId || "";
 }
@@ -1085,6 +1162,29 @@ useEffect(() => {
     );
 
     return updatedProject;
+  };
+
+  const handleProjectFuelPriceUpdated = (project, fuelPricePatch = {}) => {
+    const backendId = normalizeScopeValue(project?.backendId || project?.id);
+    const projectId = normalizeScopeValue(project?.id);
+
+    setProjects((prev) =>
+      prev.map((item) => {
+        const itemBackendId = normalizeScopeValue(item?.backendId || item?.id);
+        const itemProjectId = normalizeScopeValue(item?.id);
+
+        const isTargetProject =
+          (backendId && itemBackendId === backendId) ||
+          (projectId && itemProjectId === projectId);
+
+        return isTargetProject
+          ? {
+              ...item,
+              ...fuelPricePatch,
+            }
+          : item;
+      })
+    );
   };
 
   const handleAssignProjectManager = async (project, managerUserId) => {
@@ -2430,11 +2530,24 @@ useEffect(() => {
       return projectValues.some((value) => baseCurrentUserProjectScopeValues.includes(value));
     });
 
-    return allowedProjects.map((project) => ({
+    const individualProjectOptions = allowedProjects.map((project) => ({
       value: project.id || project.backendId || project.name,
       label: project.name || project.code || project.id,
       project,
     }));
+
+    if (currentUser.role === "Manager" && individualProjectOptions.length > 1) {
+      return [
+        ...individualProjectOptions,
+        {
+          value: "__all_managed_projects__",
+          label: "All My Projects",
+          project: null,
+        },
+      ];
+    }
+
+    return individualProjectOptions;
   }, [currentUser, companyProjects, baseCurrentUserProjectScopeValues]);
 
   useEffect(() => {
@@ -2466,6 +2579,10 @@ useEffect(() => {
     if (!selectedProjectScopeOption) return [];
     if (selectedProjectScopeOption.value === "all") return ["all"];
 
+    if (selectedProjectScopeOption.value === "__all_managed_projects__") {
+      return baseCurrentUserProjectScopeValues;
+    }
+
     const project = selectedProjectScopeOption.project;
 
     return [
@@ -2477,11 +2594,17 @@ useEffect(() => {
     ]
       .filter(Boolean)
       .map(normalizeScopeValue);
-  }, [selectedProjectScopeOption]);
+  }, [selectedProjectScopeOption, baseCurrentUserProjectScopeValues]);
 
   const currentUserProjectScopeValues = selectedProjectScopeValues.length
     ? selectedProjectScopeValues
     : baseCurrentUserProjectScopeValues;
+
+  const activeOperationProjectScopeLabel =
+    selectedProjectScopeOption?.label ||
+    selectedProjectScopeOption?.project?.name ||
+    selectedProjectScopeOption?.project?.code ||
+    "All Projects";
 
   const currentUserCanAccessAllOperationalProjects = currentUserProjectScopeValues.includes("all");
 
@@ -2572,10 +2695,116 @@ useEffect(() => {
   const scopedData = currentUserCanAccessAllOperationalProjects
     ? companyData
     : companyData.filter((row) =>
-        projectValueMatchesCurrentScope(
-          getRowProjectValue(row, headers, companyAssets, companyStations)
-        )
+        getRowProjectValues(
+          row,
+          headers,
+          companyAssets,
+          companyStations
+        ).some(projectValueMatchesCurrentScope)
       );
+
+  /*
+    Operations dashboard metadata lookup:
+    Keep operation visibility controlled by scopedData, but resolve equipment
+    metadata from all company assets so historical operations still show the
+    correct Equipment Type after an asset moves to another project.
+
+    A Map keeps lookups O(1), avoiding repeated Array.find calls as the number
+    of assets and operations grows.
+  */
+  const companyAssetLookup = useMemo(() => {
+    const lookup = new Map();
+
+    (companyAssets || []).forEach((asset) => {
+      [
+        asset?.id,
+        asset?.assetId,
+        asset?.backendId,
+        asset?.assetBackendId,
+        asset?.equipmentNo,
+        asset?.equipmentNumber,
+        asset?.equipment_no,
+        asset?.equipment_number,
+      ]
+        .filter(Boolean)
+        .forEach((value) => {
+          lookup.set(normalizeScopeValue(value), asset);
+        });
+    });
+
+    return lookup;
+  }, [companyAssets]);
+
+  const operationAssets = useMemo(() => {
+    const visibleAssets = new Map();
+
+    const addAsset = (asset) => {
+      if (!asset) return;
+
+      const identity =
+        normalizeScopeValue(
+          asset.backendId ||
+          asset.assetBackendId ||
+          asset.id ||
+          asset.assetId ||
+          asset.equipmentNo ||
+          asset.equipmentNumber
+        );
+
+      if (identity) {
+        visibleAssets.set(identity, asset);
+      }
+    };
+
+    // Keep assets already inside the selected project scope.
+    (scopedAssets || []).forEach(addAsset);
+
+    const destinationIndex = getHeaderIndex(headers, [
+      "destination_id",
+      "Destination ID",
+      "destination id",
+      "destination",
+    ]);
+
+    const assetIndex = getHeaderIndex(headers, [
+      "asset_id",
+      "Asset ID",
+      "asset id",
+      "equipment_no",
+      "Equipment No",
+      "equipment no",
+      "equipment_number",
+      "Equipment Number",
+      "machine_id",
+      "Machine ID",
+      "target_equipment",
+      "Target Equipment",
+    ]);
+
+    (scopedData || []).forEach((row) => {
+      const operation = row?.__operation || {};
+      const candidateValues = [
+        operation?.assetId,
+        operation?.asset?.id,
+        operation?.asset?.assetId,
+        assetIndex !== -1 ? row?.[assetIndex] : "",
+        destinationIndex !== -1 ? row?.[destinationIndex] : "",
+      ]
+        .filter(Boolean)
+        .map(normalizeScopeValue);
+
+      candidateValues.forEach((candidate) => {
+        addAsset(companyAssetLookup.get(candidate));
+      });
+    });
+
+    return Array.from(visibleAssets.values());
+  }, [
+    scopedAssets,
+    scopedData,
+    headers,
+    companyAssetLookup,
+  ]);
 
   const loadPendingBackendOperationApprovals = async () => {
     if (!currentUser?.id || currentUser.status !== "Active") {
@@ -2895,7 +3124,7 @@ useEffect(() => {
           data={scopedData}
           headers={headers}
           setData={setData}
-          assets={scopedAssets}
+          assets={operationAssets}
           stations={scopedStations}
           allStations={companyStations}
           fuelers={scopedTeamMembers}
@@ -2906,6 +3135,8 @@ useEffect(() => {
           assetOdometerHistory={assetOdometerHistory}
           stationCounterResetHistory={stationCounterResetHistory}
           currentUser={currentUser}
+          activeProjectScopeLabel={activeOperationProjectScopeLabel}
+          activeProjectScopeValues={currentUserProjectScopeValues}
           hasPermission={hasPermission}
           trackActivity={trackActivity}
           submitApprovalRequest={submitApprovalRequest}
@@ -3017,7 +3248,7 @@ if (page === "projects") {
       onUpdateProject={handleUpdateProject}
       onDeleteProject={handleDeleteProject}
       onAssignProjectManager={handleAssignProjectManager}
-      refreshProjects={refreshBackendProjects}
+      onProjectFuelPriceUpdated={handleProjectFuelPriceUpdated}
       users={companyUsers}
       theme={theme}
     />

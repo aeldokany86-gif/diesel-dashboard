@@ -205,11 +205,6 @@ export default function StationsPage({
   data,
   headers,
   showToast,
-  literPrice,
-  priceHistory = [],
-  setPriceHistory,
-  getLiterPriceByDate,
-  currency,
   currentUser,
   hasPermission = () => false,
   trackActivity = () => {},
@@ -241,14 +236,13 @@ export default function StationsPage({
     );
   };
 
-const [deletingStation, setDeletingStation] = useState(null);
   const [counterResetStation, setCounterResetStation] = useState(null);
   const [stationCounterResetValue, setStationCounterResetValue] = useState("");
   const [stationCounterResetDate, setStationCounterResetDate] = useState("");
   const [stationCounterResetReason, setStationCounterResetReason] = useState("");
   const [stationCounterResetLoading, setStationCounterResetLoading] = useState(false);
 
-const getLatestStationResetRecord = (stationId, companyId = "") => {
+  const getLatestStationResetRecord = (stationId, companyId = "") => {
     return (stationCounterResetHistory || [])
       .filter((item) => {
         const sameStation = isSameText(item.stationId || item.entityId, stationId);
@@ -317,46 +311,6 @@ const getLatestStationResetRecord = (stationId, companyId = "") => {
   };
 
 
-  const getStationCounterRows = (stationId) => {
-    if (stationCounterIndex === -1) return [];
-
-    return data
-      .map((row, originalIndex) => {
-        const type = row[typeIndex];
-        const destination =
-          destinationIndex !== -1 ? row[destinationIndex] : "";
-        const reading = parseFloat(row[stationCounterIndex]);
-        const operationTime =
-          dateIndex !== -1
-            ? new Date(row[dateIndex]).getTime() || 0
-            : originalIndex;
-
-        return {
-          row,
-          originalIndex,
-          type,
-          destination,
-          reading,
-          operationTime,
-        };
-      })
-      .filter((item) => {
-        if (Number.isNaN(item.reading)) return false;
-        if (isSameText(item.type, "Direct_Refuel")) return false;
-
-        return (
-          (isSameText(item.type, "Internal_Transfer") ||
-            isSameText(item.type, "External_Transfer") ||
-            isSameText(item.type, "External_Supply")) &&
-          isSameText(item.destination, stationId)
-        );
-      })
-      .sort(
-        (a, b) =>
-          a.operationTime - b.operationTime ||
-          a.originalIndex - b.originalIndex
-      );
-  };
 
   const getTotalPumpedLitersFromOperations = (station) => {
     if (dieselIndex === -1 || typeIndex === -1 || sourceIndex === -1) {
@@ -383,7 +337,7 @@ const getLatestStationResetRecord = (stationId, companyId = "") => {
   };
 
 
-const saveStationCounterReset = async ({
+  const saveStationCounterReset = async ({
     station,
     newReading,
     effectiveFrom,
@@ -519,10 +473,10 @@ const saveStationCounterReset = async ({
     }
   };
 
-const [showForm, setShowForm] = useState(false);
+  const [showForm, setShowForm] = useState(false);
   const [showSettings, setShowSettings] = useState(false);
   const [showExportMenu, setShowExportMenu] = useState(false);
-  const [selectedProject, setSelectedProject] = useState("All");
+  const [searchTerm, setSearchTerm] = useState("");
   const stationSettingsRef = useRef(null);
   const stationSettingsMenuAlign = useSmartDropdownPosition(stationSettingsRef, showSettings, 256);
 
@@ -534,12 +488,11 @@ const [showForm, setShowForm] = useState(false);
   const [selectedStation, setSelectedStation] = useState(null);
   const [zeroBalanceReason, setZeroBalanceReason] = useState("Daily reconciliation after station emptying");
   const [selectedStationHistory, setSelectedStationHistory] = useState(null);
-    const [editingProjectStation, setEditingProjectStation] = useState(null);
+  const [editingProjectStation, setEditingProjectStation] = useState(null);
   const [stationTransferStockConfirmation, setStationTransferStockConfirmation] = useState(null);
   const [newStationProject, setNewStationProject] = useState("");
-    const [newStationOpeningCounter, setNewStationOpeningCounter] = useState("0");
-const [showConfirm, setShowConfirm] = useState(false);
-  const [showPassword, setShowPassword] = useState(false);
+  const [newStationOpeningCounter, setNewStationOpeningCounter] = useState("0");
+  const [showConfirm, setShowConfirm] = useState(false);
   const [localAdjustments, setLocalAdjustments] = useState([]);
   const [localStationStatusUpdates, setLocalStationStatusUpdates] = useState({});
   const [localStations, setLocalStations] = useState([]);
@@ -569,24 +522,8 @@ const [showConfirm, setShowConfirm] = useState(false);
   const [deleteTargetStation, setDeleteTargetStation] = useState(null);
   const [stationDeleteReason, setStationDeleteReason] = useState("");
   const [showStationDeleteConfirm, setShowStationDeleteConfirm] = useState(false);
-  const [showStationDeletePassword, setShowStationDeletePassword] = useState(false);
-  const [stationDeletePassword, setStationDeletePassword] = useState("");
 
-  const [counterTargetStation, setCounterTargetStation] = useState(null);
-  const [oldCounterBeforeReset, setOldCounterBeforeReset] = useState("");
-  const [newStationCounter, setNewStationCounter] = useState("");
-  const [stationCounterEffectiveDate, setStationCounterEffectiveDate] = useState("");
-  const [stationCounterReason, setStationCounterReason] = useState("");
-  const [showStationCounterConfirm, setShowStationCounterConfirm] = useState(false);
-  const [showStationCounterPassword, setShowStationCounterPassword] = useState(false);
-  const [stationCounterPassword, setStationCounterPassword] = useState("");
-  const [stationCounterHistory, setStationCounterHistory] = useState([]);
 
-  const [showLiterPrice, setShowLiterPrice] = useState(false);
-  const [newLiterPrice, setNewLiterPrice] = useState("");
-  const [effectiveDatetime, setEffectiveDatetime] = useState("");
-  const [showPriceConfirm, setShowPriceConfirm] = useState(false);
-  const [showPricePassword, setShowPricePassword] = useState(false);
 
 
   const stationIdDuplicateError = getDuplicateIdError(
@@ -798,7 +735,6 @@ const [showConfirm, setShowConfirm] = useState(false);
     setStationSaveLoading(false);
   };
 
-  const countryFlag = "🇸🇦";
 
   const dieselIndex = getHeaderIndex(headers, [
     "diesel_quantity",
@@ -1112,19 +1048,6 @@ const [showConfirm, setShowConfirm] = useState(false);
     }
   };
 
-  const refreshBackendStationsForCompany = async (companyId) => {
-    if (!companyId || isPlatformContextValue(companyId)) return;
-
-    const backendStations = await fetchStations({ companyId });
-    const mappedStations = backendStations.map(mapBackendStationForState);
-
-    setStations((prev) => {
-      const otherCompanies = prev.filter(
-        (station) => !companyMatches(getItemCompanyId(station), companyId)
-      );
-      return filterDuplicateTenantEntities([...mappedStations, ...otherCompanies]);
-    });
-  };
 
 
   const openStatusChange = (station) => {
@@ -1319,17 +1242,6 @@ const [showConfirm, setShowConfirm] = useState(false);
     }
   };
 
-  const getCurrentStationCounter = (station) => {
-    const latestCounterRecord = stationCounterHistory
-      .filter((item) => isSameText(item.stationId, station.id))
-      .sort((a, b) => new Date(b.requestedAt) - new Date(a.requestedAt))[0];
-
-    if (latestCounterRecord) {
-      return latestCounterRecord.newCounterAfterReset;
-    }
-
-    return Number(station.counter) || 0;
-  };
 
   const proceedStationDeleteConfirm = () => {
     if (!deleteTargetStation) return;
@@ -1426,8 +1338,6 @@ const [showConfirm, setShowConfirm] = useState(false);
       setDeleteTargetStation(null);
       setStationDeleteReason("");
       setShowStationDeleteConfirm(false);
-      setShowStationDeletePassword(false);
-      setStationDeletePassword("");
 
       showToast?.("success", "Station soft deleted successfully.");
     } catch (error) {
@@ -1445,118 +1355,7 @@ const [showConfirm, setShowConfirm] = useState(false);
     }
   };
 
-  const proceedStationCounterConfirm = () => {
-    const oldReading = Number(oldCounterBeforeReset);
-    const newReading = Number(newStationCounter);
 
-    if (oldCounterBeforeReset === "" || Number.isNaN(oldReading) || oldReading < 0) {
-      showToast
-        ? showToast("warning", "Please enter valid old station counter before reset.")
-        : notifyUser(
-            typeof showToast !== "undefined" ? showToast : null,
-            inferToastTypeFromMessage("Please enter valid old station counter before reset."),
-            "Please enter valid old station counter before reset."
-          );
-      return;
-    }
-
-    if (newStationCounter === "" || Number.isNaN(newReading) || newReading < 0) {
-      showToast
-        ? showToast("warning", "Please enter valid new station counter after reset.")
-        : notifyUser(
-            typeof showToast !== "undefined" ? showToast : null,
-            inferToastTypeFromMessage("Please enter valid new station counter after reset."),
-            "Please enter valid new station counter after reset."
-          );
-      return;
-    }
-
-    if (!stationCounterEffectiveDate) {
-      showToast
-        ? showToast("warning", "Please select station counter reset effective date.")
-        : notifyUser(
-            typeof showToast !== "undefined" ? showToast : null,
-            inferToastTypeFromMessage("Please select station counter reset effective date."),
-            "Please select station counter reset effective date."
-          );
-      return;
-    }
-
-    if (!stationCounterReason) {
-      showToast
-        ? showToast("warning", "Please enter reset reason.")
-        : notifyUser(
-            typeof showToast !== "undefined" ? showToast : null,
-            inferToastTypeFromMessage("Please enter reset reason."),
-            "Please enter reset reason."
-          );
-      return;
-    }
-
-    setShowStationCounterConfirm(true);
-  };
-
-  const proceedStationCounterPassword = () => {
-    setShowStationCounterConfirm(false);
-    confirmStationCounterRequest();
-  };
-
-  const confirmStationCounterRequest = () => {
-    if (!hasPermission("stations", "edit")) {
-      showToast?.("warning", "Read-only access: you cannot request station counter reset.");
-      return;
-    }
-
-    const oldReading = Number(oldCounterBeforeReset) || 0;
-    const newReading = Number(newStationCounter) || 0;
-
-    const stationCounterHistoryRecord = {
-      stationId: counterTargetStation.id,
-      oldCounterBeforeReset: oldReading,
-      newCounterAfterReset: newReading,
-      effectiveDate: stationCounterEffectiveDate,
-      counterOffset: oldReading,
-      actualCounterAfterReset: oldReading + newReading,
-      reason: stationCounterReason,
-      requestedBy: currentUser?.fullName || currentUser?.name || "System",
-      requestedAt: new Date().toISOString(),
-      status: "Pending Approval",
-    };
-
-    setStationCounterHistory((prev) => [...prev, stationCounterHistoryRecord]);
-
-    submitApprovalRequest({
-      type: "master_data_change",
-      module: "stations",
-      title: `Station ${counterTargetStation?.id} counter reset`,
-      details: stationCounterReason,
-      payload: {
-        entity: "station",
-        action: "station_counter_reset",
-        values: stationCounterHistoryRecord,
-      },
-    });
-
-    setCounterTargetStation(null);
-    setOldCounterBeforeReset("");
-    setNewStationCounter("");
-    setStationCounterEffectiveDate("");
-    setStationCounterReason("");
-    setShowStationCounterConfirm(false);
-    setShowStationCounterPassword(false);
-    setStationCounterPassword("");
-
-    showToast
-      ? showToast(
-          "success",
-          "Station counter reset request submitted for manager approval."
-        )
-      : notifyUser(
-          typeof showToast !== "undefined" ? showToast : null,
-          inferToastTypeFromMessage("Station counter reset request submitted for manager approval."),
-          "Station counter reset request submitted for manager approval."
-        );
-  };
   const stationCurrentCounterMap = useMemo(() => {
     const map = new Map();
 
@@ -1617,10 +1416,6 @@ const [showConfirm, setShowConfirm] = useState(false);
     stationCounterIndex,
   ]);
 
-const getLatestStationCounter = (stationId, fallbackValue = 0) => {
-    const latest = stationCurrentCounterMap.get(normalizeScopeValue(stationId));
-    return latest?.value ?? fallbackValue ?? 0;
-  };
 
   const calculateStationBalance = (station) => {
     // Backend stations use database currentStock as the source of truth.
@@ -1687,20 +1482,35 @@ const getLatestStationCounter = (stationId, fallbackValue = 0) => {
     };
   });
 
-  const projectOptions = [
-    "All",
-    ...new Set(stationsWithBalance.map((station) => station.project).filter(Boolean)),
-  ];
-
   const transferProjectOptions =
     transferProjects.length > 0
       ? filterActiveProjects(transferProjects).map((project) => project.name || project.id).filter(Boolean)
       : [];
 
-  const filteredStations =
-    selectedProject === "All"
-      ? stationsWithBalance
-      : stationsWithBalance.filter((station) => station.project === selectedProject);
+  const filteredStations = stationsWithBalance.filter((station) => {
+    const search = searchTerm.trim().toLowerCase();
+    if (!search) return true;
+
+    const searchableText = [
+      station.id,
+      station.stationId,
+      station.name,
+      station.type,
+      station.project,
+      station.originalProject,
+      station.status,
+      station.capacity,
+      station.currentStock,
+      station.currentCounter,
+      station.lifetimeCounter,
+      station.totalPumpedFromOperations,
+    ]
+      .filter((value) => value !== undefined && value !== null)
+      .join(" ")
+      .toLowerCase();
+
+    return searchableText.includes(search);
+  });
 
   const stationConsumptionChartData = filteredStations
     .map((station) => {
@@ -1977,58 +1787,6 @@ const getLatestStationCounter = (stationId, fallbackValue = 0) => {
     }
   };
 
-  const proceedLiterPriceConfirm = () => {
-    if (!newLiterPrice || Number(newLiterPrice) <= 0) {
-      showToast
-        ? showToast("warning", "Please enter a valid liter price.")
-        : notifyUser(typeof showToast !== "undefined" ? showToast : null, inferToastTypeFromMessage("Please enter a valid liter price."), "Please enter a valid liter price.");
-      return;
-    }
-
-    if (!effectiveDatetime) {
-      showToast
-        ? showToast("warning", "Please select effective date and time.")
-        : notifyUser(typeof showToast !== "undefined" ? showToast : null, inferToastTypeFromMessage("Please select effective date and time."), "Please select effective date and time.");
-      return;
-    }
-
-    setShowLiterPrice(false);
-    setShowPriceConfirm(true);
-  };
-
-  const proceedLiterPricePassword = () => {
-    setShowPriceConfirm(false);
-    confirmLiterPriceUpdate();
-  };
-
-  const confirmLiterPriceUpdate = () => {
-    if (!hasPermission("stations", "updatePrice")) {
-      showToast?.("warning", "Read-only access: you cannot update liter price.");
-      return;
-    }
-
-
-    if (setPriceHistory) {
-      setPriceHistory((prev) =>
-        [
-          ...prev,
-          {
-            price: Number(newLiterPrice),
-            effectiveFrom: effectiveDatetime,
-            createdBy: currentUser?.fullName || currentUser?.name || "System",
-            createdAt: new Date().toISOString(),
-          },
-        ].sort((a, b) => new Date(a.effectiveFrom) - new Date(b.effectiveFrom))
-      );
-    }
-
-        setNewLiterPrice("");
-    setEffectiveDatetime("");
-
-    showToast
-      ? showToast("success", "Liter price updated successfully.")
-      : notifyUser(typeof showToast !== "undefined" ? showToast : null, inferToastTypeFromMessage("Liter price updated successfully."), "Liter price updated successfully.");
-  };
 
   const exportStationsToCSV = () => {
     const csvHeaders = [
@@ -2222,7 +1980,16 @@ const getLatestStationCounter = (stationId, fallbackValue = 0) => {
           <p className="text-gray-400">Fuel stock management</p>
         </div>
 
-        <div ref={stationSettingsRef} className="relative settings-layer-safe">
+        <div className="flex flex-wrap items-center justify-end gap-3">
+          <input
+            type="text"
+            placeholder="Search by station ID, name, project, type, status..."
+            value={searchTerm}
+            onChange={(e) => setSearchTerm(e.target.value)}
+            className="bg-gray-800 border border-gray-700 rounded-xl px-4 py-3 text-white w-full sm:w-[380px] focus:outline-none focus:border-yellow-400"
+          />
+
+          <div ref={stationSettingsRef} className="relative settings-layer-safe">
          <button
   onClick={(e) => {
     e.stopPropagation();
@@ -2325,29 +2092,7 @@ const getLatestStationCounter = (stationId, fallbackValue = 0) => {
               </div>
             </div>
           )}
-        </div>
-      </div>
-
-      <div className="bg-gray-800 border border-gray-700 rounded-2xl p-3 mb-4">
-        <div className="flex flex-wrap gap-4 items-center">
-          <select
-            value={selectedProject}
-            onChange={(e) => setSelectedProject(e.target.value)}
-            className="bg-gray-900 border border-gray-700 hover:border-yellow-400 text-white px-3 lg:px-4 py-2 lg:py-3 rounded-xl w-full sm:min-w-[240px] outline-none text-[12px] lg:text-sm"
-          >
-            {projectOptions.map((project) => (
-              <option key={project} value={project}>
-                {project === "All" ? "All Projects" : project}
-              </option>
-            ))}
-          </select>
-
-          <button
-            onClick={() => setSelectedProject("All")}
-            className="bg-red-500/10 hover:bg-red-500/20 text-red-300 border border-red-500/35 px-3 lg:px-4 py-2.5 rounded-xl cursor-pointer transition-all duration-200"
-          >
-            Reset Filter
-          </button>
+          </div>
         </div>
       </div>
 
@@ -2547,7 +2292,9 @@ const getLatestStationCounter = (stationId, fallbackValue = 0) => {
           </div>
 
           <span className="text-sm text-slate-400">
-            {selectedProject === "All" ? "All Projects" : selectedProject}
+            {searchTerm.trim()
+              ? `${filteredStations.length} matching station${filteredStations.length === 1 ? "" : "s"}`
+              : "All Stations"}
           </span>
         </div>
 
@@ -2581,7 +2328,7 @@ const getLatestStationCounter = (stationId, fallbackValue = 0) => {
       </div>
 
       {selectedStationHistory && (
-        <div className="fixed inset-0 bg-black/75 backdrop-blur-sm flex items-center justify-center z-[10000] p-3">
+        <div className="fixed inset-0 z-[12000] bg-black/75 backdrop-blur-sm flex items-center justify-center p-3">
           <div className="bg-slate-950 text-white w-full max-w-[min(1150px,calc(100vw-2rem))] max-h-[92vh] rounded-3xl shadow-2xl border border-slate-700 overflow-hidden min-w-0">
             <div className="p-3 sm:p-5 border-b border-gray-700 flex justify-between items-start gap-3">
               <div>
@@ -2689,7 +2436,7 @@ const getLatestStationCounter = (stationId, fallbackValue = 0) => {
 
 
       {editingProjectStation && (
-        <div className="fixed inset-0 bg-black/70 flex items-center justify-center z-50">
+        <div className="fixed inset-0 z-[12000] bg-black/70 flex items-center justify-center">
           <div className="bg-white text-black w-[560px] rounded-2xl shadow-2xl p-6">
             <div className="flex justify-between items-center mb-5 border-b pb-3">
               <div>
@@ -2756,7 +2503,7 @@ const getLatestStationCounter = (stationId, fallbackValue = 0) => {
       )}
 
       {stationTransferStockConfirmation && (
-        <div className="fleet-modal-backdrop fixed inset-0 z-[10010] bg-black/60 flex items-center justify-center p-4">
+        <div className="fleet-modal-backdrop fixed inset-0 z-[12000] bg-black/60 flex items-center justify-center p-4">
           <div className="bg-white text-black w-full max-w-[520px] rounded-xl shadow-xl p-6">
             <div className="flex justify-between items-center mb-6 border-b pb-3">
               <h2 className="text-xl sm:text-2xl font-bold">
@@ -2816,70 +2563,11 @@ const getLatestStationCounter = (stationId, fallbackValue = 0) => {
       )}
 
 
-      {deletingStation && (
-        <ModalPortal>
-          <div className="fixed inset-0 bg-black/70 flex items-center justify-center z-[9999] p-4">
-            <div className="bg-slate-950 text-white w-full max-w-[520px] rounded-3xl shadow-2xl border border-red-500/40 overflow-hidden min-w-0">
-              <div className="p-5 border-b border-slate-700">
-                <h2 className="text-2xl font-bold text-red-400">Delete Station</h2>
-                <p className="text-sm text-slate-400 mt-1">
-                  Submit a delete request for station{" "}
-                  <span className="text-blue-300 font-semibold">{deletingStation.id}</span>
-                </p>
-              </div>
 
-              <div className="p-5 space-y-4">
-                <div className="rounded-2xl bg-red-500/10 border border-red-500/30 p-4 text-sm text-red-200">
-                  This is approval-ready and does not remove historical operations.
-                </div>
-
-                <div className="flex justify-end gap-3 pt-3 border-t border-slate-700">
-                  <button
-                    onClick={() => setDeletingStation(null)}
-                    className="px-4 py-2 rounded-xl bg-slate-800 hover:bg-slate-700"
-                  >
-                    Cancel
-                  </button>
-
-                  <button
-                    onClick={() => {
-                      submitApprovalRequest?.({
-                        type: "station_delete",
-                        module: "stations",
-                        title: `Delete Station ${deletingStation.id}`,
-                        details: `Delete request submitted for station ${deletingStation.id}.`,
-                        payload: {
-                          action: "delete",
-                          entity: "Station",
-                          id: deletingStation.id,
-                          companyId: deletingStation.companyId || currentUser?.companyId || "",
-                          station: deletingStation,
-                        },
-                      });
-
-                      trackActivity?.(
-                        "Request Delete Station",
-                        "stations",
-                        `${deletingStation.id} delete request submitted.`
-                      );
-
-                      notifyUser(showToast, "warning", "Station delete request submitted.");
-                      setDeletingStation(null);
-                    }}
-                    className="px-4 py-2 rounded-xl bg-red-600 text-white font-bold hover:bg-red-500"
-                  >
-                    Submit Delete Request
-                  </button>
-                </div>
-              </div>
-            </div>
-          </div>
-        </ModalPortal>
-      )}
 
       {counterResetStation && (
         <ModalPortal>
-          <div className="fixed inset-0 bg-black/70 flex items-center justify-center z-[9999] p-4">
+          <div className="fixed inset-0 z-[12000] bg-black/70 flex items-center justify-center p-4">
             <div className="bg-slate-950 text-white w-full max-w-[560px] rounded-3xl shadow-2xl border border-slate-700 overflow-hidden min-w-0">
               <div className="p-5 border-b border-slate-700 flex items-start justify-between">
                 <div>
@@ -2998,7 +2686,7 @@ const getLatestStationCounter = (stationId, fallbackValue = 0) => {
 
       {showForm && (
         <ModalPortal>
-          <div className="fleet-portal-modal-backdrop fixed inset-0 bg-black/60 flex items-center justify-center p-4">
+          <div className="fleet-portal-modal-backdrop fixed inset-0 z-[12000] bg-black/60 flex items-center justify-center p-4">
             <div className="fleet-portal-modal-panel bg-white text-black w-[min(650px,calc(100vw-2rem))] max-h-[92vh] overflow-y-auto rounded-xl shadow-2xl p-6">
             <div className="flex justify-between items-center mb-6 border-b pb-3">
               <h2 className="text-xl sm:text-2xl font-bold">Add Station</h2>
@@ -3102,7 +2790,7 @@ const getLatestStationCounter = (stationId, fallbackValue = 0) => {
       )}
 
       {statusEditStation && (
-        <div className="fleet-modal-backdrop fixed inset-0 z-[9998] bg-black/60 flex items-center justify-center">
+        <div className="fleet-modal-backdrop fixed inset-0 z-[12000] bg-black/60 flex items-center justify-center">
           <div className="bg-white text-black w-[520px] rounded-xl shadow-xl p-6">
             <div className="flex justify-between items-center mb-6 border-b pb-3">
               <h2 className="text-xl sm:text-2xl font-bold">Confirm Station Status Change</h2>
@@ -3141,7 +2829,7 @@ const getLatestStationCounter = (stationId, fallbackValue = 0) => {
       )}
 
       {deleteTargetStation && (
-        <div className="fixed inset-0 bg-black/75 backdrop-blur-sm flex items-center justify-center z-[10000] p-3">
+        <div className="fixed inset-0 z-[12000] bg-black/75 backdrop-blur-sm flex items-center justify-center p-3">
           <div className="bg-white text-black w-[520px] rounded-2xl p-6 shadow-2xl">
             <h2 className="text-xl sm:text-2xl font-bold mb-2 text-red-600">
               Delete Station
@@ -3181,7 +2869,7 @@ const getLatestStationCounter = (stationId, fallbackValue = 0) => {
       )}
 
       {showStationDeleteConfirm && (
-        <div className="fixed inset-0 bg-black/75 backdrop-blur-sm flex items-center justify-center z-[10000] p-3">
+        <div className="fixed inset-0 z-[12000] bg-black/75 backdrop-blur-sm flex items-center justify-center p-3">
           <div className="bg-white text-black w-[500px] rounded-2xl p-6 shadow-2xl">
             <h2 className="text-xl sm:text-2xl font-bold mb-4 text-red-600">
               Confirm Delete Request
@@ -3218,127 +2906,11 @@ const getLatestStationCounter = (stationId, fallbackValue = 0) => {
         </div>
       )}
 
-      {counterTargetStation && (
-        <div className="fixed inset-0 bg-black/75 backdrop-blur-sm flex items-center justify-center z-[10000] p-3">
-          <div className="bg-white text-black w-[520px] rounded-2xl p-6 shadow-2xl">
-            <h2 className="text-xl sm:text-2xl font-bold mb-2 text-yellow-600">
-              Station Counter Reset
-            </h2>
 
-            <p className="text-gray-600 mb-5">
-              Station: <strong>{counterTargetStation.id}</strong>
-            </p>
-
-            <label className="block text-sm font-medium text-gray-700 mb-2">
-              Old Counter Before Reset
-            </label>
-            <input
-              type="number"
-              value={oldCounterBeforeReset}
-              onChange={(e) => setOldCounterBeforeReset(e.target.value)}
-              placeholder="Reading before reset"
-              className="border rounded-xl p-3 w-full mb-4"
-            />
-
-            <label className="block text-sm font-medium text-gray-700 mb-2">
-              New Counter After Reset
-            </label>
-            <input
-              type="number"
-              value={newStationCounter}
-              onChange={(e) => setNewStationCounter(e.target.value)}
-              placeholder="New reading after reset"
-              className="border rounded-xl p-3 w-full mb-4"
-            />
-
-            <label className="block text-sm font-medium text-gray-700 mb-2">
-              Effective Date & Time
-            </label>
-            <input
-              type="datetime-local"
-              value={stationCounterEffectiveDate}
-              onChange={(e) => setStationCounterEffectiveDate(e.target.value)}
-              className="border rounded-xl p-3 w-full mb-4"
-            />
-
-            <textarea
-              value={stationCounterReason}
-              onChange={(e) => setStationCounterReason(e.target.value)}
-              placeholder="Enter reset reason, e.g. station meter replaced..."
-              className="border rounded-xl p-3 w-full h-28 mb-5"
-            />
-
-            <div className="flex justify-end gap-3">
-              <button
-                onClick={() => {
-                  setCounterTargetStation(null);
-                  setOldCounterBeforeReset("");
-                  setNewStationCounter("");
-                  setStationCounterEffectiveDate("");
-                  setStationCounterReason("");
-                }}
-                className="bg-gray-200 px-3 lg:px-4 py-2 rounded-lg"
-              >
-                Cancel
-              </button>
-
-              <button
-                onClick={proceedStationCounterConfirm}
-                className="bg-yellow-500 text-black px-3 lg:px-4 py-2 rounded-lg"
-              >
-                Continue
-              </button>
-            </div>
-          </div>
-        </div>
-      )}
-
-      {showStationCounterConfirm && (
-        <div className="fixed inset-0 bg-black/75 backdrop-blur-sm flex items-center justify-center z-[10000] p-3">
-          <div className="bg-white text-black w-[500px] rounded-2xl p-6 shadow-2xl">
-            <h2 className="text-xl sm:text-2xl font-bold mb-4 text-yellow-600">
-              Confirm Station Counter Reset
-            </h2>
-
-            <div className="bg-gray-100 rounded-xl p-4 mb-5 text-sm">
-              <p>
-                <strong>Station:</strong> {counterTargetStation?.id}
-              </p>
-              <p>
-                <strong>Old Counter:</strong> {formatNumber(oldCounterBeforeReset)}
-              </p>
-              <p>
-                <strong>New Counter:</strong> {formatNumber(newStationCounter)}
-              </p>
-              <p>
-                <strong>Effective Date:</strong> {stationCounterEffectiveDate}
-              </p>
-              <p>
-                <strong>Reason:</strong> {stationCounterReason}
-              </p>
-            </div>
-
-            <div className="flex justify-end gap-3">
-              <button
-                onClick={() => setShowStationCounterConfirm(false)}
-                className="bg-gray-200 px-3 lg:px-4 py-2 rounded-lg"
-              >
-                Back
-              </button>
-
-              <button
-                onClick={proceedStationCounterPassword}
-                className="bg-yellow-500 text-black px-3 lg:px-4 py-2 rounded-lg"
-              >
-                Yes, Continue
-              </button>
-            </div>
-          </div>
-        </div>
-      )}
 
       {showStockCountAdjustment && (
-        <div className="fleet-modal-backdrop fixed inset-0 z-[9998] bg-black/60 flex items-center justify-center z-50">
+        <ModalPortal>
+          <div className="fleet-portal-modal-backdrop fixed inset-0 z-[12000] bg-black/60 backdrop-blur-sm flex items-center justify-center p-4">
           <div className="bg-white text-black w-[580px] rounded-xl shadow-xl p-6">
             <h2 className="text-xl font-bold mb-4 text-amber-600">
               Inventory Adjustment Request
@@ -3438,10 +3010,11 @@ const getLatestStationCounter = (stationId, fallbackValue = 0) => {
             </div>
           </div>
         </div>
+        </ModalPortal>
       )}
 
       {showConfirm && (
-        <div className="fleet-modal-backdrop fixed inset-0 z-[9998] bg-black/60 flex items-center justify-center z-50">
+        <div className="fleet-modal-backdrop fixed inset-0 z-[12000] bg-black/60 flex items-center justify-center">
           <div className="bg-white text-black w-[560px] rounded-xl shadow-xl p-6">
             <h2 className="text-xl font-bold mb-4 text-red-600">
               Zero Balance Adjustment
