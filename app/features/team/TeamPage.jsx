@@ -109,6 +109,42 @@ const TEAM_CREATE_USER_ROLE_NAMES = [
   "Top Management",
 ];
 
+function unwrapEmployeeTransferResult(result) {
+  return result?.transfer || result?.data?.transfer || result?.data || result || {};
+}
+
+function isEmployeeTransferApplied(result, toProjectId) {
+  const transfer = unwrapEmployeeTransferResult(result);
+  const normalizedStatus = normalizeScopeValue(
+    transfer?.status || transfer?.approvalStatus || transfer?.transferStatus
+  );
+
+  if (["approved", "completed", "applied"].includes(normalizedStatus)) {
+    return true;
+  }
+
+  if (
+    transfer?.autoApproved === true ||
+    transfer?.isAutoApproved === true ||
+    transfer?.applied === true ||
+    transfer?.requiresApproval === false
+  ) {
+    return true;
+  }
+
+  const transferredEmployee = transfer?.employee || transfer?.updatedEmployee;
+  const resultingProjectId =
+    transferredEmployee?.projectId ||
+    transferredEmployee?.project?.id ||
+    transfer?.employeeProjectId;
+
+  return Boolean(
+    resultingProjectId &&
+      toProjectId &&
+      normalizeScopeValue(resultingProjectId) === normalizeScopeValue(toProjectId)
+  );
+}
+
 export default function TeamPage({
   fuelers = [],
   users = [],
@@ -126,6 +162,7 @@ export default function TeamPage({
   onCreateEmployee,
   onUpdateEmployee,
   onCreateEmployeeTransfer,
+  onCreateBulkEmployeeTransfer,
   onCreateUserFromEmployee,
   onUpdateUserStatus,
   onLoadRoles,
@@ -149,8 +186,6 @@ export default function TeamPage({
   const [bulkTransferModalOpen, setBulkTransferModalOpen] = useState(false);
   const [bulkTransferProjectId, setBulkTransferProjectId] = useState("");
   const [savingBulkTransfer, setSavingBulkTransfer] = useState(false);
-
-  const getTodayDateInputValue = () => new Date().toISOString().slice(0, 10);
 
   const fuelersSettingsRef = useRef(null);
 
@@ -460,9 +495,96 @@ export default function TeamPage({
     setSelectedTeamMemberIds([]);
   };
 
+  const applyTransferredEmployeeProjectInState = (
+    fueler,
+    projectId,
+    projectName
+  ) => {
+    if (!fueler?.id) return;
+
+    setLocalFuelerUpdates((prev) => ({
+      ...prev,
+      [fueler.id]: {
+        ...prev[fueler.id],
+        projectId,
+        projectName,
+      },
+    }));
+  };
+
+  const getProjectManagerId = (project = {}) =>
+    project.projectManagerId ||
+    project.managerUserId ||
+    project.managerId ||
+    project.projectManager?.id ||
+    project.manager?.id ||
+    "";
+
+  const findTransferProject = (projectValue) => {
+    const normalizedValue = normalizeScopeValue(projectValue);
+
+    return [...(transferProjects || []), ...(projects || [])].find(
+      (project) =>
+        normalizeScopeValue(project.backendId || project.id) === normalizedValue ||
+        normalizeScopeValue(project.id) === normalizedValue ||
+        normalizeScopeValue(project.name) === normalizedValue ||
+        normalizeScopeValue(project.code) === normalizedValue
+    );
+  };
+
+  const projectsHaveSameManager = (fueler, toProjectId) => {
+    const fromProject = findTransferProject(
+      fueler?.projectId || fueler?.projectName || fueler?.project
+    );
+    const toProject = findTransferProject(toProjectId);
+    const fromManagerId = getProjectManagerId(fromProject);
+    const toManagerId = getProjectManagerId(toProject);
+
+    return Boolean(
+      fromManagerId &&
+        toManagerId &&
+        normalizeScopeValue(fromManagerId) === normalizeScopeValue(toManagerId)
+    );
+  };
+
+  const shouldApplyEmployeeTransfer = (result, fueler, toProjectId) => {
+    if (isEmployeeTransferApplied(result, toProjectId)) return true;
+
+    const transfer = unwrapEmployeeTransferResult(result);
+    const normalizedStatus = normalizeScopeValue(
+      transfer?.status || transfer?.approvalStatus || transfer?.transferStatus
+    );
+
+    if (
+      ["pending", "partially approved", "partially_approved"].includes(
+        normalizedStatus
+      )
+    ) {
+      return false;
+    }
+
+    return projectsHaveSameManager(fueler, toProjectId);
+  };
+
   const openBulkTransferModal = () => {
-    if (!hasPermission("team", "edit")) {
-      showToast?.("warning", "Read-only access: you cannot transfer team members.");
+    const restrictedFuelers = selectedTeamFuelers.filter(
+      (fueler) => !canRequestTeamProjectTransfer(fueler)
+    );
+
+    if (restrictedFuelers.length > 0) {
+      const currentRole = normalizeBackendRoleName(
+        currentUser?.role || currentUser?.roleName || ""
+      );
+      const includesManagerTransfer = restrictedFuelers.some(
+        isFuelerManagerSystemRole
+      );
+
+      showToast?.(
+        "warning",
+        currentRole === "Manager" && includesManagerTransfer
+          ? "Manager and Top Management employees can only be transferred by an Officer. Remove them from the selection and try again."
+          : "Your selection includes team members you are not allowed to transfer."
+      );
       return;
     }
 
@@ -494,7 +616,7 @@ export default function TeamPage({
       return;
     }
 
-    if (typeof onCreateEmployeeTransfer !== "function") {
+    if (typeof onCreateBulkEmployeeTransfer !== "function") {
       showToast?.("warning", "Employee transfer API is not configured.");
       return;
     }
@@ -503,18 +625,55 @@ export default function TeamPage({
 
     try {
       const targetProjectName = getProjectNameById(bulkTransferProjectId);
+      const eligibleFuelers = selectedTeamFuelers.filter(
+        (fueler) =>
+          normalizeText(fueler.projectId || fueler.projectName) !==
+          normalizeText(bulkTransferProjectId)
+      );
+      const bulkResult = await onCreateBulkEmployeeTransfer(
+        eligibleFuelers,
+        bulkTransferProjectId
+      );
+      const transfers = Array.isArray(bulkResult?.transfers)
+        ? bulkResult.transfers
+        : [];
+      let appliedTransfersCount = 0;
+      let pendingTransfersCount = 0;
 
-      for (const fueler of selectedTeamFuelers) {
-        if (normalizeText(fueler.projectId || fueler.projectName) === normalizeText(bulkTransferProjectId)) {
-          continue;
+      for (const transferResult of transfers) {
+        const fueler = eligibleFuelers.find(
+          (item) =>
+            normalizeText(item.backendId || item.employeeBackendId || item.id) ===
+            normalizeText(
+              transferResult.employeeBackendId || transferResult.employeeId
+            )
+        );
+
+        if (!fueler) continue;
+
+        if (
+          shouldApplyEmployeeTransfer(
+            transferResult,
+            fueler,
+            bulkTransferProjectId
+          )
+        ) {
+          applyTransferredEmployeeProjectInState(
+            fueler,
+            bulkTransferProjectId,
+            targetProjectName
+          );
+          appliedTransfersCount += 1;
+        } else {
+          pendingTransfersCount += 1;
         }
-
-        await onCreateEmployeeTransfer(fueler, bulkTransferProjectId);
       }
 
       showToast?.(
         "success",
-        `Bulk transfer request submitted for ${selectedTeamFuelers.length} team member(s) to ${targetProjectName}.`
+        pendingTransfersCount > 0
+          ? `${appliedTransfersCount} employee transfer(s) completed and ${pendingTransfersCount} sent for approval.`
+          : `${appliedTransfersCount} employee transfer(s) completed successfully to ${targetProjectName}.`
       );
 
       setFuelerAuditLog((prev) => [
@@ -525,7 +684,9 @@ export default function TeamPage({
           field: "Bulk Transfer",
           oldValue: selectedTeamFuelers.map((fueler) => `${fueler.id} - ${fueler.projectName || "-"}`).join(" | "),
           newValue: targetProjectName,
-          reason: "Bulk transfer request",
+          reason: bulkResult?.transferBatchId
+            ? `Bulk transfer request ${bulkResult.transferBatchId}`
+            : "Bulk transfer request",
           editedBy: currentUser?.fullName || currentUser?.email || "System",
           editedAt: new Date().toISOString(),
         },
@@ -597,7 +758,7 @@ export default function TeamPage({
       oldDisplayValue: fueler.status || "On Duty",
       newDisplayValue: "Retired / Resigned",
       message:
-        "This team member will be retired and hidden from the Team page. Historical operations and reports will remain unchanged. If this employee has a linked system user, the user login will be deactivated. If the employee returns later, create a new team member with a new Team Member ID.",
+        "This team member will be retired and hidden from the Team page. If linked, the system user will be deactivated and removed from the active Users list. Historical operations and reports will remain unchanged. If this employee returns later, create a new team member with a new Team Member ID.",
     });
   };
 
@@ -1004,7 +1165,7 @@ export default function TeamPage({
 
   const buildTeamChangeMessage = ({ field, oldDisplayValue, newDisplayValue }) => {
     if (field === "project") {
-      return `Are you sure you want to submit a transfer request from ${oldDisplayValue || "-"} to ${newDisplayValue || "-"}? The current project will not change until approval is completed.`;
+      return `Are you sure you want to submit a transfer request from ${oldDisplayValue || "-"} to ${newDisplayValue || "-"}? The current project will not change until final approval, and the transfer takes effect on that approval date.`;
     }
 
     return `Are you sure you want to change ${getTeamFieldLabel(field)} from ${oldDisplayValue || "-"} to ${newDisplayValue || "-"}?`;
@@ -1388,7 +1549,7 @@ export default function TeamPage({
         oldDisplayValue,
         newDisplayValue: "Retired / Resigned",
         message:
-          "This team member will be retired and hidden from the Team page. Historical operations and reports will remain unchanged. If this employee has a linked system user, the user login will be deactivated. If the employee returns later, create a new team member with a new Team Member ID.",
+          "This team member will be retired and hidden from the Team page. If linked, the system user will be deactivated and removed from the active Users list. Historical operations and reports will remain unchanged. If this employee returns later, create a new team member with a new Team Member ID.",
       });
       return;
     }
@@ -1400,10 +1561,9 @@ export default function TeamPage({
       newValue,
       oldDisplayValue,
       newDisplayValue,
-      effectiveDate: field === "project" ? "" : undefined,
       message:
         field === "project" && isFuelerManagerSystemRole(fueler)
-          ? `Are you sure you want to submit a Manager / Top Management transfer request from ${oldDisplayValue || "-"} to ${newDisplayValue || "-"}? This transfer requires Admin approval.`
+          ? `Are you sure you want to submit a Manager / Top Management transfer request from ${oldDisplayValue || "-"} to ${newDisplayValue || "-"}? This transfer requires Admin approval and takes effect on final approval.`
           : buildTeamChangeMessage({ field, oldDisplayValue, newDisplayValue }),
     });
   };
@@ -1509,10 +1669,6 @@ export default function TeamPage({
           getExistingUserForFueler(fueler)?.id ||
           "";
 
-        if (linkedUserId && typeof onUpdateUserStatus === "function") {
-          await onUpdateUserStatus(linkedUserId, false);
-        }
-
         setLocalFuelerUpdates((prev) => ({
           ...prev,
           [fuelerId]: {
@@ -1543,7 +1699,7 @@ export default function TeamPage({
 
         showToast?.(
           "success",
-          "Team member retired successfully. Historical operations remain unchanged and linked user login was deactivated if applicable."
+          "Team member retired successfully. The linked user was removed from the active Users list, while historical records remain unchanged."
         );
 
         setPendingTeamChange(null);
@@ -1555,13 +1711,26 @@ export default function TeamPage({
           throw new Error("Employee transfer API is not configured.");
         }
 
-        await onCreateEmployeeTransfer(fueler, newValue, {
-          effectiveDate: pendingTeamChange.effectiveDate || undefined,
-        });
+        const transferResult = await onCreateEmployeeTransfer(fueler, newValue);
+        const transferApplied = shouldApplyEmployeeTransfer(
+          transferResult,
+          fueler,
+          newValue
+        );
+
+        if (transferApplied) {
+          applyTransferredEmployeeProjectInState(
+            fueler,
+            newValue,
+            newDisplayValue
+          );
+        }
 
         showToast?.(
-          "success",
-          isFuelerManagerSystemRole(fueler)
+          transferApplied ? "success" : "warning",
+          transferApplied
+            ? `Team member transferred successfully to ${newDisplayValue}.`
+            : isFuelerManagerSystemRole(fueler)
             ? "Manager transfer request submitted for Admin approval."
             : "Transfer request submitted for approval. The current project will remain unchanged until approval is completed."
         );
@@ -2320,11 +2489,7 @@ export default function TeamPage({
                   <button
                     onClick={confirmBulkTransfer}
                     disabled={savingBulkTransfer || !bulkTransferProjectId || !selectedTeamFuelers.length}
-                    className={`inline-flex items-center gap-2 rounded-xl px-4 py-2 font-bold disabled:cursor-wait disabled:opacity-70 ${
-                    pendingTeamChange.field === "retire"
-                      ? "bg-red-500 text-white hover:bg-red-400"
-                      : "bg-amber-500 text-black hover:bg-amber-400"
-                  }`}
+                    className="inline-flex items-center gap-2 rounded-xl bg-amber-500 px-4 py-2 font-bold text-black hover:bg-amber-400 disabled:cursor-wait disabled:opacity-70"
                   >
                     {savingBulkTransfer && (
                       <span className="h-4 w-4 animate-spin rounded-full border-2 border-black/60 border-t-transparent" />
@@ -2610,30 +2775,9 @@ export default function TeamPage({
                 </div>
 
                 {pendingTeamChange.field === "project" && (
-                  <div className="rounded-xl border border-amber-400/30 bg-amber-500/10 p-3">
-                    <label className="block text-xs font-semibold uppercase tracking-[0.18em] text-amber-200">
-                      Effective Date
-                    </label>
-                    <input
-                      type="date"
-                      value={pendingTeamChange.effectiveDate || ""}
-                      onChange={(event) =>
-                        setPendingTeamChange((prev) =>
-                          prev
-                            ? {
-                                ...prev,
-                                effectiveDate: event.target.value,
-                              }
-                            : prev
-                        )
-                      }
-                      max={getTodayDateInputValue()}
-                      className="mt-2 w-full rounded-xl border border-slate-700 bg-slate-950 px-3 py-2 text-sm text-white outline-none focus:border-amber-400"
-                    />
-                    <p className="mt-2 text-xs text-slate-400">
-                      Optional. Leave it empty to use the final approval date as the transfer effective date.
-                    </p>
-                  </div>
+                  <p className="rounded-xl border border-amber-400/30 bg-amber-500/10 p-3 text-xs text-amber-100">
+                    The transfer takes effect on the final approval date. Historical operations remain unchanged.
+                  </p>
                 )}
               </div>
 

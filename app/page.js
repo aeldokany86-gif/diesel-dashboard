@@ -110,6 +110,7 @@ import {
   updateEmployeeRecord,
   fetchPendingEmployeeTransfers,
   createEmployeeTransfer,
+  createBulkEmployeeTransfer,
   reviewEmployeeTransfer,
 } from "./services/employeesService";
 
@@ -1376,7 +1377,7 @@ useEffect(() => {
     return updatedEmployee;
   };
 
-  const handleCreateEmployeeTransfer = async (employee, toProjectId, options = {}) => {
+  const handleCreateEmployeeTransfer = async (employee, toProjectId) => {
     const employeeBackendId = employee?.backendId || employee?.employeeBackendId || employee?.id;
     const requestedByUserId = backendAuthUser?.id || currentUser?.id || "";
 
@@ -1396,21 +1397,100 @@ useEffect(() => {
       employeeId: employeeBackendId,
       toProjectId,
       requestedByUserId,
-      effectiveDate: options?.effectiveDate || undefined,
     });
 
     const createdTransfer = mapBackendEmployeeTransferForState(createdTransferData);
+    const transferApproved =
+      String(createdTransfer.status || "").toUpperCase() === "APPROVED";
 
-    setEmployeeTransferRequests((prev) => [
-      createdTransfer,
-      ...prev.filter((item) =>
-        normalizeScopeValue(item.id) !== normalizeScopeValue(createdTransfer.id)
-      ),
-    ]);
+    setEmployeeTransferRequests((prev) =>
+      transferApproved
+        ? prev.filter(
+            (item) =>
+              normalizeScopeValue(item.id) !==
+              normalizeScopeValue(createdTransfer.id)
+          )
+        : [
+            createdTransfer,
+            ...prev.filter(
+              (item) =>
+                normalizeScopeValue(item.id) !==
+                normalizeScopeValue(createdTransfer.id)
+            ),
+          ]
+    );
+
+    if (transferApproved) {
+      applyEmployeeTransferLocally(createdTransfer);
+      await refreshBackendEmployees(currentCompanyId, currentUser?.id);
+    }
 
     await refreshBackendEmployeeTransfers();
 
     return createdTransfer;
+  };
+
+  const handleCreateBulkEmployeeTransfer = async (employees, toProjectId) => {
+    const employeeIds = Array.from(
+      new Set(
+        (Array.isArray(employees) ? employees : [])
+          .map((employee) =>
+            employee?.backendId || employee?.employeeBackendId || employee?.id || ""
+          )
+          .filter(Boolean)
+      )
+    );
+    const requestedByUserId = backendAuthUser?.id || currentUser?.id || "";
+
+    if (!employeeIds.length) throw new Error("At least one employee is required.");
+    if (!toProjectId) throw new Error("Target project is required.");
+    if (!requestedByUserId) throw new Error("Requester user ID is required.");
+
+    const result = await createBulkEmployeeTransfer({
+      employeeIds,
+      toProjectId,
+      requestedByUserId,
+    });
+    const mappedTransfers = (Array.isArray(result?.transfers) ? result.transfers : [])
+      .map((transfer) => ({
+        ...mapBackendEmployeeTransferForState(transfer),
+        transferBatchId:
+          transfer?.transferBatchId || result?.transferBatchId || null,
+      }))
+      .filter((transfer) => transfer.id);
+
+    setEmployeeTransferRequests((prev) => {
+      const mappedIds = new Set(mappedTransfers.map((transfer) => normalizeScopeValue(transfer.id)));
+      const pendingTransfers = mappedTransfers.filter((transfer) =>
+        ["PENDING", "PARTIALLY_APPROVED"].includes(
+          String(transfer.status || "").toUpperCase()
+        )
+      );
+      return [
+        ...pendingTransfers,
+        ...prev.filter((transfer) => !mappedIds.has(normalizeScopeValue(transfer.id))),
+      ];
+    });
+
+    const approvedTransfers = mappedTransfers.filter(
+      (transfer) => String(transfer.status || "").toUpperCase() === "APPROVED"
+    );
+    approvedTransfers.forEach(applyEmployeeTransferLocally);
+
+    // The authoritative bulk request has already succeeded. Keep the UI fast by
+    // returning immediately after the optimistic state update, then reconcile
+    // employees and pending approvals in the background.
+    const backgroundSyncTasks = [refreshBackendEmployeeTransfers()];
+
+    if (approvedTransfers.length) {
+      backgroundSyncTasks.push(
+        refreshBackendEmployees(currentCompanyId, currentUser?.id)
+      );
+    }
+
+    void Promise.allSettled(backgroundSyncTasks);
+
+    return { ...result, transfers: mappedTransfers };
   };
 
   const applyEmployeeTransferLocally = (transfer) => {
@@ -2919,10 +2999,12 @@ useEffect(() => {
         id: `EMP-TRANSFER-${transfer.id}`,
         type: "employee_transfer",
         module: "team",
+        transferBatchId: transfer.transferBatchId || null,
         title: `${isManagerTransfer ? "Manager / Top Management Transfer" : "Team Transfer"}: ${transfer.employeeName || transfer.employeeId || "Team Member"}`,
         payload: {
           transfer,
           employeeTransferId: transfer.id,
+          transferBatchId: transfer.transferBatchId || null,
         },
         details: `${isManagerTransfer ? "Manager / Top Management transfer requiring Admin approval" : "Transfer"} ${transfer.employeeName || transfer.employeeId || "team member"} from ${transfer.fromProjectName || "-"} to ${transfer.toProjectName || "-"}.`,
         status: "Pending",
@@ -3216,6 +3298,7 @@ useEffect(() => {
       onCreateEmployee={handleCreateEmployee}
       onUpdateEmployee={handleUpdateEmployee}
       onCreateEmployeeTransfer={handleCreateEmployeeTransfer}
+      onCreateBulkEmployeeTransfer={handleCreateBulkEmployeeTransfer}
       onCreateUserFromEmployee={handleCreateUserFromEmployee}
       onUpdateUserStatus={handleUpdateUserStatusFromTeam}
       onLoadRoles={fetchRoles}

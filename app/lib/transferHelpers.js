@@ -57,6 +57,7 @@ export function mapBackendAssetTransferForState(transfer = {}) {
     toProjectId: transfer.toProjectId || toProject.id || "",
     toProjectName: toProject.name || toProject.code || transfer.toProjectId || "-",
     requestedByUserId: transfer.requestedByUserId || "",
+    transferBatchId: transfer.transferBatchId || transfer.batchId || null,
     status: normalizeBackendTransferStatusForState(transfer.status),
     reason: transfer.reason || "",
     rejectionReason: transfer.rejectionReason || "",
@@ -84,6 +85,7 @@ export function mapBackendStationTransferForState(transfer = {}) {
     toProjectId: transfer.toProjectId || toProject.id || "",
     toProjectName: toProject.name || toProject.code || transfer.toProjectId || "-",
     requestedByUserId: transfer.requestedByUserId || "",
+    transferBatchId: transfer.transferBatchId || transfer.batchId || null,
     status: normalizeBackendTransferStatusForState(transfer.status),
     effectiveDate: transfer.effectiveDate || "",
     reason: transfer.reason || "",
@@ -123,6 +125,7 @@ export function mapBackendEmployeeTransferForState(transfer = {}) {
       transfer.toProjectId ||
       "-",
     requestedByUserId: transfer.requestedByUserId || "",
+    transferBatchId: transfer.transferBatchId || transfer.batchId || null,
     status: normalizeBackendTransferStatusForState(transfer.status),
     reason: transfer.reason || "",
     rejectionReason: transfer.rejectionReason || "",

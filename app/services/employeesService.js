@@ -34,6 +34,11 @@ export async function createEmployeeTransfer(payload) {
   return response.data;
 }
 
+export async function createBulkEmployeeTransfer(payload) {
+  const response = await api.post('/employee-transfers/bulk', payload);
+  return response.data;
+}
+
 export async function reviewEmployeeTransfer(transferId, payload) {
   const response = await api.patch(
     `/employee-transfers/${transferId}/review`,
