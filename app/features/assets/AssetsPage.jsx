@@ -83,6 +83,41 @@ function isOfficerUser(user) {
   return user?.role === "Officer";
 }
 
+function unwrapAssetTransferResult(result) {
+  return result?.transfer || result?.data?.transfer || result?.data || result || {};
+}
+
+function isAssetTransferApplied(transfer, toProjectId) {
+  const normalizedStatus = normalizeScopeValue(
+    transfer?.status || transfer?.approvalStatus || transfer?.transferStatus
+  );
+
+  if (["approved", "completed", "applied"].includes(normalizedStatus)) {
+    return true;
+  }
+
+  if (
+    transfer?.autoApproved === true ||
+    transfer?.isAutoApproved === true ||
+    transfer?.applied === true ||
+    transfer?.requiresApproval === false
+  ) {
+    return true;
+  }
+
+  const transferredAsset = transfer?.asset || transfer?.updatedAsset;
+  const resultingProjectId =
+    transferredAsset?.projectId ||
+    transferredAsset?.project?.id ||
+    transfer?.assetProjectId;
+
+  return Boolean(
+    resultingProjectId &&
+      toProjectId &&
+      normalizeScopeValue(resultingProjectId) === normalizeScopeValue(toProjectId)
+  );
+}
+
 function useOutsideClick(ref, callback) {
   useEffect(() => {
     const handleClickOutside = (event) => {
@@ -389,6 +424,36 @@ export default function AssetsPage({
     }
 
     return mappedAsset;
+  };
+
+  const applyTransferredProjectInState = (asset, projectValue, projectId, transfer) => {
+    const updatedAsset = transfer?.asset || transfer?.updatedAsset;
+
+    if (updatedAsset) {
+      replaceAssetInState(updatedAsset);
+      return;
+    }
+
+    if (typeof setAssets !== "function") return;
+
+    const assetBackendId = getBackendAssetId(asset);
+    setAssets((prev) =>
+      (prev || []).map((item) => {
+        const sameBackendAsset =
+          assetBackendId &&
+          normalizeScopeValue(getBackendAssetId(item)) === normalizeScopeValue(assetBackendId);
+        const sameDisplayAsset =
+          normalizeScopeValue(item.id) === normalizeScopeValue(asset?.id);
+
+        if (!sameBackendAsset && !sameDisplayAsset) return item;
+
+        return {
+          ...item,
+          project: projectValue,
+          projectId,
+        };
+      })
+    );
   };
 
 
@@ -913,18 +978,38 @@ export default function AssetsPage({
     }
 
     try {
-      const createdTransfer = await createAssetTransfer(backendAssetId, {
+      const transferResponse = await createAssetTransfer(backendAssetId, {
         toProjectId,
         requestedByUserId: currentUser?.id || "",
       });
+      const createdTransfer = unwrapAssetTransferResult(transferResponse);
+      const transferApplied = isAssetTransferApplied(createdTransfer, toProjectId);
 
       onAssetTransferCreated?.(createdTransfer);
 
-      showToast?.("warning", "Asset transfer request submitted for project manager approval.");
+      if (transferApplied) {
+        applyTransferredProjectInState(
+          projectTargetAsset,
+          selectedProjectValue,
+          toProjectId,
+          createdTransfer
+        );
+        showToast?.(
+          "success",
+          `Asset transferred successfully to ${selectedProjectValue}.`
+        );
+      } else {
+        showToast?.(
+          "warning",
+          "Asset transfer request submitted for project manager approval."
+        );
+      }
       trackActivity?.(
-        "Request Asset Transfer",
+        transferApplied ? "Transfer Asset" : "Request Asset Transfer",
         "assets",
-        `${projectTargetAsset.id} transfer requested from ${projectTargetAsset.project || "-"} to ${selectedProjectValue}.`
+        transferApplied
+          ? `${projectTargetAsset.id} transferred from ${projectTargetAsset.project || "-"} to ${selectedProjectValue}.`
+          : `${projectTargetAsset.id} transfer requested from ${projectTargetAsset.project || "-"} to ${selectedProjectValue}.`
       );
       resetProjectWorkflow();
     } catch (error) {

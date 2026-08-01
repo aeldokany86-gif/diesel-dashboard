@@ -44,7 +44,10 @@ import {
   createOperation,
 } from "../../services/operationsService";
 
-import { createOperationCorrection } from "../../services/operationCorrectionsService";
+import {
+  createOperationCorrection,
+  fetchOperationCorrectionContext,
+} from "../../services/operationCorrectionsService";
 import OperationCorrectionModal from "./OperationCorrectionModal";
 import AddOperationModal from "./AddOperationModal";
 import useOperationsData from "./hooks/useOperationsData";
@@ -500,6 +503,8 @@ export default function OperationsPage({
   const [operationPhotoViewerLoading, setOperationPhotoViewerLoading] = useState(false);
   const [auditLog, setAuditLog] = useState([]);
   const [editCell, setEditCell] = useState(null);
+  const [correctionContextLoading, setCorrectionContextLoading] = useState(false);
+  const [correctionContextError, setCorrectionContextError] = useState("");
 
 
   const dieselIndex = getHeaderIndex(headers, [
@@ -1704,7 +1709,7 @@ const payload = mapFrontendOperationToBackendPayload({
     return readings[0]?.reading || 0;
   };
 
-  const openCellEdit = (item, field) => {
+  const openCellEdit = async (item, field) => {
     if (!hasPermission("operations", "edit")) return;
 
     const row = item.row;
@@ -1735,11 +1740,14 @@ const payload = mapFrontendOperationToBackendPayload({
         ? row[fuelerIndex]
         : "";
 
-    setEditCell({
+    const operationBackendId = getOperationCorrectionBackendId(row);
+
+    const baseEditCell = {
       originalIndex: item.originalIndex,
       row,
       field,
       operationType,
+      operationBackendId,
       isExternalDirectRefuel,
       oldValue: currentValue || "",
       oldValueDisplay:
@@ -1748,11 +1756,146 @@ const payload = mapFrontendOperationToBackendPayload({
           : getOperationCorrectionDisplayValue(field, currentValue),
       newValue: currentValue || "",
       reason: "",
-    });
+      operationContext: null,
+      allowedAssets: [],
+      allowedSourceStations: [],
+      allowedDestinationStations: [],
+      allowedFuelers: [],
+    };
+
+    setEditCell(baseEditCell);
+    setCorrectionContextError("");
+
+    if (!operationBackendId) {
+      setCorrectionContextError(
+        "Backend operation id was not found for this row."
+      );
+      return;
+    }
+
+    if (!canUseNetwork(showToast)) {
+      setCorrectionContextError(NETWORK_OFFLINE_MESSAGE);
+      return;
+    }
+
+    setCorrectionContextLoading(true);
+
+    try {
+      const contextResponse = await fetchOperationCorrectionContext(
+        operationBackendId,
+        currentUser
+      );
+
+      setEditCell((current) => {
+        if (!current || current.operationBackendId !== operationBackendId) {
+          return current;
+        }
+
+        const allowedAssets = Array.isArray(contextResponse?.allowedAssets)
+          ? contextResponse.allowedAssets
+          : [];
+        const allowedSourceStations = Array.isArray(
+          contextResponse?.allowedSourceStations
+        )
+          ? contextResponse.allowedSourceStations
+          : [];
+        const allowedDestinationStations = Array.isArray(
+          contextResponse?.allowedDestinationStations
+        )
+          ? contextResponse.allowedDestinationStations
+          : [];
+        const allowedFuelers = Array.isArray(contextResponse?.allowedFuelers)
+          ? contextResponse.allowedFuelers
+          : [];
+
+        const optionsForCurrentField =
+          current.field === "equipment"
+            ? allowedAssets
+            : current.field === "station" && !current.isExternalDirectRefuel
+            ? allowedSourceStations
+            : current.field === "fueler"
+            ? allowedFuelers
+            : [];
+
+        const oldValueCandidates = buildLookupCandidates(
+          current.oldValue,
+          current.field === "equipment" ? row?.__operation?.assetId : null,
+          current.field === "station" ? row?.__operation?.sourceStationId : null,
+          current.field === "fueler" ? row?.__operation?.requestedByUserId : null
+        );
+
+        const matchingCurrentOption = optionsForCurrentField.find((option) => {
+          const optionCandidates = buildLookupCandidates(
+            option?.id,
+            option?.backendId,
+            option?.assetId,
+            option?.stationId,
+            option?.employeeId,
+            option?.employeeBackendId,
+            option?.linkedUserId
+          );
+
+          return optionCandidates.some((candidate) =>
+            oldValueCandidates.includes(candidate)
+          );
+        });
+
+        const normalizedCurrentValue = matchingCurrentOption
+          ? matchingCurrentOption.backendId ||
+            matchingCurrentOption.employeeBackendId ||
+            matchingCurrentOption.id
+          : current.newValue;
+
+        return {
+          ...current,
+          newValue: normalizedCurrentValue,
+          operationContext: contextResponse?.operationContext || null,
+          allowedAssets,
+          allowedSourceStations,
+          allowedDestinationStations,
+          allowedFuelers,
+        };
+      });
+    } catch (error) {
+      console.warn("Correction context load failed:", error);
+      setCorrectionContextError(
+        getFriendlyApiErrorMessage(
+          error,
+          "Failed to load the historical correction options."
+        )
+      );
+    } finally {
+      setCorrectionContextLoading(false);
+    }
   };
 
   const closeEditCell = () => {
     setEditCell(null);
+    setCorrectionContextLoading(false);
+    setCorrectionContextError("");
+  };
+
+  const findCorrectionOption = (items = [], value) => {
+    const candidates = buildLookupCandidates(value);
+    if (!candidates.length) return null;
+
+    return (items || []).find((item) => {
+      const itemCandidates = buildLookupCandidates(
+        item?.id,
+        item?.backendId,
+        item?.assetId,
+        item?.assetBackendId,
+        item?.stationId,
+        item?.stationBackendId,
+        item?.employeeId,
+        item?.employeeBackendId,
+        item?.linkedUserId,
+        item?.name,
+        item?.fullName
+      );
+
+      return itemCandidates.some((candidate) => candidates.includes(candidate));
+    }) || null;
   };
 
   const saveCellEdit = async () => {
@@ -1772,11 +1915,27 @@ const payload = mapFrontendOperationToBackendPayload({
     const row = editCell.row;
     const field = editCell.field;
 
+    const fieldNeedsHistoricalOptions = ["equipment", "station", "fueler"].includes(field) &&
+      !(field === "station" && editCell.isExternalDirectRefuel);
+
+    if (fieldNeedsHistoricalOptions && correctionContextLoading) {
+      notifyUser(showToast, "warning", "Historical correction options are still loading.");
+      return;
+    }
+
+    if (fieldNeedsHistoricalOptions && correctionContextError) {
+      notifyUser(showToast, "warning", correctionContextError);
+      return;
+    }
+
     let fieldLabel = "";
 
     if (field === "equipment") {
       const newEquipment = editCell.newValue;
-      const asset = getAsset(newEquipment);
+      const asset = findCorrectionOption(
+        editCell.allowedAssets,
+        newEquipment
+      );
 
       if (!asset) {
         notifyUser(typeof showToast !== "undefined" ? showToast : null, inferToastTypeFromMessage("Please select a valid equipment."), "Please select a valid equipment.");
@@ -1824,24 +1983,28 @@ const payload = mapFrontendOperationToBackendPayload({
         fieldLabel = "External Station";
       } else {
         const newStation = editCell.newValue;
-        const station = getStation(newStation);
+        const station = findCorrectionOption(
+          editCell.allowedSourceStations,
+          newStation
+        );
 
         if (!station) {
           notifyUser(typeof showToast !== "undefined" ? showToast : null, inferToastTypeFromMessage("Please select a valid station."), "Please select a valid station.");
           return;
         }
 
-        if (station.status?.trim().toLowerCase() !== "active") {
-          notifyUser(typeof showToast !== "undefined" ? showToast : null, inferToastTypeFromMessage("Selected station must be active."), "Selected station must be active.");
-          return;
-        }
-
+        // The backend context already confirms that this station was valid
+        // in the historical project at the operation date. Do not reject it
+        // because of a later status change or soft deletion.
         fieldLabel = "Source Station";
       }
     }
 
     if (field === "fueler") {
-      const selectedFueler = getFueler(editCell.newValue);
+      const selectedFueler = findCorrectionOption(
+        editCell.allowedFuelers,
+        editCell.newValue
+      );
 
       if (!selectedFueler) {
         notifyUser(
@@ -2930,9 +3093,13 @@ const payload = mapFrontendOperationToBackendPayload({
       <OperationCorrectionModal
         editCell={editCell}
         setEditCell={setEditCell}
-        assets={assets}
-        stations={stations}
-        fuelers={fuelers}
+        assets={editCell?.allowedAssets || []}
+        stations={editCell?.allowedSourceStations || []}
+        destinationStations={editCell?.allowedDestinationStations || []}
+        fuelers={editCell?.allowedFuelers || []}
+        operationContext={editCell?.operationContext || null}
+        contextLoading={correctionContextLoading}
+        contextError={correctionContextError}
         externalStationHistory={externalStationHistory}
         onClose={closeEditCell}
         onSave={saveCellEdit}

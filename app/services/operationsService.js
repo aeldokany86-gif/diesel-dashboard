@@ -95,6 +95,27 @@ export async function fetchOperations(currentUser = {}) {
   return Array.isArray(response.data) ? response.data : [];
 }
 
+export async function fetchOperationsSummaryReport(
+  filters = {},
+  currentUser = {}
+) {
+  const params = Object.fromEntries(
+    Object.entries(filters).filter(
+      ([, value]) => value !== undefined && value !== null && value !== "" && value !== "all"
+    )
+  );
+
+  const response = await api.get("/operations/report/summary", {
+    params,
+    headers: buildOperationRequestHeaders(currentUser),
+  });
+
+  return {
+    rows: Array.isArray(response.data?.rows) ? response.data.rows : [],
+    summary: response.data?.summary || {},
+  };
+}
+
 export async function fetchPendingOperationApprovals(currentUser = {}) {
   const response = await api.get("/operations/pending-approvals", {
     headers: buildOperationRequestHeaders(currentUser),

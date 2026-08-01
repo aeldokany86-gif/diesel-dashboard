@@ -6,6 +6,8 @@ import { printReport } from "./utils/printReport";
 import { exportReportToExcel } from "./utils/exportReportToExcel";
 import { fetchStationStockMovements } from "../../services/stationsService";
 import StationsReportsPage from "./stations/StationsReportsPage";
+import EmployeesReportsPage from "./employees/EmployeesReportsPage";
+import { fetchOperationsSummaryReport } from "../../services/operationsService";
 import {
   fetchAssetTransferHistory,
   fetchAssetMeterHistory,
@@ -86,6 +88,23 @@ const STATIONS_REPORTS = [
   },
 ];
 
+const TEAM_REPORTS = [
+  {
+    id: "employee-master",
+    title: "Employee Master Report",
+    description:
+      "Complete company employee register including assignment, employment status, contact information and linked user account details.",
+    available: true,
+  },
+  {
+    id: "employee-transfer",
+    title: "Employee Transfer Report",
+    description:
+      "Complete history of single and bulk employee transfers including batch reference, projects, approval stages and final status.",
+    available: true,
+  },
+];
+
 const REPORT_MODULES = [
   {
     id: "operations",
@@ -120,8 +139,8 @@ const REPORT_MODULES = [
     description:
       "Team members, assignments, transfers and workforce activity reports.",
     icon: "👷",
-    reports: [],
-    available: false,
+    reports: TEAM_REPORTS,
+    available: true,
   },
   {
     id: "projects",
@@ -148,6 +167,8 @@ const TABLE_HEADERS = [
   "Date",
   "Project",
   "Operation Type",
+  "Employee Code",
+  "Employee Name",
   "Source",
   "Destination",
   "Quantity",
@@ -161,6 +182,7 @@ const EMPTY_FILTERS = {
   project: "all",
   asset: "all",
   operationType: "all",
+  fuelerEmployeeId: "",
   status: "all",
 };
 
@@ -481,6 +503,10 @@ function getActiveFilterSummary(filters) {
           : formatOperationType(filters.operationType),
     },
     {
+      label: "Employee Code",
+      value: filters.fuelerEmployeeId || "All Employees",
+    },
+    {
       label: "Status",
       value:
         filters.status === "all"
@@ -488,6 +514,60 @@ function getActiveFilterSummary(filters) {
           : formatOperationType(filters.status),
     },
   ];
+}
+
+function getOperationEntityLabel(entity, preferredCodeFields = []) {
+  for (const field of preferredCodeFields) {
+    if (entity?.[field]) return entity[field];
+  }
+  return entity?.name || entity?.id || "";
+}
+
+function mapSummaryOperation(operation, index) {
+  const type = String(operation?.type || "").toUpperCase();
+  const sourceStation = getOperationEntityLabel(operation?.sourceStation, ["stationId", "stationCode", "code"]);
+  const destinationStation = getOperationEntityLabel(operation?.destinationStation, ["stationId", "stationCode", "code"]);
+  const asset = getOperationEntityLabel(operation?.asset, ["assetId", "equipmentNo", "equipmentNumber", "code"]);
+  const externalSource = operation?.externalStationName || operation?.supplierName || operation?.externalSupplierName || "";
+
+  let source = sourceStation || externalSource || "-";
+  let destination = asset || destinationStation || "-";
+
+  if (type === "EXTERNAL_SUPPLY") {
+    source = externalSource || "External Supplier";
+    destination = destinationStation || "-";
+  } else if (type === "EXTERNAL_DIRECT_REFUEL") {
+    source = externalSource || "External Station";
+    destination = asset || "-";
+  } else if (type === "INTERNAL_TRANSFER" || type === "EXTERNAL_TRANSFER") {
+    destination = destinationStation || asset || "-";
+  }
+
+  return {
+    key: operation?.id || `${operation?.operationNo || "operation"}-${index}`,
+    operationNo: operation?.operationNo || "-",
+    transactionDate: operation?.operationDate || operation?.createdAt,
+    operationType: operation?.type || "-",
+    fuelerEmployeeId: operation?.fuelerEmployeeId || "-",
+    fuelerName: operation?.fuelerName || "-",
+    source,
+    destination,
+    destinationRaw:
+      operation?.assetId ||
+      operation?.asset?.id ||
+      operation?.asset?.assetId ||
+      operation?.destinationStationId ||
+      destination,
+    quantity: getNumericValue(operation?.quantity),
+    cost: getNumericValue(operation?.totalCostAtOperation, operation?.totalCost),
+    status: operation?.status || "COMPLETED",
+    project:
+      operation?.projectNameAtOperation ||
+      operation?.project?.name ||
+      operation?.sourceProjectNameAtOperation ||
+      operation?.destinationProjectNameAtOperation ||
+      "-",
+  };
 }
 
 
@@ -1038,11 +1118,11 @@ function FuelSuppliersReport({
 
         {filtersOpen ? (
           <div className="fixed inset-0 z-[120] bg-black/70 backdrop-blur-sm">
-            <button type="button" aria-label="Close filters" onClick={() => reportGenerated && setFiltersOpen(false)} className="absolute inset-0 h-full w-full" />
+            <button type="button" aria-label="Close filters" onClick={() => setFiltersOpen(false)} className="absolute inset-0 h-full w-full" />
             <aside className="absolute right-0 top-0 z-10 flex h-full w-full max-w-md flex-col border-l border-slate-800 bg-slate-900 shadow-2xl shadow-black/50">
               <div className="flex items-start justify-between border-b border-slate-800 px-5 py-4">
                 <div><p className="text-xs font-bold uppercase tracking-[0.2em] text-amber-400">Report Setup</p><h2 className="mt-1 text-xl font-black text-white">Fuel Supplier Filters</h2></div>
-                {reportGenerated ? <button type="button" onClick={() => setFiltersOpen(false)} className="rounded-lg border border-slate-700 px-3 py-2 text-sm font-bold text-slate-400 hover:text-white">Close</button> : null}
+                <button type="button" aria-label="Close filters" onClick={() => setFiltersOpen(false)} className="flex h-9 w-9 items-center justify-center rounded-lg border border-slate-700 bg-slate-950/70 text-lg text-slate-400 transition hover:text-white">×</button>
               </div>
               <div className="flex-1 space-y-4 overflow-y-auto px-5 py-5">
                 <div className="grid grid-cols-2 gap-3">
@@ -1531,7 +1611,7 @@ function StationMovementsReport({
             <button
               type="button"
               aria-label="Close filters"
-              onClick={() => reportGenerated && setFiltersOpen(false)}
+              onClick={() => setFiltersOpen(false)}
               className="absolute inset-0 h-full w-full"
             />
 
@@ -1545,15 +1625,14 @@ function StationMovementsReport({
                     Station Movement Filters
                   </h2>
                 </div>
-                {reportGenerated ? (
-                  <button
-                    type="button"
-                    onClick={() => setFiltersOpen(false)}
-                    className="rounded-lg border border-slate-700 px-3 py-2 text-sm font-bold text-slate-400 hover:text-white"
-                  >
-                    Close
-                  </button>
-                ) : null}
+                <button
+                  type="button"
+                  aria-label="Close filters"
+                  onClick={() => setFiltersOpen(false)}
+                  className="flex h-9 w-9 items-center justify-center rounded-lg border border-slate-700 bg-slate-950/70 text-lg text-slate-400 transition hover:text-white"
+                >
+                  ×
+                </button>
               </div>
 
               <div className="flex-1 space-y-4 overflow-y-auto px-5 py-5">
@@ -2080,11 +2159,11 @@ function AssetsMasterReport({
 
         {filtersOpen ? (
           <div className="fixed inset-0 z-[120] bg-black/70 backdrop-blur-sm">
-            <button type="button" aria-label="Close filters" onClick={() => reportGenerated && setFiltersOpen(false)} className="absolute inset-0 h-full w-full" />
+            <button type="button" aria-label="Close filters" onClick={() => setFiltersOpen(false)} className="absolute inset-0 h-full w-full" />
             <aside className="absolute right-0 top-0 z-10 flex h-full w-full max-w-md flex-col border-l border-slate-800 bg-slate-900 shadow-2xl shadow-black/50">
               <div className="flex items-start justify-between border-b border-slate-800 px-5 py-4">
                 <div><p className="text-xs font-bold uppercase tracking-[0.2em] text-amber-400">Report Setup</p><h2 className="mt-1 text-xl font-black text-white">Assets Master Filters</h2></div>
-                {reportGenerated ? <button type="button" onClick={() => setFiltersOpen(false)} className="rounded-lg border border-slate-700 px-3 py-2 text-sm font-bold text-slate-400 hover:text-white">Close</button> : null}
+                <button type="button" aria-label="Close filters" onClick={() => setFiltersOpen(false)} className="flex h-9 w-9 items-center justify-center rounded-lg border border-slate-700 bg-slate-950/70 text-lg text-slate-400 transition hover:text-white">×</button>
               </div>
 
               <div className="flex-1 space-y-4 overflow-y-auto px-5 py-5">
@@ -2985,7 +3064,7 @@ function AssetTransferHistoryReport({
             <button
               type="button"
               aria-label="Close filters"
-              onClick={() => reportGenerated && setFiltersOpen(false)}
+              onClick={() => setFiltersOpen(false)}
               className="absolute inset-0 h-full w-full"
             />
 
@@ -3000,15 +3079,14 @@ function AssetTransferHistoryReport({
                   </h2>
                 </div>
 
-                {reportGenerated ? (
-                  <button
-                    type="button"
-                    onClick={() => setFiltersOpen(false)}
-                    className="rounded-lg border border-slate-700 px-3 py-2 text-sm font-bold text-slate-400 hover:text-white"
-                  >
-                    Close
-                  </button>
-                ) : null}
+                <button
+                  type="button"
+                  aria-label="Close filters"
+                  onClick={() => setFiltersOpen(false)}
+                  className="flex h-9 w-9 items-center justify-center rounded-lg border border-slate-700 bg-slate-950/70 text-lg text-slate-400 transition hover:text-white"
+                >
+                  ×
+                </button>
               </div>
 
               <div className="flex-1 space-y-4 overflow-y-auto px-5 py-5">
@@ -3917,9 +3995,9 @@ function AssetMeterHistoryReport({
 
         {filtersOpen ? (
           <div className="fixed inset-0 z-[120] bg-black/70 backdrop-blur-sm">
-            <button type="button" aria-label="Close filters" onClick={() => reportGenerated && setFiltersOpen(false)} className="absolute inset-0 h-full w-full" />
+            <button type="button" aria-label="Close filters" onClick={() => setFiltersOpen(false)} className="absolute inset-0 h-full w-full" />
             <aside className="absolute right-0 top-0 z-10 flex h-full w-full max-w-md flex-col border-l border-slate-800 bg-slate-900 shadow-2xl shadow-black/50">
-              <div className="flex items-start justify-between border-b border-slate-800 px-5 py-4"><div><p className="text-xs font-bold uppercase tracking-[0.2em] text-amber-400">Report Setup</p><h2 className="mt-1 text-xl font-black text-white">Asset Meter Filters</h2></div>{reportGenerated ? <button type="button" onClick={() => setFiltersOpen(false)} className="rounded-lg border border-slate-700 px-3 py-2 text-sm font-bold text-slate-400 hover:text-white">Close</button> : null}</div>
+              <div className="flex items-start justify-between border-b border-slate-800 px-5 py-4"><div><p className="text-xs font-bold uppercase tracking-[0.2em] text-amber-400">Report Setup</p><h2 className="mt-1 text-xl font-black text-white">Asset Meter Filters</h2></div><button type="button" aria-label="Close filters" onClick={() => setFiltersOpen(false)} className="flex h-9 w-9 items-center justify-center rounded-lg border border-slate-700 bg-slate-950/70 text-lg text-slate-400 transition hover:text-white">×</button></div>
               <div className="flex-1 space-y-4 overflow-y-auto px-5 py-5">
                 <div className="grid grid-cols-2 gap-3">
                   <label className="block"><span className="mb-2 block text-sm font-bold text-slate-300">Date From</span><input type="date" value={draftFilters.dateFrom} onChange={(e) => handleFilterChange("dateFrom", e.target.value)} className="w-full rounded-xl border border-slate-700 bg-slate-950 px-3 py-2.5 text-sm text-white outline-none focus:border-amber-500" /></label>
@@ -3956,6 +4034,9 @@ export default function ReportsPage({
   const [reportGenerated, setReportGenerated] = useState(false);
   const [draftFilters, setDraftFilters] = useState(EMPTY_FILTERS);
   const [appliedFilters, setAppliedFilters] = useState(EMPTY_FILTERS);
+  const [operationsReportRows, setOperationsReportRows] = useState([]);
+  const [operationsReportLoading, setOperationsReportLoading] = useState(false);
+  const [operationsReportError, setOperationsReportError] = useState("");
 
   const availableAssets = useMemo(() => {
     if (draftFilters.project === "all") return assets;
@@ -3973,68 +4054,8 @@ export default function ReportsPage({
   }, [assets, draftFilters.project]);
 
   const reportRows = useMemo(() => {
-    return (data || []).map((row, index) => {
-      const embeddedOperation = getEmbeddedOperation(row);
-
-      const operationNo = getRowValue(row, headers, [
-        "operation_id",
-        "operation no",
-        "operation_no",
-      ]);
-      const transactionDate = getRowValue(row, headers, [
-        "transaction_datetime",
-        "transaction date",
-        "date",
-      ]);
-      const operationType = getRowValue(row, headers, [
-        "transaction_type",
-        "operation_type",
-      ]);
-      const source = getRowValue(row, headers, [
-        "source_station",
-        "source",
-      ]);
-      const destination = getRowValue(row, headers, [
-        "destination_id",
-        "destination",
-      ]);
-      const quantity = getRowValue(row, headers, [
-        "diesel_quantity",
-        "quantity",
-      ]);
-      const status = getRowValue(row, headers, [
-        "operation_status",
-        "status",
-      ]);
-      const externalStation = getRowValue(row, headers, [
-        "external_station_name",
-      ]);
-
-      const project = resolveOperationProjectLabel({
-        embeddedOperation,
-        source,
-        destination,
-        projects,
-        assets,
-        stations,
-      });
-
-      return {
-        key: `${operationNo || "operation"}-${index}`,
-        operationNo: operationNo || "-",
-        transactionDate,
-        operationType,
-        source: source || externalStation || "-",
-        destination: destination || "-",
-        destinationRaw: destination || "",
-        asset: resolveAssetLabel(destination, assets),
-        quantity: getNumericValue(quantity),
-        cost: getOperationCost(row, headers),
-        status: status || "COMPLETED",
-        project,
-      };
-    });
-  }, [data, headers, projects, assets, stations]);
+    return operationsReportRows.map(mapSummaryOperation);
+  }, [operationsReportRows]);
 
   const filteredRows = useMemo(() => {
     return reportRows.filter((row) => {
@@ -4089,6 +4110,14 @@ export default function ReportsPage({
       }
 
       if (
+        appliedFilters.fuelerEmployeeId &&
+        normalizeValue(row.fuelerEmployeeId) !==
+          normalizeValue(appliedFilters.fuelerEmployeeId)
+      ) {
+        return false;
+      }
+
+      if (
         appliedFilters.status !== "all" &&
         normalizeValue(row.status) !== normalizeValue(appliedFilters.status)
       ) {
@@ -4135,6 +4164,8 @@ export default function ReportsPage({
         Date: formatDateTime(row.transactionDate),
         Project: row.project,
         "Operation Type": formatOperationType(row.operationType),
+        "Employee Code": row.fuelerEmployeeId,
+        "Employee Name": row.fuelerName,
         Source: row.source,
         Destination: row.destination,
         Quantity: row.quantity,
@@ -4166,6 +4197,8 @@ export default function ReportsPage({
         formatDateTime(row.transactionDate),
         row.project,
         formatOperationType(row.operationType),
+        row.fuelerEmployeeId,
+        row.fuelerName,
         row.source,
         row.destination,
         formatNumber(row.quantity),
@@ -4174,6 +4207,8 @@ export default function ReportsPage({
       ]),
       footerRow: [
         "Grand Total",
+        "",
+        "",
         "",
         "",
         "",
@@ -4248,10 +4283,49 @@ export default function ReportsPage({
     setAppliedFilters(EMPTY_FILTERS);
   };
 
-  const handleApplyFilters = () => {
-    setAppliedFilters(draftFilters);
-    setReportGenerated(true);
-    setFiltersOpen(false);
+  const handleApplyFilters = async () => {
+    setOperationsReportLoading(true);
+    setOperationsReportError("");
+
+    try {
+      const selectedProject = projects.find(
+        (project) =>
+          normalizeValue(getProjectLabel(project)) ===
+          normalizeValue(draftFilters.project)
+      );
+
+      const result = await fetchOperationsSummaryReport(
+        {
+          dateFrom: draftFilters.dateFrom,
+          dateTo: draftFilters.dateTo,
+          projectId:
+            draftFilters.project === "all"
+              ? ""
+              : getProjectBackendId(selectedProject),
+          assetId: draftFilters.asset === "all" ? "" : draftFilters.asset,
+          type:
+            draftFilters.operationType === "all"
+              ? ""
+              : draftFilters.operationType.toUpperCase(),
+          fuelerEmployeeId: draftFilters.fuelerEmployeeId.trim(),
+          status: draftFilters.status === "all" ? "" : draftFilters.status,
+        },
+        currentUser
+      );
+
+      setOperationsReportRows(result.rows);
+      setAppliedFilters(draftFilters);
+      setReportGenerated(true);
+      setFiltersOpen(false);
+    } catch (requestError) {
+      setOperationsReportError(
+        requestError?.response?.data?.message ||
+          requestError?.message ||
+          "Failed to generate operations report."
+      );
+    } finally {
+      setOperationsReportLoading(false);
+    }
   };
 
   if (
@@ -4268,6 +4342,18 @@ export default function ReportsPage({
         currentCompany={currentCompany}
         projects={projects}
         stations={stations}
+        onBack={handleBackToReports}
+      />
+    );
+  }
+
+  if (["employee-master", "employee-transfer"].includes(selectedReport?.id)) {
+    return (
+      <EmployeesReportsPage
+        selectedReport={selectedReport}
+        currentUser={currentUser}
+        currentCompany={currentCompany}
+        projects={projects}
         onBack={handleBackToReports}
       />
     );
@@ -4393,8 +4479,8 @@ export default function ReportsPage({
                 </h2>
 
                 <p className="mt-3 text-sm leading-6 text-slate-400">
-                  Choose the required date range, project, asset, operation type and
-                  status, then generate the report to display its results.
+                  Choose the required date range, project, asset, operation type,
+                  employee code and status, then generate the report.
                 </p>
 
                 <button
@@ -4408,7 +4494,7 @@ export default function ReportsPage({
             </section>
           ) : (
             <>
-              <section className="grid gap-3 sm:grid-cols-2 xl:grid-cols-5">
+              <section className="grid gap-3 sm:grid-cols-2 xl:grid-cols-6">
                 {filterSummary.map((item) => (
                   <div
                     key={item.label}
@@ -4447,7 +4533,7 @@ export default function ReportsPage({
                 </div>
 
                 <div className="overflow-x-auto">
-                  <table className="min-w-[1250px] w-full border-collapse text-left text-sm">
+                  <table className="min-w-[1550px] w-full border-collapse text-left text-sm">
                     <thead className="bg-slate-950/80">
                       <tr>
                         {TABLE_HEADERS.map((header) => (
@@ -4481,6 +4567,12 @@ export default function ReportsPage({
                               <td className="whitespace-nowrap px-4 py-3 text-slate-300">
                                 {formatOperationType(row.operationType)}
                               </td>
+                              <td className="whitespace-nowrap px-4 py-3 font-bold text-sky-300">
+                                {row.fuelerEmployeeId}
+                              </td>
+                              <td className="whitespace-nowrap px-4 py-3 text-slate-300">
+                                {row.fuelerName}
+                              </td>
                               <td className="whitespace-nowrap px-4 py-3 text-slate-300">
                                 {row.source}
                               </td>
@@ -4503,7 +4595,7 @@ export default function ReportsPage({
 
                           <tr className="bg-slate-950/70">
                             <td
-                              colSpan={6}
+                              colSpan={8}
                               className="px-4 py-4 text-right text-sm font-black uppercase tracking-wider text-amber-300"
                             >
                               Grand Total
@@ -4691,12 +4783,34 @@ export default function ReportsPage({
                     <option value="COMPLETED">Completed</option>
                   </select>
                 </label>
+
+                <label className="block">
+                  <span className="mb-2 block text-sm font-bold text-slate-300">
+                    Employee Code
+                  </span>
+                  <input
+                    type="text"
+                    value={draftFilters.fuelerEmployeeId}
+                    onChange={(event) =>
+                      handleFilterChange("fuelerEmployeeId", event.target.value)
+                    }
+                    placeholder="All employees"
+                    className="w-full rounded-xl border border-slate-700 bg-slate-950 px-3 py-2.5 text-sm text-white outline-none transition focus:border-amber-500"
+                  />
+                </label>
+
+                {operationsReportError ? (
+                  <div className="rounded-xl border border-rose-500/30 bg-rose-500/10 p-3 text-sm text-rose-300">
+                    {operationsReportError}
+                  </div>
+                ) : null}
               </div>
 
               <div className="grid grid-cols-2 gap-3 border-t border-slate-800 px-5 py-4">
                 <button
                   type="button"
                   onClick={handleResetFilters}
+                  disabled={operationsReportLoading}
                   className="rounded-xl border border-slate-700 bg-slate-950 px-4 py-2.5 text-sm font-extrabold text-slate-300 transition hover:border-slate-500 hover:text-white"
                 >
                   Reset
@@ -4705,9 +4819,14 @@ export default function ReportsPage({
                 <button
                   type="button"
                   onClick={handleApplyFilters}
+                  disabled={operationsReportLoading}
                   className="rounded-xl border border-amber-500 bg-amber-500 px-4 py-2.5 text-sm font-extrabold text-slate-950 transition hover:bg-amber-400"
                 >
-                  {reportGenerated ? "Update Report" : "Generate Report"}
+                  {operationsReportLoading
+                    ? "Generating..."
+                    : reportGenerated
+                      ? "Update Report"
+                      : "Generate Report"}
                 </button>
               </div>
             </aside>

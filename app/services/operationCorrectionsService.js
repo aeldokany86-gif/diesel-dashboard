@@ -17,6 +17,22 @@ export async function createOperationCorrection(payload, currentUser = {}) {
   return response.data;
 }
 
+export async function fetchOperationCorrectionContext(
+  operationId,
+  currentUser = {}
+) {
+  if (!operationId) {
+    throw new Error("Operation ID is required.");
+  }
+
+  const response = await api.get(
+    `/operation-corrections/${operationId}/correction-context`,
+    { headers: buildOperationRequestHeaders(currentUser) }
+  );
+
+  return response.data || {};
+}
+
 export async function reviewOperationCorrection(
   correctionId,
   action,

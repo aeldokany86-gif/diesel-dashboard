@@ -545,14 +545,14 @@ function StationCounterMeterHistoryReport({
 
         {filtersOpen ? (
           <div className="fixed inset-0 z-[120] bg-black/70 backdrop-blur-sm">
-            <button type="button" aria-label="Close filters" onClick={() => reportGenerated && setFiltersOpen(false)} className="absolute inset-0 h-full w-full" />
+            <button type="button" aria-label="Close filters" onClick={() => setFiltersOpen(false)} className="absolute inset-0 h-full w-full" />
             <aside className="absolute right-0 top-0 z-10 flex h-full w-full max-w-md flex-col border-l border-slate-800 bg-slate-900 shadow-2xl shadow-black/50">
               <div className="flex items-start justify-between border-b border-slate-800 px-5 py-4">
                 <div>
                   <p className="text-xs font-bold uppercase tracking-[0.2em] text-amber-400">Report Setup</p>
                   <h2 className="mt-1 text-xl font-black text-white">Counter History Filters</h2>
                 </div>
-                {reportGenerated ? <button type="button" onClick={() => setFiltersOpen(false)} className="rounded-lg border border-slate-700 px-3 py-2 text-sm font-bold text-slate-400 hover:text-white">Close</button> : null}
+                <button type="button" aria-label="Close filters" onClick={() => setFiltersOpen(false)} className="flex h-9 w-9 items-center justify-center rounded-lg border border-slate-700 bg-slate-950/70 text-lg text-slate-400 transition hover:text-white">×</button>
               </div>
 
               <div className="flex-1 space-y-4 overflow-y-auto px-5 py-5">
@@ -968,11 +968,11 @@ function StationMasterReport({
 
         {filtersOpen ? (
           <div className="fixed inset-0 z-[120] bg-black/70 backdrop-blur-sm">
-            <button type="button" aria-label="Close filters" onClick={() => reportGenerated && setFiltersOpen(false)} className="absolute inset-0 h-full w-full" />
+            <button type="button" aria-label="Close filters" onClick={() => setFiltersOpen(false)} className="absolute inset-0 h-full w-full" />
             <aside className="absolute right-0 top-0 z-10 flex h-full w-full max-w-md flex-col border-l border-slate-800 bg-slate-900 shadow-2xl shadow-black/50">
               <div className="flex items-start justify-between border-b border-slate-800 px-5 py-4">
                 <div><p className="text-xs font-bold uppercase tracking-[0.2em] text-amber-400">Report Setup</p><h2 className="mt-1 text-xl font-black text-white">Station Master Filters</h2></div>
-                {reportGenerated ? <button type="button" onClick={() => setFiltersOpen(false)} className="rounded-lg border border-slate-700 px-3 py-2 text-sm font-bold text-slate-400 hover:text-white">Close</button> : null}
+                <button type="button" aria-label="Close filters" onClick={() => setFiltersOpen(false)} className="flex h-9 w-9 items-center justify-center rounded-lg border border-slate-700 bg-slate-950/70 text-lg text-slate-400 transition hover:text-white">×</button>
               </div>
 
               <div className="flex-1 space-y-4 overflow-y-auto px-5 py-5">
@@ -1403,14 +1403,14 @@ function StationTransferReport({
 
         {filtersOpen ? (
           <div className="fixed inset-0 z-[120] bg-black/70 backdrop-blur-sm">
-            <button type="button" aria-label="Close filters" onClick={() => reportGenerated && setFiltersOpen(false)} className="absolute inset-0 h-full w-full" />
+            <button type="button" aria-label="Close filters" onClick={() => setFiltersOpen(false)} className="absolute inset-0 h-full w-full" />
             <aside className="absolute right-0 top-0 z-10 flex h-full w-full max-w-md flex-col border-l border-slate-800 bg-slate-900 shadow-2xl shadow-black/50">
               <div className="flex items-start justify-between border-b border-slate-800 px-5 py-4">
                 <div>
                   <p className="text-xs font-bold uppercase tracking-[0.2em] text-amber-400">Report Setup</p>
                   <h2 className="mt-1 text-xl font-black text-white">Station Transfer Filters</h2>
                 </div>
-                {reportGenerated ? <button type="button" onClick={() => setFiltersOpen(false)} className="rounded-lg border border-slate-700 px-3 py-2 text-sm font-bold text-slate-400 hover:text-white">Close</button> : null}
+                <button type="button" aria-label="Close filters" onClick={() => setFiltersOpen(false)} className="flex h-9 w-9 items-center justify-center rounded-lg border border-slate-700 bg-slate-950/70 text-lg text-slate-400 transition hover:text-white">×</button>
               </div>
 
               <div className="flex-1 space-y-4 overflow-y-auto px-5 py-5">

@@ -47,3 +47,33 @@ export async function reviewEmployeeTransfer(transferId, payload) {
 
   return response.data;
 }
+
+export async function fetchEmployeeMasterReport({ companyId } = {}) {
+  if (!companyId) {
+    throw new Error("Company ID is required to generate the employee report.");
+  }
+
+  const response = await api.get("/employees/report/master", {
+    params: { companyId },
+  });
+
+  return {
+    rows: Array.isArray(response.data?.rows) ? response.data.rows : [],
+    summary: response.data?.summary || {},
+  };
+}
+
+export async function fetchEmployeeTransferReport({ companyId, ...filters } = {}) {
+  if (!companyId) {
+    throw new Error("Company ID is required to generate the employee transfer report.");
+  }
+
+  const response = await api.get("/employee-transfers/report", {
+    params: { companyId, ...filters },
+  });
+
+  return {
+    rows: Array.isArray(response.data?.rows) ? response.data.rows : [],
+    summary: response.data?.summary || {},
+  };
+}

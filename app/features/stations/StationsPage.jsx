@@ -197,6 +197,41 @@ function getSmartDropdownClass(menuAlign, widthClass = "w-64") {
   return `absolute ${menuAlign === "right" ? "right-0" : "left-0"} mt-3 ${widthClass} max-w-[calc(100vw-1.5rem)]`;
 }
 
+function unwrapStationTransferResult(result) {
+  return result?.transfer || result?.data?.transfer || result?.data || result || {};
+}
+
+function isStationTransferApplied(transfer, toProjectId) {
+  const normalizedStatus = normalizeScopeValue(
+    transfer?.status || transfer?.approvalStatus || transfer?.transferStatus
+  );
+
+  if (["approved", "completed", "applied"].includes(normalizedStatus)) {
+    return true;
+  }
+
+  if (
+    transfer?.autoApproved === true ||
+    transfer?.isAutoApproved === true ||
+    transfer?.applied === true ||
+    transfer?.requiresApproval === false
+  ) {
+    return true;
+  }
+
+  const transferredStation = transfer?.station || transfer?.updatedStation;
+  const resultingProjectId =
+    transferredStation?.projectId ||
+    transferredStation?.project?.id ||
+    transfer?.stationProjectId;
+
+  return Boolean(
+    resultingProjectId &&
+      toProjectId &&
+      normalizeScopeValue(resultingProjectId) === normalizeScopeValue(toProjectId)
+  );
+}
+
 export default function StationsPage({
   stations,
   setStations = () => {},
@@ -924,26 +959,69 @@ export default function StationsPage({
       : "Station transfer requested with zero stock balance.";
 
     try {
-      const createdTransfer = await createStationTransfer(backendId, {
+      const transferResponse = await createStationTransfer(backendId, {
         toProjectId,
         requestedByUserId: currentUser?.id || "",
         stockAtRequest: currentStock,
         transferWithStockConfirmed,
         stockSnapshotNote,
       });
+      const createdTransfer = unwrapStationTransferResult(transferResponse);
+      const transferApplied = isStationTransferApplied(createdTransfer, toProjectId);
 
       onStationTransferCreated?.(createdTransfer);
 
+      if (transferApplied) {
+        const updatedStation = createdTransfer?.station || createdTransfer?.updatedStation;
+
+        setStations((prev) =>
+          (prev || []).map((item) => {
+            const sameBackendStation =
+              normalizeScopeValue(getStationBackendId(item)) === normalizeScopeValue(backendId);
+            const sameDisplayStation =
+              normalizeScopeValue(item.id) === normalizeScopeValue(station.id);
+
+            if (!sameBackendStation && !sameDisplayStation) return item;
+
+            if (updatedStation) {
+              const mappedStation = mapBackendStationForState(updatedStation);
+              return {
+                ...item,
+                ...mappedStation,
+                project: newStationProject,
+                projectName: newStationProject,
+                projectId: toProjectId,
+              };
+            }
+
+            return {
+              ...item,
+              project: newStationProject,
+              projectId: toProjectId,
+            };
+          })
+        );
+      }
+
       trackActivity?.(
-        "Request Station Transfer",
+        transferApplied ? "Transfer Station" : "Request Station Transfer",
         "stations",
-        `${station.id} transfer requested from ${station.project || "-"} to ${newStationProject}. ${stockSnapshotNote}`
+        transferApplied
+          ? `${station.id} transferred from ${station.project || "-"} to ${newStationProject}. ${stockSnapshotNote}`
+          : `${station.id} transfer requested from ${station.project || "-"} to ${newStationProject}. ${stockSnapshotNote}`
       );
 
-      showToast?.(
-        "warning",
-        "Station transfer request submitted for project manager approval."
-      );
+      if (transferApplied) {
+        showToast?.(
+          "success",
+          `Station transferred successfully to ${newStationProject}.`
+        );
+      } else {
+        showToast?.(
+          "warning",
+          "Station transfer request submitted for project manager approval."
+        );
+      }
       closeStationProjectTransferModal();
       return true;
     } catch (error) {
@@ -976,6 +1054,14 @@ export default function StationsPage({
       return;
     }
 
+    if (
+      normalizeScopeValue(newStationProject) ===
+      normalizeScopeValue(editingProjectStation.project)
+    ) {
+      showToast?.("warning", "Please select a project different from the current project.");
+      return;
+    }
+
 
     const backendId = getStationBackendId(editingProjectStation);
     const toProjectId = resolveStationProjectId(newStationProject);
@@ -994,7 +1080,9 @@ export default function StationsPage({
       return;
     }
 
-    const currentStock = Number(editingProjectStation.currentStock);
+    const currentStock = Number(
+      String(editingProjectStation.currentStock ?? "").replace(/,/g, "").trim()
+    );
 
     if (!Number.isFinite(currentStock)) {
       showToast?.(
@@ -1013,6 +1101,7 @@ export default function StationsPage({
         toProjectId,
         currentStock,
       });
+      setEditingProjectStation(null);
       return;
     }
 
@@ -2174,7 +2263,7 @@ export default function StationsPage({
                       }
 
                       setEditingProjectStation(station);
-                      setNewStationProject(station.project || "");
+                      setNewStationProject("");
                                                         }}
                     className={`mt-3 border border-slate-700/80 rounded-2xl bg-slate-950/50 px-4 py-3 min-w-[170px] shadow-lg transition-all duration-300 text-left ${
                       canCurrentUserCreateStationTransfer()
@@ -2447,6 +2536,7 @@ export default function StationsPage({
               </div>
 
               <button
+                type="button"
                 onClick={closeStationProjectTransferModal}
                 className="text-gray-500 hover:text-black text-xl"
               >
@@ -2471,7 +2561,13 @@ export default function StationsPage({
               >
                 <option value="">Select Project</option>
 
-                {filterActiveProjects(transferProjects || projects || []).map((project) => (
+                {filterActiveProjects(transferProjects || projects || [])
+                  .filter(
+                    (project) =>
+                      normalizeScopeValue(project.name || project.id) !==
+                      normalizeScopeValue(editingProjectStation.project)
+                  )
+                  .map((project) => (
                   <option
                     key={makeTenantEntityKey(project, project.name)}
                     value={project.name || project.id}
@@ -2485,6 +2581,7 @@ export default function StationsPage({
 
             <div className="flex justify-end gap-3 border-t border-slate-700/80 px-6 py-5 bg-slate-950/90">
               <button
+                type="button"
                 onClick={closeStationProjectTransferModal}
                 className="rounded-xl border border-slate-600 bg-slate-900 px-5 py-2.5 font-bold text-slate-200 hover:bg-slate-800 transition"
               >
@@ -2492,6 +2589,7 @@ export default function StationsPage({
               </button>
 
               <button
+                type="button"
                 onClick={submitStationProjectTransferRequest}
                 className="bg-yellow-500 text-black px-4 py-2 rounded-lg font-semibold"
               >
@@ -2510,6 +2608,7 @@ export default function StationsPage({
                 Confirm Station Transfer
               </h2>
               <button
+                type="button"
                 onClick={() => setStationTransferStockConfirmation(null)}
                 className="text-gray-500 hover:text-black text-xl"
               >
@@ -2552,6 +2651,7 @@ export default function StationsPage({
               </button>
 
               <button
+                type="button"
                 onClick={confirmStationTransferWithStock}
                 className="bg-amber-500 hover:bg-amber-400 text-black px-4 py-2 rounded-lg font-bold"
               >
