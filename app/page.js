@@ -170,6 +170,7 @@ const OPERATION_HEADERS = [
 ];
 
 const COMPANY_CONTEXT_STORAGE_KEY = "fleetfuelpro_company_context";
+const THEME_STORAGE_KEY = "fleetfuelpro_theme";
 
 function notifyUser(showToastFn, type, message) {
   const safeType = type || "info";
@@ -637,7 +638,7 @@ function filterTransactionRowsByCompany({ rows = [], headers = [], companyId, us
  
 export default function Home() {
   const [page, setPage] = useState("companies");
-  const [theme, setTheme] = useState("dark");
+  const [theme, setTheme] = useState("light");
   const [showThemeSettings, setShowThemeSettings] = useState(false);
   const [sidebarCollapsed, setSidebarCollapsed] = useState(false);
   const [mobileSidebarOpen, setMobileSidebarOpen] = useState(false);
@@ -858,6 +859,23 @@ useEffect(() => {
       localStorage.removeItem(COMPANY_CONTEXT_STORAGE_KEY);
     }
   }, [selectedCompanyId]);
+
+  useEffect(() => {
+    if (typeof window === "undefined") return;
+
+    const savedTheme = window.localStorage.getItem(THEME_STORAGE_KEY);
+    if (savedTheme === "dark" || savedTheme === "light") {
+      setTheme(savedTheme);
+    }
+  }, []);
+
+  useEffect(() => {
+    if (typeof window === "undefined") return;
+
+    window.localStorage.setItem(THEME_STORAGE_KEY, theme);
+    document.documentElement.dataset.theme = theme;
+    document.documentElement.style.colorScheme = theme;
+  }, [theme]);
 
   useEffect(() => {
     if (!backendAuthUser) return;
@@ -3289,11 +3307,8 @@ useEffect(() => {
       data={scopedData}
       headers={headers}
       showToast={showToast}
-      currency={currency}
-      getLiterPriceByDate={getLiterPriceByDate}
       currentUser={currentUser}
       hasPermission={hasPermission}
-      trackActivity={trackActivity}
       submitApprovalRequest={submitApprovalRequest}
       onCreateEmployee={handleCreateEmployee}
       onUpdateEmployee={handleUpdateEmployee}
@@ -3596,8 +3611,17 @@ if (currentUser?.passwordResetRequired || forcePasswordChangeOpen) {
   return (
     <>
       <style jsx global>{`
+        [data-theme="dark"] {
+          --chart-axis-color: #cbd5e1;
+        }
+
         [data-theme="light"] {
-          color-scheme: light;
+          --chart-axis-color: #334155;
+        }
+
+        [data-theme="dark"] select option {
+          background-color: #0f172a !important;
+          color: #f8fafc !important;
         }
 
         [data-theme="light"] .theme-main-bg {
@@ -3618,8 +3642,10 @@ if (currentUser?.passwordResetRequired || forcePasswordChangeOpen) {
 
         [data-theme="light"] .bg-\[\#080d19\],
         [data-theme="light"] .bg-slate-950,
+        [data-theme="light"] .bg-slate-950\/50,
         [data-theme="light"] .bg-slate-900,
         [data-theme="light"] .bg-slate-900\/80,
+        [data-theme="light"] .bg-slate-900\/70,
         [data-theme="light"] .bg-slate-900\/60,
         [data-theme="light"] .bg-slate-800,
         [data-theme="light"] .bg-slate-800\/80,
@@ -3635,6 +3661,11 @@ if (currentUser?.passwordResetRequired || forcePasswordChangeOpen) {
         [data-theme="light"] .border-slate-700,
         [data-theme="light"] .border-gray-700 {
           border-color: rgba(203, 213, 225, 0.95) !important;
+        }
+
+        [data-theme="light"] .bg-slate-700 {
+          background-color: #e2e8f0 !important;
+          color: #64748b !important;
         }
 
         [data-theme="light"] .text-slate-100,
@@ -3680,6 +3711,11 @@ if (currentUser?.passwordResetRequired || forcePasswordChangeOpen) {
           background-color: #ffffff !important;
           color: #0f172a !important;
           border-color: #cbd5e1 !important;
+        }
+
+        [data-theme="light"] select option {
+          background-color: #ffffff !important;
+          color: #0f172a !important;
         }
 
         [data-theme="light"] .shadow-black\/10,
@@ -4249,10 +4285,6 @@ function LoginPage({
   return (
     <>
       <style jsx global>{`
-        [data-theme="light"] {
-          color-scheme: light;
-        }
-
         [data-theme="light"] .theme-main-bg {
           background:
             radial-gradient(circle at top left, rgba(245, 158, 11, 0.10), transparent 34%),

@@ -1,6 +1,6 @@
 "use client";
 
-import React, { useEffect, useRef, useState } from "react";
+import { useEffect, useRef, useState } from "react";
 
 import {
   BarChart,
@@ -27,7 +27,6 @@ import {
   mapFrontendEmployeeStatusForBackend,
   normalizeBackendRoleName,
   normalizeScopeValue,
-  normalizeText,
 } from "../../lib/helpers";
 
 import {
@@ -153,11 +152,8 @@ export default function TeamPage({
   data = [],
   headers = [],
   showToast,
-  currency = "SAR",
-  getLiterPriceByDate,
   currentUser,
   hasPermission = () => false,
-  trackActivity = () => {},
   submitApprovalRequest = () => {},
   onCreateEmployee,
   onUpdateEmployee,
@@ -327,7 +323,6 @@ export default function TeamPage({
         })
       : null;
 
-    const linkedUser = explicitlyLinkedUser || matchedEmailUser;
     const linkedUserIsActive =
       localUpdate.linkedUserIsActive !== undefined
         ? Boolean(localUpdate.linkedUserIsActive)
@@ -384,13 +379,45 @@ export default function TeamPage({
           .map((row, originalIndex) => ({ row, originalIndex }))
           .filter((item) => isSameText(item.row[typeIndex], "Direct_Refuel"));
 
-  const getFuelerOperations = (fuelerId) => {
-    if (fuelerIndex === -1 || typeIndex === -1) return [];
+  const getFuelerIdentityKeys = (fueler) => {
+    const keys = [
+      fueler?.id,
+      fueler?.employeeId,
+      fueler?.backendId,
+      fueler?.linkedUserId,
+    ]
+      .map((value) => normalizeText(value))
+      .filter(Boolean);
+
+    return new Set(keys);
+  };
+
+  const getOperationFuelerIdentityKeys = (item) => {
+    const operation = item?.row?.__operation || {};
+    const requestedBy = operation.requestedBy || {};
+    const linkedEmployee = requestedBy.linkedEmployee || {};
+
+    return [
+      operation.fuelerEmployeeIdAtOperation,
+      linkedEmployee.employeeId,
+      requestedBy.employeeId,
+      operation.requestedByUserId,
+      fuelerIndex !== -1 ? item?.row?.[fuelerIndex] : "",
+    ]
+      .map((value) => normalizeText(value))
+      .filter(Boolean);
+  };
+
+  const getFuelerOperations = (fueler) => {
+    if (typeIndex === -1) return [];
+
+    const fuelerIdentityKeys = getFuelerIdentityKeys(fueler);
+    if (fuelerIdentityKeys.size === 0) return [];
 
     return directRefuelOperations
       .filter((item) => {
-        const rowFuelerId = normalizeText(item.row[fuelerIndex]);
-        return rowFuelerId === normalizeText(fuelerId);
+        const operationFuelerKeys = getOperationFuelerIdentityKeys(item);
+        return operationFuelerKeys.some((key) => fuelerIdentityKeys.has(key));
       })
       .sort((a, b) => {
         const da = dateIndex !== -1 ? new Date(a.row[dateIndex]).getTime() || 0 : 0;
@@ -399,17 +426,17 @@ export default function TeamPage({
       });
   };
 
-  const getFuelerDieselQty = (fuelerId) => {
+  const getFuelerDieselQty = (fueler) => {
     if (dieselIndex === -1) return 0;
 
-    return getFuelerOperations(fuelerId).reduce((sum, item) => {
+    return getFuelerOperations(fueler).reduce((sum, item) => {
       return sum + (parseFloat(item.row[dieselIndex]) || 0);
     }, 0);
   };
 
   const fuelersWithKpi = displayFuelers.map((fueler) => {
-    const operations = getFuelerOperations(fueler.id);
-    const dieselQty = getFuelerDieselQty(fueler.id);
+    const operations = getFuelerOperations(fueler);
+    const dieselQty = getFuelerDieselQty(fueler);
 
     return {
       ...fueler,
@@ -456,7 +483,8 @@ export default function TeamPage({
       name: fueler.name || fueler.id,
       dieselQty: Number(fueler.dieselQty) || 0,
     }))
-    .sort((a, b) => b.dieselQty - a.dieselQty);
+    .sort((a, b) => b.dieselQty - a.dieselQty)
+    .slice(0, 10);
 
   const totalOperations = activeTeamFuelers.reduce(
     (sum, fueler) => sum + fueler.operationsCount,
@@ -738,30 +766,6 @@ export default function TeamPage({
       value === "resigned"
     );
   }
-
-  const requestRetireFueler = (fueler) => {
-    if (!hasPermission("team", "edit")) {
-      showToast?.("warning", "Read-only access: you cannot retire team members.");
-      return;
-    }
-
-    if (!fueler?.id) {
-      showToast?.("warning", "Team member is not valid.");
-      return;
-    }
-
-    setPendingTeamChange({
-      fueler,
-      field: "retire",
-      oldValue: fueler.status || "On Duty",
-      newValue: "Retired / Resigned",
-      oldDisplayValue: fueler.status || "On Duty",
-      newDisplayValue: "Retired / Resigned",
-      message:
-        "This team member will be retired and hidden from the Team page. If linked, the system user will be deactivated and removed from the active Users list. Historical operations and reports will remain unchanged. If this employee returns later, create a new team member with a new Team Member ID.",
-    });
-  };
-
 
   const printTable = (tableId, title = "Team Report") => {
     const tableElement = document.getElementById(tableId);
@@ -1123,44 +1127,6 @@ export default function TeamPage({
     }
 
     return currentRole === "Officer" || currentRole === "Manager";
-  };
-
-  const isEmployeeCurrentProjectManager = (fueler) => {
-    if (!fueler) return false;
-
-    const linkedUserId = normalizeText(
-      fueler.linkedUserId ||
-        fueler.userId ||
-        fueler.user?.id ||
-        fueler.systemUserId ||
-        ""
-    );
-
-    const employeeId = normalizeText(fueler.backendId || fueler.id || "");
-    const employeeEmail = normalizeText(fueler.email || "");
-
-    const matchedUser = users.find((user) => {
-      const userId = normalizeText(user.id || "");
-      const userEmail = normalizeText(user.email || "");
-
-      return (linkedUserId && userId === linkedUserId) || (employeeEmail && userEmail === employeeEmail);
-    });
-
-    const managerUserId = linkedUserId || normalizeText(matchedUser?.id || "");
-
-    return filterActiveProjects(projects).some((project) => {
-      const projectManagerId = normalizeText(
-        project.projectManagerId ||
-          project.managerUserId ||
-          project.managerId ||
-          project.projectManager?.id ||
-          ""
-      );
-
-      if (!projectManagerId) return false;
-
-      return projectManagerId === managerUserId || projectManagerId === employeeId;
-    });
   };
 
   const buildTeamChangeMessage = ({ field, oldDisplayValue, newDisplayValue }) => {
@@ -1896,7 +1862,7 @@ export default function TeamPage({
                 </button>
 
                 {showFuelersSettings && (
-                  <div className="absolute left-0 mt-2 w-44 bg-slate-950 border border-slate-700 rounded-xl shadow-2xl z-[9999] overflow-hidden">
+                  <div className="absolute right-0 mt-2 w-44 bg-slate-950 border border-slate-700 rounded-xl shadow-2xl z-[9999] overflow-hidden">
                     <button
                       onClick={() => {
                         exportFuelersCSV();
@@ -2246,7 +2212,7 @@ export default function TeamPage({
                 Diesel Quantity Per Operator
               </h2>
               <p className="text-xs text-gray-400 mt-1">
-                Total diesel quantity handled by each operator based on Direct Refuel operations only
+                Top 10 operators by diesel quantity based on Direct Refuel operations only
               </p>
             </div>
 
@@ -2259,9 +2225,22 @@ export default function TeamPage({
           </div>
 
           <ChartFrame height={260}>
-            <BarChart data={chartData}>
-              <XAxis dataKey="name" stroke="#ccc" tick={{ fontSize: 11 }} />
-              <YAxis stroke="#ccc" tick={{ fontSize: 11 }} />
+            <BarChart data={chartData} margin={{ top: 4, right: 8, left: 0, bottom: 34 }}>
+              <XAxis
+                dataKey="name"
+                stroke="var(--chart-axis-color, #cbd5e1)"
+                interval={0}
+                minTickGap={0}
+                tickMargin={8}
+                height={72}
+                angle={-45}
+                textAnchor="end"
+                tick={{ fontSize: 11, fill: "var(--chart-axis-color, #cbd5e1)" }}
+              />
+              <YAxis
+                stroke="var(--chart-axis-color, #cbd5e1)"
+                tick={{ fontSize: 11, fill: "var(--chart-axis-color, #cbd5e1)" }}
+              />
               <Tooltip />
               <Bar dataKey="dieselQty" fill="#60a5fa" name="Diesel Qty" />
             </BarChart>
@@ -2560,7 +2539,7 @@ export default function TeamPage({
                   </thead>
 
                   <tbody>
-                    {getFuelerOperations(selectedFuelerHistory.id).map((item, i) => {
+                    {getFuelerOperations(selectedFuelerHistory).map((item, i) => {
                       const row = item.row;
 
                       return (
@@ -2587,7 +2566,7 @@ export default function TeamPage({
                       );
                     })}
 
-                    {getFuelerOperations(selectedFuelerHistory.id).length === 0 && (
+                    {getFuelerOperations(selectedFuelerHistory).length === 0 && (
                       <tr>
                         <Td colSpan={8}>No Direct Refuel operations found for this fueler.</Td>
                       </tr>
@@ -2601,18 +2580,18 @@ export default function TeamPage({
 
         {showAddFueler && (
           <div className="fixed inset-0 bg-black/75 backdrop-blur-sm flex items-center justify-center z-[10000] p-3">
-            <div className="bg-white text-black w-[620px] rounded-2xl shadow-2xl p-6">
-              <div className="flex justify-between items-center mb-5 border-b pb-3">
+            <div className="w-[620px] max-w-[95vw] rounded-2xl border border-slate-700 bg-slate-950 p-6 text-slate-100 shadow-2xl">
+              <div className="flex justify-between items-center mb-5 border-b border-slate-700 pb-3">
                 <div>
                   <h2 className="text-xl sm:text-2xl font-bold">Add Team Member</h2>
-                  <p className="text-sm text-gray-500 mt-1">
-                    Local entry now, backend-ready structure later
+                  <p className="text-sm text-slate-400 mt-1">
+                    Create an employee record and assign the initial project
                   </p>
                 </div>
 
                 <button
                   onClick={closeAddFueler}
-                  className="text-gray-500 hover:text-black text-xl"
+                  className="text-slate-400 hover:text-white text-xl"
                 >
                   ×
                 </button>
@@ -2620,75 +2599,75 @@ export default function TeamPage({
 
               <div className="grid grid-cols-1 md:grid-cols-2 gap-4 mb-4">
                 <div>
-                  <label className="font-medium text-gray-700">Operator ID</label>
+                  <label className="font-medium text-slate-300">Operator ID</label>
                   <input
                     type="text"
                     value={newFueler.id}
                     onChange={(e) => setNewFueler({ ...newFueler, id: e.target.value })}
-                    className={`border rounded-lg p-3 w-full mt-2 ${
+                    className={`w-full mt-2 rounded-lg border bg-slate-900 p-3 text-white placeholder:text-slate-500 outline-none focus:ring-2 ${
                       teamMemberIdDuplicateError
-                        ? "border-red-500 bg-red-50 focus:outline-none focus:ring-2 focus:ring-red-200"
-                        : "border-gray-300"
+                        ? "border-red-500 bg-red-500/10 focus:ring-red-500/30"
+                        : "border-slate-700 focus:border-amber-400 focus:ring-amber-400/20"
                     }`}
                     placeholder="Example: FL-001"
                   />
                   {teamMemberIdDuplicateError && (
-                    <p className="mt-1 text-xs font-semibold text-red-600">
+                    <p className="mt-1 text-xs font-semibold text-red-300">
                       {teamMemberIdDuplicateError}
                     </p>
                   )}
                 </div>
 
                 <div>
-                  <label className="font-medium text-gray-700">Team Member Name</label>
+                  <label className="font-medium text-slate-300">Team Member Name</label>
                   <input
                     type="text"
                     value={newFueler.name}
                     onChange={(e) => setNewFueler({ ...newFueler, name: e.target.value })}
-                    className="border rounded-lg p-3 w-full mt-2"
+                    className="w-full mt-2 rounded-lg border border-slate-700 bg-slate-900 p-3 text-white placeholder:text-slate-500 outline-none focus:border-amber-400 focus:ring-2 focus:ring-amber-400/20"
                     placeholder="Enter team member name"
                   />
                 </div>
 
                 <div>
-                  <label className="font-medium text-gray-700">Mobile Number</label>
+                  <label className="font-medium text-slate-300">Mobile Number</label>
                   <input
                     type="text"
                     value={newFueler.mobile}
                     onChange={(e) => setNewFueler({ ...newFueler, mobile: e.target.value })}
-                    className="border rounded-lg p-3 w-full mt-2"
+                    className="w-full mt-2 rounded-lg border border-slate-700 bg-slate-900 p-3 text-white placeholder:text-slate-500 outline-none focus:border-amber-400 focus:ring-2 focus:ring-amber-400/20"
                     placeholder="Enter mobile number"
                   />
                 </div>
 
                 <div>
-                  <label className="font-medium text-gray-700">Email</label>
+                  <label className="font-medium text-slate-300">Email</label>
                   <input
                     type="email"
                     value={newFueler.email}
                     onChange={(e) => setNewFueler({ ...newFueler, email: e.target.value })}
-                    className="border rounded-lg p-3 w-full mt-2"
+                    className="w-full mt-2 rounded-lg border border-slate-700 bg-slate-900 p-3 text-white placeholder:text-slate-500 outline-none focus:border-amber-400 focus:ring-2 focus:ring-amber-400/20"
                     placeholder="Link with Users page email"
                   />
                 </div>
 
                 <div>
-                  <label className="font-medium text-gray-700">Job Title</label>
+                  <label className="font-medium text-slate-300">Job Title</label>
                   <input
                     type="text"
                     value={newFueler.jobTitle}
                     onChange={(e) => setNewFueler({ ...newFueler, jobTitle: e.target.value })}
-                    className="border rounded-lg p-3 w-full mt-2"
+                    className="w-full mt-2 rounded-lg border border-slate-700 bg-slate-900 p-3 text-white placeholder:text-slate-500 outline-none focus:border-amber-400 focus:ring-2 focus:ring-amber-400/20"
                     placeholder="Example: Operator, Fueler, Mechanic, Manager"
                   />
                 </div>
 
                 <div>
-                  <label className="font-medium text-gray-700">Status</label>
+                  <label className="font-medium text-slate-300">Status</label>
                   <select
                     value={newFueler.status}
                     onChange={(e) => setNewFueler({ ...newFueler, status: e.target.value })}
-                    className="border rounded-lg p-3 w-full mt-2"
+                    className="w-full mt-2 rounded-lg border border-slate-700 bg-slate-900 p-3 text-white outline-none focus:border-amber-400 focus:ring-2 focus:ring-amber-400/20"
                   >
                     <option value="On Duty">On Duty</option>
                     <option value="In Vacation">In Vacation</option>
@@ -2698,7 +2677,7 @@ export default function TeamPage({
               </div>
 
               <div className="mb-5">
-                <label className="font-medium text-gray-700">Project Name</label>
+                <label className="font-medium text-slate-300">Project Name</label>
                 <select
                   value={newFueler.projectId}
                   onChange={(e) => {
@@ -2713,7 +2692,7 @@ export default function TeamPage({
                       projectName: selectedProject?.name || selectedProject?.id || "",
                     });
                   }}
-                  className="border rounded-lg p-3 w-full mt-2"
+                  className="w-full mt-2 rounded-lg border border-slate-700 bg-slate-900 p-3 text-white outline-none focus:border-amber-400 focus:ring-2 focus:ring-amber-400/20"
                 >
                   <option value="">Select Project</option>
                   {filterActiveProjects(transferProjects).map((project) => (
@@ -2724,10 +2703,10 @@ export default function TeamPage({
                 </select>
               </div>
 
-              <div className="flex justify-end gap-3 border-t border-slate-700/80 px-6 py-5 bg-slate-950/90">
+              <div className="-mx-6 -mb-6 flex justify-end gap-3 rounded-b-2xl border-t border-slate-700/80 bg-slate-900/80 px-6 py-5">
                 <button
                   onClick={closeAddFueler}
-                  className="bg-gray-200 px-3 lg:px-4 py-2 rounded-lg"
+                  className="rounded-lg border border-slate-700 bg-slate-800 px-3 py-2 text-slate-200 hover:bg-slate-800/70 lg:px-4"
                 >
                   Cancel
                 </button>
@@ -2737,7 +2716,7 @@ export default function TeamPage({
                   disabled={Boolean(teamMemberIdDuplicateError) || !newFueler.id.trim()}
                   className={`px-3 lg:px-4 py-2 rounded-lg font-semibold ${
                     teamMemberIdDuplicateError || !newFueler.id.trim()
-                      ? "bg-gray-300 text-gray-500 cursor-not-allowed"
+                      ? "bg-slate-700 text-slate-400 opacity-60 cursor-not-allowed"
                       : "bg-yellow-500 hover:bg-yellow-400 text-black"
                   }`}
                 >
