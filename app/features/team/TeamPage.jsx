@@ -372,12 +372,16 @@ export default function TeamPage({
     };
   });
 
-  const directRefuelOperations =
+  const equipmentRefuelOperations =
     typeIndex === -1
       ? []
       : data
           .map((row, originalIndex) => ({ row, originalIndex }))
-          .filter((item) => isSameText(item.row[typeIndex], "Direct_Refuel"));
+          .filter(
+            (item) =>
+              isSameText(item.row[typeIndex], "Direct_Refuel") ||
+              isSameText(item.row[typeIndex], "External_Direct_Refuel")
+          );
 
   const getFuelerIdentityKeys = (fueler) => {
     const keys = [
@@ -414,7 +418,7 @@ export default function TeamPage({
     const fuelerIdentityKeys = getFuelerIdentityKeys(fueler);
     if (fuelerIdentityKeys.size === 0) return [];
 
-    return directRefuelOperations
+    return equipmentRefuelOperations
       .filter((item) => {
         const operationFuelerKeys = getOperationFuelerIdentityKeys(item);
         return operationFuelerKeys.some((key) => fuelerIdentityKeys.has(key));
@@ -1807,7 +1811,7 @@ export default function TeamPage({
           <div>
             <h1 className="text-xl sm:text-2xl font-bold">Team Management</h1>
             <p className="text-gray-400">
-              Team monitoring, operator Direct Refuel KPI and performance tracking
+              Team monitoring, equipment refuel KPI and performance tracking
             </p>
           </div>
 
@@ -1833,7 +1837,7 @@ export default function TeamPage({
               ).length
             )}
           />
-          <Card title="Direct Refuel Operations" value={formatNumber(totalOperations)} />
+          <Card title="Equipment Refuel Operations" value={formatNumber(totalOperations)} />
           <Card title="Assigned Projects" value={formatNumber(assignedProjectsCount)} />
         </div>
 
@@ -2212,7 +2216,7 @@ export default function TeamPage({
                 Diesel Quantity Per Operator
               </h2>
               <p className="text-xs text-gray-400 mt-1">
-                Top 10 operators by diesel quantity based on Direct Refuel operations only
+                Top 10 operators by equipment fuel consumption from Direct and External Direct Refuel
               </p>
             </div>
 
@@ -2496,7 +2500,7 @@ export default function TeamPage({
                     </span>
                   </p>
                   <p className="text-xs text-gray-500 mt-1">
-                    Read-only view based on Direct Refuel operations only
+                    Read-only view based on Direct and External Direct Refuel operations
                   </p>
                 </div>
 
@@ -2510,7 +2514,7 @@ export default function TeamPage({
 
               <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-3 p-3 sm:p-4 lg:p-5 border-b border-gray-700 bg-gray-950/40">
                 <Card
-                  title="Operator Operations"
+                  title="Equipment Refuel Operations"
                   value={formatNumber(selectedFuelerHistory.operationsCount)}
                 />
                 <Card
@@ -2568,7 +2572,7 @@ export default function TeamPage({
 
                     {getFuelerOperations(selectedFuelerHistory).length === 0 && (
                       <tr>
-                        <Td colSpan={8}>No Direct Refuel operations found for this fueler.</Td>
+                        <Td colSpan={8}>No equipment refuel operations found for this fueler.</Td>
                       </tr>
                     )}
                   </tbody>

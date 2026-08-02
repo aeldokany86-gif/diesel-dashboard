@@ -1259,6 +1259,32 @@ export default function Home() {
       throw new Error("Project backend ID is required.");
     }
 
+    // Updating a historical price can reprice completed operations in the
+    // backend. Refresh the shared operations state here so every consumer
+    // (OperationsPage and ProjectsPage) receives the same fresh snapshot.
+    const operationsRefreshPromise = fetchOperations(
+      currentUserRef.current || currentUser,
+    )
+      .then((backendOperations) =>
+        backendOperations
+          .filter(
+            (operation) =>
+              String(operation?.status || "").toUpperCase() === "COMPLETED",
+          )
+          .map(mapBackendOperationForState),
+      )
+      .catch((error) => {
+        logHandledApiIssue(
+          "Fuel price was saved, but operations could not be refreshed",
+          error,
+        );
+        showToast?.(
+          "warning",
+          "Fuel price was saved, but operation costs could not be refreshed automatically.",
+        );
+        return null;
+      });
+
     const refreshedProjectData = await fetchProjectById(backendId);
     const refreshedProject = mapBackendProjectForState(refreshedProjectData);
 
@@ -1274,6 +1300,11 @@ export default function Home() {
         return isTargetProject ? refreshedProject : item;
       }),
     );
+
+    const refreshedOperations = await operationsRefreshPromise;
+    if (Array.isArray(refreshedOperations)) {
+      setData(refreshedOperations);
+    }
 
     return refreshedProject;
   };

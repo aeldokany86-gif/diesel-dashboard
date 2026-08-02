@@ -7,14 +7,13 @@ import { exportReportToExcel } from "./utils/exportReportToExcel";
 import { fetchStationStockMovements } from "../../services/stationsService";
 import StationsReportsPage from "./stations/StationsReportsPage";
 import EmployeesReportsPage from "./employees/EmployeesReportsPage";
+import ProjectsReportsPage from "./projects/ProjectsReportsPage";
 import { fetchOperationsSummaryReport } from "../../services/operationsService";
 import {
   fetchAssetTransferHistory,
   fetchAssetMeterHistory,
 } from "../../services/assetsService";
-import {
-  fetchOdometerCorrectionHistory,
-} from "../../services/operationCorrectionsService";
+import { fetchOdometerCorrectionHistory } from "../../services/operationCorrectionsService";
 
 const OPERATIONS_REPORTS = [
   {
@@ -105,6 +104,23 @@ const TEAM_REPORTS = [
   },
 ];
 
+const PROJECTS_REPORTS = [
+  {
+    id: "projects-master",
+    title: "Projects Master Report",
+    description:
+      "Complete project register including status, manager, assignments, fuel consumption, cost and current pricing components.",
+    available: true,
+  },
+  {
+    id: "project-fuel-price-history",
+    title: "Project Fuel Price History Report",
+    description:
+      "Chronological history of project fuel prices including base price, delivery, VAT, effective date, changer and priced operations.",
+    available: true,
+  },
+];
+
 const REPORT_MODULES = [
   {
     id: "operations",
@@ -118,8 +134,7 @@ const REPORT_MODULES = [
   {
     id: "assets",
     title: "Assets",
-    description:
-      "Asset register, movement history and utilization reports.",
+    description: "Asset register, movement history and utilization reports.",
     icon: "🚜",
     reports: ASSETS_REPORTS,
     available: true,
@@ -148,8 +163,8 @@ const REPORT_MODULES = [
     description:
       "Project summaries, operational activity and fuel performance reports.",
     icon: "📁",
-    reports: [],
-    available: false,
+    reports: PROJECTS_REPORTS,
+    available: true,
   },
   {
     id: "users",
@@ -187,7 +202,9 @@ const EMPTY_FILTERS = {
 };
 
 function normalizeValue(value) {
-  return String(value ?? "").trim().toLowerCase();
+  return String(value ?? "")
+    .trim()
+    .toLowerCase();
 }
 
 function getHeaderIndex(headers = [], aliases = []) {
@@ -242,7 +259,7 @@ function getOperationCost(row, headers = []) {
       "total_cost",
       "operation_cost",
       "cost",
-    ])
+    ]),
   );
 }
 
@@ -350,7 +367,7 @@ function resolveAssetLabel(value, assets = []) {
   if (!normalizedValue) return "-";
 
   const matchedAsset = assets.find((asset) =>
-    getAssetCandidates(asset).includes(normalizedValue)
+    getAssetCandidates(asset).includes(normalizedValue),
   );
 
   return matchedAsset ? getAssetLabel(matchedAsset) : value;
@@ -419,7 +436,7 @@ function resolveOperationProjectLabel({
       ]
         .filter(Boolean)
         .map(normalizeValue)
-        .includes(normalizedSnapshotId)
+        .includes(normalizedSnapshotId),
     );
 
     return matchedProject ? getProjectLabel(matchedProject) : snapshotId;
@@ -460,7 +477,7 @@ function resolveProjectLabel({
     ]
       .filter(Boolean)
       .map(normalizeValue)
-      .includes(normalizedProject)
+      .includes(normalizedProject),
   );
 
   return matchedProject ? getProjectLabel(matchedProject) : rawProject;
@@ -483,7 +500,7 @@ function getActiveFilterSummary(filters) {
       value:
         filters.dateFrom || filters.dateTo
           ? `${formatReportDate(filters.dateFrom)} → ${formatReportDate(
-              filters.dateTo
+              filters.dateTo,
             )}`
           : "All dates",
     },
@@ -493,7 +510,10 @@ function getActiveFilterSummary(filters) {
     },
     {
       label: "Asset",
-      value: filters.asset === "all" ? "All Assets" : filters.assetLabel || filters.asset,
+      value:
+        filters.asset === "all"
+          ? "All Assets"
+          : filters.assetLabel || filters.asset,
     },
     {
       label: "Operation Type",
@@ -525,10 +545,26 @@ function getOperationEntityLabel(entity, preferredCodeFields = []) {
 
 function mapSummaryOperation(operation, index) {
   const type = String(operation?.type || "").toUpperCase();
-  const sourceStation = getOperationEntityLabel(operation?.sourceStation, ["stationId", "stationCode", "code"]);
-  const destinationStation = getOperationEntityLabel(operation?.destinationStation, ["stationId", "stationCode", "code"]);
-  const asset = getOperationEntityLabel(operation?.asset, ["assetId", "equipmentNo", "equipmentNumber", "code"]);
-  const externalSource = operation?.externalStationName || operation?.supplierName || operation?.externalSupplierName || "";
+  const sourceStation = getOperationEntityLabel(operation?.sourceStation, [
+    "stationId",
+    "stationCode",
+    "code",
+  ]);
+  const destinationStation = getOperationEntityLabel(
+    operation?.destinationStation,
+    ["stationId", "stationCode", "code"],
+  );
+  const asset = getOperationEntityLabel(operation?.asset, [
+    "assetId",
+    "equipmentNo",
+    "equipmentNumber",
+    "code",
+  ]);
+  const externalSource =
+    operation?.externalStationName ||
+    operation?.supplierName ||
+    operation?.externalSupplierName ||
+    "";
 
   let source = sourceStation || externalSource || "-";
   let destination = asset || destinationStation || "-";
@@ -559,7 +595,10 @@ function mapSummaryOperation(operation, index) {
       operation?.destinationStationId ||
       destination,
     quantity: getNumericValue(operation?.quantity),
-    cost: getNumericValue(operation?.totalCostAtOperation, operation?.totalCost),
+    cost: getNumericValue(
+      operation?.totalCostAtOperation,
+      operation?.totalCost,
+    ),
     status: operation?.status || "COMPLETED",
     project:
       operation?.projectNameAtOperation ||
@@ -569,7 +608,6 @@ function mapSummaryOperation(operation, index) {
       "-",
   };
 }
-
 
 const STATION_MOVEMENT_FILTERS = {
   dateFrom: "",
@@ -666,16 +704,19 @@ function getMovementRelatedEntity(movement) {
   }
 
   if (movement?.referenceType === "STATION_CREATE") return "Station Creation";
-  if (movement?.referenceType === "PHYSICAL_STOCK_COUNT") return "Physical Stock Count";
-  if (movement?.referenceType === "ZERO_BALANCE") return "Balance Reconciliation";
+  if (movement?.referenceType === "PHYSICAL_STOCK_COUNT")
+    return "Physical Stock Count";
+  if (movement?.referenceType === "ZERO_BALANCE")
+    return "Balance Reconciliation";
 
   return movement?.referenceType || "-";
 }
 
 function getMovementStatus(movement) {
-  return movement?.operation?.status || movement?.referenceStatus || "COMPLETED";
+  return (
+    movement?.operation?.status || movement?.referenceStatus || "COMPLETED"
+  );
 }
-
 
 const FUEL_SUPPLIER_FILTERS = {
   dateFrom: "",
@@ -700,7 +741,12 @@ const FUEL_SUPPLIER_HEADERS = [
   "Status",
 ];
 
-function getOperationField(row, headers, embeddedAliases = [], rowAliases = []) {
+function getOperationField(
+  row,
+  headers,
+  embeddedAliases = [],
+  rowAliases = [],
+) {
   const embeddedOperation = getEmbeddedOperation(row);
 
   for (const alias of embeddedAliases) {
@@ -737,10 +783,13 @@ function FuelSuppliersReport({
           row,
           headers,
           ["transactionType", "operationType", "type"],
-          ["transaction_type", "operation_type", "type"]
+          ["transaction_type", "operation_type", "type"],
         );
 
-        if (normalizeValue(operationType).replaceAll(" ", "_") !== "external_supply") {
+        if (
+          normalizeValue(operationType).replaceAll(" ", "_") !==
+          "external_supply"
+        ) {
           return null;
         }
 
@@ -748,31 +797,60 @@ function FuelSuppliersReport({
           row,
           headers,
           ["operationNo", "operationNumber", "referenceNo"],
-          ["operation_id", "operation no", "operation_no", "reference_no"]
+          ["operation_id", "operation no", "operation_no", "reference_no"],
         );
         const transactionDate = getOperationField(
           row,
           headers,
-          ["transactionDateTime", "transactionDate", "operationDate", "createdAt"],
-          ["transaction_datetime", "transaction date", "operation_date", "date", "created_at"]
+          [
+            "transactionDateTime",
+            "transactionDate",
+            "operationDate",
+            "createdAt",
+          ],
+          [
+            "transaction_datetime",
+            "transaction date",
+            "operation_date",
+            "date",
+            "created_at",
+          ],
         );
-        const supplier = getOperationField(
-          row,
-          headers,
-          ["supplierName", "supplier", "vendorName", "externalSupplierName", "externalStationName"],
-          ["supplier_name", "supplier", "vendor_name", "external_supplier_name", "external_station_name"]
-        ) || "Unspecified Supplier";
+        const supplier =
+          getOperationField(
+            row,
+            headers,
+            [
+              "supplierName",
+              "supplier",
+              "vendorName",
+              "externalSupplierName",
+              "externalStationName",
+            ],
+            [
+              "supplier_name",
+              "supplier",
+              "vendor_name",
+              "external_supplier_name",
+              "external_station_name",
+            ],
+          ) || "Unspecified Supplier";
         const invoiceNumber = getOperationField(
           row,
           headers,
           ["invoiceNumber", "invoiceNo", "supplierInvoiceNumber"],
-          ["invoice_number", "invoice_no", "supplier_invoice_number"]
+          ["invoice_number", "invoice_no", "supplier_invoice_number"],
         );
         const destination = getOperationField(
           row,
           headers,
           ["destinationStationId", "destinationId", "destinationStationCode"],
-          ["destination_station", "destination_station_id", "destination_id", "destination"]
+          [
+            "destination_station",
+            "destination_station_id",
+            "destination_id",
+            "destination",
+          ],
         );
         const destinationLabel =
           embeddedOperation?.destinationStation?.stationId ||
@@ -783,22 +861,32 @@ function FuelSuppliersReport({
           embeddedOperation?.dieselQuantity,
           embeddedOperation?.quantity,
           embeddedOperation?.fuelQuantity,
-          getRowValue(row, headers, ["diesel_quantity", "quantity", "fuel_quantity"])
+          getRowValue(row, headers, [
+            "diesel_quantity",
+            "quantity",
+            "fuel_quantity",
+          ]),
         );
         const totalCost = getOperationCost(row, headers);
         const explicitUnitPrice = getNumericValue(
           embeddedOperation?.unitPrice,
           embeddedOperation?.pricePerLiter,
           embeddedOperation?.literPrice,
-          getRowValue(row, headers, ["unit_price", "price_per_liter", "liter_price"])
+          getRowValue(row, headers, [
+            "unit_price",
+            "price_per_liter",
+            "liter_price",
+          ]),
         );
-        const unitPrice = explicitUnitPrice || (quantity > 0 ? totalCost / quantity : 0);
-        const status = getOperationField(
-          row,
-          headers,
-          ["status", "operationStatus"],
-          ["operation_status", "status"]
-        ) || "COMPLETED";
+        const unitPrice =
+          explicitUnitPrice || (quantity > 0 ? totalCost / quantity : 0);
+        const status =
+          getOperationField(
+            row,
+            headers,
+            ["status", "operationStatus"],
+            ["operation_status", "status"],
+          ) || "COMPLETED";
         const createdBy =
           embeddedOperation?.createdBy?.fullName ||
           embeddedOperation?.createdBy?.name ||
@@ -807,7 +895,7 @@ function FuelSuppliersReport({
             row,
             headers,
             ["createdByName", "createdByUserName"],
-            ["created_by", "created_by_name", "created_by_user"]
+            ["created_by", "created_by_name", "created_by_user"],
           ) ||
           "-";
         const project =
@@ -841,8 +929,11 @@ function FuelSuppliersReport({
   }, [data, headers, projects, stations]);
 
   const supplierOptions = useMemo(
-    () => [...new Set(supplyRows.map((row) => row.supplier).filter(Boolean))].sort(),
-    [supplyRows]
+    () =>
+      [
+        ...new Set(supplyRows.map((row) => row.supplier).filter(Boolean)),
+      ].sort(),
+    [supplyRows],
   );
 
   const stationOptions = useMemo(() => {
@@ -850,48 +941,66 @@ function FuelSuppliersReport({
       draftFilters.project === "all"
         ? supplyRows
         : supplyRows.filter(
-            (row) => normalizeValue(row.project) === normalizeValue(draftFilters.project)
+            (row) =>
+              normalizeValue(row.project) ===
+              normalizeValue(draftFilters.project),
           );
-    return [...new Set(filtered.map((row) => row.destination).filter(Boolean))].sort();
+    return [
+      ...new Set(filtered.map((row) => row.destination).filter(Boolean)),
+    ].sort();
   }, [supplyRows, draftFilters.project]);
 
   const filteredRows = useMemo(() => {
     return supplyRows.filter((row) => {
-      const rowDate = row.transactionDate ? new Date(row.transactionDate) : null;
+      const rowDate = row.transactionDate
+        ? new Date(row.transactionDate)
+        : null;
       if (
         appliedFilters.dateFrom &&
         (!rowDate || rowDate < new Date(`${appliedFilters.dateFrom}T00:00:00`))
-      ) return false;
+      )
+        return false;
       if (
         appliedFilters.dateTo &&
         (!rowDate || rowDate > new Date(`${appliedFilters.dateTo}T23:59:59`))
-      ) return false;
+      )
+        return false;
       if (
         appliedFilters.project !== "all" &&
         normalizeValue(row.project) !== normalizeValue(appliedFilters.project)
-      ) return false;
+      )
+        return false;
       if (
         appliedFilters.supplier !== "all" &&
         normalizeValue(row.supplier) !== normalizeValue(appliedFilters.supplier)
-      ) return false;
+      )
+        return false;
       if (
         appliedFilters.station !== "all" &&
-        normalizeValue(row.destination) !== normalizeValue(appliedFilters.station)
-      ) return false;
+        normalizeValue(row.destination) !==
+          normalizeValue(appliedFilters.station)
+      )
+        return false;
       if (
         appliedFilters.status !== "all" &&
         normalizeValue(row.status) !== normalizeValue(appliedFilters.status)
-      ) return false;
+      )
+        return false;
       return true;
     });
   }, [supplyRows, appliedFilters]);
 
-  const totals = useMemo(() => ({
-    deliveries: filteredRows.length,
-    suppliers: new Set(filteredRows.map((row) => normalizeValue(row.supplier))).size,
-    quantity: filteredRows.reduce((sum, row) => sum + row.quantity, 0),
-    cost: filteredRows.reduce((sum, row) => sum + row.totalCost, 0),
-  }), [filteredRows]);
+  const totals = useMemo(
+    () => ({
+      deliveries: filteredRows.length,
+      suppliers: new Set(
+        filteredRows.map((row) => normalizeValue(row.supplier)),
+      ).size,
+      quantity: filteredRows.reduce((sum, row) => sum + row.quantity, 0),
+      cost: filteredRows.reduce((sum, row) => sum + row.totalCost, 0),
+    }),
+    [filteredRows],
+  );
 
   const supplierSummary = useMemo(() => {
     const groups = new Map();
@@ -911,19 +1020,46 @@ function FuelSuppliersReport({
     return [...groups.values()].sort((a, b) => b.quantity - a.quantity);
   }, [filteredRows]);
 
-  const filterSummary = useMemo(() => [
-    {
-      label: "Period",
-      value:
-        appliedFilters.dateFrom || appliedFilters.dateTo
-          ? `${formatReportDate(appliedFilters.dateFrom)} → ${formatReportDate(appliedFilters.dateTo)}`
-          : "All dates",
-    },
-    { label: "Project", value: appliedFilters.project === "all" ? "All Projects" : appliedFilters.project },
-    { label: "Supplier", value: appliedFilters.supplier === "all" ? "All Suppliers" : appliedFilters.supplier },
-    { label: "Station", value: appliedFilters.station === "all" ? "All Stations" : appliedFilters.station },
-    { label: "Status", value: appliedFilters.status === "all" ? "All Statuses" : formatOperationType(appliedFilters.status) },
-  ], [appliedFilters]);
+  const filterSummary = useMemo(
+    () => [
+      {
+        label: "Period",
+        value:
+          appliedFilters.dateFrom || appliedFilters.dateTo
+            ? `${formatReportDate(appliedFilters.dateFrom)} → ${formatReportDate(appliedFilters.dateTo)}`
+            : "All dates",
+      },
+      {
+        label: "Project",
+        value:
+          appliedFilters.project === "all"
+            ? "All Projects"
+            : appliedFilters.project,
+      },
+      {
+        label: "Supplier",
+        value:
+          appliedFilters.supplier === "all"
+            ? "All Suppliers"
+            : appliedFilters.supplier,
+      },
+      {
+        label: "Station",
+        value:
+          appliedFilters.station === "all"
+            ? "All Stations"
+            : appliedFilters.station,
+      },
+      {
+        label: "Status",
+        value:
+          appliedFilters.status === "all"
+            ? "All Statuses"
+            : formatOperationType(appliedFilters.status),
+      },
+    ],
+    [appliedFilters],
+  );
 
   const reportMeta = {
     title: selectedReport?.title || "Fuel Suppliers Report",
@@ -939,7 +1075,10 @@ function FuelSuppliersReport({
       totals: [
         { label: "Suppliers", value: totals.suppliers },
         { label: "Deliveries", value: totals.deliveries },
-        { label: "Total Quantity", value: `${formatNumber(totals.quantity)} L` },
+        {
+          label: "Total Quantity",
+          value: `${formatNumber(totals.quantity)} L`,
+        },
         { label: "Total Value", value: formatMoney(totals.cost, currency) },
       ],
       columns: FUEL_SUPPLIER_HEADERS,
@@ -957,8 +1096,16 @@ function FuelSuppliersReport({
         formatOperationType(row.status),
       ]),
       footerRow: [
-        "Grand Total", "", "", "", "", "",
-        formatNumber(totals.quantity), "", formatMoney(totals.cost, currency), "",
+        "Grand Total",
+        "",
+        "",
+        "",
+        "",
+        "",
+        formatNumber(totals.quantity),
+        "",
+        formatMoney(totals.cost, currency),
+        "",
         `${totals.deliveries} deliveries`,
       ],
     });
@@ -1016,34 +1163,71 @@ function FuelSuppliersReport({
         <section className="rounded-2xl border border-slate-800 bg-slate-900/80 p-5 shadow-xl shadow-black/10">
           <div className="flex flex-col gap-4 xl:flex-row xl:items-center xl:justify-between">
             <div>
-              <button type="button" onClick={onBack} className="mb-4 inline-flex items-center gap-2 rounded-lg border border-slate-700 bg-slate-950/70 px-3 py-2 text-sm font-bold text-slate-300 transition hover:border-amber-500/50 hover:text-amber-300">
+              <button
+                type="button"
+                onClick={onBack}
+                className="mb-4 inline-flex items-center gap-2 rounded-lg border border-slate-700 bg-slate-950/70 px-3 py-2 text-sm font-bold text-slate-300 transition hover:border-amber-500/50 hover:text-amber-300"
+              >
                 <span aria-hidden="true">←</span> Back to Reports
               </button>
-              <p className="text-xs font-bold uppercase tracking-[0.22em] text-amber-400">Operations Reports</p>
-              <h1 className="mt-1 text-2xl font-black text-white sm:text-3xl">{selectedReport?.title}</h1>
-              <p className="mt-2 max-w-4xl text-sm leading-6 text-slate-400">{selectedReport?.description}</p>
-              <p className="mt-2 text-xs font-extrabold text-amber-300">All quantities are shown in Liters (L).</p>
+              <p className="text-xs font-bold uppercase tracking-[0.22em] text-amber-400">
+                Operations Reports
+              </p>
+              <h1 className="mt-1 text-2xl font-black text-white sm:text-3xl">
+                {selectedReport?.title}
+              </h1>
+              <p className="mt-2 max-w-4xl text-sm leading-6 text-slate-400">
+                {selectedReport?.description}
+              </p>
+              <p className="mt-2 text-xs font-extrabold text-amber-300">
+                All quantities are shown in Liters (L).
+              </p>
             </div>
-            <ReportToolbar onOpenFilters={() => setFiltersOpen(true)} onPrint={handlePrint} onExport={handleExport} disabled={!reportGenerated || !filteredRows.length} />
+            <ReportToolbar
+              onOpenFilters={() => setFiltersOpen(true)}
+              onPrint={handlePrint}
+              onExport={handleExport}
+              disabled={!reportGenerated || !filteredRows.length}
+            />
           </div>
         </section>
 
         {!reportGenerated ? (
           <section className="rounded-2xl border border-amber-500/30 bg-slate-900/80 px-6 py-14 text-center shadow-xl shadow-black/10">
             <div className="mx-auto flex max-w-xl flex-col items-center">
-              <div className="flex h-16 w-16 items-center justify-center rounded-2xl border border-amber-500/30 bg-amber-500/10 text-3xl">🚚</div>
-              <h2 className="mt-5 text-xl font-black text-white sm:text-2xl">Select supplier report filters first</h2>
-              <p className="mt-3 text-sm leading-6 text-slate-400">Choose the period, project, supplier, destination station and status, then generate the report.</p>
-              <button type="button" onClick={() => setFiltersOpen(true)} className="mt-6 rounded-xl border border-amber-500 bg-amber-500 px-5 py-3 text-sm font-extrabold text-slate-950 transition hover:bg-amber-400">Set Report Filters</button>
+              <div className="flex h-16 w-16 items-center justify-center rounded-2xl border border-amber-500/30 bg-amber-500/10 text-3xl">
+                🚚
+              </div>
+              <h2 className="mt-5 text-xl font-black text-white sm:text-2xl">
+                Select supplier report filters first
+              </h2>
+              <p className="mt-3 text-sm leading-6 text-slate-400">
+                Choose the period, project, supplier, destination station and
+                status, then generate the report.
+              </p>
+              <button
+                type="button"
+                onClick={() => setFiltersOpen(true)}
+                className="mt-6 rounded-xl border border-amber-500 bg-amber-500 px-5 py-3 text-sm font-extrabold text-slate-950 transition hover:bg-amber-400"
+              >
+                Set Report Filters
+              </button>
             </div>
           </section>
         ) : (
           <>
             <section className="grid gap-3 sm:grid-cols-2 xl:grid-cols-5">
               {filterSummary.map((item) => (
-                <div key={item.label} className="rounded-xl border border-slate-800 bg-slate-900/70 px-4 py-3">
-                  <p className="text-[11px] font-bold uppercase tracking-wider text-slate-500">{item.label}</p>
-                  <p className="mt-1 truncate text-sm font-extrabold text-slate-200">{item.value}</p>
+                <div
+                  key={item.label}
+                  className="rounded-xl border border-slate-800 bg-slate-900/70 px-4 py-3"
+                >
+                  <p className="text-[11px] font-bold uppercase tracking-wider text-slate-500">
+                    {item.label}
+                  </p>
+                  <p className="mt-1 truncate text-sm font-extrabold text-slate-200">
+                    {item.value}
+                  </p>
                 </div>
               ))}
             </section>
@@ -1055,8 +1239,13 @@ function FuelSuppliersReport({
                 ["Total Quantity (L)", formatNumber(totals.quantity)],
                 ["Total Supply Value", formatMoney(totals.cost, currency)],
               ].map(([label, value]) => (
-                <div key={label} className="rounded-2xl border border-amber-500/25 bg-slate-900/80 p-4 shadow-lg shadow-black/10">
-                  <p className="text-xs font-bold uppercase tracking-wider text-amber-400">{label}</p>
+                <div
+                  key={label}
+                  className="rounded-2xl border border-amber-500/25 bg-slate-900/80 p-4 shadow-lg shadow-black/10"
+                >
+                  <p className="text-xs font-bold uppercase tracking-wider text-amber-400">
+                    {label}
+                  </p>
                   <p className="mt-2 text-2xl font-black text-white">{value}</p>
                 </div>
               ))}
@@ -1065,20 +1254,60 @@ function FuelSuppliersReport({
             <section className="overflow-hidden rounded-2xl border border-slate-800 bg-slate-900/80 shadow-xl shadow-black/10">
               <div className="border-b border-slate-800 px-5 py-4">
                 <h2 className="font-extrabold text-white">Supplier Summary</h2>
-                <p className="mt-1 text-xs text-slate-500">Totals grouped by fuel supplier.</p>
+                <p className="mt-1 text-xs text-slate-500">
+                  Totals grouped by fuel supplier.
+                </p>
               </div>
               <div className="overflow-x-auto">
                 <table className="min-w-[760px] w-full border-collapse text-sm">
-                  <thead className="bg-slate-950/90"><tr>{["Supplier", "Deliveries", "Total Quantity (L)", `Total Value (${currency})`].map((header) => <th key={header} className="border-b border-slate-800 px-4 py-3 text-left text-[11px] font-black uppercase tracking-wider text-slate-400">{header}</th>)}</tr></thead>
+                  <thead className="bg-slate-950/90">
+                    <tr>
+                      {[
+                        "Supplier",
+                        "Deliveries",
+                        "Total Quantity (L)",
+                        `Total Value (${currency})`,
+                      ].map((header) => (
+                        <th
+                          key={header}
+                          className="border-b border-slate-800 px-4 py-3 text-left text-[11px] font-black uppercase tracking-wider text-slate-400"
+                        >
+                          {header}
+                        </th>
+                      ))}
+                    </tr>
+                  </thead>
                   <tbody>
-                    {supplierSummary.length ? supplierSummary.map((item) => (
-                      <tr key={item.supplier} className="border-b border-slate-800/70 hover:bg-slate-800/30">
-                        <td className="px-4 py-3 font-extrabold text-amber-300">{item.supplier}</td>
-                        <td className="px-4 py-3 text-right font-bold text-slate-200">{item.deliveries}</td>
-                        <td className="px-4 py-3 text-right font-extrabold text-white">{formatNumber(item.quantity)}</td>
-                        <td className="px-4 py-3 text-right font-extrabold text-emerald-300">{formatMoney(item.cost, currency)}</td>
+                    {supplierSummary.length ? (
+                      supplierSummary.map((item) => (
+                        <tr
+                          key={item.supplier}
+                          className="border-b border-slate-800/70 hover:bg-slate-800/30"
+                        >
+                          <td className="px-4 py-3 font-extrabold text-amber-300">
+                            {item.supplier}
+                          </td>
+                          <td className="px-4 py-3 text-right font-bold text-slate-200">
+                            {item.deliveries}
+                          </td>
+                          <td className="px-4 py-3 text-right font-extrabold text-white">
+                            {formatNumber(item.quantity)}
+                          </td>
+                          <td className="px-4 py-3 text-right font-extrabold text-emerald-300">
+                            {formatMoney(item.cost, currency)}
+                          </td>
+                        </tr>
+                      ))
+                    ) : (
+                      <tr>
+                        <td
+                          colSpan={4}
+                          className="px-6 py-10 text-center text-slate-500"
+                        >
+                          No supplier deliveries match the selected filters.
+                        </td>
                       </tr>
-                    )) : <tr><td colSpan={4} className="px-6 py-10 text-center text-slate-500">No supplier deliveries match the selected filters.</td></tr>}
+                    )}
                   </tbody>
                 </table>
               </div>
@@ -1086,30 +1315,105 @@ function FuelSuppliersReport({
 
             <section className="overflow-hidden rounded-2xl border border-slate-800 bg-slate-900/80 shadow-xl shadow-black/10">
               <div className="flex flex-col gap-2 border-b border-slate-800 px-5 py-4 sm:flex-row sm:items-center sm:justify-between">
-                <div><h2 className="font-extrabold text-white">Fuel Delivery Details</h2><p className="mt-1 text-xs text-slate-500">{filteredRows.length} delivery record{filteredRows.length === 1 ? "" : "s"} found</p></div>
-                <p className="text-xs font-bold text-amber-300">External Supply operations only</p>
+                <div>
+                  <h2 className="font-extrabold text-white">
+                    Fuel Delivery Details
+                  </h2>
+                  <p className="mt-1 text-xs text-slate-500">
+                    {filteredRows.length} delivery record
+                    {filteredRows.length === 1 ? "" : "s"} found
+                  </p>
+                </div>
+                <p className="text-xs font-bold text-amber-300">
+                  External Supply operations only
+                </p>
               </div>
               <div className="overflow-x-auto">
                 <table className="min-w-[1750px] w-full border-collapse text-sm">
-                  <thead className="bg-slate-950/90"><tr>{FUEL_SUPPLIER_HEADERS.map((header) => <th key={header} className="whitespace-nowrap border-b border-slate-800 px-3 py-3 text-left text-[11px] font-black uppercase tracking-wider text-slate-400">{header}</th>)}</tr></thead>
+                  <thead className="bg-slate-950/90">
+                    <tr>
+                      {FUEL_SUPPLIER_HEADERS.map((header) => (
+                        <th
+                          key={header}
+                          className="whitespace-nowrap border-b border-slate-800 px-3 py-3 text-left text-[11px] font-black uppercase tracking-wider text-slate-400"
+                        >
+                          {header}
+                        </th>
+                      ))}
+                    </tr>
+                  </thead>
                   <tbody>
-                    {filteredRows.length ? filteredRows.map((row) => (
-                      <tr key={row.key} className="border-b border-slate-800/70 transition hover:bg-slate-800/30">
-                        <td className="whitespace-nowrap px-3 py-3 font-bold text-amber-300">{row.operationNo}</td>
-                        <td className="whitespace-nowrap px-3 py-3 text-slate-300">{formatDateTime(row.transactionDate)}</td>
-                        <td className="whitespace-nowrap px-3 py-3 font-extrabold text-white">{row.supplier}</td>
-                        <td className="whitespace-nowrap px-3 py-3 text-slate-300">{row.invoiceNumber}</td>
-                        <td className="whitespace-nowrap px-3 py-3 text-slate-300">{row.project}</td>
-                        <td className="whitespace-nowrap px-3 py-3 text-slate-300">{row.destination}</td>
-                        <td className="whitespace-nowrap px-3 py-3 text-right font-extrabold text-white">{formatNumber(row.quantity)}</td>
-                        <td className="whitespace-nowrap px-3 py-3 text-right text-slate-300">{formatMoney(row.unitPrice, currency)}</td>
-                        <td className="whitespace-nowrap px-3 py-3 text-right font-extrabold text-emerald-300">{formatMoney(row.totalCost, currency)}</td>
-                        <td className="whitespace-nowrap px-3 py-3 text-slate-300">{row.createdBy}</td>
-                        <td className="whitespace-nowrap px-3 py-3 font-bold text-slate-300">{formatOperationType(row.status)}</td>
+                    {filteredRows.length ? (
+                      filteredRows.map((row) => (
+                        <tr
+                          key={row.key}
+                          className="border-b border-slate-800/70 transition hover:bg-slate-800/30"
+                        >
+                          <td className="whitespace-nowrap px-3 py-3 font-bold text-amber-300">
+                            {row.operationNo}
+                          </td>
+                          <td className="whitespace-nowrap px-3 py-3 text-slate-300">
+                            {formatDateTime(row.transactionDate)}
+                          </td>
+                          <td className="whitespace-nowrap px-3 py-3 font-extrabold text-white">
+                            {row.supplier}
+                          </td>
+                          <td className="whitespace-nowrap px-3 py-3 text-slate-300">
+                            {row.invoiceNumber}
+                          </td>
+                          <td className="whitespace-nowrap px-3 py-3 text-slate-300">
+                            {row.project}
+                          </td>
+                          <td className="whitespace-nowrap px-3 py-3 text-slate-300">
+                            {row.destination}
+                          </td>
+                          <td className="whitespace-nowrap px-3 py-3 text-right font-extrabold text-white">
+                            {formatNumber(row.quantity)}
+                          </td>
+                          <td className="whitespace-nowrap px-3 py-3 text-right text-slate-300">
+                            {formatMoney(row.unitPrice, currency)}
+                          </td>
+                          <td className="whitespace-nowrap px-3 py-3 text-right font-extrabold text-emerald-300">
+                            {formatMoney(row.totalCost, currency)}
+                          </td>
+                          <td className="whitespace-nowrap px-3 py-3 text-slate-300">
+                            {row.createdBy}
+                          </td>
+                          <td className="whitespace-nowrap px-3 py-3 font-bold text-slate-300">
+                            {formatOperationType(row.status)}
+                          </td>
+                        </tr>
+                      ))
+                    ) : (
+                      <tr>
+                        <td
+                          colSpan={FUEL_SUPPLIER_HEADERS.length}
+                          className="px-6 py-12 text-center text-slate-500"
+                        >
+                          No fuel supplier deliveries match the selected
+                          filters.
+                        </td>
                       </tr>
-                    )) : <tr><td colSpan={FUEL_SUPPLIER_HEADERS.length} className="px-6 py-12 text-center text-slate-500">No fuel supplier deliveries match the selected filters.</td></tr>}
+                    )}
                   </tbody>
-                  <tfoot className="bg-slate-950/80"><tr className="font-black text-white"><td className="px-3 py-3" colSpan={6}>Grand Total</td><td className="px-3 py-3 text-right">{formatNumber(totals.quantity)}</td><td /><td className="px-3 py-3 text-right text-emerald-300">{formatMoney(totals.cost, currency)}</td><td /><td className="px-3 py-3 text-xs text-slate-400">{totals.deliveries} deliveries</td></tr></tfoot>
+                  <tfoot className="bg-slate-950/80">
+                    <tr className="font-black text-white">
+                      <td className="px-3 py-3" colSpan={6}>
+                        Grand Total
+                      </td>
+                      <td className="px-3 py-3 text-right">
+                        {formatNumber(totals.quantity)}
+                      </td>
+                      <td />
+                      <td className="px-3 py-3 text-right text-emerald-300">
+                        {formatMoney(totals.cost, currency)}
+                      </td>
+                      <td />
+                      <td className="px-3 py-3 text-xs text-slate-400">
+                        {totals.deliveries} deliveries
+                      </td>
+                    </tr>
+                  </tfoot>
                 </table>
               </div>
             </section>
@@ -1118,25 +1422,157 @@ function FuelSuppliersReport({
 
         {filtersOpen ? (
           <div className="fixed inset-0 z-[120] bg-black/70 backdrop-blur-sm">
-            <button type="button" aria-label="Close filters" onClick={() => setFiltersOpen(false)} className="absolute inset-0 h-full w-full" />
+            <button
+              type="button"
+              aria-label="Close filters"
+              onClick={() => setFiltersOpen(false)}
+              className="absolute inset-0 h-full w-full"
+            />
             <aside className="absolute right-0 top-0 z-10 flex h-full w-full max-w-md flex-col border-l border-slate-800 bg-slate-900 shadow-2xl shadow-black/50">
               <div className="flex items-start justify-between border-b border-slate-800 px-5 py-4">
-                <div><p className="text-xs font-bold uppercase tracking-[0.2em] text-amber-400">Report Setup</p><h2 className="mt-1 text-xl font-black text-white">Fuel Supplier Filters</h2></div>
-                <button type="button" aria-label="Close filters" onClick={() => setFiltersOpen(false)} className="flex h-9 w-9 items-center justify-center rounded-lg border border-slate-700 bg-slate-950/70 text-lg text-slate-400 transition hover:text-white">×</button>
+                <div>
+                  <p className="text-xs font-bold uppercase tracking-[0.2em] text-amber-400">
+                    Report Setup
+                  </p>
+                  <h2 className="mt-1 text-xl font-black text-white">
+                    Fuel Supplier Filters
+                  </h2>
+                </div>
+                <button
+                  type="button"
+                  aria-label="Close filters"
+                  onClick={() => setFiltersOpen(false)}
+                  className="flex h-9 w-9 items-center justify-center rounded-lg border border-slate-700 bg-slate-950/70 text-lg text-slate-400 transition hover:text-white"
+                >
+                  ×
+                </button>
               </div>
               <div className="flex-1 space-y-4 overflow-y-auto px-5 py-5">
                 <div className="grid grid-cols-2 gap-3">
-                  <label className="block"><span className="mb-2 block text-sm font-bold text-slate-300">Date From</span><input type="date" value={draftFilters.dateFrom} onChange={(e) => handleFilterChange("dateFrom", e.target.value)} className="w-full rounded-xl border border-slate-700 bg-slate-950 px-3 py-2.5 text-sm text-white outline-none focus:border-amber-500" /></label>
-                  <label className="block"><span className="mb-2 block text-sm font-bold text-slate-300">Date To</span><input type="date" value={draftFilters.dateTo} onChange={(e) => handleFilterChange("dateTo", e.target.value)} className="w-full rounded-xl border border-slate-700 bg-slate-950 px-3 py-2.5 text-sm text-white outline-none focus:border-amber-500" /></label>
+                  <label className="block">
+                    <span className="mb-2 block text-sm font-bold text-slate-300">
+                      Date From
+                    </span>
+                    <input
+                      type="date"
+                      value={draftFilters.dateFrom}
+                      onChange={(e) =>
+                        handleFilterChange("dateFrom", e.target.value)
+                      }
+                      className="w-full rounded-xl border border-slate-700 bg-slate-950 px-3 py-2.5 text-sm text-white outline-none focus:border-amber-500"
+                    />
+                  </label>
+                  <label className="block">
+                    <span className="mb-2 block text-sm font-bold text-slate-300">
+                      Date To
+                    </span>
+                    <input
+                      type="date"
+                      value={draftFilters.dateTo}
+                      onChange={(e) =>
+                        handleFilterChange("dateTo", e.target.value)
+                      }
+                      className="w-full rounded-xl border border-slate-700 bg-slate-950 px-3 py-2.5 text-sm text-white outline-none focus:border-amber-500"
+                    />
+                  </label>
                 </div>
-                <label className="block"><span className="mb-2 block text-sm font-bold text-slate-300">Project</span><select value={draftFilters.project} onChange={(e) => handleFilterChange("project", e.target.value)} className="w-full rounded-xl border border-slate-700 bg-slate-950 px-3 py-2.5 text-sm text-white outline-none focus:border-amber-500"><option value="all">All Projects</option>{projects.map((project) => <option key={project.id || getProjectLabel(project)} value={getProjectLabel(project)}>{getProjectLabel(project)}</option>)}</select></label>
-                <label className="block"><span className="mb-2 block text-sm font-bold text-slate-300">Supplier</span><select value={draftFilters.supplier} onChange={(e) => handleFilterChange("supplier", e.target.value)} className="w-full rounded-xl border border-slate-700 bg-slate-950 px-3 py-2.5 text-sm text-white outline-none focus:border-amber-500"><option value="all">All Suppliers</option>{supplierOptions.map((supplier) => <option key={supplier} value={supplier}>{supplier}</option>)}</select></label>
-                <label className="block"><span className="mb-2 block text-sm font-bold text-slate-300">Destination Station</span><select value={draftFilters.station} onChange={(e) => handleFilterChange("station", e.target.value)} className="w-full rounded-xl border border-slate-700 bg-slate-950 px-3 py-2.5 text-sm text-white outline-none focus:border-amber-500"><option value="all">All Stations</option>{stationOptions.map((station) => <option key={station} value={station}>{station}</option>)}</select></label>
-                <label className="block"><span className="mb-2 block text-sm font-bold text-slate-300">Status</span><select value={draftFilters.status} onChange={(e) => handleFilterChange("status", e.target.value)} className="w-full rounded-xl border border-slate-700 bg-slate-950 px-3 py-2.5 text-sm text-white outline-none focus:border-amber-500"><option value="all">All Statuses</option><option value="COMPLETED">Completed</option><option value="APPROVED">Approved</option><option value="PENDING">Pending</option><option value="PARTIALLY_APPROVED">Partially Approved</option><option value="REJECTED">Rejected</option></select></label>
+                <label className="block">
+                  <span className="mb-2 block text-sm font-bold text-slate-300">
+                    Project
+                  </span>
+                  <select
+                    value={draftFilters.project}
+                    onChange={(e) =>
+                      handleFilterChange("project", e.target.value)
+                    }
+                    className="w-full rounded-xl border border-slate-700 bg-slate-950 px-3 py-2.5 text-sm text-white outline-none focus:border-amber-500"
+                  >
+                    <option value="all">All Projects</option>
+                    {projects.map((project) => (
+                      <option
+                        key={project.id || getProjectLabel(project)}
+                        value={getProjectLabel(project)}
+                      >
+                        {getProjectLabel(project)}
+                      </option>
+                    ))}
+                  </select>
+                </label>
+                <label className="block">
+                  <span className="mb-2 block text-sm font-bold text-slate-300">
+                    Supplier
+                  </span>
+                  <select
+                    value={draftFilters.supplier}
+                    onChange={(e) =>
+                      handleFilterChange("supplier", e.target.value)
+                    }
+                    className="w-full rounded-xl border border-slate-700 bg-slate-950 px-3 py-2.5 text-sm text-white outline-none focus:border-amber-500"
+                  >
+                    <option value="all">All Suppliers</option>
+                    {supplierOptions.map((supplier) => (
+                      <option key={supplier} value={supplier}>
+                        {supplier}
+                      </option>
+                    ))}
+                  </select>
+                </label>
+                <label className="block">
+                  <span className="mb-2 block text-sm font-bold text-slate-300">
+                    Destination Station
+                  </span>
+                  <select
+                    value={draftFilters.station}
+                    onChange={(e) =>
+                      handleFilterChange("station", e.target.value)
+                    }
+                    className="w-full rounded-xl border border-slate-700 bg-slate-950 px-3 py-2.5 text-sm text-white outline-none focus:border-amber-500"
+                  >
+                    <option value="all">All Stations</option>
+                    {stationOptions.map((station) => (
+                      <option key={station} value={station}>
+                        {station}
+                      </option>
+                    ))}
+                  </select>
+                </label>
+                <label className="block">
+                  <span className="mb-2 block text-sm font-bold text-slate-300">
+                    Status
+                  </span>
+                  <select
+                    value={draftFilters.status}
+                    onChange={(e) =>
+                      handleFilterChange("status", e.target.value)
+                    }
+                    className="w-full rounded-xl border border-slate-700 bg-slate-950 px-3 py-2.5 text-sm text-white outline-none focus:border-amber-500"
+                  >
+                    <option value="all">All Statuses</option>
+                    <option value="COMPLETED">Completed</option>
+                    <option value="APPROVED">Approved</option>
+                    <option value="PENDING">Pending</option>
+                    <option value="PARTIALLY_APPROVED">
+                      Partially Approved
+                    </option>
+                    <option value="REJECTED">Rejected</option>
+                  </select>
+                </label>
               </div>
               <div className="grid grid-cols-2 gap-3 border-t border-slate-800 px-5 py-4">
-                <button type="button" onClick={resetFilters} className="rounded-xl border border-slate-700 bg-slate-950 px-4 py-2.5 text-sm font-extrabold text-slate-300 hover:border-slate-500 hover:text-white">Reset</button>
-                <button type="button" onClick={applyFilters} className="rounded-xl border border-amber-500 bg-amber-500 px-4 py-2.5 text-sm font-extrabold text-slate-950 hover:bg-amber-400">{reportGenerated ? "Update Report" : "Generate Report"}</button>
+                <button
+                  type="button"
+                  onClick={resetFilters}
+                  className="rounded-xl border border-slate-700 bg-slate-950 px-4 py-2.5 text-sm font-extrabold text-slate-300 hover:border-slate-500 hover:text-white"
+                >
+                  Reset
+                </button>
+                <button
+                  type="button"
+                  onClick={applyFilters}
+                  className="rounded-xl border border-amber-500 bg-amber-500 px-4 py-2.5 text-sm font-extrabold text-slate-950 hover:bg-amber-400"
+                >
+                  {reportGenerated ? "Update Report" : "Generate Report"}
+                </button>
               </div>
             </aside>
           </div>
@@ -1157,7 +1593,9 @@ function StationMovementsReport({
   const [filtersOpen, setFiltersOpen] = useState(true);
   const [reportGenerated, setReportGenerated] = useState(false);
   const [draftFilters, setDraftFilters] = useState(STATION_MOVEMENT_FILTERS);
-  const [appliedFilters, setAppliedFilters] = useState(STATION_MOVEMENT_FILTERS);
+  const [appliedFilters, setAppliedFilters] = useState(
+    STATION_MOVEMENT_FILTERS,
+  );
   const [movements, setMovements] = useState([]);
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState("");
@@ -1176,7 +1614,9 @@ function StationMovementsReport({
         station?.project ||
         "";
 
-      return normalizeValue(stationProject) === normalizeValue(selectedProjectId);
+      return (
+        normalizeValue(stationProject) === normalizeValue(selectedProjectId)
+      );
     });
   }, [stations, selectedProjectId]);
 
@@ -1205,7 +1645,7 @@ function StationMovementsReport({
           status: getMovementStatus(movement),
         };
       }),
-    [movements]
+    [movements],
   );
 
   const totals = useMemo(() => {
@@ -1229,7 +1669,7 @@ function StationMovementsReport({
       const ordered = [...group].sort(
         (a, b) =>
           new Date(a.movementAt || a.createdAt).getTime() -
-          new Date(b.movementAt || b.createdAt).getTime()
+          new Date(b.movementAt || b.createdAt).getTime(),
       );
 
       opening += getNumericValue(ordered[0]?.balanceBefore);
@@ -1248,13 +1688,13 @@ function StationMovementsReport({
     const selectedProject = projects.find(
       (project) =>
         normalizeValue(getProjectBackendId(project)) ===
-        normalizeValue(appliedFilters.projectId)
+        normalizeValue(appliedFilters.projectId),
     );
 
     const selectedStation = stations.find(
       (station) =>
         normalizeValue(getStationBackendId(station)) ===
-        normalizeValue(appliedFilters.stationId)
+        normalizeValue(appliedFilters.stationId),
     );
 
     return [
@@ -1263,7 +1703,7 @@ function StationMovementsReport({
         value:
           appliedFilters.dateFrom || appliedFilters.dateTo
             ? `${formatReportDate(appliedFilters.dateFrom)} → ${formatReportDate(
-                appliedFilters.dateTo
+                appliedFilters.dateTo,
               )}`
             : "All dates",
       },
@@ -1338,7 +1778,7 @@ function StationMovementsReport({
       setError(
         requestError?.response?.data?.message ||
           requestError?.message ||
-          "Failed to load station movements."
+          "Failed to load station movements.",
       );
     } finally {
       setLoading(false);
@@ -1539,7 +1979,9 @@ function StationMovementsReport({
             <section className="overflow-hidden rounded-2xl border border-slate-800 bg-slate-900/80 shadow-xl shadow-black/10">
               <div className="flex flex-col gap-2 border-b border-slate-800 px-5 py-4 sm:flex-row sm:items-center sm:justify-between">
                 <div>
-                  <h2 className="font-extrabold text-white">Station Stock Ledger</h2>
+                  <h2 className="font-extrabold text-white">
+                    Station Stock Ledger
+                  </h2>
                   <p className="mt-1 text-xs text-slate-500">
                     {rows.length} movement{rows.length === 1 ? "" : "s"} found
                   </p>
@@ -1570,22 +2012,47 @@ function StationMovementsReport({
                           key={row.key}
                           className="border-b border-slate-800/70 transition hover:bg-slate-800/30"
                         >
-                          <td className="px-3 py-3 font-bold text-amber-300">{row.reference}</td>
-                          <td className="px-3 py-3 text-slate-300">{formatDateTime(row.movementAt || row.createdAt)}</td>
-                          <td className="px-3 py-3 text-slate-300">{row.project}</td>
-                          <td className="px-3 py-3 font-bold text-white">{row.station}</td>
-                          <td className="px-3 py-3 text-slate-300">{formatMovementType(row.movementType)}</td>
-                          <td className="px-3 py-3 text-slate-300">{row.relatedEntity}</td>
-                          <td className="px-3 py-3 text-right font-extrabold text-emerald-300">{row.inbound ? formatNumber(row.inbound) : "-"}</td>
-                          <td className="px-3 py-3 text-right font-extrabold text-red-300">{row.outbound ? formatNumber(row.outbound) : "-"}</td>
-                          <td className="px-3 py-3 text-right font-black text-amber-300">{formatNumber(row.balanceAfter)}</td>
-                          <td className="max-w-[260px] px-3 py-3 text-slate-400">{row.reason || "-"}</td>
-                          <td className="px-3 py-3 font-bold text-slate-300">{formatMovementType(row.status)}</td>
+                          <td className="px-3 py-3 font-bold text-amber-300">
+                            {row.reference}
+                          </td>
+                          <td className="px-3 py-3 text-slate-300">
+                            {formatDateTime(row.movementAt || row.createdAt)}
+                          </td>
+                          <td className="px-3 py-3 text-slate-300">
+                            {row.project}
+                          </td>
+                          <td className="px-3 py-3 font-bold text-white">
+                            {row.station}
+                          </td>
+                          <td className="px-3 py-3 text-slate-300">
+                            {formatMovementType(row.movementType)}
+                          </td>
+                          <td className="px-3 py-3 text-slate-300">
+                            {row.relatedEntity}
+                          </td>
+                          <td className="px-3 py-3 text-right font-extrabold text-emerald-300">
+                            {row.inbound ? formatNumber(row.inbound) : "-"}
+                          </td>
+                          <td className="px-3 py-3 text-right font-extrabold text-red-300">
+                            {row.outbound ? formatNumber(row.outbound) : "-"}
+                          </td>
+                          <td className="px-3 py-3 text-right font-black text-amber-300">
+                            {formatNumber(row.balanceAfter)}
+                          </td>
+                          <td className="max-w-[260px] px-3 py-3 text-slate-400">
+                            {row.reason || "-"}
+                          </td>
+                          <td className="px-3 py-3 font-bold text-slate-300">
+                            {formatMovementType(row.status)}
+                          </td>
                         </tr>
                       ))
                     ) : (
                       <tr>
-                        <td colSpan={STATION_MOVEMENT_HEADERS.length} className="px-6 py-12 text-center text-slate-500">
+                        <td
+                          colSpan={STATION_MOVEMENT_HEADERS.length}
+                          className="px-6 py-12 text-center text-slate-500"
+                        >
                           No station movements match the selected filters.
                         </td>
                       </tr>
@@ -1593,10 +2060,18 @@ function StationMovementsReport({
                   </tbody>
                   <tfoot className="bg-slate-950/80">
                     <tr className="font-black text-white">
-                      <td className="px-3 py-3" colSpan={6}>Totals</td>
-                      <td className="px-3 py-3 text-right text-emerald-300">{formatNumber(totals.inbound)}</td>
-                      <td className="px-3 py-3 text-right text-red-300">{formatNumber(totals.outbound)}</td>
-                      <td className="px-3 py-3 text-right text-amber-300">{formatNumber(totals.closing)}</td>
+                      <td className="px-3 py-3" colSpan={6}>
+                        Totals
+                      </td>
+                      <td className="px-3 py-3 text-right text-emerald-300">
+                        {formatNumber(totals.inbound)}
+                      </td>
+                      <td className="px-3 py-3 text-right text-red-300">
+                        {formatNumber(totals.outbound)}
+                      </td>
+                      <td className="px-3 py-3 text-right text-amber-300">
+                        {formatNumber(totals.closing)}
+                      </td>
                       <td colSpan={2} />
                     </tr>
                   </tfoot>
@@ -1638,21 +2113,53 @@ function StationMovementsReport({
               <div className="flex-1 space-y-4 overflow-y-auto px-5 py-5">
                 <div className="grid grid-cols-2 gap-3">
                   <label className="block">
-                    <span className="mb-2 block text-sm font-bold text-slate-300">Date From</span>
-                    <input type="date" value={draftFilters.dateFrom} onChange={(event) => handleFilterChange("dateFrom", event.target.value)} className="w-full rounded-xl border border-slate-700 bg-slate-950 px-3 py-2.5 text-sm text-white outline-none transition focus:border-amber-500" />
+                    <span className="mb-2 block text-sm font-bold text-slate-300">
+                      Date From
+                    </span>
+                    <input
+                      type="date"
+                      value={draftFilters.dateFrom}
+                      onChange={(event) =>
+                        handleFilterChange("dateFrom", event.target.value)
+                      }
+                      className="w-full rounded-xl border border-slate-700 bg-slate-950 px-3 py-2.5 text-sm text-white outline-none transition focus:border-amber-500"
+                    />
                   </label>
                   <label className="block">
-                    <span className="mb-2 block text-sm font-bold text-slate-300">Date To</span>
-                    <input type="date" value={draftFilters.dateTo} onChange={(event) => handleFilterChange("dateTo", event.target.value)} className="w-full rounded-xl border border-slate-700 bg-slate-950 px-3 py-2.5 text-sm text-white outline-none transition focus:border-amber-500" />
+                    <span className="mb-2 block text-sm font-bold text-slate-300">
+                      Date To
+                    </span>
+                    <input
+                      type="date"
+                      value={draftFilters.dateTo}
+                      onChange={(event) =>
+                        handleFilterChange("dateTo", event.target.value)
+                      }
+                      className="w-full rounded-xl border border-slate-700 bg-slate-950 px-3 py-2.5 text-sm text-white outline-none transition focus:border-amber-500"
+                    />
                   </label>
                 </div>
 
                 <label className="block">
-                  <span className="mb-2 block text-sm font-bold text-slate-300">Project</span>
-                  <select value={draftFilters.projectId} onChange={(event) => handleFilterChange("projectId", event.target.value)} className="w-full rounded-xl border border-slate-700 bg-slate-950 px-3 py-2.5 text-sm text-white outline-none transition focus:border-amber-500">
+                  <span className="mb-2 block text-sm font-bold text-slate-300">
+                    Project
+                  </span>
+                  <select
+                    value={draftFilters.projectId}
+                    onChange={(event) =>
+                      handleFilterChange("projectId", event.target.value)
+                    }
+                    className="w-full rounded-xl border border-slate-700 bg-slate-950 px-3 py-2.5 text-sm text-white outline-none transition focus:border-amber-500"
+                  >
                     <option value="all">All Projects</option>
                     {projects.map((project) => (
-                      <option key={getProjectBackendId(project) || getProjectLabel(project)} value={getProjectBackendId(project)}>
+                      <option
+                        key={
+                          getProjectBackendId(project) ||
+                          getProjectLabel(project)
+                        }
+                        value={getProjectBackendId(project)}
+                      >
                         {getProjectLabel(project)}
                       </option>
                     ))}
@@ -1660,11 +2167,25 @@ function StationMovementsReport({
                 </label>
 
                 <label className="block">
-                  <span className="mb-2 block text-sm font-bold text-slate-300">Station</span>
-                  <select value={draftFilters.stationId} onChange={(event) => handleFilterChange("stationId", event.target.value)} className="w-full rounded-xl border border-slate-700 bg-slate-950 px-3 py-2.5 text-sm text-white outline-none transition focus:border-amber-500">
+                  <span className="mb-2 block text-sm font-bold text-slate-300">
+                    Station
+                  </span>
+                  <select
+                    value={draftFilters.stationId}
+                    onChange={(event) =>
+                      handleFilterChange("stationId", event.target.value)
+                    }
+                    className="w-full rounded-xl border border-slate-700 bg-slate-950 px-3 py-2.5 text-sm text-white outline-none transition focus:border-amber-500"
+                  >
                     <option value="all">All Stations</option>
                     {availableStations.map((station) => (
-                      <option key={getStationBackendId(station) || getStationLabel(station)} value={getStationBackendId(station)}>
+                      <option
+                        key={
+                          getStationBackendId(station) ||
+                          getStationLabel(station)
+                        }
+                        value={getStationBackendId(station)}
+                      >
                         {getStationLabel(station)}
                       </option>
                     ))}
@@ -1672,24 +2193,54 @@ function StationMovementsReport({
                 </label>
 
                 <label className="block">
-                  <span className="mb-2 block text-sm font-bold text-slate-300">Movement Type</span>
-                  <select value={draftFilters.movementType} onChange={(event) => handleFilterChange("movementType", event.target.value)} className="w-full rounded-xl border border-slate-700 bg-slate-950 px-3 py-2.5 text-sm text-white outline-none transition focus:border-amber-500">
+                  <span className="mb-2 block text-sm font-bold text-slate-300">
+                    Movement Type
+                  </span>
+                  <select
+                    value={draftFilters.movementType}
+                    onChange={(event) =>
+                      handleFilterChange("movementType", event.target.value)
+                    }
+                    className="w-full rounded-xl border border-slate-700 bg-slate-950 px-3 py-2.5 text-sm text-white outline-none transition focus:border-amber-500"
+                  >
                     <option value="all">All Movement Types</option>
                     <option value="OPENING_BALANCE">Opening Balance</option>
-                    <option value="DIRECT_REFUEL_OUT">Direct Refuel Outbound</option>
-                    <option value="INTERNAL_TRANSFER_IN">Internal Transfer Inbound</option>
-                    <option value="INTERNAL_TRANSFER_OUT">Internal Transfer Outbound</option>
-                    <option value="EXTERNAL_SUPPLY_IN">External Supply Inbound</option>
-                    <option value="EXTERNAL_TRANSFER_IN">External Transfer Inbound</option>
-                    <option value="EXTERNAL_TRANSFER_OUT">External Transfer Outbound</option>
-                    <option value="PHYSICAL_ADJUSTMENT">Physical Adjustment</option>
+                    <option value="DIRECT_REFUEL_OUT">
+                      Direct Refuel Outbound
+                    </option>
+                    <option value="INTERNAL_TRANSFER_IN">
+                      Internal Transfer Inbound
+                    </option>
+                    <option value="INTERNAL_TRANSFER_OUT">
+                      Internal Transfer Outbound
+                    </option>
+                    <option value="EXTERNAL_SUPPLY_IN">
+                      External Supply Inbound
+                    </option>
+                    <option value="EXTERNAL_TRANSFER_IN">
+                      External Transfer Inbound
+                    </option>
+                    <option value="EXTERNAL_TRANSFER_OUT">
+                      External Transfer Outbound
+                    </option>
+                    <option value="PHYSICAL_ADJUSTMENT">
+                      Physical Adjustment
+                    </option>
                     <option value="ZERO_BALANCE">Zero Balance</option>
                   </select>
                 </label>
 
                 <label className="block">
-                  <span className="mb-2 block text-sm font-bold text-slate-300">Direction</span>
-                  <select value={draftFilters.direction} onChange={(event) => handleFilterChange("direction", event.target.value)} className="w-full rounded-xl border border-slate-700 bg-slate-950 px-3 py-2.5 text-sm text-white outline-none transition focus:border-amber-500">
+                  <span className="mb-2 block text-sm font-bold text-slate-300">
+                    Direction
+                  </span>
+                  <select
+                    value={draftFilters.direction}
+                    onChange={(event) =>
+                      handleFilterChange("direction", event.target.value)
+                    }
+                    className="w-full rounded-xl border border-slate-700 bg-slate-950 px-3 py-2.5 text-sm text-white outline-none transition focus:border-amber-500"
+                  >
                     <option value="all">Inbound & Outbound</option>
                     <option value="inbound">Inbound</option>
                     <option value="outbound">Outbound</option>
@@ -1698,11 +2249,25 @@ function StationMovementsReport({
               </div>
 
               <div className="grid grid-cols-2 gap-3 border-t border-slate-800 px-5 py-4">
-                <button type="button" onClick={handleReset} disabled={loading} className="rounded-xl border border-slate-700 bg-slate-950 px-4 py-2.5 text-sm font-extrabold text-slate-300 transition hover:border-slate-500 hover:text-white disabled:opacity-50">
+                <button
+                  type="button"
+                  onClick={handleReset}
+                  disabled={loading}
+                  className="rounded-xl border border-slate-700 bg-slate-950 px-4 py-2.5 text-sm font-extrabold text-slate-300 transition hover:border-slate-500 hover:text-white disabled:opacity-50"
+                >
                   Reset
                 </button>
-                <button type="button" onClick={loadReport} disabled={loading} className="rounded-xl border border-amber-500 bg-amber-500 px-4 py-2.5 text-sm font-extrabold text-slate-950 transition hover:bg-amber-400 disabled:cursor-wait disabled:opacity-60">
-                  {loading ? "Generating..." : reportGenerated ? "Update Report" : "Generate Report"}
+                <button
+                  type="button"
+                  onClick={loadReport}
+                  disabled={loading}
+                  className="rounded-xl border border-amber-500 bg-amber-500 px-4 py-2.5 text-sm font-extrabold text-slate-950 transition hover:bg-amber-400 disabled:cursor-wait disabled:opacity-60"
+                >
+                  {loading
+                    ? "Generating..."
+                    : reportGenerated
+                      ? "Update Report"
+                      : "Generate Report"}
                 </button>
               </div>
             </aside>
@@ -1761,7 +2326,7 @@ function getAssetProjectLabel(asset, projects = []) {
     ]
       .filter(Boolean)
       .map(normalizeValue)
-      .includes(normalizedProject)
+      .includes(normalizedProject),
   );
 
   return matchedProject ? getProjectLabel(matchedProject) : String(rawProject);
@@ -1826,7 +2391,7 @@ function getAssetCurrentOdometer(asset) {
       source?.odometer,
       source?.hourMeter,
       source?.meterReading,
-    ])
+    ]),
   );
 }
 
@@ -1841,17 +2406,18 @@ function getAssetLifetimeOdometer(asset) {
       source?.totalLifetimeOdometer,
       source?.totalDistance,
       source?.lifetimeHours,
-    ])
+    ]),
   );
 
   const currentOdometer = getAssetCurrentOdometer(asset);
-  const currentMeterCycle = getFirstAssetNumber(
-    ...sources.flatMap((source) => [
-      source?.currentMeterCycle,
-      source?.meterCycle,
-      source?.assetMeterCycleNumber,
-    ])
-  ) || 1;
+  const currentMeterCycle =
+    getFirstAssetNumber(
+      ...sources.flatMap((source) => [
+        source?.currentMeterCycle,
+        source?.meterCycle,
+        source?.assetMeterCycleNumber,
+      ]),
+    ) || 1;
 
   if (storedLifetime === 0 && currentMeterCycle === 1 && currentOdometer > 0) {
     return currentOdometer;
@@ -1865,7 +2431,7 @@ function getAssetTankCapacity(asset) {
     asset?.fuelTankCapacity,
     asset?.tankCapacity,
     asset?.dieselTankCapacity,
-    asset?.fuelCapacity
+    asset?.fuelCapacity,
   );
 }
 
@@ -1900,27 +2466,41 @@ function AssetsMasterReport({
         lifetimeOdometer: getAssetLifetimeOdometer(asset),
         tankCapacity: getAssetTankCapacity(asset),
       })),
-    [assets, projects]
+    [assets, projects],
   );
 
   const projectOptions = useMemo(
     () => [...new Set(rows.map((row) => row.project).filter(Boolean))].sort(),
-    [rows]
+    [rows],
   );
 
   const assetTypeOptions = useMemo(
-    () => [...new Set(rows.map((row) => row.assetType).filter((value) => value && value !== "-"))].sort(),
-    [rows]
+    () =>
+      [
+        ...new Set(
+          rows
+            .map((row) => row.assetType)
+            .filter((value) => value && value !== "-"),
+        ),
+      ].sort(),
+    [rows],
   );
 
   const categoryOptions = useMemo(
-    () => [...new Set(rows.map((row) => row.category).filter((value) => value && value !== "-"))].sort(),
-    [rows]
+    () =>
+      [
+        ...new Set(
+          rows
+            .map((row) => row.category)
+            .filter((value) => value && value !== "-"),
+        ),
+      ].sort(),
+    [rows],
   );
 
   const statusOptions = useMemo(
     () => [...new Set(rows.map((row) => row.status).filter(Boolean))].sort(),
-    [rows]
+    [rows],
   );
 
   const filteredRows = useMemo(() => {
@@ -1930,22 +2510,27 @@ function AssetsMasterReport({
       if (
         appliedFilters.project !== "all" &&
         normalizeValue(row.project) !== normalizeValue(appliedFilters.project)
-      ) return false;
+      )
+        return false;
 
       if (
         appliedFilters.assetType !== "all" &&
-        normalizeValue(row.assetType) !== normalizeValue(appliedFilters.assetType)
-      ) return false;
+        normalizeValue(row.assetType) !==
+          normalizeValue(appliedFilters.assetType)
+      )
+        return false;
 
       if (
         appliedFilters.category !== "all" &&
         normalizeValue(row.category) !== normalizeValue(appliedFilters.category)
-      ) return false;
+      )
+        return false;
 
       if (
         appliedFilters.status !== "all" &&
         normalizeValue(row.status) !== normalizeValue(appliedFilters.status)
-      ) return false;
+      )
+        return false;
 
       if (
         search &&
@@ -1956,7 +2541,8 @@ function AssetsMasterReport({
           row.project,
           row.status,
         ].some((value) => normalizeValue(value).includes(search))
-      ) return false;
+      )
+        return false;
 
       return true;
     });
@@ -1965,22 +2551,52 @@ function AssetsMasterReport({
   const totals = useMemo(
     () => ({
       assets: filteredRows.length,
-      active: filteredRows.filter((row) => normalizeValue(row.status) === "active").length,
-      inactive: filteredRows.filter((row) => normalizeValue(row.status) === "inactive").length,
-      deleted: filteredRows.filter((row) => normalizeValue(row.status) === "deleted").length,
+      active: filteredRows.filter(
+        (row) => normalizeValue(row.status) === "active",
+      ).length,
+      inactive: filteredRows.filter(
+        (row) => normalizeValue(row.status) === "inactive",
+      ).length,
+      deleted: filteredRows.filter(
+        (row) => normalizeValue(row.status) === "deleted",
+      ).length,
     }),
-    [filteredRows]
+    [filteredRows],
   );
 
   const filterSummary = useMemo(
     () => [
-      { label: "Project", value: appliedFilters.project === "all" ? "All Projects" : appliedFilters.project },
-      { label: "Asset Type", value: appliedFilters.assetType === "all" ? "All Asset Types" : appliedFilters.assetType },
-      { label: "Category", value: appliedFilters.category === "all" ? "All Categories" : appliedFilters.category },
-      { label: "Status", value: appliedFilters.status === "all" ? "All Statuses" : formatOperationType(appliedFilters.status) },
+      {
+        label: "Project",
+        value:
+          appliedFilters.project === "all"
+            ? "All Projects"
+            : appliedFilters.project,
+      },
+      {
+        label: "Asset Type",
+        value:
+          appliedFilters.assetType === "all"
+            ? "All Asset Types"
+            : appliedFilters.assetType,
+      },
+      {
+        label: "Category",
+        value:
+          appliedFilters.category === "all"
+            ? "All Categories"
+            : appliedFilters.category,
+      },
+      {
+        label: "Status",
+        value:
+          appliedFilters.status === "all"
+            ? "All Statuses"
+            : formatOperationType(appliedFilters.status),
+      },
       { label: "Search", value: appliedFilters.search || "No search text" },
     ],
-    [appliedFilters]
+    [appliedFilters],
   );
 
   const reportMeta = {
@@ -2063,33 +2679,68 @@ function AssetsMasterReport({
         <section className="rounded-2xl border border-slate-800 bg-slate-900/80 p-5 shadow-xl shadow-black/10">
           <div className="flex flex-col gap-4 xl:flex-row xl:items-center xl:justify-between">
             <div>
-              <button type="button" onClick={onBack} className="mb-4 inline-flex items-center gap-2 rounded-lg border border-slate-700 bg-slate-950/70 px-3 py-2 text-sm font-bold text-slate-300 transition hover:border-amber-500/50 hover:text-amber-300">
+              <button
+                type="button"
+                onClick={onBack}
+                className="mb-4 inline-flex items-center gap-2 rounded-lg border border-slate-700 bg-slate-950/70 px-3 py-2 text-sm font-bold text-slate-300 transition hover:border-amber-500/50 hover:text-amber-300"
+              >
                 <span aria-hidden="true">←</span> Back to Reports
               </button>
-              <p className="text-xs font-bold uppercase tracking-[0.22em] text-amber-400">Assets Reports</p>
-              <h1 className="mt-1 text-2xl font-black text-white sm:text-3xl">{selectedReport?.title}</h1>
-              <p className="mt-2 max-w-4xl text-sm leading-6 text-slate-400">{selectedReport?.description}</p>
+              <p className="text-xs font-bold uppercase tracking-[0.22em] text-amber-400">
+                Assets Reports
+              </p>
+              <h1 className="mt-1 text-2xl font-black text-white sm:text-3xl">
+                {selectedReport?.title}
+              </h1>
+              <p className="mt-2 max-w-4xl text-sm leading-6 text-slate-400">
+                {selectedReport?.description}
+              </p>
             </div>
-            <ReportToolbar onOpenFilters={() => setFiltersOpen(true)} onPrint={handlePrint} onExport={handleExport} disabled={!reportGenerated || !filteredRows.length} />
+            <ReportToolbar
+              onOpenFilters={() => setFiltersOpen(true)}
+              onPrint={handlePrint}
+              onExport={handleExport}
+              disabled={!reportGenerated || !filteredRows.length}
+            />
           </div>
         </section>
 
         {!reportGenerated ? (
           <section className="rounded-2xl border border-amber-500/30 bg-slate-900/80 px-6 py-14 text-center shadow-xl shadow-black/10">
             <div className="mx-auto flex max-w-xl flex-col items-center">
-              <div className="flex h-16 w-16 items-center justify-center rounded-2xl border border-amber-500/30 bg-amber-500/10 text-3xl">🚜</div>
-              <h2 className="mt-5 text-xl font-black text-white sm:text-2xl">Select asset report filters first</h2>
-              <p className="mt-3 text-sm leading-6 text-slate-400">Choose the project, asset type, category and status, then generate the asset register.</p>
-              <button type="button" onClick={() => setFiltersOpen(true)} className="mt-6 rounded-xl border border-amber-500 bg-amber-500 px-5 py-3 text-sm font-extrabold text-slate-950 transition hover:bg-amber-400">Set Report Filters</button>
+              <div className="flex h-16 w-16 items-center justify-center rounded-2xl border border-amber-500/30 bg-amber-500/10 text-3xl">
+                🚜
+              </div>
+              <h2 className="mt-5 text-xl font-black text-white sm:text-2xl">
+                Select asset report filters first
+              </h2>
+              <p className="mt-3 text-sm leading-6 text-slate-400">
+                Choose the project, asset type, category and status, then
+                generate the asset register.
+              </p>
+              <button
+                type="button"
+                onClick={() => setFiltersOpen(true)}
+                className="mt-6 rounded-xl border border-amber-500 bg-amber-500 px-5 py-3 text-sm font-extrabold text-slate-950 transition hover:bg-amber-400"
+              >
+                Set Report Filters
+              </button>
             </div>
           </section>
         ) : (
           <>
             <section className="grid gap-3 sm:grid-cols-2 xl:grid-cols-5">
               {filterSummary.map((item) => (
-                <div key={item.label} className="rounded-xl border border-slate-800 bg-slate-900/70 px-4 py-3">
-                  <p className="text-[11px] font-bold uppercase tracking-wider text-slate-500">{item.label}</p>
-                  <p className="mt-1 truncate text-sm font-extrabold text-slate-200">{item.value}</p>
+                <div
+                  key={item.label}
+                  className="rounded-xl border border-slate-800 bg-slate-900/70 px-4 py-3"
+                >
+                  <p className="text-[11px] font-bold uppercase tracking-wider text-slate-500">
+                    {item.label}
+                  </p>
+                  <p className="mt-1 truncate text-sm font-extrabold text-slate-200">
+                    {item.value}
+                  </p>
                 </div>
               ))}
             </section>
@@ -2101,8 +2752,13 @@ function AssetsMasterReport({
                 ["Inactive Assets", totals.inactive],
                 ["Deleted Assets", totals.deleted],
               ].map(([label, value]) => (
-                <div key={label} className="rounded-2xl border border-amber-500/25 bg-slate-900/80 p-4 shadow-lg shadow-black/10">
-                  <p className="text-xs font-bold uppercase tracking-wider text-amber-400">{label}</p>
+                <div
+                  key={label}
+                  className="rounded-2xl border border-amber-500/25 bg-slate-900/80 p-4 shadow-lg shadow-black/10"
+                >
+                  <p className="text-xs font-bold uppercase tracking-wider text-amber-400">
+                    {label}
+                  </p>
                   <p className="mt-2 text-2xl font-black text-white">{value}</p>
                 </div>
               ))}
@@ -2111,10 +2767,17 @@ function AssetsMasterReport({
             <section className="overflow-hidden rounded-2xl border border-slate-800 bg-slate-900/80 shadow-xl shadow-black/10">
               <div className="flex flex-col gap-2 border-b border-slate-800 px-5 py-4 sm:flex-row sm:items-center sm:justify-between">
                 <div>
-                  <h2 className="font-extrabold text-white">Assets Master Register</h2>
-                  <p className="mt-1 text-xs text-slate-500">{filteredRows.length} asset{filteredRows.length === 1 ? "" : "s"} found</p>
+                  <h2 className="font-extrabold text-white">
+                    Assets Master Register
+                  </h2>
+                  <p className="mt-1 text-xs text-slate-500">
+                    {filteredRows.length} asset
+                    {filteredRows.length === 1 ? "" : "s"} found
+                  </p>
                 </div>
-                <p className="text-xs font-bold text-amber-300">Master asset data</p>
+                <p className="text-xs font-bold text-amber-300">
+                  Master asset data
+                </p>
               </div>
 
               <div className="overflow-x-auto">
@@ -2130,26 +2793,71 @@ function AssetsMasterReport({
                     <col className="w-[12%]" />
                   </colgroup>
                   <thead className="bg-slate-950/90">
-                    <tr>{ASSETS_MASTER_HEADERS.map((header, index) => <th key={header} className={`whitespace-nowrap border-b border-slate-800 px-3 py-3 text-[11px] font-black uppercase tracking-wider text-slate-400 ${index >= 5 ? "text-right" : "text-left"}`}>{header}</th>)}</tr>
+                    <tr>
+                      {ASSETS_MASTER_HEADERS.map((header, index) => (
+                        <th
+                          key={header}
+                          className={`whitespace-nowrap border-b border-slate-800 px-3 py-3 text-[11px] font-black uppercase tracking-wider text-slate-400 ${index >= 5 ? "text-right" : "text-left"}`}
+                        >
+                          {header}
+                        </th>
+                      ))}
+                    </tr>
                   </thead>
                   <tbody>
-                    {filteredRows.length ? filteredRows.map((row) => (
-                      <tr key={row.key} className="border-b border-slate-800/70 transition hover:bg-slate-800/30">
-                        <td className="whitespace-nowrap px-3 py-3 font-extrabold text-amber-300">{row.assetId}</td>
-                        <td className="whitespace-nowrap px-3 py-3 text-slate-300">{row.assetType}</td>
-                        <td className="whitespace-nowrap px-3 py-3 text-slate-300">{row.category}</td>
-                        <td className="whitespace-nowrap px-3 py-3 font-bold text-white">{row.project}</td>
-                        <td className="whitespace-nowrap px-3 py-3 font-bold text-slate-300">{formatOperationType(row.status)}</td>
-                        <td className="whitespace-nowrap px-3 py-3 text-right font-extrabold text-white">{formatNumber(row.currentOdometer)}</td>
-                        <td className="whitespace-nowrap px-3 py-3 text-right font-extrabold text-amber-300">{formatNumber(row.lifetimeOdometer)}</td>
-                        <td className="whitespace-nowrap px-3 py-3 text-right font-extrabold text-emerald-300">{formatNumber(row.tankCapacity)}</td>
+                    {filteredRows.length ? (
+                      filteredRows.map((row) => (
+                        <tr
+                          key={row.key}
+                          className="border-b border-slate-800/70 transition hover:bg-slate-800/30"
+                        >
+                          <td className="whitespace-nowrap px-3 py-3 font-extrabold text-amber-300">
+                            {row.assetId}
+                          </td>
+                          <td className="whitespace-nowrap px-3 py-3 text-slate-300">
+                            {row.assetType}
+                          </td>
+                          <td className="whitespace-nowrap px-3 py-3 text-slate-300">
+                            {row.category}
+                          </td>
+                          <td className="whitespace-nowrap px-3 py-3 font-bold text-white">
+                            {row.project}
+                          </td>
+                          <td className="whitespace-nowrap px-3 py-3 font-bold text-slate-300">
+                            {formatOperationType(row.status)}
+                          </td>
+                          <td className="whitespace-nowrap px-3 py-3 text-right font-extrabold text-white">
+                            {formatNumber(row.currentOdometer)}
+                          </td>
+                          <td className="whitespace-nowrap px-3 py-3 text-right font-extrabold text-amber-300">
+                            {formatNumber(row.lifetimeOdometer)}
+                          </td>
+                          <td className="whitespace-nowrap px-3 py-3 text-right font-extrabold text-emerald-300">
+                            {formatNumber(row.tankCapacity)}
+                          </td>
+                        </tr>
+                      ))
+                    ) : (
+                      <tr>
+                        <td
+                          colSpan={ASSETS_MASTER_HEADERS.length}
+                          className="px-6 py-12 text-center text-slate-500"
+                        >
+                          No assets match the selected filters.
+                        </td>
                       </tr>
-                    )) : (
-                      <tr><td colSpan={ASSETS_MASTER_HEADERS.length} className="px-6 py-12 text-center text-slate-500">No assets match the selected filters.</td></tr>
                     )}
                   </tbody>
                   <tfoot className="bg-slate-950/80">
-                    <tr className="font-black text-white"><td className="px-3 py-3" colSpan={4}>Total Assets</td><td className="px-3 py-3 text-amber-300">{filteredRows.length}</td><td colSpan={3} /></tr>
+                    <tr className="font-black text-white">
+                      <td className="px-3 py-3" colSpan={4}>
+                        Total Assets
+                      </td>
+                      <td className="px-3 py-3 text-amber-300">
+                        {filteredRows.length}
+                      </td>
+                      <td colSpan={3} />
+                    </tr>
                   </tfoot>
                 </table>
               </div>
@@ -2159,24 +2867,155 @@ function AssetsMasterReport({
 
         {filtersOpen ? (
           <div className="fixed inset-0 z-[120] bg-black/70 backdrop-blur-sm">
-            <button type="button" aria-label="Close filters" onClick={() => setFiltersOpen(false)} className="absolute inset-0 h-full w-full" />
+            <button
+              type="button"
+              aria-label="Close filters"
+              onClick={() => setFiltersOpen(false)}
+              className="absolute inset-0 h-full w-full"
+            />
             <aside className="absolute right-0 top-0 z-10 flex h-full w-full max-w-md flex-col border-l border-slate-800 bg-slate-900 shadow-2xl shadow-black/50">
               <div className="flex items-start justify-between border-b border-slate-800 px-5 py-4">
-                <div><p className="text-xs font-bold uppercase tracking-[0.2em] text-amber-400">Report Setup</p><h2 className="mt-1 text-xl font-black text-white">Assets Master Filters</h2></div>
-                <button type="button" aria-label="Close filters" onClick={() => setFiltersOpen(false)} className="flex h-9 w-9 items-center justify-center rounded-lg border border-slate-700 bg-slate-950/70 text-lg text-slate-400 transition hover:text-white">×</button>
+                <div>
+                  <p className="text-xs font-bold uppercase tracking-[0.2em] text-amber-400">
+                    Report Setup
+                  </p>
+                  <h2 className="mt-1 text-xl font-black text-white">
+                    Assets Master Filters
+                  </h2>
+                </div>
+                <button
+                  type="button"
+                  aria-label="Close filters"
+                  onClick={() => setFiltersOpen(false)}
+                  className="flex h-9 w-9 items-center justify-center rounded-lg border border-slate-700 bg-slate-950/70 text-lg text-slate-400 transition hover:text-white"
+                >
+                  ×
+                </button>
               </div>
 
               <div className="flex-1 space-y-4 overflow-y-auto px-5 py-5">
-                <label className="block"><span className="mb-2 block text-sm font-bold text-slate-300">Asset Search</span><input type="text" value={draftFilters.search} onChange={(event) => setDraftFilters((previous) => ({ ...previous, search: event.target.value }))} placeholder="Asset ID, type, category or project" className="w-full rounded-xl border border-slate-700 bg-slate-950 px-3 py-2.5 text-sm text-white outline-none focus:border-amber-500" /></label>
-                <label className="block"><span className="mb-2 block text-sm font-bold text-slate-300">Project</span><select value={draftFilters.project} onChange={(event) => setDraftFilters((previous) => ({ ...previous, project: event.target.value }))} className="w-full rounded-xl border border-slate-700 bg-slate-950 px-3 py-2.5 text-sm text-white outline-none focus:border-amber-500"><option value="all">All Projects</option>{projectOptions.map((project) => <option key={project} value={project}>{project}</option>)}</select></label>
-                <label className="block"><span className="mb-2 block text-sm font-bold text-slate-300">Asset Type</span><select value={draftFilters.assetType} onChange={(event) => setDraftFilters((previous) => ({ ...previous, assetType: event.target.value }))} className="w-full rounded-xl border border-slate-700 bg-slate-950 px-3 py-2.5 text-sm text-white outline-none focus:border-amber-500"><option value="all">All Asset Types</option>{assetTypeOptions.map((assetType) => <option key={assetType} value={assetType}>{assetType}</option>)}</select></label>
-                <label className="block"><span className="mb-2 block text-sm font-bold text-slate-300">Category</span><select value={draftFilters.category} onChange={(event) => setDraftFilters((previous) => ({ ...previous, category: event.target.value }))} className="w-full rounded-xl border border-slate-700 bg-slate-950 px-3 py-2.5 text-sm text-white outline-none focus:border-amber-500"><option value="all">All Categories</option>{categoryOptions.map((category) => <option key={category} value={category}>{category}</option>)}</select></label>
-                <label className="block"><span className="mb-2 block text-sm font-bold text-slate-300">Status</span><select value={draftFilters.status} onChange={(event) => setDraftFilters((previous) => ({ ...previous, status: event.target.value }))} className="w-full rounded-xl border border-slate-700 bg-slate-950 px-3 py-2.5 text-sm text-white outline-none focus:border-amber-500"><option value="all">All Statuses</option>{statusOptions.map((status) => <option key={status} value={status}>{formatOperationType(status)}</option>)}</select></label>
+                <label className="block">
+                  <span className="mb-2 block text-sm font-bold text-slate-300">
+                    Asset Search
+                  </span>
+                  <input
+                    type="text"
+                    value={draftFilters.search}
+                    onChange={(event) =>
+                      setDraftFilters((previous) => ({
+                        ...previous,
+                        search: event.target.value,
+                      }))
+                    }
+                    placeholder="Asset ID, type, category or project"
+                    className="w-full rounded-xl border border-slate-700 bg-slate-950 px-3 py-2.5 text-sm text-white outline-none focus:border-amber-500"
+                  />
+                </label>
+                <label className="block">
+                  <span className="mb-2 block text-sm font-bold text-slate-300">
+                    Project
+                  </span>
+                  <select
+                    value={draftFilters.project}
+                    onChange={(event) =>
+                      setDraftFilters((previous) => ({
+                        ...previous,
+                        project: event.target.value,
+                      }))
+                    }
+                    className="w-full rounded-xl border border-slate-700 bg-slate-950 px-3 py-2.5 text-sm text-white outline-none focus:border-amber-500"
+                  >
+                    <option value="all">All Projects</option>
+                    {projectOptions.map((project) => (
+                      <option key={project} value={project}>
+                        {project}
+                      </option>
+                    ))}
+                  </select>
+                </label>
+                <label className="block">
+                  <span className="mb-2 block text-sm font-bold text-slate-300">
+                    Asset Type
+                  </span>
+                  <select
+                    value={draftFilters.assetType}
+                    onChange={(event) =>
+                      setDraftFilters((previous) => ({
+                        ...previous,
+                        assetType: event.target.value,
+                      }))
+                    }
+                    className="w-full rounded-xl border border-slate-700 bg-slate-950 px-3 py-2.5 text-sm text-white outline-none focus:border-amber-500"
+                  >
+                    <option value="all">All Asset Types</option>
+                    {assetTypeOptions.map((assetType) => (
+                      <option key={assetType} value={assetType}>
+                        {assetType}
+                      </option>
+                    ))}
+                  </select>
+                </label>
+                <label className="block">
+                  <span className="mb-2 block text-sm font-bold text-slate-300">
+                    Category
+                  </span>
+                  <select
+                    value={draftFilters.category}
+                    onChange={(event) =>
+                      setDraftFilters((previous) => ({
+                        ...previous,
+                        category: event.target.value,
+                      }))
+                    }
+                    className="w-full rounded-xl border border-slate-700 bg-slate-950 px-3 py-2.5 text-sm text-white outline-none focus:border-amber-500"
+                  >
+                    <option value="all">All Categories</option>
+                    {categoryOptions.map((category) => (
+                      <option key={category} value={category}>
+                        {category}
+                      </option>
+                    ))}
+                  </select>
+                </label>
+                <label className="block">
+                  <span className="mb-2 block text-sm font-bold text-slate-300">
+                    Status
+                  </span>
+                  <select
+                    value={draftFilters.status}
+                    onChange={(event) =>
+                      setDraftFilters((previous) => ({
+                        ...previous,
+                        status: event.target.value,
+                      }))
+                    }
+                    className="w-full rounded-xl border border-slate-700 bg-slate-950 px-3 py-2.5 text-sm text-white outline-none focus:border-amber-500"
+                  >
+                    <option value="all">All Statuses</option>
+                    {statusOptions.map((status) => (
+                      <option key={status} value={status}>
+                        {formatOperationType(status)}
+                      </option>
+                    ))}
+                  </select>
+                </label>
               </div>
 
               <div className="grid grid-cols-2 gap-3 border-t border-slate-800 px-5 py-4">
-                <button type="button" onClick={resetFilters} className="rounded-xl border border-slate-700 bg-slate-950 px-4 py-2.5 text-sm font-extrabold text-slate-300 hover:border-slate-500 hover:text-white">Reset</button>
-                <button type="button" onClick={applyFilters} className="rounded-xl border border-amber-500 bg-amber-500 px-4 py-2.5 text-sm font-extrabold text-slate-950 hover:bg-amber-400">{reportGenerated ? "Update Report" : "Generate Report"}</button>
+                <button
+                  type="button"
+                  onClick={resetFilters}
+                  className="rounded-xl border border-slate-700 bg-slate-950 px-4 py-2.5 text-sm font-extrabold text-slate-300 hover:border-slate-500 hover:text-white"
+                >
+                  Reset
+                </button>
+                <button
+                  type="button"
+                  onClick={applyFilters}
+                  className="rounded-xl border border-amber-500 bg-amber-500 px-4 py-2.5 text-sm font-extrabold text-slate-950 hover:bg-amber-400"
+                >
+                  {reportGenerated ? "Update Report" : "Generate Report"}
+                </button>
               </div>
             </aside>
           </div>
@@ -2185,7 +3024,6 @@ function AssetsMasterReport({
     </div>
   );
 }
-
 
 const ASSET_TRANSFER_FILTERS = {
   dateFrom: "",
@@ -2218,7 +3056,9 @@ function getTransferAsset(transfer) {
 
 function getTransferProject(transfer, side) {
   if (side === "from") {
-    return transfer?.fromProject || transfer?.payload?.transfer?.fromProject || null;
+    return (
+      transfer?.fromProject || transfer?.payload?.transfer?.fromProject || null
+    );
   }
 
   return transfer?.toProject || transfer?.payload?.transfer?.toProject || null;
@@ -2259,7 +3099,10 @@ function makeTransferReference(transfer) {
   const batchId = getTransferBatchId(transfer);
   if (batchId) return batchId;
 
-  const id = String(getTransferId(transfer) || "").replace(/^ASSET-TRANSFER-/i, "");
+  const id = String(getTransferId(transfer) || "").replace(
+    /^ASSET-TRANSFER-/i,
+    "",
+  );
   return id ? `ATR-${id.slice(-8).toUpperCase()}` : "ATR-UNKNOWN";
 }
 
@@ -2286,8 +3129,7 @@ function getTransferProjectLabel(transfer, side) {
   return (
     (side === "from"
       ? transfer?.fromProjectName || transfer?.fromProjectId
-      : transfer?.toProjectName || transfer?.toProjectId) ||
-    "-"
+      : transfer?.toProjectName || transfer?.toProjectId) || "-"
   );
 }
 
@@ -2320,7 +3162,8 @@ function AssetTransferHistoryReport({
   const [transferHistory, setTransferHistory] = useState([]);
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState("");
-  const [selectedTransferReference, setSelectedTransferReference] = useState(null);
+  const [selectedTransferReference, setSelectedTransferReference] =
+    useState(null);
 
   const rows = useMemo(
     () =>
@@ -2339,14 +3182,12 @@ function AssetTransferHistoryReport({
           assetBackendId: asset?.id || transfer?.assetId || "",
           transferType: batchId ? "BULK" : "SINGLE",
           sourceProject: getTransferProjectLabel(transfer, "from"),
-          sourceProjectId:
-            sourceProject?.id || transfer?.fromProjectId || "",
+          sourceProjectId: sourceProject?.id || transfer?.fromProjectId || "",
           destinationProject: getTransferProjectLabel(transfer, "to"),
           destinationProjectId:
             destinationProject?.id || transfer?.toProjectId || "",
           requestedBy: getTransferUserLabel(transfer),
-          requestedById:
-            requester?.id || transfer?.requestedByUserId || "",
+          requestedById: requester?.id || transfer?.requestedByUserId || "",
           requestedDate:
             transfer?.requestedAt ||
             transfer?.createdAt ||
@@ -2378,7 +3219,7 @@ function AssetTransferHistoryReport({
             "PENDING",
         };
       }),
-    [transferHistory]
+    [transferHistory],
   );
 
   const selectedTransferGroup = useMemo(() => {
@@ -2387,7 +3228,7 @@ function AssetTransferHistoryReport({
     const matchedRows = rows.filter(
       (row) =>
         normalizeValue(row.transferReference) ===
-        normalizeValue(selectedTransferReference)
+        normalizeValue(selectedTransferReference),
     );
 
     if (!matchedRows.length) return null;
@@ -2430,7 +3271,7 @@ function AssetTransferHistoryReport({
 
   const filteredRows = useMemo(() => {
     const transferReferenceSearch = normalizeValue(
-      appliedFilters.transferReference
+      appliedFilters.transferReference,
     );
     return rows.filter((row) => {
       const requestedDate = row.requestedDate
@@ -2509,7 +3350,6 @@ function AssetTransferHistoryReport({
         return false;
       }
 
-
       return true;
     });
   }, [rows, appliedFilters]);
@@ -2518,40 +3358,39 @@ function AssetTransferHistoryReport({
     () => ({
       records: filteredRows.length,
       singleTransfers: filteredRows.filter(
-        (row) => row.transferType === "SINGLE"
+        (row) => row.transferType === "SINGLE",
       ).length,
-      bulkAssets: filteredRows.filter(
-        (row) => row.transferType === "BULK"
-      ).length,
+      bulkAssets: filteredRows.filter((row) => row.transferType === "BULK")
+        .length,
       batches: new Set(
         filteredRows
           .map((row) => row.batchId)
-          .filter((value) => value && value !== "-")
+          .filter((value) => value && value !== "-"),
       ).size,
     }),
-    [filteredRows]
+    [filteredRows],
   );
 
   const filterSummary = useMemo(() => {
     const asset = assets.find(
       (item) =>
         normalizeValue(getAssetFilterValue(item)) ===
-        normalizeValue(appliedFilters.assetId)
+        normalizeValue(appliedFilters.assetId),
     );
     const sourceProject = projects.find(
       (item) =>
         normalizeValue(getProjectBackendId(item)) ===
-        normalizeValue(appliedFilters.sourceProjectId)
+        normalizeValue(appliedFilters.sourceProjectId),
     );
     const destinationProject = projects.find(
       (item) =>
         normalizeValue(getProjectBackendId(item)) ===
-        normalizeValue(appliedFilters.destinationProjectId)
+        normalizeValue(appliedFilters.destinationProjectId),
     );
     const requester = requesterOptions.find(
       (item) =>
         normalizeValue(item.value) ===
-        normalizeValue(appliedFilters.requestedBy)
+        normalizeValue(appliedFilters.requestedBy),
     );
 
     return [
@@ -2560,7 +3399,7 @@ function AssetTransferHistoryReport({
         value:
           appliedFilters.dateFrom || appliedFilters.dateTo
             ? `${formatReportDate(appliedFilters.dateFrom)} → ${formatReportDate(
-                appliedFilters.dateTo
+                appliedFilters.dateTo,
               )}`
             : "All dates",
       },
@@ -2611,12 +3450,7 @@ function AssetTransferHistoryReport({
         value: appliedFilters.transferReference || "All References",
       },
     ];
-  }, [
-    appliedFilters,
-    assets,
-    projects,
-    requesterOptions,
-  ]);
+  }, [appliedFilters, assets, projects, requesterOptions]);
 
   const reportMeta = {
     title: selectedReport?.title || "Asset Transfer History",
@@ -2706,7 +3540,7 @@ function AssetTransferHistoryReport({
       setError(
         requestError?.response?.data?.message ||
           requestError?.message ||
-          "Failed to load asset transfer history."
+          "Failed to load asset transfer history.",
       );
     } finally {
       setLoading(false);
@@ -2859,7 +3693,9 @@ function AssetTransferHistoryReport({
                             <button
                               type="button"
                               onClick={() =>
-                                setSelectedTransferReference(row.transferReference)
+                                setSelectedTransferReference(
+                                  row.transferReference,
+                                )
                               }
                               className="font-extrabold text-amber-300 underline-offset-4 transition hover:text-amber-200 hover:underline"
                             >
@@ -2897,7 +3733,8 @@ function AssetTransferHistoryReport({
                                   ? "border-emerald-500/30 bg-emerald-500/10 text-emerald-300"
                                   : normalizeValue(row.status) === "rejected"
                                     ? "border-red-500/30 bg-red-500/10 text-red-300"
-                                    : normalizeValue(row.status) === "partially_approved"
+                                    : normalizeValue(row.status) ===
+                                        "partially_approved"
                                       ? "border-orange-500/30 bg-orange-500/10 text-orange-300"
                                       : "border-amber-500/30 bg-amber-500/10 text-amber-300"
                               }`}
@@ -2961,11 +3798,17 @@ function AssetTransferHistoryReport({
               <div className="max-h-[calc(90vh-88px)] overflow-y-auto px-5 py-5">
                 <section className="grid gap-3 sm:grid-cols-2 lg:grid-cols-3">
                   {[
-                    ["Transfer Type", formatOperationType(selectedTransferGroup.transferType)],
+                    [
+                      "Transfer Type",
+                      formatOperationType(selectedTransferGroup.transferType),
+                    ],
                     ["From Project", selectedTransferGroup.sourceProject],
                     ["To Project", selectedTransferGroup.destinationProject],
                     ["Requested By", selectedTransferGroup.requestedBy],
-                    ["Requested Date", formatDateTime(selectedTransferGroup.requestedDate)],
+                    [
+                      "Requested Date",
+                      formatDateTime(selectedTransferGroup.requestedDate),
+                    ],
                     [
                       "Approved / Rejected Date",
                       formatDateTime(selectedTransferGroup.reviewDate),
@@ -2974,7 +3817,10 @@ function AssetTransferHistoryReport({
                       "Transfer Date",
                       formatDateTime(selectedTransferGroup.transferDate),
                     ],
-                    ["Status", formatOperationType(selectedTransferGroup.status)],
+                    [
+                      "Status",
+                      formatOperationType(selectedTransferGroup.status),
+                    ],
                     ["Assets Count", selectedTransferGroup.assets.length],
                   ].map(([label, value]) => (
                     <div
@@ -3037,7 +3883,8 @@ function AssetTransferHistoryReport({
                                 className={`inline-flex rounded-full border px-2.5 py-1 text-xs font-extrabold ${
                                   normalizeValue(asset.status) === "approved"
                                     ? "border-emerald-500/30 bg-emerald-500/10 text-emerald-300"
-                                    : normalizeValue(asset.status) === "rejected"
+                                    : normalizeValue(asset.status) ===
+                                        "rejected"
                                       ? "border-red-500/30 bg-red-500/10 text-red-300"
                                       : normalizeValue(asset.status) ===
                                           "partially_approved"
@@ -3152,7 +3999,7 @@ function AssetTransferHistoryReport({
                     onChange={(event) =>
                       handleFilterChange(
                         "transferReference",
-                        event.target.value
+                        event.target.value,
                       )
                     }
                     placeholder="ATB-... or ATR-..."
@@ -3167,10 +4014,7 @@ function AssetTransferHistoryReport({
                   <select
                     value={draftFilters.sourceProjectId}
                     onChange={(event) =>
-                      handleFilterChange(
-                        "sourceProjectId",
-                        event.target.value
-                      )
+                      handleFilterChange("sourceProjectId", event.target.value)
                     }
                     className="w-full rounded-xl border border-slate-700 bg-slate-950 px-3 py-2.5 text-sm text-white outline-none focus:border-amber-500"
                   >
@@ -3198,7 +4042,7 @@ function AssetTransferHistoryReport({
                     onChange={(event) =>
                       handleFilterChange(
                         "destinationProjectId",
-                        event.target.value
+                        event.target.value,
                       )
                     }
                     className="w-full rounded-xl border border-slate-700 bg-slate-950 px-3 py-2.5 text-sm text-white outline-none focus:border-amber-500"
@@ -3307,7 +4151,6 @@ function AssetTransferHistoryReport({
   );
 }
 
-
 const ASSET_METER_HISTORY_FILTERS = {
   dateFrom: "",
   dateTo: "",
@@ -3388,7 +4231,9 @@ function AssetMeterHistoryReport({
   const [filtersOpen, setFiltersOpen] = useState(true);
   const [reportGenerated, setReportGenerated] = useState(false);
   const [draftFilters, setDraftFilters] = useState(ASSET_METER_HISTORY_FILTERS);
-  const [appliedFilters, setAppliedFilters] = useState(ASSET_METER_HISTORY_FILTERS);
+  const [appliedFilters, setAppliedFilters] = useState(
+    ASSET_METER_HISTORY_FILTERS,
+  );
   const [resetEvents, setResetEvents] = useState([]);
   const [correctionEvents, setCorrectionEvents] = useState([]);
   const [loading, setLoading] = useState(false);
@@ -3400,7 +4245,9 @@ function AssetMeterHistoryReport({
     return assets.filter((asset) => {
       const projectId =
         asset?.projectId || asset?.project?.id || asset?.projectBackendId || "";
-      return normalizeValue(projectId) === normalizeValue(draftFilters.projectId);
+      return (
+        normalizeValue(projectId) === normalizeValue(draftFilters.projectId)
+      );
     });
   }, [assets, draftFilters.projectId]);
 
@@ -3417,7 +4264,7 @@ function AssetMeterHistoryReport({
             "odometer_reading",
             "meter_reading",
             "current_odometer",
-          ])
+          ]),
         );
 
         const hasReading = [
@@ -3430,7 +4277,9 @@ function AssetMeterHistoryReport({
             "meter_reading",
             "current_odometer",
           ]),
-        ].some((value) => value !== undefined && value !== null && value !== "");
+        ].some(
+          (value) => value !== undefined && value !== null && value !== "",
+        );
 
         if (!hasReading) return null;
 
@@ -3473,7 +4322,7 @@ function AssetMeterHistoryReport({
             "previous_odometer",
             "previous_meter_reading",
             "last_odometer",
-          ])
+          ]),
         );
 
         return {
@@ -3494,9 +4343,10 @@ function AssetMeterHistoryReport({
             getRowValue(row, headers, [
               "lifetime_odometer",
               "asset_lifetime_odometer",
-            ])
+            ]),
           ),
-          previousMeterCycle: getNumericValue(operation?.assetMeterCycleNumber) || 1,
+          previousMeterCycle:
+            getNumericValue(operation?.assetMeterCycleNumber) || 1,
           meterCycle: getNumericValue(operation?.assetMeterCycleNumber) || 1,
           reason: "Refuel operation meter reading",
           reference:
@@ -3534,12 +4384,13 @@ function AssetMeterHistoryReport({
           correction?.operationId ||
           correction?.operationNo ||
           correction?.operationReference ||
-          ""
+          "",
       );
 
       if (!operationKey) return;
 
-      const operationCorrections = correctionsByOperation.get(operationKey) || [];
+      const operationCorrections =
+        correctionsByOperation.get(operationKey) || [];
       operationCorrections.push(correction);
       correctionsByOperation.set(operationKey, operationCorrections);
     });
@@ -3548,7 +4399,7 @@ function AssetMeterHistoryReport({
       items.sort(
         (a, b) =>
           new Date(a.eventDate || a.appliedAt || a.createdAt).getTime() -
-          new Date(b.eventDate || b.appliedAt || b.createdAt).getTime()
+          new Date(b.eventDate || b.appliedAt || b.createdAt).getTime(),
       );
     });
 
@@ -3582,7 +4433,7 @@ function AssetMeterHistoryReport({
       ...(resetEvents || []),
     ].forEach((event) => {
       const assetKey = normalizeValue(
-        event?.assetBackendId || event?.assetId || "unknown-asset"
+        event?.assetBackendId || event?.assetId || "unknown-asset",
       );
       const assetEvents = eventsByAsset.get(assetKey) || [];
       assetEvents.push({ ...event });
@@ -3602,7 +4453,9 @@ function AssetMeterHistoryReport({
         // Deterministic ordering for equal timestamps: refuel first, then its
         // correction, then reset. This preserves operation → correction → reset.
         const eventPriority = { REFUEL: 1, CORRECTION: 2, RESET: 3 };
-        return (eventPriority[a.eventType] || 9) - (eventPriority[b.eventType] || 9);
+        return (
+          (eventPriority[a.eventType] || 9) - (eventPriority[b.eventType] || 9)
+        );
       });
 
       /*
@@ -3622,7 +4475,7 @@ function AssetMeterHistoryReport({
       orderedEvents.forEach((event) => {
         const displayedCurrentReading = Number(event.currentReading);
         const operationalCurrentReading = Number(
-          event.operationalCurrentReading ?? event.currentReading
+          event.operationalCurrentReading ?? event.currentReading,
         );
         const storedPreviousReading = Number(event.previousReading);
 
@@ -3665,14 +4518,14 @@ function AssetMeterHistoryReport({
         : assets.find(
             (asset) =>
               normalizeValue(getAssetFilterValue(asset)) ===
-              normalizeValue(appliedFilters.assetId)
+              normalizeValue(appliedFilters.assetId),
           );
 
     const selectedAssetCandidates = new Set(
       [
         normalizeValue(appliedFilters.assetId),
         ...(selectedAsset ? getAssetCandidates(selectedAsset) : []),
-      ].filter(Boolean)
+      ].filter(Boolean),
     );
 
     return timeline
@@ -3682,18 +4535,24 @@ function AssetMeterHistoryReport({
 
         if (
           appliedFilters.dateFrom &&
-          (!rowDate || rowDate < new Date(`${appliedFilters.dateFrom}T00:00:00`))
-        ) return false;
+          (!rowDate ||
+            rowDate < new Date(`${appliedFilters.dateFrom}T00:00:00`))
+        )
+          return false;
 
         if (
           appliedFilters.dateTo &&
-          (!rowDate || rowDate > new Date(`${appliedFilters.dateTo}T23:59:59.999`))
-        ) return false;
+          (!rowDate ||
+            rowDate > new Date(`${appliedFilters.dateTo}T23:59:59.999`))
+        )
+          return false;
 
         if (
           appliedFilters.projectId !== "all" &&
-          normalizeValue(row.projectId) !== normalizeValue(appliedFilters.projectId)
-        ) return false;
+          normalizeValue(row.projectId) !==
+            normalizeValue(appliedFilters.projectId)
+        )
+          return false;
 
         if (appliedFilters.assetId !== "all") {
           const rowAssetCandidates = [
@@ -3704,35 +4563,45 @@ function AssetMeterHistoryReport({
             .filter(Boolean)
             .map(normalizeValue);
 
-          if (!rowAssetCandidates.some((value) => selectedAssetCandidates.has(value))) {
+          if (
+            !rowAssetCandidates.some((value) =>
+              selectedAssetCandidates.has(value),
+            )
+          ) {
             return false;
           }
         }
 
         if (
           appliedFilters.eventType !== "all" &&
-          normalizeValue(row.eventType) !== normalizeValue(appliedFilters.eventType)
-        ) return false;
+          normalizeValue(row.eventType) !==
+            normalizeValue(appliedFilters.eventType)
+        )
+          return false;
 
         if (
           appliedFilters.meterCycle !== "all" &&
           String(row.meterCycle) !== String(appliedFilters.meterCycle)
-        ) return false;
+        )
+          return false;
 
         return true;
       })
       .sort(
         (a, b) =>
           new Date(b.eventDate || b.createdAt).getTime() -
-          new Date(a.eventDate || a.createdAt).getTime()
+          new Date(a.eventDate || a.createdAt).getTime(),
       );
   }, [operationEvents, correctionEvents, resetEvents, appliedFilters, assets]);
 
   const meterCycleOptions = useMemo(
     () =>
-      [...new Set(rows.map((row) => Number(row.meterCycle)).filter(Number.isFinite))]
-        .sort((a, b) => a - b),
-    [rows]
+      [
+        ...new Set(
+          rows.map((row) => Number(row.meterCycle)).filter(Number.isFinite),
+        ),
+      ].sort((a, b) => a - b),
+    [rows],
   );
 
   const totals = useMemo(
@@ -3742,19 +4611,19 @@ function AssetMeterHistoryReport({
       corrections: rows.filter((row) => row.eventType === "CORRECTION").length,
       resets: rows.filter((row) => row.eventType === "RESET").length,
     }),
-    [rows]
+    [rows],
   );
 
   const filterSummary = useMemo(() => {
     const selectedProject = projects.find(
       (project) =>
         normalizeValue(getProjectBackendId(project)) ===
-        normalizeValue(appliedFilters.projectId)
+        normalizeValue(appliedFilters.projectId),
     );
     const selectedAsset = assets.find(
       (asset) =>
         normalizeValue(getAssetFilterValue(asset)) ===
-        normalizeValue(appliedFilters.assetId)
+        normalizeValue(appliedFilters.assetId),
     );
 
     return [
@@ -3810,11 +4679,13 @@ function AssetMeterHistoryReport({
 
     try {
       const companyId = getCompanyBackendId(currentCompany, currentUser);
-      if (!companyId) throw new Error("Company ID is required to generate this report.");
+      if (!companyId)
+        throw new Error("Company ID is required to generate this report.");
 
       const reportParams = {
         companyId,
-        projectId: draftFilters.projectId === "all" ? "" : draftFilters.projectId,
+        projectId:
+          draftFilters.projectId === "all" ? "" : draftFilters.projectId,
         assetId: draftFilters.assetId === "all" ? "" : draftFilters.assetId,
         dateFrom: draftFilters.dateFrom,
         dateTo: draftFilters.dateTo,
@@ -3827,7 +4698,7 @@ function AssetMeterHistoryReport({
 
       setResetEvents(Array.isArray(resetResult) ? resetResult : []);
       setCorrectionEvents(
-        Array.isArray(correctionResult) ? correctionResult : []
+        Array.isArray(correctionResult) ? correctionResult : [],
       );
       setAppliedFilters(draftFilters);
       setReportGenerated(true);
@@ -3836,7 +4707,7 @@ function AssetMeterHistoryReport({
       setError(
         requestError?.response?.data?.message ||
           requestError?.message ||
-          "Failed to load asset meter history."
+          "Failed to load asset meter history.",
       );
     } finally {
       setLoading(false);
@@ -3916,32 +4787,76 @@ function AssetMeterHistoryReport({
         <section className="rounded-2xl border border-slate-800 bg-slate-900/80 p-5 shadow-xl shadow-black/10">
           <div className="flex flex-col gap-4 xl:flex-row xl:items-center xl:justify-between">
             <div>
-              <button type="button" onClick={onBack} className="mb-4 inline-flex items-center gap-2 rounded-lg border border-slate-700 bg-slate-950/70 px-3 py-2 text-sm font-bold text-slate-300 transition hover:border-amber-500/50 hover:text-amber-300">
+              <button
+                type="button"
+                onClick={onBack}
+                className="mb-4 inline-flex items-center gap-2 rounded-lg border border-slate-700 bg-slate-950/70 px-3 py-2 text-sm font-bold text-slate-300 transition hover:border-amber-500/50 hover:text-amber-300"
+              >
                 <span aria-hidden="true">←</span> Back to Reports
               </button>
-              <p className="text-xs font-bold uppercase tracking-[0.22em] text-amber-400">Assets Reports</p>
-              <h1 className="mt-1 text-2xl font-black text-white sm:text-3xl">{selectedReport?.title}</h1>
-              <p className="mt-2 max-w-4xl text-sm leading-6 text-slate-400">{selectedReport?.description}</p>
+              <p className="text-xs font-bold uppercase tracking-[0.22em] text-amber-400">
+                Assets Reports
+              </p>
+              <h1 className="mt-1 text-2xl font-black text-white sm:text-3xl">
+                {selectedReport?.title}
+              </h1>
+              <p className="mt-2 max-w-4xl text-sm leading-6 text-slate-400">
+                {selectedReport?.description}
+              </p>
             </div>
-            <ReportToolbar onOpenFilters={() => setFiltersOpen(true)} onPrint={handlePrint} onExport={handleExport} disabled={!reportGenerated || !rows.length} />
+            <ReportToolbar
+              onOpenFilters={() => setFiltersOpen(true)}
+              onPrint={handlePrint}
+              onExport={handleExport}
+              disabled={!reportGenerated || !rows.length}
+            />
           </div>
         </section>
 
-        {error ? <section className="rounded-2xl border border-red-500/30 bg-red-500/10 px-5 py-4 text-sm font-bold text-red-200">{error}</section> : null}
+        {error ? (
+          <section className="rounded-2xl border border-red-500/30 bg-red-500/10 px-5 py-4 text-sm font-bold text-red-200">
+            {error}
+          </section>
+        ) : null}
 
         {!reportGenerated ? (
           <section className="rounded-2xl border border-amber-500/30 bg-slate-900/80 px-6 py-14 text-center shadow-xl shadow-black/10">
             <div className="mx-auto flex max-w-xl flex-col items-center">
-              <div className="flex h-16 w-16 items-center justify-center rounded-2xl border border-amber-500/30 bg-amber-500/10 text-3xl">⏱️</div>
-              <h2 className="mt-5 text-xl font-black text-white sm:text-2xl">Select asset meter filters first</h2>
-              <p className="mt-3 text-sm leading-6 text-slate-400">Choose the period, project, asset, event type and meter cycle, then generate the complete meter history.</p>
-              <button type="button" onClick={() => setFiltersOpen(true)} className="mt-6 rounded-xl border border-amber-500 bg-amber-500 px-5 py-3 text-sm font-extrabold text-slate-950 transition hover:bg-amber-400">Set Report Filters</button>
+              <div className="flex h-16 w-16 items-center justify-center rounded-2xl border border-amber-500/30 bg-amber-500/10 text-3xl">
+                ⏱️
+              </div>
+              <h2 className="mt-5 text-xl font-black text-white sm:text-2xl">
+                Select asset meter filters first
+              </h2>
+              <p className="mt-3 text-sm leading-6 text-slate-400">
+                Choose the period, project, asset, event type and meter cycle,
+                then generate the complete meter history.
+              </p>
+              <button
+                type="button"
+                onClick={() => setFiltersOpen(true)}
+                className="mt-6 rounded-xl border border-amber-500 bg-amber-500 px-5 py-3 text-sm font-extrabold text-slate-950 transition hover:bg-amber-400"
+              >
+                Set Report Filters
+              </button>
             </div>
           </section>
         ) : (
           <>
             <section className="grid gap-3 sm:grid-cols-2 xl:grid-cols-5">
-              {filterSummary.map((item) => <div key={item.label} className="rounded-xl border border-slate-800 bg-slate-900/70 px-4 py-3"><p className="text-[11px] font-bold uppercase tracking-wider text-slate-500">{item.label}</p><p className="mt-1 truncate text-sm font-extrabold text-slate-200">{item.value}</p></div>)}
+              {filterSummary.map((item) => (
+                <div
+                  key={item.label}
+                  className="rounded-xl border border-slate-800 bg-slate-900/70 px-4 py-3"
+                >
+                  <p className="text-[11px] font-bold uppercase tracking-wider text-slate-500">
+                    {item.label}
+                  </p>
+                  <p className="mt-1 truncate text-sm font-extrabold text-slate-200">
+                    {item.value}
+                  </p>
+                </div>
+              ))}
             </section>
 
             <section className="grid gap-3 sm:grid-cols-2 xl:grid-cols-4">
@@ -3950,42 +4865,118 @@ function AssetMeterHistoryReport({
                 ["Refuel Readings", totals.refuels],
                 ["Odometer Corrections", totals.corrections],
                 ["Meter Resets", totals.resets],
-              ].map(([label, value]) => <div key={label} className="rounded-2xl border border-amber-500/25 bg-slate-900/80 p-4 shadow-lg shadow-black/10"><p className="text-xs font-bold uppercase tracking-wider text-amber-400">{label}</p><p className="mt-2 text-2xl font-black text-white">{value}</p></div>)}
+              ].map(([label, value]) => (
+                <div
+                  key={label}
+                  className="rounded-2xl border border-amber-500/25 bg-slate-900/80 p-4 shadow-lg shadow-black/10"
+                >
+                  <p className="text-xs font-bold uppercase tracking-wider text-amber-400">
+                    {label}
+                  </p>
+                  <p className="mt-2 text-2xl font-black text-white">{value}</p>
+                </div>
+              ))}
             </section>
 
             <section className="overflow-hidden rounded-2xl border border-slate-800 bg-slate-900/80 shadow-xl shadow-black/10">
-              <div className="flex flex-col gap-2 border-b border-slate-800 px-5 py-4 sm:flex-row sm:items-center sm:justify-between"><div><h2 className="font-extrabold text-white">Asset Meter Timeline</h2><p className="mt-1 text-xs text-slate-500">{rows.length} meter event{rows.length === 1 ? "" : "s"} found</p></div><p className="text-xs font-bold text-amber-300">Refuel readings, corrections and odometer resets</p></div>
+              <div className="flex flex-col gap-2 border-b border-slate-800 px-5 py-4 sm:flex-row sm:items-center sm:justify-between">
+                <div>
+                  <h2 className="font-extrabold text-white">
+                    Asset Meter Timeline
+                  </h2>
+                  <p className="mt-1 text-xs text-slate-500">
+                    {rows.length} meter event{rows.length === 1 ? "" : "s"}{" "}
+                    found
+                  </p>
+                </div>
+                <p className="text-xs font-bold text-amber-300">
+                  Refuel readings, corrections and odometer resets
+                </p>
+              </div>
               <div className="overflow-x-auto">
                 <table className="min-w-[1750px] w-full border-collapse text-sm">
-                  <thead className="bg-slate-950/90"><tr>{ASSET_METER_HISTORY_HEADERS.map((header) => <th key={header} className="whitespace-nowrap border-b border-slate-800 px-3 py-3 text-left text-[11px] font-black uppercase tracking-wider text-slate-400">{header}</th>)}</tr></thead>
+                  <thead className="bg-slate-950/90">
+                    <tr>
+                      {ASSET_METER_HISTORY_HEADERS.map((header) => (
+                        <th
+                          key={header}
+                          className="whitespace-nowrap border-b border-slate-800 px-3 py-3 text-left text-[11px] font-black uppercase tracking-wider text-slate-400"
+                        >
+                          {header}
+                        </th>
+                      ))}
+                    </tr>
+                  </thead>
                   <tbody>
-                    {rows.length ? rows.map((row) => {
-                      const isReset = row.eventType === "RESET";
-                      const isCorrection = row.eventType === "CORRECTION";
-                      const badgeClass = isReset
-                        ? "border-purple-400/40 bg-purple-500/10 text-purple-300"
-                        : isCorrection
-                          ? "border-sky-400/40 bg-sky-500/10 text-sky-300"
-                          : "border-emerald-400/40 bg-emerald-500/10 text-emerald-300";
-                      const badgeLabel = isReset
-                        ? "🔄 Odometer Reset"
-                        : isCorrection
-                          ? "✏️ Odometer Correction"
-                          : "⛽ Refuel Operation";
-                      return <tr key={`${row.eventType}-${row.id}`} className="border-b border-slate-800/70 transition hover:bg-slate-800/30">
-                        <td className="whitespace-nowrap px-3 py-3 text-slate-300">{formatDateTime(row.eventDate || row.createdAt)}</td>
-                        <td className="whitespace-nowrap px-3 py-3 font-extrabold text-white">{row.assetId || "-"}</td>
-                        <td className="whitespace-nowrap px-3 py-3 text-slate-300">{row.projectName || row.projectCode || "-"}</td>
-                        <td className="whitespace-nowrap px-3 py-3"><span className={`inline-flex rounded-full border px-2.5 py-1 text-xs font-extrabold ${badgeClass}`}>{badgeLabel}</span></td>
-                        <td className="whitespace-nowrap px-3 py-3 text-center font-black text-amber-300">{formatNumber(row.meterCycle, 0)}</td>
-                        <td className="whitespace-nowrap px-3 py-3 text-right text-slate-300">{formatNumber(row.previousReading)}</td>
-                        <td className="whitespace-nowrap px-3 py-3 text-right font-extrabold text-white">{formatNumber(row.currentReading)}</td>
-                        <td className="whitespace-nowrap px-3 py-3 text-right font-black text-amber-300">{formatNumber(row.lifetimeReading)}</td>
-                        <td className="max-w-[280px] px-3 py-3 text-slate-400">{row.reason || "-"}</td>
-                        <td className="whitespace-nowrap px-3 py-3 font-bold text-slate-300">{row.reference || "-"}</td>
-                        <td className="whitespace-nowrap px-3 py-3 text-slate-300">{row.performedBy || "-"}</td>
-                      </tr>;
-                    }) : <tr><td colSpan={ASSET_METER_HISTORY_HEADERS.length} className="px-6 py-12 text-center text-slate-500">No asset meter events match the selected filters.</td></tr>}
+                    {rows.length ? (
+                      rows.map((row) => {
+                        const isReset = row.eventType === "RESET";
+                        const isCorrection = row.eventType === "CORRECTION";
+                        const badgeClass = isReset
+                          ? "border-purple-400/40 bg-purple-500/10 text-purple-300"
+                          : isCorrection
+                            ? "border-sky-400/40 bg-sky-500/10 text-sky-300"
+                            : "border-emerald-400/40 bg-emerald-500/10 text-emerald-300";
+                        const badgeLabel = isReset
+                          ? "🔄 Odometer Reset"
+                          : isCorrection
+                            ? "✏️ Odometer Correction"
+                            : "⛽ Refuel Operation";
+                        return (
+                          <tr
+                            key={`${row.eventType}-${row.id}`}
+                            className="border-b border-slate-800/70 transition hover:bg-slate-800/30"
+                          >
+                            <td className="whitespace-nowrap px-3 py-3 text-slate-300">
+                              {formatDateTime(row.eventDate || row.createdAt)}
+                            </td>
+                            <td className="whitespace-nowrap px-3 py-3 font-extrabold text-white">
+                              {row.assetId || "-"}
+                            </td>
+                            <td className="whitespace-nowrap px-3 py-3 text-slate-300">
+                              {row.projectName || row.projectCode || "-"}
+                            </td>
+                            <td className="whitespace-nowrap px-3 py-3">
+                              <span
+                                className={`inline-flex rounded-full border px-2.5 py-1 text-xs font-extrabold ${badgeClass}`}
+                              >
+                                {badgeLabel}
+                              </span>
+                            </td>
+                            <td className="whitespace-nowrap px-3 py-3 text-center font-black text-amber-300">
+                              {formatNumber(row.meterCycle, 0)}
+                            </td>
+                            <td className="whitespace-nowrap px-3 py-3 text-right text-slate-300">
+                              {formatNumber(row.previousReading)}
+                            </td>
+                            <td className="whitespace-nowrap px-3 py-3 text-right font-extrabold text-white">
+                              {formatNumber(row.currentReading)}
+                            </td>
+                            <td className="whitespace-nowrap px-3 py-3 text-right font-black text-amber-300">
+                              {formatNumber(row.lifetimeReading)}
+                            </td>
+                            <td className="max-w-[280px] px-3 py-3 text-slate-400">
+                              {row.reason || "-"}
+                            </td>
+                            <td className="whitespace-nowrap px-3 py-3 font-bold text-slate-300">
+                              {row.reference || "-"}
+                            </td>
+                            <td className="whitespace-nowrap px-3 py-3 text-slate-300">
+                              {row.performedBy || "-"}
+                            </td>
+                          </tr>
+                        );
+                      })
+                    ) : (
+                      <tr>
+                        <td
+                          colSpan={ASSET_METER_HISTORY_HEADERS.length}
+                          className="px-6 py-12 text-center text-slate-500"
+                        >
+                          No asset meter events match the selected filters.
+                        </td>
+                      </tr>
+                    )}
                   </tbody>
                 </table>
               </div>
@@ -3995,20 +4986,166 @@ function AssetMeterHistoryReport({
 
         {filtersOpen ? (
           <div className="fixed inset-0 z-[120] bg-black/70 backdrop-blur-sm">
-            <button type="button" aria-label="Close filters" onClick={() => setFiltersOpen(false)} className="absolute inset-0 h-full w-full" />
+            <button
+              type="button"
+              aria-label="Close filters"
+              onClick={() => setFiltersOpen(false)}
+              className="absolute inset-0 h-full w-full"
+            />
             <aside className="absolute right-0 top-0 z-10 flex h-full w-full max-w-md flex-col border-l border-slate-800 bg-slate-900 shadow-2xl shadow-black/50">
-              <div className="flex items-start justify-between border-b border-slate-800 px-5 py-4"><div><p className="text-xs font-bold uppercase tracking-[0.2em] text-amber-400">Report Setup</p><h2 className="mt-1 text-xl font-black text-white">Asset Meter Filters</h2></div><button type="button" aria-label="Close filters" onClick={() => setFiltersOpen(false)} className="flex h-9 w-9 items-center justify-center rounded-lg border border-slate-700 bg-slate-950/70 text-lg text-slate-400 transition hover:text-white">×</button></div>
+              <div className="flex items-start justify-between border-b border-slate-800 px-5 py-4">
+                <div>
+                  <p className="text-xs font-bold uppercase tracking-[0.2em] text-amber-400">
+                    Report Setup
+                  </p>
+                  <h2 className="mt-1 text-xl font-black text-white">
+                    Asset Meter Filters
+                  </h2>
+                </div>
+                <button
+                  type="button"
+                  aria-label="Close filters"
+                  onClick={() => setFiltersOpen(false)}
+                  className="flex h-9 w-9 items-center justify-center rounded-lg border border-slate-700 bg-slate-950/70 text-lg text-slate-400 transition hover:text-white"
+                >
+                  ×
+                </button>
+              </div>
               <div className="flex-1 space-y-4 overflow-y-auto px-5 py-5">
                 <div className="grid grid-cols-2 gap-3">
-                  <label className="block"><span className="mb-2 block text-sm font-bold text-slate-300">Date From</span><input type="date" value={draftFilters.dateFrom} onChange={(e) => handleFilterChange("dateFrom", e.target.value)} className="w-full rounded-xl border border-slate-700 bg-slate-950 px-3 py-2.5 text-sm text-white outline-none focus:border-amber-500" /></label>
-                  <label className="block"><span className="mb-2 block text-sm font-bold text-slate-300">Date To</span><input type="date" value={draftFilters.dateTo} onChange={(e) => handleFilterChange("dateTo", e.target.value)} className="w-full rounded-xl border border-slate-700 bg-slate-950 px-3 py-2.5 text-sm text-white outline-none focus:border-amber-500" /></label>
+                  <label className="block">
+                    <span className="mb-2 block text-sm font-bold text-slate-300">
+                      Date From
+                    </span>
+                    <input
+                      type="date"
+                      value={draftFilters.dateFrom}
+                      onChange={(e) =>
+                        handleFilterChange("dateFrom", e.target.value)
+                      }
+                      className="w-full rounded-xl border border-slate-700 bg-slate-950 px-3 py-2.5 text-sm text-white outline-none focus:border-amber-500"
+                    />
+                  </label>
+                  <label className="block">
+                    <span className="mb-2 block text-sm font-bold text-slate-300">
+                      Date To
+                    </span>
+                    <input
+                      type="date"
+                      value={draftFilters.dateTo}
+                      onChange={(e) =>
+                        handleFilterChange("dateTo", e.target.value)
+                      }
+                      className="w-full rounded-xl border border-slate-700 bg-slate-950 px-3 py-2.5 text-sm text-white outline-none focus:border-amber-500"
+                    />
+                  </label>
                 </div>
-                <label className="block"><span className="mb-2 block text-sm font-bold text-slate-300">Project</span><select value={draftFilters.projectId} onChange={(e) => handleFilterChange("projectId", e.target.value)} className="w-full rounded-xl border border-slate-700 bg-slate-950 px-3 py-2.5 text-sm text-white outline-none focus:border-amber-500"><option value="all">All Projects</option>{projects.map((project) => <option key={getProjectBackendId(project) || getProjectLabel(project)} value={getProjectBackendId(project)}>{getProjectLabel(project)}</option>)}</select></label>
-                <label className="block"><span className="mb-2 block text-sm font-bold text-slate-300">Asset</span><select value={draftFilters.assetId} onChange={(e) => handleFilterChange("assetId", e.target.value)} className="w-full rounded-xl border border-slate-700 bg-slate-950 px-3 py-2.5 text-sm text-white outline-none focus:border-amber-500"><option value="all">All Assets</option>{availableAssets.map((asset) => <option key={getAssetFilterValue(asset) || getAssetLabel(asset)} value={getAssetFilterValue(asset)}>{getAssetLabel(asset)}</option>)}</select></label>
-                <label className="block"><span className="mb-2 block text-sm font-bold text-slate-300">Event Type</span><select value={draftFilters.eventType} onChange={(e) => handleFilterChange("eventType", e.target.value)} className="w-full rounded-xl border border-slate-700 bg-slate-950 px-3 py-2.5 text-sm text-white outline-none focus:border-amber-500"><option value="all">All Events</option><option value="REFUEL">Refuel Operation</option><option value="CORRECTION">Odometer Correction</option><option value="RESET">Odometer Reset</option></select></label>
-                <label className="block"><span className="mb-2 block text-sm font-bold text-slate-300">Meter Cycle</span><select value={draftFilters.meterCycle} onChange={(e) => handleFilterChange("meterCycle", e.target.value)} className="w-full rounded-xl border border-slate-700 bg-slate-950 px-3 py-2.5 text-sm text-white outline-none focus:border-amber-500"><option value="all">All Cycles</option>{meterCycleOptions.map((cycle) => <option key={cycle} value={cycle}>Cycle {cycle}</option>)}</select></label>
+                <label className="block">
+                  <span className="mb-2 block text-sm font-bold text-slate-300">
+                    Project
+                  </span>
+                  <select
+                    value={draftFilters.projectId}
+                    onChange={(e) =>
+                      handleFilterChange("projectId", e.target.value)
+                    }
+                    className="w-full rounded-xl border border-slate-700 bg-slate-950 px-3 py-2.5 text-sm text-white outline-none focus:border-amber-500"
+                  >
+                    <option value="all">All Projects</option>
+                    {projects.map((project) => (
+                      <option
+                        key={
+                          getProjectBackendId(project) ||
+                          getProjectLabel(project)
+                        }
+                        value={getProjectBackendId(project)}
+                      >
+                        {getProjectLabel(project)}
+                      </option>
+                    ))}
+                  </select>
+                </label>
+                <label className="block">
+                  <span className="mb-2 block text-sm font-bold text-slate-300">
+                    Asset
+                  </span>
+                  <select
+                    value={draftFilters.assetId}
+                    onChange={(e) =>
+                      handleFilterChange("assetId", e.target.value)
+                    }
+                    className="w-full rounded-xl border border-slate-700 bg-slate-950 px-3 py-2.5 text-sm text-white outline-none focus:border-amber-500"
+                  >
+                    <option value="all">All Assets</option>
+                    {availableAssets.map((asset) => (
+                      <option
+                        key={getAssetFilterValue(asset) || getAssetLabel(asset)}
+                        value={getAssetFilterValue(asset)}
+                      >
+                        {getAssetLabel(asset)}
+                      </option>
+                    ))}
+                  </select>
+                </label>
+                <label className="block">
+                  <span className="mb-2 block text-sm font-bold text-slate-300">
+                    Event Type
+                  </span>
+                  <select
+                    value={draftFilters.eventType}
+                    onChange={(e) =>
+                      handleFilterChange("eventType", e.target.value)
+                    }
+                    className="w-full rounded-xl border border-slate-700 bg-slate-950 px-3 py-2.5 text-sm text-white outline-none focus:border-amber-500"
+                  >
+                    <option value="all">All Events</option>
+                    <option value="REFUEL">Refuel Operation</option>
+                    <option value="CORRECTION">Odometer Correction</option>
+                    <option value="RESET">Odometer Reset</option>
+                  </select>
+                </label>
+                <label className="block">
+                  <span className="mb-2 block text-sm font-bold text-slate-300">
+                    Meter Cycle
+                  </span>
+                  <select
+                    value={draftFilters.meterCycle}
+                    onChange={(e) =>
+                      handleFilterChange("meterCycle", e.target.value)
+                    }
+                    className="w-full rounded-xl border border-slate-700 bg-slate-950 px-3 py-2.5 text-sm text-white outline-none focus:border-amber-500"
+                  >
+                    <option value="all">All Cycles</option>
+                    {meterCycleOptions.map((cycle) => (
+                      <option key={cycle} value={cycle}>
+                        Cycle {cycle}
+                      </option>
+                    ))}
+                  </select>
+                </label>
               </div>
-              <div className="grid grid-cols-2 gap-3 border-t border-slate-800 px-5 py-4"><button type="button" onClick={resetFilters} disabled={loading} className="rounded-xl border border-slate-700 bg-slate-950 px-4 py-2.5 text-sm font-extrabold text-slate-300 hover:border-slate-500 hover:text-white disabled:opacity-50">Reset</button><button type="button" onClick={loadReport} disabled={loading} className="rounded-xl border border-amber-500 bg-amber-500 px-4 py-2.5 text-sm font-extrabold text-slate-950 hover:bg-amber-400 disabled:cursor-wait disabled:opacity-60">{loading ? "Generating..." : reportGenerated ? "Update Report" : "Generate Report"}</button></div>
+              <div className="grid grid-cols-2 gap-3 border-t border-slate-800 px-5 py-4">
+                <button
+                  type="button"
+                  onClick={resetFilters}
+                  disabled={loading}
+                  className="rounded-xl border border-slate-700 bg-slate-950 px-4 py-2.5 text-sm font-extrabold text-slate-300 hover:border-slate-500 hover:text-white disabled:opacity-50"
+                >
+                  Reset
+                </button>
+                <button
+                  type="button"
+                  onClick={loadReport}
+                  disabled={loading}
+                  className="rounded-xl border border-amber-500 bg-amber-500 px-4 py-2.5 text-sm font-extrabold text-slate-950 hover:bg-amber-400 disabled:cursor-wait disabled:opacity-60"
+                >
+                  {loading
+                    ? "Generating..."
+                    : reportGenerated
+                      ? "Update Report"
+                      : "Generate Report"}
+                </button>
+              </div>
             </aside>
           </div>
         ) : null}
@@ -4049,7 +5186,9 @@ export default function ReportsPage({
         asset?.projectCode ||
         "";
 
-      return normalizeValue(assetProject) === normalizeValue(draftFilters.project);
+      return (
+        normalizeValue(assetProject) === normalizeValue(draftFilters.project)
+      );
     });
   }, [assets, draftFilters.project]);
 
@@ -4088,13 +5227,13 @@ export default function ReportsPage({
         const selectedAsset = assets.find(
           (asset) =>
             normalizeValue(getAssetFilterValue(asset)) ===
-            normalizeValue(appliedFilters.asset)
+            normalizeValue(appliedFilters.asset),
         );
 
         if (
           !selectedAsset ||
           !getAssetCandidates(selectedAsset).includes(
-            normalizeValue(row.destinationRaw)
+            normalizeValue(row.destinationRaw),
           )
         ) {
           return false;
@@ -4136,16 +5275,16 @@ export default function ReportsPage({
           quantity: summary.quantity + getNumericValue(row.quantity),
           cost: summary.cost + getNumericValue(row.cost),
         }),
-        { operations: 0, quantity: 0, cost: 0 }
+        { operations: 0, quantity: 0, cost: 0 },
       ),
-    [filteredRows]
+    [filteredRows],
   );
 
   const filterSummary = useMemo(() => {
     const selectedAsset = assets.find(
       (asset) =>
         normalizeValue(getAssetFilterValue(asset)) ===
-        normalizeValue(appliedFilters.asset)
+        normalizeValue(appliedFilters.asset),
     );
 
     return getActiveFilterSummary({
@@ -4172,7 +5311,7 @@ export default function ReportsPage({
         [`Cost (${currency})`]: row.cost,
         Status: String(row.status || "COMPLETED").replaceAll("_", " "),
       })),
-    [filteredRows, currency]
+    [filteredRows, currency],
   );
 
   const reportMeta = {
@@ -4291,7 +5430,7 @@ export default function ReportsPage({
       const selectedProject = projects.find(
         (project) =>
           normalizeValue(getProjectLabel(project)) ===
-          normalizeValue(draftFilters.project)
+          normalizeValue(draftFilters.project),
       );
 
       const result = await fetchOperationsSummaryReport(
@@ -4310,7 +5449,7 @@ export default function ReportsPage({
           fuelerEmployeeId: draftFilters.fuelerEmployeeId.trim(),
           status: draftFilters.status === "all" ? "" : draftFilters.status,
         },
-        currentUser
+        currentUser,
       );
 
       setOperationsReportRows(result.rows);
@@ -4321,7 +5460,7 @@ export default function ReportsPage({
       setOperationsReportError(
         requestError?.response?.data?.message ||
           requestError?.message ||
-          "Failed to generate operations report."
+          "Failed to generate operations report.",
       );
     } finally {
       setOperationsReportLoading(false);
@@ -4350,6 +5489,22 @@ export default function ReportsPage({
   if (["employee-master", "employee-transfer"].includes(selectedReport?.id)) {
     return (
       <EmployeesReportsPage
+        selectedReport={selectedReport}
+        currentUser={currentUser}
+        currentCompany={currentCompany}
+        projects={projects}
+        onBack={handleBackToReports}
+      />
+    );
+  }
+
+  if (
+    ["projects-master", "project-fuel-price-history"].includes(
+      selectedReport?.id,
+    )
+  ) {
+    return (
+      <ProjectsReportsPage
         selectedReport={selectedReport}
         currentUser={currentUser}
         currentCompany={currentCompany}
@@ -4479,8 +5634,8 @@ export default function ReportsPage({
                 </h2>
 
                 <p className="mt-3 text-sm leading-6 text-slate-400">
-                  Choose the required date range, project, asset, operation type,
-                  employee code and status, then generate the report.
+                  Choose the required date range, project, asset, operation
+                  type, employee code and status, then generate the report.
                 </p>
 
                 <button
@@ -4513,9 +5668,12 @@ export default function ReportsPage({
               <section className="overflow-hidden rounded-2xl border border-slate-800 bg-slate-900/80 shadow-xl shadow-black/10">
                 <div className="flex flex-col gap-3 border-b border-slate-800 px-5 py-4 lg:flex-row lg:items-center lg:justify-between">
                   <div>
-                    <h2 className="font-extrabold text-white">Report Details</h2>
+                    <h2 className="font-extrabold text-white">
+                      Report Details
+                    </h2>
                     <p className="mt-1 text-sm text-slate-500">
-                      Showing completed operations from the current accessible scope.
+                      Showing completed operations from the current accessible
+                      scope.
                     </p>
                   </div>
 
@@ -4587,7 +5745,10 @@ export default function ReportsPage({
                               </td>
                               <td className="whitespace-nowrap px-4 py-3">
                                 <span className="rounded-full border border-emerald-500/30 bg-emerald-500/10 px-2.5 py-1 text-xs font-bold text-emerald-300">
-                                  {String(row.status || "COMPLETED").replaceAll("_", " ")}
+                                  {String(row.status || "COMPLETED").replaceAll(
+                                    "_",
+                                    " ",
+                                  )}
                                 </span>
                               </td>
                             </tr>
@@ -4837,7 +5998,7 @@ export default function ReportsPage({
   }
 
   const activeModule = REPORT_MODULES.find(
-    (module) => module.id === selectedReportModule
+    (module) => module.id === selectedReportModule,
   );
 
   if (!selectedReportModule) {
@@ -4861,7 +6022,7 @@ export default function ReportsPage({
           <section className="grid gap-4 sm:grid-cols-2 xl:grid-cols-3">
             {REPORT_MODULES.map((module) => {
               const availableReports = module.reports.filter(
-                (report) => report.available
+                (report) => report.available,
               ).length;
               const totalReports = module.reports.length;
 

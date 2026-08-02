@@ -61,3 +61,23 @@ export async function updateProjectFuelPrice(projectId, payload) {
 
   return response.data;
 }
+
+export async function fetchProjectsMasterReport(params = {}) {
+  const response = await api.get("/projects/report/master", { params });
+  return {
+    generatedAt: response.data?.generatedAt || null,
+    summary: response.data?.summary || {},
+    rows: Array.isArray(response.data?.rows) ? response.data.rows : [],
+  };
+}
+
+export async function fetchProjectsFuelPriceHistoryReport(params = {}) {
+  const response = await api.get("/projects/report/fuel-price-history", {
+    params,
+  });
+  return {
+    generatedAt: response.data?.generatedAt || null,
+    summary: response.data?.summary || {},
+    rows: Array.isArray(response.data?.rows) ? response.data.rows : [],
+  };
+}

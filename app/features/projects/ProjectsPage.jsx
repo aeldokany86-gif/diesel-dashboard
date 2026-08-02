@@ -843,7 +843,7 @@ export default function ProjectsPage({
     return project || asset?.project || "-";
   };
 
-  const directRefuelOperationsByProject = useMemo(() => {
+  const equipmentRefuelOperationsByProject = useMemo(() => {
     const lookup = new Map();
 
     const addOperation = (projectValue, item) => {
@@ -860,7 +860,11 @@ export default function ProjectsPage({
     data.forEach((row, originalIndex) => {
       const operationType = typeIndex !== -1 ? row[typeIndex] : "";
 
-      if (!isSameText(operationType, "Direct_Refuel")) {
+      const isEquipmentFuelConsumption =
+        isSameText(operationType, "Direct_Refuel") ||
+        isSameText(operationType, "External_Direct_Refuel");
+
+      if (!isEquipmentFuelConsumption) {
         return;
       }
 
@@ -906,7 +910,7 @@ export default function ProjectsPage({
     assetProjectHistory,
   ]);
 
-  const getDirectRefuelOperations = (project) => {
+  const getEquipmentRefuelOperations = (project) => {
     const projectKeys = [
       project?.id,
       project?.backendId,
@@ -918,7 +922,7 @@ export default function ProjectsPage({
       .map(normalizeScopeValue);
 
     for (const key of projectKeys) {
-      const operations = directRefuelOperationsByProject.get(key);
+      const operations = equipmentRefuelOperationsByProject.get(key);
       if (operations) return operations;
     }
 
@@ -927,7 +931,7 @@ export default function ProjectsPage({
 
   const getFilteredProjectOperations = (project) => {
     const search = projectOperationSearch.trim().toLowerCase();
-    const operations = getDirectRefuelOperations(project);
+    const operations = getEquipmentRefuelOperations(project);
 
     if (!search) return operations;
 
@@ -975,13 +979,13 @@ export default function ProjectsPage({
         matchProject(fueler.projectName, project),
       ).length;
 
-      const directRefuelOperations = getDirectRefuelOperations(project);
+      const equipmentRefuelOperations = getEquipmentRefuelOperations(project);
 
       let dieselQty = 0;
       let dieselCost = 0;
       const projectFuelPrice = Number(project.currentFuelPrice || 0);
 
-      directRefuelOperations.forEach((item) => {
+      equipmentRefuelOperations.forEach((item) => {
         const diesel =
           dieselIndex !== -1 ? parseFloat(item.row[dieselIndex]) || 0 : 0;
 
@@ -1008,7 +1012,7 @@ export default function ProjectsPage({
         assignedAssetsCount,
         assignedStationsCount,
         assignedFuelersCount,
-        operationsCount: directRefuelOperations.length,
+        operationsCount: equipmentRefuelOperations.length,
         dieselQty,
         dieselCost,
       };
@@ -1019,7 +1023,7 @@ export default function ProjectsPage({
     stations,
     fuelers,
     assetProjectHistory,
-    directRefuelOperationsByProject,
+    equipmentRefuelOperationsByProject,
     dieselIndex,
     dateIndex,
     getLiterPriceByDate,
@@ -1439,8 +1443,8 @@ export default function ProjectsPage({
         "Assigned Assets",
         "Assigned Stations",
         "Assigned Fuelers",
-        "Direct Refuel Operations",
-        "Diesel Qty",
+        "Equipment Refuel Operations",
+        "Equipment Fuel Consumption (L)",
         "Base Fuel Price / L",
         "Delivery Cost / L",
         "Operational Price Excl. VAT / L",
@@ -1448,7 +1452,7 @@ export default function ProjectsPage({
         "Price Incl. VAT / L",
         "Fuel Price Currency",
         "Fuel Price Effective From",
-        "Total Cost",
+        "Equipment Fuel Cost",
       ],
       filteredProjects.map((project, i) => [
         i + 1,
@@ -1600,9 +1604,12 @@ export default function ProjectsPage({
             title="Inactive Projects"
             value={formatNumber(inactiveProjects)}
           />
-          <Card title="Total Quantity (L)" value={formatNumber(totalDiesel)} />
           <Card
-            title={`Total Cost (${currency})`}
+            title="Equipment Fuel Consumption (L)"
+            value={formatNumber(totalDiesel)}
+          />
+          <Card
+            title={`Equipment Fuel Cost (${currency})`}
             value={formatNumber(totalCost)}
           />
         </div>
@@ -1932,7 +1939,7 @@ export default function ProjectsPage({
                     <p
                       className={`label text-[11px] ${theme === "light" ? "text-slate-500" : "text-gray-400"}`}
                     >
-                      Direct Refuel
+                      Refuel Operations
                     </p>
 
                     <p className="value text-xl font-bold text-yellow-500 mt-1">
@@ -1950,7 +1957,7 @@ export default function ProjectsPage({
                     <p
                       className={`label text-[11px] ${theme === "light" ? "text-slate-500" : "text-gray-400"}`}
                     >
-                      Qty Liters
+                      Fuel Consumed (L)
                     </p>
 
                     <p className="value text-xl font-bold text-emerald-500 mt-1">
@@ -1994,16 +2001,16 @@ export default function ProjectsPage({
 
         {fuelPriceModalOpen && selectedProjectForFuelPrice && (
           <ModalPortal>
-            <div className="fixed inset-0 z-[10020] flex items-center justify-center bg-black/75 p-3 backdrop-blur-sm">
+            <div className="fixed inset-0 z-[10020] flex items-center justify-center bg-black/75 p-2 backdrop-blur-sm sm:p-3">
               <div
-                className={`w-full max-w-xl overflow-hidden rounded-3xl border shadow-2xl ${
+                className={`flex max-h-[calc(100dvh-1rem)] w-full max-w-xl flex-col overflow-hidden rounded-3xl border shadow-2xl sm:max-h-[calc(100dvh-1.5rem)] ${
                   theme === "light"
                     ? "border-slate-300 bg-white text-slate-950 shadow-slate-300/70"
                     : "border-emerald-500/30 bg-slate-950 text-white shadow-black/40"
                 }`}
               >
                 <div
-                  className={`flex items-start justify-between gap-3 border-b p-5 ${
+                  className={`shrink-0 flex items-start justify-between gap-3 border-b px-4 py-3 sm:px-5 sm:py-4 ${
                     theme === "light"
                       ? "border-slate-200 bg-slate-50"
                       : "border-slate-800 bg-slate-900"
@@ -2037,7 +2044,7 @@ export default function ProjectsPage({
                   </button>
                 </div>
 
-                <div className="space-y-4 p-5">
+                <div className="min-h-0 flex-1 space-y-3 overflow-y-auto p-4 sm:p-5">
                   <div
                     className={`rounded-2xl border p-4 ${
                       theme === "light"
@@ -2048,7 +2055,7 @@ export default function ProjectsPage({
                     <p
                       className={`text-xs ${theme === "light" ? "text-slate-500" : "text-slate-400"}`}
                     >
-                      Current project fuel price
+                      Current active operational price (read-only)
                     </p>
                     <p className="mt-1 text-2xl font-extrabold text-emerald-400">
                       {formatNumber(
@@ -2058,42 +2065,9 @@ export default function ProjectsPage({
                         currency}
                       /L
                     </p>
-                    {hasProjectPricingComponents(
+                    {!hasProjectPricingComponents(
                       selectedProjectForFuelPrice,
-                    ) ? (
-                      <div
-                        className={`mt-2 grid grid-cols-2 gap-2 text-xs ${theme === "light" ? "text-slate-600" : "text-slate-300"}`}
-                      >
-                        <span>
-                          Base:{" "}
-                          {formatNumber(
-                            selectedProjectForFuelPrice.currentBaseFuelPrice,
-                          )}{" "}
-                          {currency}/L
-                        </span>
-                        <span>
-                          Delivery:{" "}
-                          {formatNumber(
-                            selectedProjectForFuelPrice.currentTransportCostPerLiter,
-                          )}{" "}
-                          {currency}/L
-                        </span>
-                        <span>
-                          VAT:{" "}
-                          {formatNumber(
-                            selectedProjectForFuelPrice.currentVatRate,
-                          )}
-                          %
-                        </span>
-                        <span>
-                          Incl. VAT:{" "}
-                          {formatNumber(
-                            selectedProjectForFuelPrice.currentGrossFuelPrice,
-                          )}{" "}
-                          {currency}/L
-                        </span>
-                      </div>
-                    ) : (
+                    ) && (
                       <p className="mt-2 text-xs font-semibold text-amber-500">
                         Legacy combined price — its base, delivery and VAT
                         components are unavailable.
@@ -2109,66 +2083,71 @@ export default function ProjectsPage({
                     </p>
                   </div>
 
-                  <div className="grid grid-cols-1 gap-3 sm:grid-cols-3">
-                    <div>
-                      <label className="text-sm font-bold">
-                        Base Fuel Price / L
-                      </label>
-                      <input
-                        type="number"
-                        step="0.01"
-                        min="0.01"
-                        value={fuelPriceForm.basePricePerLiter}
-                        onChange={(event) =>
-                          setFuelPriceForm((prev) => ({
-                            ...prev,
-                            basePricePerLiter: event.target.value,
-                          }))
-                        }
-                        className={`mt-2 w-full rounded-xl border px-4 py-3 outline-none transition ${
-                          theme === "light"
-                            ? "border-slate-300 bg-white text-slate-900 focus:border-emerald-500"
-                            : "border-slate-700 bg-slate-900 text-white focus:border-emerald-400"
-                        }`}
-                        placeholder="1.70"
-                      />
-                    </div>
-                    <div>
-                      <label className="text-sm font-bold">
-                        Delivery Cost / L
-                      </label>
-                      <input
-                        type="number"
-                        step="0.01"
-                        min="0"
-                        value={fuelPriceForm.transportCostPerLiter}
-                        onChange={(event) =>
-                          setFuelPriceForm((prev) => ({
-                            ...prev,
-                            transportCostPerLiter: event.target.value,
-                          }))
-                        }
-                        className={`mt-2 w-full rounded-xl border px-4 py-3 outline-none transition ${theme === "light" ? "border-slate-300 bg-white text-slate-900 focus:border-emerald-500" : "border-slate-700 bg-slate-900 text-white focus:border-emerald-400"}`}
-                        placeholder="0.30"
-                      />
-                    </div>
-                    <div>
-                      <label className="text-sm font-bold">VAT Rate %</label>
-                      <input
-                        type="number"
-                        step="0.01"
-                        min="0"
-                        max="100"
-                        value={fuelPriceForm.vatRate}
-                        onChange={(event) =>
-                          setFuelPriceForm((prev) => ({
-                            ...prev,
-                            vatRate: event.target.value,
-                          }))
-                        }
-                        className={`mt-2 w-full rounded-xl border px-4 py-3 outline-none transition ${theme === "light" ? "border-slate-300 bg-white text-slate-900 focus:border-emerald-500" : "border-slate-700 bg-slate-900 text-white focus:border-emerald-400"}`}
-                        placeholder="15"
-                      />
+                  <div>
+                    <p className="mb-2 text-sm font-extrabold">
+                      New pricing components
+                    </p>
+                    <div className="grid grid-cols-1 gap-3 sm:grid-cols-3">
+                      <div>
+                        <label className="text-sm font-bold">
+                          Base Fuel Price / L
+                        </label>
+                        <input
+                          type="number"
+                          step="0.01"
+                          min="0.01"
+                          value={fuelPriceForm.basePricePerLiter}
+                          onChange={(event) =>
+                            setFuelPriceForm((prev) => ({
+                              ...prev,
+                              basePricePerLiter: event.target.value,
+                            }))
+                          }
+                          className={`mt-2 w-full rounded-xl border px-4 py-3 outline-none transition ${
+                            theme === "light"
+                              ? "border-slate-300 bg-white text-slate-900 focus:border-emerald-500"
+                              : "border-slate-700 bg-slate-900 text-white focus:border-emerald-400"
+                          }`}
+                          placeholder="Enter base price"
+                        />
+                      </div>
+                      <div>
+                        <label className="text-sm font-bold">
+                          Delivery Cost / L
+                        </label>
+                        <input
+                          type="number"
+                          step="0.01"
+                          min="0"
+                          value={fuelPriceForm.transportCostPerLiter}
+                          onChange={(event) =>
+                            setFuelPriceForm((prev) => ({
+                              ...prev,
+                              transportCostPerLiter: event.target.value,
+                            }))
+                          }
+                          className={`mt-2 w-full rounded-xl border px-4 py-3 outline-none transition ${theme === "light" ? "border-slate-300 bg-white text-slate-900 focus:border-emerald-500" : "border-slate-700 bg-slate-900 text-white focus:border-emerald-400"}`}
+                          placeholder="0.30"
+                        />
+                      </div>
+                      <div>
+                        <label className="text-sm font-bold">VAT Rate %</label>
+                        <input
+                          type="number"
+                          step="0.01"
+                          min="0"
+                          max="100"
+                          value={fuelPriceForm.vatRate}
+                          onChange={(event) =>
+                            setFuelPriceForm((prev) => ({
+                              ...prev,
+                              vatRate: event.target.value,
+                            }))
+                          }
+                          className={`mt-2 w-full rounded-xl border px-4 py-3 outline-none transition ${theme === "light" ? "border-slate-300 bg-white text-slate-900 focus:border-emerald-500" : "border-slate-700 bg-slate-900 text-white focus:border-emerald-400"}`}
+                          placeholder="15"
+                        />
+                      </div>
                     </div>
                   </div>
 
@@ -2228,7 +2207,7 @@ export default function ProjectsPage({
                   <div>
                     <label className="text-sm font-bold">Reason</label>
                     <textarea
-                      rows={3}
+                      rows={2}
                       value={fuelPriceForm.reason}
                       onChange={(event) =>
                         setFuelPriceForm((prev) => ({
@@ -2247,7 +2226,7 @@ export default function ProjectsPage({
                 </div>
 
                 <div
-                  className={`flex justify-end gap-3 border-t p-5 ${
+                  className={`shrink-0 flex justify-end gap-3 border-t px-4 py-3 sm:px-5 sm:py-4 ${
                     theme === "light"
                       ? "border-slate-200 bg-slate-50"
                       : "border-slate-800 bg-slate-900"
@@ -2284,7 +2263,7 @@ export default function ProjectsPage({
               <div className="p-3 sm:p-5 border-b border-gray-700 flex justify-between items-start gap-3">
                 <div>
                   <h2 className="text-xl sm:text-2xl font-bold text-yellow-400 italic underline">
-                    Project Direct Refuel Operations
+                    Project Equipment Fuel Consumption
                   </h2>
                   <p className="text-gray-400 mt-1">
                     Project:{" "}
@@ -2325,11 +2304,11 @@ export default function ProjectsPage({
                   value={formatNumber(selectedProject.assignedFuelersCount)}
                 />
                 <Card
-                  title="Direct Refuel"
+                  title="Refuel Operations"
                   value={formatNumber(selectedProject.operationsCount)}
                 />
                 <Card
-                  title="Qty Liters"
+                  title="Fuel Consumed (L)"
                   value={formatNumber(selectedProject.dieselQty)}
                 />
               </div>
@@ -2338,12 +2317,12 @@ export default function ProjectsPage({
                 <div className="bg-gray-800 rounded-xl border border-gray-700 p-4 mb-5 flex flex-wrap justify-between items-center gap-3">
                   <div>
                     <h3 className="text-base sm:text-lg font-extrabold text-amber-300">
-                      Direct Refuel Operations Table
+                      Equipment Refuel Operations Table
                     </h3>
                     <p className="text-xs text-gray-400 mt-1">
                       {getFilteredProjectOperations(selectedProject).length}{" "}
                       shown from{" "}
-                      {getDirectRefuelOperations(selectedProject).length}{" "}
+                      {getEquipmentRefuelOperations(selectedProject).length}{" "}
                       operations
                     </p>
                   </div>
@@ -2362,7 +2341,7 @@ export default function ProjectsPage({
                       <Th>#</Th>
                       <Th>Date</Th>
                       <Th>Operation ID</Th>
-                      <Th>Station</Th>
+                      <Th>Source / External</Th>
                       <Th>Fueler</Th>
                       <Th>Equipment</Th>
                       <Th>Liters</Th>
@@ -2441,7 +2420,7 @@ export default function ProjectsPage({
 
                 {getFilteredProjectOperations(selectedProject).length === 0 && (
                   <div className="text-center text-gray-400 py-8">
-                    No matching Direct Refuel operations found for this project.
+                    No matching equipment refuel operations found for this project.
                   </div>
                 )}
               </div>
@@ -2977,7 +2956,7 @@ export default function ProjectsPage({
                                 initialBasePricePerLiter: e.target.value,
                               })
                             }
-                            placeholder="1.70"
+                            placeholder="Enter price"
                             className="mt-1 w-full rounded-xl border border-slate-600 bg-slate-900 px-3 py-2.5 text-slate-100 outline-none focus:border-amber-400"
                           />
                         </div>

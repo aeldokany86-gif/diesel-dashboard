@@ -458,6 +458,7 @@ export default function OperationsPage({
   const [selectedEquipment, setSelectedEquipment] = useState([]);
   const [selectedEquipmentType, setSelectedEquipmentType] = useState([]);
   const [selectedProject, setSelectedProject] = useState([]);
+  const [selectedRefuelType, setSelectedRefuelType] = useState("ALL");
   const [equipmentSearch, setEquipmentSearch] = useState("");
   const [equipmentTypeSearch, setEquipmentTypeSearch] = useState("");
   const [projectSearch, setProjectSearch] = useState("");
@@ -1142,6 +1143,23 @@ const payload = mapFrontendOperationToBackendPayload({
     return true;
   });
 
+  const refuelTypeFilteredData = dateFilteredData.filter((item) => {
+    const operationTypeValue =
+      typeIndex !== -1
+        ? item.row[typeIndex]
+        : item.row?.__operation?.type || "";
+
+    if (selectedRefuelType === "DIRECT") {
+      return !isExternalDirectRefuelTransactionType(operationTypeValue);
+    }
+
+    if (selectedRefuelType === "EXTERNAL") {
+      return isExternalDirectRefuelTransactionType(operationTypeValue);
+    }
+
+    return true;
+  });
+
   const getOperationProjectName = (item) => {
     const row = item?.row || [];
     const operation = row?.__operation || {};
@@ -1184,7 +1202,7 @@ const payload = mapFrontendOperationToBackendPayload({
 
   const equipmentTypeOptions = [
     ...new Set(
-      dateFilteredData
+      refuelTypeFilteredData
         .filter((item) => {
           const equipmentNo = item.row[destinationIndex];
           const project = getOperationProjectName(item);
@@ -1209,7 +1227,7 @@ const payload = mapFrontendOperationToBackendPayload({
 
   const equipmentOptions = [
     ...new Set(
-      dateFilteredData
+      refuelTypeFilteredData
         .filter((item) => {
           const equipmentNo = item.row[destinationIndex];
           const asset = getAsset(equipmentNo);
@@ -1240,7 +1258,7 @@ const payload = mapFrontendOperationToBackendPayload({
 
   const projectOptions = [
     ...new Set(
-      dateFilteredData
+      refuelTypeFilteredData
         .filter((item) => {
           const equipmentNo = item.row[destinationIndex];
           const asset = getAsset(equipmentNo);
@@ -1325,7 +1343,7 @@ const payload = mapFrontendOperationToBackendPayload({
     return `${selectedProject.length} Projects Selected`;
   };
 
-  const filteredDirectRefuelData = dateFilteredData.filter((item) => {
+  const filteredDirectRefuelData = refuelTypeFilteredData.filter((item) => {
     const equipmentNo = item.row[destinationIndex];
     const asset = getAsset(equipmentNo);
     const equipmentType = asset?.type || "";
@@ -1591,7 +1609,10 @@ const payload = mapFrontendOperationToBackendPayload({
     return filteredDirectRefuelData
       .filter((item) => {
         const rowEquipment = item.row[destinationIndex];
-        return rowEquipment === equipmentNo || getAssetDisplayCode(rowEquipment) === equipmentNo;
+        return (
+          rowEquipment === equipmentNo ||
+          getAssetDisplayCode(rowEquipment) === equipmentNo
+        );
       })
       .sort((a, b) => {
         const da = parseOperationDate(a.row[dateIndex])?.getTime() || 0;
@@ -2124,8 +2145,8 @@ const payload = mapFrontendOperationToBackendPayload({
       </div>
 
       <div className="relative z-[80] bg-slate-900/80 border border-slate-700/80 rounded-2xl p-3 mb-4 shadow-xl shadow-black/10 backdrop-blur">
-        <div className="grid grid-cols-1 sm:grid-cols-2 xl:grid-cols-4 2xl:flex 2xl:flex-wrap gap-3 items-center">
-          <div ref={dateFilterRef} className="relative z-[90]">
+        <div className="grid grid-cols-1 sm:grid-cols-2 lg:flex lg:flex-row lg:flex-nowrap gap-3 items-center">
+          <div ref={dateFilterRef} className="relative z-[90] lg:flex-1 lg:min-w-0">
             <button
               onClick={() => setShowDateFilter(!showDateFilter)}
               className="bg-[#080d19] border border-slate-700 hover:border-amber-400 focus:border-amber-400 focus:ring-2 focus:ring-amber-400/20 text-slate-100 px-3 lg:px-4 py-2.5 rounded-xl w-full min-w-0 2xl:min-w-[220px] shadow-inner transition-all duration-200 flex justify-between items-center text-[12px] lg:text-sm"
@@ -2198,7 +2219,7 @@ const payload = mapFrontendOperationToBackendPayload({
             )}
           </div>
 
-          <div ref={equipmentDropdownRef} className="relative z-[90]">
+          <div ref={equipmentDropdownRef} className="relative z-[90] lg:flex-1 lg:min-w-0">
             <button
               onClick={() => setShowEquipmentDropdown(!showEquipmentDropdown)}
               className="bg-[#080d19] border border-slate-700 hover:border-amber-400 focus:border-amber-400 focus:ring-2 focus:ring-amber-400/20 text-slate-100 px-3 lg:px-4 py-2.5 rounded-xl w-full min-w-0 2xl:min-w-[220px] shadow-inner transition-all duration-200 text-left text-[12px] lg:text-sm"
@@ -2260,7 +2281,7 @@ const payload = mapFrontendOperationToBackendPayload({
             )}
           </div>
 
-          <div ref={equipmentTypeDropdownRef} className="relative z-[90]">
+          <div ref={equipmentTypeDropdownRef} className="relative z-[90] lg:flex-1 lg:min-w-0">
             <button
               onClick={() =>
                 setShowEquipmentTypeDropdown(!showEquipmentTypeDropdown)
@@ -2325,7 +2346,7 @@ const payload = mapFrontendOperationToBackendPayload({
             )}
           </div>
 
-          <div ref={projectDropdownRef} className="relative z-[90]">
+          <div ref={projectDropdownRef} className="relative z-[90] lg:flex-1 lg:min-w-0">
             <button
               onClick={() => setShowProjectDropdown(!showProjectDropdown)}
               className="bg-[#080d19] border border-slate-700 hover:border-amber-400 focus:border-amber-400 focus:ring-2 focus:ring-amber-400/20 text-slate-100 px-3 lg:px-4 py-2.5 rounded-xl w-full min-w-0 2xl:min-w-[220px] shadow-inner transition-all duration-200 text-left text-[12px] lg:text-sm"
@@ -2387,6 +2408,17 @@ const payload = mapFrontendOperationToBackendPayload({
             )}
           </div>
 
+          <select
+            value={selectedRefuelType}
+            onChange={(event) => setSelectedRefuelType(event.target.value)}
+            aria-label="Refuel operation type"
+            className="bg-[#080d19] border border-slate-700 hover:border-amber-400 focus:border-amber-400 focus:ring-2 focus:ring-amber-400/20 text-slate-100 px-3 lg:px-4 py-2.5 rounded-xl w-full lg:flex-1 lg:min-w-0 shadow-inner transition-all duration-200 text-[12px] lg:text-sm outline-none"
+          >
+            <option value="ALL">All Refuel Types</option>
+            <option value="DIRECT">Direct Refuel</option>
+            <option value="EXTERNAL">External Direct Refuel</option>
+          </select>
+
           <button
             onClick={() => {
               setFromDate("");
@@ -2394,11 +2426,12 @@ const payload = mapFrontendOperationToBackendPayload({
               setSelectedEquipment([]);
               setSelectedEquipmentType([]);
               setSelectedProject([]);
+              setSelectedRefuelType("ALL");
               setEquipmentSearch("");
               setEquipmentTypeSearch("");
               setProjectSearch("");
             }}
-            className="w-full 2xl:w-auto bg-red-500/10 hover:bg-red-500/20 text-red-300 border border-red-500/35 px-3 lg:px-4 py-2.5 rounded-xl cursor-pointer transition-all duration-200"
+            className="w-full lg:w-auto lg:flex-none whitespace-nowrap bg-red-500/10 hover:bg-red-500/20 text-red-300 border border-red-500/35 px-3 lg:px-4 py-2.5 rounded-xl cursor-pointer transition-all duration-200"
           >
             Reset Filters
           </button>
@@ -2414,7 +2447,7 @@ const payload = mapFrontendOperationToBackendPayload({
         />
 
         <Card
-          title="Direct Refuel Operations"
+          title="Equipment Refuel Operations"
           value={formatNumber(filteredDirectRefuelData.length)}
         />
 
@@ -2448,7 +2481,7 @@ const payload = mapFrontendOperationToBackendPayload({
               </button>
 
               {showEquipmentSummarySettings && (
-                <div className="absolute left-0 mt-2 w-44 bg-slate-950 border border-slate-700 rounded-xl shadow-2xl z-[9999] overflow-hidden">
+                <div className="absolute right-0 mt-2 w-44 bg-slate-950 border border-slate-700 rounded-xl shadow-2xl z-[9999] overflow-hidden">
                   <button
                     onClick={exportEquipmentSummaryCSV}
                     className="block w-full cursor-pointer text-left px-4 py-3 hover:bg-slate-800 transition text-white"
@@ -2549,7 +2582,7 @@ const payload = mapFrontendOperationToBackendPayload({
                 </button>
 
                 {showEquipmentTypeSettings && (
-                  <div className="absolute left-0 mt-2 w-44 bg-slate-950 border border-slate-700 rounded-xl shadow-2xl z-[9999] overflow-hidden">
+                  <div className="absolute right-0 mt-2 w-44 bg-slate-950 border border-slate-700 rounded-xl shadow-2xl z-[9999] overflow-hidden">
                     <button
                       onClick={exportEquipmentTypeSummaryCSV}
                       className="block w-full cursor-pointer text-left px-4 py-3 hover:bg-slate-800 transition text-white"
@@ -2634,7 +2667,7 @@ const payload = mapFrontendOperationToBackendPayload({
                 </button>
 
                 {showDailyConsumptionSettings && (
-                  <div className="absolute left-0 mt-2 w-44 bg-slate-950 border border-slate-700 rounded-xl shadow-2xl z-[9999] overflow-hidden">
+                  <div className="absolute right-0 mt-2 w-44 bg-slate-950 border border-slate-700 rounded-xl shadow-2xl z-[9999] overflow-hidden">
                     <button
                       onClick={exportDailyConsumptionCSV}
                       className="block w-full cursor-pointer text-left px-4 py-3 hover:bg-slate-800 transition text-white"
@@ -2990,6 +3023,14 @@ const payload = mapFrontendOperationToBackendPayload({
                         </tr>
                       );
                     }
+                  )}
+
+                  {getEquipmentHistory(selectedEquipmentHistory.equipmentNo).length === 0 && (
+                    <tr>
+                      <Td colSpan={12}>
+                        No operations match the selected refuel type.
+                      </Td>
+                    </tr>
                   )}
                 </tbody>
               </table>
