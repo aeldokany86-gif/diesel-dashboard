@@ -2787,10 +2787,10 @@ export default function StationsPage({
       {showForm && (
         <ModalPortal>
           <div className="fleet-portal-modal-backdrop fixed inset-0 z-[12000] bg-black/60 flex items-center justify-center p-4">
-            <div className="fleet-portal-modal-panel bg-white text-black w-[min(650px,calc(100vw-2rem))] max-h-[92vh] overflow-y-auto rounded-xl shadow-2xl p-6">
-            <div className="flex justify-between items-center mb-6 border-b pb-3">
+            <div className="fleet-portal-modal-panel w-[min(650px,calc(100vw-2rem))] max-h-[92vh] overflow-y-auto rounded-xl border border-slate-700 bg-slate-950 p-6 text-slate-100 shadow-2xl">
+            <div className="flex justify-between items-center mb-6 border-b border-slate-700 pb-3">
               <h2 className="text-xl sm:text-2xl font-bold">Add Station</h2>
-              <button onClick={closeAddStation}>×</button>
+              <button onClick={closeAddStation} className="text-xl text-slate-400 hover:text-white">×</button>
             </div>
 
             <div className="grid grid-cols-1 gap-4">
@@ -2803,11 +2803,11 @@ export default function StationsPage({
               />
 
               <div className="grid grid-cols-1 sm:grid-cols-3 items-start sm:items-center gap-2 sm:gap-4">
-                <label className="font-medium text-gray-700">Station Type</label>
+                <label className="font-medium text-slate-300">Station Type</label>
                 <select
                   value={newStation.type}
                   onChange={(e) => setNewStation({ ...newStation, type: e.target.value })}
-                  className="col-span-2 border rounded-lg p-2"
+                  className="col-span-2 rounded-lg border border-slate-700 bg-slate-900 p-2 text-white outline-none focus:border-amber-400"
                 >
                   <option>Main</option>
                   <option>Sub</option>
@@ -2815,11 +2815,11 @@ export default function StationsPage({
               </div>
 
               <div className="grid grid-cols-1 sm:grid-cols-3 items-start sm:items-center gap-2 sm:gap-4">
-                <label className="font-medium text-gray-700">Project</label>
+                <label className="font-medium text-slate-300">Project</label>
                 <select
                   value={newStation.project}
                   onChange={(e) => setNewStation({ ...newStation, project: e.target.value })}
-                  className="col-span-2 border rounded-lg p-2"
+                  className="col-span-2 rounded-lg border border-slate-700 bg-slate-900 p-2 text-white outline-none focus:border-amber-400"
                 >
                   <option value="">Select Project</option>
                   {transferProjectOptions.map((project) => (
@@ -2852,11 +2852,11 @@ export default function StationsPage({
               />
 
               <div className="grid grid-cols-1 sm:grid-cols-3 items-start sm:items-center gap-2 sm:gap-4">
-                <label className="font-medium text-gray-700">Status</label>
+                <label className="font-medium text-slate-300">Status</label>
                 <select
                   value={newStation.status}
                   onChange={(e) => setNewStation({ ...newStation, status: e.target.value })}
-                  className="col-span-2 border rounded-lg p-2"
+                  className="col-span-2 rounded-lg border border-slate-700 bg-slate-900 p-2 text-white outline-none focus:border-amber-400"
                 >
                   <option>Active</option>
                   <option>Inactive</option>
@@ -2864,10 +2864,10 @@ export default function StationsPage({
               </div>
             </div>
 
-            <div className="flex justify-end gap-3 mt-6 border-t pt-4">
+            <div className="flex justify-end gap-3 mt-6 border-t border-slate-700 pt-4">
               <button
                 onClick={closeAddStation}
-                className="bg-gray-200 px-3 lg:px-4 py-2 rounded-lg"
+                className="rounded-lg border border-slate-700 bg-slate-800 px-3 py-2 text-slate-200 hover:bg-slate-800/70 lg:px-4"
               >
                 Cancel
               </button>
@@ -2877,7 +2877,7 @@ export default function StationsPage({
                 disabled={stationSaveLoading || Boolean(stationIdDuplicateError) || !newStation.id.trim()}
                 className={`px-3 lg:px-4 py-2 rounded-lg ${
                   stationSaveLoading || stationIdDuplicateError || !newStation.id.trim()
-                    ? "bg-gray-300 text-gray-500 cursor-not-allowed"
+                    ? "bg-slate-700 text-slate-400 opacity-60 cursor-not-allowed"
                     : "bg-green-600 text-white hover:bg-green-700"
                 }`}
               >

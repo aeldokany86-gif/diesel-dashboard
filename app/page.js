@@ -2,13 +2,8 @@
 // Replace only app/page.js with this content.
 
 "use client";
- 
-import {
-  useEffect,
-  useMemo,
-  useRef,
-  useState,
-} from "react";
+
+import { useEffect, useMemo, useRef, useState } from "react";
 import { useAuth } from "./context/AuthContext";
 import api from "./services/api";
 
@@ -23,7 +18,6 @@ import {
   Bell,
 } from "./components/icons/SidebarIcons";
 import Toast from "./components/feedback/Toast";
-
 
 import OperationsPage from "./features/operations/OperationsPage";
 import AssetsPage from "./features/assets/AssetsPage";
@@ -68,12 +62,11 @@ import {
   fetchPendingOperationApprovals,
 } from "./services/operationsService";
 
-import {
-  fetchPendingOperationCorrections,
-} from "./services/operationCorrectionsService";
+import { fetchPendingOperationCorrections } from "./services/operationCorrectionsService";
 
 import {
   fetchProjects,
+  fetchProjectById,
   createProjectRecord,
   updateProjectRecord,
   assignProjectManager,
@@ -133,9 +126,7 @@ import {
   canUserViewApproval,
 } from "./lib/permissionHelpers";
 
-import {
-  buildNotificationItems,
-} from "./lib/notificationHelpers";
+import { buildNotificationItems } from "./lib/notificationHelpers";
 
 import {
   isPlatformContextValue,
@@ -189,8 +180,10 @@ function notifyUser(showToastFn, type, message) {
   }
 }
 
-const NETWORK_OFFLINE_MESSAGE = "No internet connection. Please check your connection and try again.";
-const BACKEND_UNAVAILABLE_MESSAGE = "Connection to server is unavailable. Please try again.";
+const NETWORK_OFFLINE_MESSAGE =
+  "No internet connection. Please check your connection and try again.";
+const BACKEND_UNAVAILABLE_MESSAGE =
+  "Connection to server is unavailable. Please try again.";
 
 function isBrowserOffline() {
   return typeof navigator !== "undefined" && navigator.onLine === false;
@@ -211,10 +204,14 @@ function isNetworkConnectionError(error) {
   );
 }
 
-function getFriendlyApiErrorMessage(error, fallbackMessage = BACKEND_UNAVAILABLE_MESSAGE) {
+function getFriendlyApiErrorMessage(
+  error,
+  fallbackMessage = BACKEND_UNAVAILABLE_MESSAGE,
+) {
   if (isNetworkConnectionError(error)) return NETWORK_OFFLINE_MESSAGE;
 
-  const backendMessage = error?.response?.data?.message || error?.response?.data?.error;
+  const backendMessage =
+    error?.response?.data?.message || error?.response?.data?.error;
 
   if (Array.isArray(backendMessage)) return backendMessage.join(" / ");
   if (backendMessage) return String(backendMessage);
@@ -231,25 +228,28 @@ function canUseNetwork(showToastFn) {
 
 function logHandledApiIssue(label, error) {
   const safeLabel = String(label || "API request failed");
-  const safeMessage = getFriendlyApiErrorMessage(error, BACKEND_UNAVAILABLE_MESSAGE);
+  const safeMessage = getFriendlyApiErrorMessage(
+    error,
+    BACKEND_UNAVAILABLE_MESSAGE,
+  );
 
   // Use warn instead of error for expected connection/backend failures so Next.js dev overlay does not block the UI.
   console.warn(`${safeLabel}: ${safeMessage}`);
 }
 
-
 function makeUsernameFromUser({ id, fullName, email }) {
   const emailName = String(email || "").split("@")[0];
   const raw = emailName || fullName || id || "user";
 
-  return String(raw)
-    .trim()
-    .toLowerCase()
-    .replace(/[^a-z0-9._-]+/g, ".")
-    .replace(/\.+/g, ".")
-    .replace(/^\.|\.$/g, "") || String(id || "user");
+  return (
+    String(raw)
+      .trim()
+      .toLowerCase()
+      .replace(/[^a-z0-9._-]+/g, ".")
+      .replace(/\.+/g, ".")
+      .replace(/^\.|\.$/g, "") || String(id || "user")
+  );
 }
-
 
 function buildLegacyUserFromAuthUser(authUser) {
   if (!authUser) return null;
@@ -282,14 +282,29 @@ function buildLegacyUserFromAuthUser(authUser) {
   return {
     id: authUser.id,
     fullName: authUser.fullName,
-    username: authUser.username || makeUsernameFromUser({ id: authUser.id, fullName: authUser.fullName, email: authUser.email }),
+    username:
+      authUser.username ||
+      makeUsernameFromUser({
+        id: authUser.id,
+        fullName: authUser.fullName,
+        email: authUser.email,
+      }),
     email: authUser.email,
     role,
     companyId,
     tenantKey: `${normalizeScopeValue(companyId) || "global"}::${normalizeScopeValue(authUser.id) || "no-id"}`,
     status: authUser.isActive === false ? "Inactive" : "Active",
-    fuelerId: authUser.fuelerId || authUser.employeeId || linkedEmployee?.employeeId || linkedEmployee?.id || authUser.id,
-    teamId: authUser.teamId || authUser.linkedEmployeeId || linkedEmployee?.id || authUser.id,
+    fuelerId:
+      authUser.fuelerId ||
+      authUser.employeeId ||
+      linkedEmployee?.employeeId ||
+      linkedEmployee?.id ||
+      authUser.id,
+    teamId:
+      authUser.teamId ||
+      authUser.linkedEmployeeId ||
+      linkedEmployee?.id ||
+      authUser.id,
     linkedEmployeeId: authUser.linkedEmployeeId || linkedEmployee?.id || "",
     employeeId: authUser.employeeId || linkedEmployee?.employeeId || "",
     linkedEmployee,
@@ -300,7 +315,10 @@ function buildLegacyUserFromAuthUser(authUser) {
     teamProject:
       role === "PlatformAdmin"
         ? "Platform Console"
-        : authUser.teamProject || linkedEmployee?.projectName || authUser.companyName || "",
+        : authUser.teamProject ||
+          linkedEmployee?.projectName ||
+          authUser.companyName ||
+          "",
     teamStatus: authUser.teamStatus || linkedEmployee?.status || "",
     passwordResetRequired: Boolean(authUser.mustChangePassword),
     lastLogin: "",
@@ -359,8 +377,14 @@ function mapLegacyPermissionToBackendPermission(module, action = "view") {
   }
 
   if (normalizedAction === "delete") return `${backendModule}.manage`;
-  if (normalizedAction === "approve") return backendModule === "operations" ? "approvals.manage" : `${backendModule}.manage`;
-  if (normalizedAction === "export") return backendModule === "audit_logs" ? "audit_logs.read" : "reports.export";
+  if (normalizedAction === "approve")
+    return backendModule === "operations"
+      ? "approvals.manage"
+      : `${backendModule}.manage`;
+  if (normalizedAction === "export")
+    return backendModule === "audit_logs"
+      ? "audit_logs.read"
+      : "reports.export";
   if (normalizedAction === "print") return `${backendModule}.read`;
   if (normalizedAction === "deactivate") return "users.status.change";
   if (normalizedAction === "resetPassword") return "users.update";
@@ -383,13 +407,10 @@ function createActivityRecord({ user, action, module, details }) {
   };
 }
 
-
 function getUserProjectScope(user) {
   if (!user || !Array.isArray(user.assignedProjects)) return [];
   return user.assignedProjects;
 }
-
-
 
 function userCanAccessAllProjects(user) {
   if (!user) return false;
@@ -397,10 +418,13 @@ function userCanAccessAllProjects(user) {
   // Admin remains company-wide.
   // Managers are project-scoped unless they are explicitly assigned to All.
   // This makes approval-routing tests easier and closer to real project ownership.
-  if (["PlatformAdmin", "Admin", "TopManagement"].includes(user.role)) return true;
+  if (["PlatformAdmin", "Admin", "TopManagement"].includes(user.role))
+    return true;
 
   const scope = getUserProjectScope(user);
-  return scope.includes("All") && !["Operator", "Supervisor"].includes(user.role);
+  return (
+    scope.includes("All") && !["Operator", "Supervisor"].includes(user.role)
+  );
 }
 
 function getAssetProjectValue(assetId, assets = []) {
@@ -466,10 +490,7 @@ function getStationProjectValue(stationId, stations = []) {
 
 function getRowProjectValues(row, headers, assets = [], stations = []) {
   const operation =
-    row?.__operation ||
-    row?.operation ||
-    row?.backendOperation ||
-    null;
+    row?.__operation || row?.operation || row?.backendOperation || null;
 
   const typeIndex = getHeaderIndex(headers, [
     "transaction_type",
@@ -480,8 +501,7 @@ function getRowProjectValues(row, headers, assets = [], stations = []) {
   ]);
 
   const operationType = String(
-    operation?.type ||
-    (typeIndex !== -1 ? row[typeIndex] : "")
+    operation?.type || (typeIndex !== -1 ? row[typeIndex] : ""),
   )
     .trim()
     .toUpperCase()
@@ -514,8 +534,8 @@ function getRowProjectValues(row, headers, assets = [], stations = []) {
         crossProjectSnapshotValues.map((value) => [
           normalizeScopeValue(value),
           value,
-        ])
-      ).values()
+        ]),
+      ).values(),
     );
   }
 
@@ -587,8 +607,13 @@ function getRowProjectValue(row, headers, assets = [], stations = []) {
   return getRowProjectValues(row, headers, assets, stations)[0] || "";
 }
 
-
-function inferRowCompanyId(row, headers, assets = [], stations = [], projects = []) {
+function inferRowCompanyId(
+  row,
+  headers,
+  assets = [],
+  stations = [],
+  projects = [],
+) {
   const explicitCompanyId =
     row?.__operation?.companyId ||
     getValue(row, headers, [
@@ -604,7 +629,7 @@ function inferRowCompanyId(row, headers, assets = [], stations = [], projects = 
     row,
     headers,
     assets,
-    stations
+    stations,
   ).map(normalizeScopeValue);
 
   const matchedProject = projects.find((project) => {
@@ -619,33 +644,43 @@ function inferRowCompanyId(row, headers, assets = [], stations = [], projects = 
       .filter(Boolean)
       .map(normalizeScopeValue);
 
-    return projectValues.some((value) =>
-      rowProjectValues.includes(value)
-    );
+    return projectValues.some((value) => rowProjectValues.includes(value));
   });
 
   return matchedProject?.companyId || "";
 }
 
-function filterTransactionRowsByCompany({ rows = [], headers = [], companyId, user, assets = [], stations = [], projects = [] }) {
-  if (isPlatformAdminUser(user) && isPlatformContextValue(companyId)) return rows;
+function filterTransactionRowsByCompany({
+  rows = [],
+  headers = [],
+  companyId,
+  user,
+  assets = [],
+  stations = [],
+  projects = [],
+}) {
+  if (isPlatformAdminUser(user) && isPlatformContextValue(companyId))
+    return rows;
   if (!companyId || isPlatformContextValue(companyId)) return [];
 
   return rows.filter((row) =>
-    companyMatches(inferRowCompanyId(row, headers, assets, stations, projects), companyId)
+    companyMatches(
+      inferRowCompanyId(row, headers, assets, stations, projects),
+      companyId,
+    ),
   );
 }
- 
+
 export default function Home() {
   const [page, setPage] = useState("companies");
   const [theme, setTheme] = useState("light");
   const [showThemeSettings, setShowThemeSettings] = useState(false);
   const [sidebarCollapsed, setSidebarCollapsed] = useState(false);
   const [mobileSidebarOpen, setMobileSidebarOpen] = useState(false);
- 
+
   const [data, setData] = useState([]);
   const [headers, setHeaders] = useState([]);
- 
+
   const [assets, setAssets] = useState([]);
   const [stations, setStations] = useState([]);
   const [fuelers, setFuelers] = useState([]);
@@ -654,7 +689,9 @@ export default function Home() {
 
   const [assetProjectHistory, setAssetProjectHistory] = useState([]);
   const [assetOdometerHistory, setAssetOdometerHistory] = useState([]);
-  const [stationCounterResetHistory, setStationCounterResetHistory] = useState([]);
+  const [stationCounterResetHistory, setStationCounterResetHistory] = useState(
+    [],
+  );
 
   const [users, setUsers] = useState([]);
   const [usersLoading, setUsersLoading] = useState(false);
@@ -670,12 +707,16 @@ export default function Home() {
   const [loginError, setLoginError] = useState("");
   const [activityLog, setActivityLog] = useState([]);
   const [pendingApprovals, setPendingApprovals] = useState([]);
-  const [backendOperationApprovals, setBackendOperationApprovals] = useState([]);
-  const [backendOperationCorrections, setBackendOperationCorrections] = useState([]);
+  const [backendOperationApprovals, setBackendOperationApprovals] = useState(
+    [],
+  );
+  const [backendOperationCorrections, setBackendOperationCorrections] =
+    useState([]);
   const [employeeTransferRequests, setEmployeeTransferRequests] = useState([]);
   const [assetTransferRequests, setAssetTransferRequests] = useState([]);
   const [stationTransferRequests, setStationTransferRequests] = useState([]);
-  const [approvedStationStockAdjustments, setApprovedStationStockAdjustments] = useState([]);
+  const [approvedStationStockAdjustments, setApprovedStationStockAdjustments] =
+    useState([]);
   const [notificationReadMap, setNotificationReadMap] = useState({});
   const [loginPassword, setLoginPassword] = useState("Admin@12345");
   const [forcePasswordChangeOpen, setForcePasswordChangeOpen] = useState(false);
@@ -697,17 +738,26 @@ export default function Home() {
 
     if (url.includes("/auth") || url.includes("/login")) return "Signing in...";
     if (url.includes("/assets/transfers") && url.includes("/review")) {
-      return method === "PATCH" ? "Reviewing asset transfer..." : "Loading asset transfer...";
+      return method === "PATCH"
+        ? "Reviewing asset transfer..."
+        : "Loading asset transfer...";
     }
     if (url.includes("/stations/transfers") && url.includes("/review")) {
-      return method === "PATCH" ? "Reviewing station transfer..." : "Loading station transfer...";
+      return method === "PATCH"
+        ? "Reviewing station transfer..."
+        : "Loading station transfer...";
     }
     if (url.includes("/employee-transfers") && url.includes("/review")) {
-      return method === "PATCH" ? "Reviewing team transfer..." : "Loading team transfer...";
+      return method === "PATCH"
+        ? "Reviewing team transfer..."
+        : "Loading team transfer...";
     }
-    if (url.includes("/assets") && url.includes("/reset-odometer")) return "Submitting odometer reset...";
-    if (url.includes("/assets") && url.includes("/transfer")) return "Submitting asset transfer...";
-    if (url.includes("/stations") && url.includes("/transfer")) return "Submitting station transfer...";
+    if (url.includes("/assets") && url.includes("/reset-odometer"))
+      return "Submitting odometer reset...";
+    if (url.includes("/assets") && url.includes("/transfer"))
+      return "Submitting asset transfer...";
+    if (url.includes("/stations") && url.includes("/transfer"))
+      return "Submitting station transfer...";
     if (method === "DELETE") return "Deleting...";
     if (method === "POST") return "Saving...";
     if (method === "PATCH" || method === "PUT") return "Updating...";
@@ -723,7 +773,10 @@ export default function Home() {
   };
 
   const endActionLoading = () => {
-    actionLoadingCounterRef.current = Math.max(0, actionLoadingCounterRef.current - 1);
+    actionLoadingCounterRef.current = Math.max(
+      0,
+      actionLoadingCounterRef.current - 1,
+    );
 
     if (actionLoadingCounterRef.current === 0) {
       setActionLoading({
@@ -755,19 +808,19 @@ export default function Home() {
 
   const backendLegacyUser = useMemo(
     () => buildLegacyUserFromAuthUser(backendAuthUser),
-    [backendAuthUser]
+    [backendAuthUser],
   );
 
   const currentUser = backendLegacyUser;
   const currentUserRef = useRef(null);
   currentUserRef.current = currentUser;
 
-
   useEffect(() => {
     const requestInterceptor = api.interceptors.request.use((config) => {
       const method = String(config.method || "GET").toUpperCase();
       const explicitLabel = config?.headers?.["X-Action-Loading-Label"];
-      const shouldTrackActionLoading = Boolean(explicitLabel) || method !== "GET";
+      const shouldTrackActionLoading =
+        Boolean(explicitLabel) || method !== "GET";
 
       if (explicitLabel) {
         delete config.headers["X-Action-Loading-Label"];
@@ -798,7 +851,7 @@ export default function Home() {
         }
 
         return Promise.reject(error);
-      }
+      },
     );
 
     return () => {
@@ -817,7 +870,6 @@ export default function Home() {
     };
   }, [actionLoading.active]);
 
-
   useEffect(() => {
     if (!actionLoading.active) return undefined;
 
@@ -830,27 +882,27 @@ export default function Home() {
   }, [actionLoading.active]);
 
   useEffect(() => {
-  async function fetchProtectedCompanies() {
-    if (!backendIsLoggedIn) return;
-    if (!hasBackendPermission?.("companies.read")) return;
+    async function fetchProtectedCompanies() {
+      if (!backendIsLoggedIn) return;
+      if (!hasBackendPermission?.("companies.read")) return;
 
-    try {
-      const backendCompanies = await fetchCompanies();
+      try {
+        const backendCompanies = await fetchCompanies();
 
-      setCompanies(
-        mergePlatformConsoleWithCompanies(backendCompanies)
-          .map(normalizeCompanyForState)
-          .filter((company) => company.id)
-      );
-    } catch (error) {
-      console.warn("Protected companies API is not available.", error);
+        setCompanies(
+          mergePlatformConsoleWithCompanies(backendCompanies)
+            .map(normalizeCompanyForState)
+            .filter((company) => company.id),
+        );
+      } catch (error) {
+        console.warn("Protected companies API is not available.", error);
+      }
     }
-  }
 
-  fetchProtectedCompanies();
-}, [backendIsLoggedIn, hasBackendPermission]);
+    fetchProtectedCompanies();
+  }, [backendIsLoggedIn, hasBackendPermission]);
 
-useEffect(() => {
+  useEffect(() => {
     if (typeof window === "undefined") return;
 
     if (selectedCompanyId) {
@@ -880,13 +932,15 @@ useEffect(() => {
   useEffect(() => {
     if (!backendAuthUser) return;
 
-    const authenticatedRole = normalizeBackendRoleName(backendAuthUser.roleName);
+    const authenticatedRole = normalizeBackendRoleName(
+      backendAuthUser.roleName,
+    );
     const isPlatformUser = authenticatedRole === "PlatformAdmin";
 
     if (isPlatformUser) {
       if (!selectedCompanyId) {
         setSelectedCompanyId(
-          backendAuthUser.companyId || getPlatformCompanyId(companies)
+          backendAuthUser.companyId || getPlatformCompanyId(companies),
         );
       }
       return;
@@ -905,7 +959,9 @@ useEffect(() => {
   const handleLogin = async (event) => {
     event?.preventDefault?.();
 
-    const rawLoginValue = String(loginIdentifier || "").trim().toLowerCase();
+    const rawLoginValue = String(loginIdentifier || "")
+      .trim()
+      .toLowerCase();
 
     if (!rawLoginValue || !loginPassword) {
       setLoginError("Username and password are required.");
@@ -913,10 +969,7 @@ useEffect(() => {
     }
 
     try {
-      const loggedUser = await authenticateUser(
-        rawLoginValue,
-        loginPassword
-      );
+      const loggedUser = await authenticateUser(rawLoginValue, loginPassword);
       const isPlatformUser =
         normalizeBackendRoleName(loggedUser.roleName) === "PlatformAdmin";
 
@@ -939,7 +992,7 @@ useEffect(() => {
       trackActivity(
         "Login",
         "auth",
-        `${loggedUser.fullName || loggedUser.username || "User"} signed in using username.`
+        `${loggedUser.fullName || loggedUser.username || "User"} signed in using username.`,
       );
       return;
     } catch (error) {
@@ -949,8 +1002,8 @@ useEffect(() => {
         isNetworkConnectionError(error)
           ? NETWORK_OFFLINE_MESSAGE
           : Array.isArray(backendMessage)
-          ? backendMessage.join(", ")
-          : backendMessage || "Login failed. Check username and password."
+            ? backendMessage.join(", ")
+            : backendMessage || "Login failed. Check username and password.",
       );
       if (isNetworkConnectionError(error)) {
         showToast?.("warning", NETWORK_OFFLINE_MESSAGE);
@@ -964,7 +1017,9 @@ useEffect(() => {
     setForcePasswordError("");
 
     if (!forceCurrentPassword || !forceNewPassword || !forceConfirmPassword) {
-      setForcePasswordError("Current password, new password, and confirmation are required.");
+      setForcePasswordError(
+        "Current password, new password, and confirmation are required.",
+      );
       return;
     }
 
@@ -979,17 +1034,16 @@ useEffect(() => {
     }
 
     if (forceCurrentPassword === forceNewPassword) {
-      setForcePasswordError("New password must be different from the temporary password.");
+      setForcePasswordError(
+        "New password must be different from the temporary password.",
+      );
       return;
     }
 
     try {
       setForcePasswordLoading(true);
 
-      await changeBackendPassword(
-        forceCurrentPassword,
-        forceNewPassword
-      );
+      await changeBackendPassword(forceCurrentPassword, forceNewPassword);
 
       setForcePasswordChangeOpen(false);
       setForceCurrentPassword("");
@@ -998,15 +1052,24 @@ useEffect(() => {
       setForcePasswordError("");
       setLoginPassword("");
 
-      showToast?.("success", "Password changed successfully. You can now continue.");
-      trackActivity("Change Password", "auth", `${currentUser?.fullName || "User"} changed temporary password.`);
+      showToast?.(
+        "success",
+        "Password changed successfully. You can now continue.",
+      );
+      trackActivity(
+        "Change Password",
+        "auth",
+        `${currentUser?.fullName || "User"} changed temporary password.`,
+      );
     } catch (error) {
       const backendMessage =
         error?.response?.data?.message ||
         "Password change failed. Please check the temporary password and try again.";
 
       setForcePasswordError(
-        Array.isArray(backendMessage) ? backendMessage.join(", ") : backendMessage
+        Array.isArray(backendMessage)
+          ? backendMessage.join(", ")
+          : backendMessage,
       );
     } finally {
       setForcePasswordLoading(false);
@@ -1025,16 +1088,21 @@ useEffect(() => {
     setMobileSidebarOpen(false);
   };
 
-
   const hasPermission = (module, action = "view") => {
     // Users & Roles is a governance page. Keep it available only for Admin and PlatformAdmin,
     // even if a backend permission is accidentally returned for another role.
-    if (module === "users" && !["Admin", "PlatformAdmin"].includes(currentUser?.role)) {
+    if (
+      module === "users" &&
+      !["Admin", "PlatformAdmin"].includes(currentUser?.role)
+    ) {
       return false;
     }
 
     if (backendIsLoggedIn) {
-      const backendPermission = mapLegacyPermissionToBackendPermission(module, action);
+      const backendPermission = mapLegacyPermissionToBackendPermission(
+        module,
+        action,
+      );
       if (!backendPermission) return true;
       return hasBackendPermission(backendPermission);
     }
@@ -1060,12 +1128,7 @@ useEffect(() => {
 
   const getPreferredPageOrder = () => {
     if (isPlatformAdminUser(currentUser)) {
-      return [
-        "companies",
-        "users",
-        "notifications",
-        "auditTimeline",
-      ];
+      return ["companies", "users", "notifications", "auditTimeline"];
     }
 
     return [
@@ -1094,13 +1157,21 @@ useEffect(() => {
     beginActionLoading("Submitting approval request...");
 
     try {
-      const approvalRequest = createApprovalRequest({ ...request, requestedBy: currentUser, users, projects });
+      const approvalRequest = createApprovalRequest({
+        ...request,
+        requestedBy: currentUser,
+        users,
+        projects,
+      });
 
       if (
         approvalRequest?.payload?.approvalRouteStrategy === "project_manager" &&
         !(approvalRequest?.approvalRoute?.requiredApprovers || []).length
       ) {
-        showToast?.("warning", "No active project manager found for this project. Request was not submitted.");
+        showToast?.(
+          "warning",
+          "No active project manager found for this project. Request was not submitted.",
+        );
         return null;
       }
 
@@ -1110,7 +1181,8 @@ useEffect(() => {
           user: currentUser,
           action: "Submit Approval Request",
           module: request.module,
-          details: request.title || request.details || "Approval request submitted.",
+          details:
+            request.title || request.details || "Approval request submitted.",
         }),
         ...prev,
       ]);
@@ -1118,7 +1190,7 @@ useEffect(() => {
         "warning",
         approvalRequest?.payload?.approvalRouteStrategy === "admin"
           ? "Request sent to Admin approval queue."
-          : "Request sent to Manager approval queue."
+          : "Request sent to Manager approval queue.",
       );
       return approvalRequest;
     } finally {
@@ -1126,23 +1198,17 @@ useEffect(() => {
     }
   };
 
-  
-
- 
-
-  
-
-  
-
-  
-
-
   const refreshBackendProjects = async (companyId = "") => {
     try {
       const backendProjects = await fetchProjects({
-        companyId: companyId && !isPlatformContextValue(companyId) ? companyId : "",
+        companyId:
+          companyId && !isPlatformContextValue(companyId) ? companyId : "",
       });
-      setProjects(backendProjects.map(mapBackendProjectForState).filter((project) => project.id));
+      setProjects(
+        backendProjects
+          .map(mapBackendProjectForState)
+          .filter((project) => project.id),
+      );
       return backendProjects;
     } catch (error) {
       logHandledApiIssue("Failed to refresh projects from backend", error);
@@ -1157,9 +1223,10 @@ useEffect(() => {
 
     setProjects((prev) => [
       createdProject,
-      ...prev.filter((project) =>
-        normalizeScopeValue(project.backendId || project.id) !==
-        normalizeScopeValue(createdProject.backendId || createdProject.id)
+      ...prev.filter(
+        (project) =>
+          normalizeScopeValue(project.backendId || project.id) !==
+          normalizeScopeValue(createdProject.backendId || createdProject.id),
       ),
     ]);
 
@@ -1173,19 +1240,27 @@ useEffect(() => {
 
     setProjects((prev) =>
       prev.map((item) =>
-        normalizeScopeValue(item.backendId || item.id) === normalizeScopeValue(backendId) ||
+        normalizeScopeValue(item.backendId || item.id) ===
+          normalizeScopeValue(backendId) ||
         normalizeScopeValue(item.id) === normalizeScopeValue(updatedProject.id)
           ? updatedProject
-          : item
-      )
+          : item,
+      ),
     );
 
     return updatedProject;
   };
 
-  const handleProjectFuelPriceUpdated = (project, fuelPricePatch = {}) => {
+  const handleProjectFuelPriceUpdated = async (project) => {
     const backendId = normalizeScopeValue(project?.backendId || project?.id);
     const projectId = normalizeScopeValue(project?.id);
+
+    if (!backendId) {
+      throw new Error("Project backend ID is required.");
+    }
+
+    const refreshedProjectData = await fetchProjectById(backendId);
+    const refreshedProject = mapBackendProjectForState(refreshedProjectData);
 
     setProjects((prev) =>
       prev.map((item) => {
@@ -1196,14 +1271,11 @@ useEffect(() => {
           (backendId && itemBackendId === backendId) ||
           (projectId && itemProjectId === projectId);
 
-        return isTargetProject
-          ? {
-              ...item,
-              ...fuelPricePatch,
-            }
-          : item;
-      })
+        return isTargetProject ? refreshedProject : item;
+      }),
     );
+
+    return refreshedProject;
   };
 
   const handleAssignProjectManager = async (project, managerUserId) => {
@@ -1222,11 +1294,12 @@ useEffect(() => {
 
     setProjects((prev) =>
       prev.map((item) =>
-        normalizeScopeValue(item.backendId || item.id) === normalizeScopeValue(backendId) ||
+        normalizeScopeValue(item.backendId || item.id) ===
+          normalizeScopeValue(backendId) ||
         normalizeScopeValue(item.id) === normalizeScopeValue(updatedProject.id)
           ? updatedProject
-          : item
-      )
+          : item,
+      ),
     );
 
     return updatedProject;
@@ -1237,9 +1310,11 @@ useEffect(() => {
     await deleteProjectRecord(backendId);
 
     setProjects((prev) =>
-      prev.filter((item) =>
-        normalizeScopeValue(item.backendId || item.id) !== normalizeScopeValue(backendId)
-      )
+      prev.filter(
+        (item) =>
+          normalizeScopeValue(item.backendId || item.id) !==
+          normalizeScopeValue(backendId),
+      ),
     );
   };
   const refreshBackendEmployees = async (companyId = "", viewerUserId = "") => {
@@ -1295,7 +1370,9 @@ useEffect(() => {
     setAssetTransferRequests((prev) => [
       mappedTransfer,
       ...(prev || []).filter(
-        (item) => normalizeScopeValue(item.id) !== normalizeScopeValue(mappedTransfer.id)
+        (item) =>
+          normalizeScopeValue(item.id) !==
+          normalizeScopeValue(mappedTransfer.id),
       ),
     ]);
 
@@ -1334,7 +1411,9 @@ useEffect(() => {
     setStationTransferRequests((prev) => [
       mappedTransfer,
       ...(prev || []).filter(
-        (item) => normalizeScopeValue(item.id) !== normalizeScopeValue(mappedTransfer.id)
+        (item) =>
+          normalizeScopeValue(item.id) !==
+          normalizeScopeValue(mappedTransfer.id),
       ),
     ]);
 
@@ -1363,10 +1442,14 @@ useEffect(() => {
 
     setFuelers((prev) => [
       createdEmployee,
-      ...prev.filter((employee) =>
-        normalizeScopeValue(employee.backendId || employee.id) !==
-          normalizeScopeValue(createdEmployee.backendId || createdEmployee.id) &&
-        normalizeScopeValue(employee.id) !== normalizeScopeValue(createdEmployee.id)
+      ...prev.filter(
+        (employee) =>
+          normalizeScopeValue(employee.backendId || employee.id) !==
+            normalizeScopeValue(
+              createdEmployee.backendId || createdEmployee.id,
+            ) &&
+          normalizeScopeValue(employee.id) !==
+            normalizeScopeValue(createdEmployee.id),
       ),
     ]);
 
@@ -1385,18 +1468,20 @@ useEffect(() => {
 
     setFuelers((prev) =>
       prev.map((item) =>
-        normalizeScopeValue(item.backendId || item.id) === normalizeScopeValue(backendId) ||
+        normalizeScopeValue(item.backendId || item.id) ===
+          normalizeScopeValue(backendId) ||
         normalizeScopeValue(item.id) === normalizeScopeValue(updatedEmployee.id)
           ? updatedEmployee
-          : item
-      )
+          : item,
+      ),
     );
 
     return updatedEmployee;
   };
 
   const handleCreateEmployeeTransfer = async (employee, toProjectId) => {
-    const employeeBackendId = employee?.backendId || employee?.employeeBackendId || employee?.id;
+    const employeeBackendId =
+      employee?.backendId || employee?.employeeBackendId || employee?.id;
     const requestedByUserId = backendAuthUser?.id || currentUser?.id || "";
 
     if (!employeeBackendId) {
@@ -1417,7 +1502,8 @@ useEffect(() => {
       requestedByUserId,
     });
 
-    const createdTransfer = mapBackendEmployeeTransferForState(createdTransferData);
+    const createdTransfer =
+      mapBackendEmployeeTransferForState(createdTransferData);
     const transferApproved =
       String(createdTransfer.status || "").toUpperCase() === "APPROVED";
 
@@ -1426,16 +1512,16 @@ useEffect(() => {
         ? prev.filter(
             (item) =>
               normalizeScopeValue(item.id) !==
-              normalizeScopeValue(createdTransfer.id)
+              normalizeScopeValue(createdTransfer.id),
           )
         : [
             createdTransfer,
             ...prev.filter(
               (item) =>
                 normalizeScopeValue(item.id) !==
-                normalizeScopeValue(createdTransfer.id)
+                normalizeScopeValue(createdTransfer.id),
             ),
-          ]
+          ],
     );
 
     if (transferApproved) {
@@ -1452,15 +1538,20 @@ useEffect(() => {
     const employeeIds = Array.from(
       new Set(
         (Array.isArray(employees) ? employees : [])
-          .map((employee) =>
-            employee?.backendId || employee?.employeeBackendId || employee?.id || ""
+          .map(
+            (employee) =>
+              employee?.backendId ||
+              employee?.employeeBackendId ||
+              employee?.id ||
+              "",
           )
-          .filter(Boolean)
-      )
+          .filter(Boolean),
+      ),
     );
     const requestedByUserId = backendAuthUser?.id || currentUser?.id || "";
 
-    if (!employeeIds.length) throw new Error("At least one employee is required.");
+    if (!employeeIds.length)
+      throw new Error("At least one employee is required.");
     if (!toProjectId) throw new Error("Target project is required.");
     if (!requestedByUserId) throw new Error("Requester user ID is required.");
 
@@ -1469,7 +1560,9 @@ useEffect(() => {
       toProjectId,
       requestedByUserId,
     });
-    const mappedTransfers = (Array.isArray(result?.transfers) ? result.transfers : [])
+    const mappedTransfers = (
+      Array.isArray(result?.transfers) ? result.transfers : []
+    )
       .map((transfer) => ({
         ...mapBackendEmployeeTransferForState(transfer),
         transferBatchId:
@@ -1478,20 +1571,24 @@ useEffect(() => {
       .filter((transfer) => transfer.id);
 
     setEmployeeTransferRequests((prev) => {
-      const mappedIds = new Set(mappedTransfers.map((transfer) => normalizeScopeValue(transfer.id)));
+      const mappedIds = new Set(
+        mappedTransfers.map((transfer) => normalizeScopeValue(transfer.id)),
+      );
       const pendingTransfers = mappedTransfers.filter((transfer) =>
         ["PENDING", "PARTIALLY_APPROVED"].includes(
-          String(transfer.status || "").toUpperCase()
-        )
+          String(transfer.status || "").toUpperCase(),
+        ),
       );
       return [
         ...pendingTransfers,
-        ...prev.filter((transfer) => !mappedIds.has(normalizeScopeValue(transfer.id))),
+        ...prev.filter(
+          (transfer) => !mappedIds.has(normalizeScopeValue(transfer.id)),
+        ),
       ];
     });
 
     const approvedTransfers = mappedTransfers.filter(
-      (transfer) => String(transfer.status || "").toUpperCase() === "APPROVED"
+      (transfer) => String(transfer.status || "").toUpperCase() === "APPROVED",
     );
     approvedTransfers.forEach(applyEmployeeTransferLocally);
 
@@ -1502,7 +1599,7 @@ useEffect(() => {
 
     if (approvedTransfers.length) {
       backgroundSyncTasks.push(
-        refreshBackendEmployees(currentCompanyId, currentUser?.id)
+        refreshBackendEmployees(currentCompanyId, currentUser?.id),
       );
     }
 
@@ -1512,29 +1609,40 @@ useEffect(() => {
   };
 
   const applyEmployeeTransferLocally = (transfer) => {
-    if (!transfer?.id && !transfer?.employeeBackendId && !transfer?.employeeId) return;
+    if (!transfer?.id && !transfer?.employeeBackendId && !transfer?.employeeId)
+      return;
 
     setFuelers((prev) =>
       prev.map((employee) => {
         const sameEmployee =
-          normalizeScopeValue(employee.backendId || employee.id) === normalizeScopeValue(transfer.employeeBackendId) ||
-          normalizeScopeValue(employee.id) === normalizeScopeValue(transfer.employeeId);
+          normalizeScopeValue(employee.backendId || employee.id) ===
+            normalizeScopeValue(transfer.employeeBackendId) ||
+          normalizeScopeValue(employee.id) ===
+            normalizeScopeValue(transfer.employeeId);
 
         if (!sameEmployee) return employee;
 
         return {
           ...employee,
           projectId: transfer.toProjectId || employee.projectId,
-          projectName: transfer.toProjectName || transfer.toProjectId || employee.projectName,
-          project: transfer.toProjectName || transfer.toProjectId || employee.project,
+          projectName:
+            transfer.toProjectName ||
+            transfer.toProjectId ||
+            employee.projectName,
+          project:
+            transfer.toProjectName || transfer.toProjectId || employee.project,
         };
-      })
+      }),
     );
   };
 
-  const handleApproveEmployeeTransfer = async (transfer, reviewerUserId = "") => {
+  const handleApproveEmployeeTransfer = async (
+    transfer,
+    reviewerUserId = "",
+  ) => {
     const transferId = transfer?.backendId || transfer?.id;
-    const managerUserId = reviewerUserId || backendAuthUser?.id || currentUser?.id || "";
+    const managerUserId =
+      reviewerUserId || backendAuthUser?.id || currentUser?.id || "";
 
     if (!transferId) {
       throw new Error("Employee transfer ID is required.");
@@ -1549,17 +1657,23 @@ useEffect(() => {
       approve: true,
     });
 
-    const reviewedTransfer = mapBackendEmployeeTransferForState(reviewedTransferData);
+    const reviewedTransfer =
+      mapBackendEmployeeTransferForState(reviewedTransferData);
 
     setEmployeeTransferRequests((prev) => {
       if (String(reviewedTransfer.status || "").toUpperCase() === "APPROVED") {
-        return prev.filter((item) => normalizeScopeValue(item.id) !== normalizeScopeValue(reviewedTransfer.id));
+        return prev.filter(
+          (item) =>
+            normalizeScopeValue(item.id) !==
+            normalizeScopeValue(reviewedTransfer.id),
+        );
       }
 
       return prev.map((item) =>
-        normalizeScopeValue(item.id) === normalizeScopeValue(reviewedTransfer.id)
+        normalizeScopeValue(item.id) ===
+        normalizeScopeValue(reviewedTransfer.id)
           ? reviewedTransfer
-          : item
+          : item,
       );
     });
 
@@ -1573,9 +1687,14 @@ useEffect(() => {
     return reviewedTransfer;
   };
 
-  const handleRejectEmployeeTransfer = async (transfer, reason = "", reviewerUserId = "") => {
+  const handleRejectEmployeeTransfer = async (
+    transfer,
+    reason = "",
+    reviewerUserId = "",
+  ) => {
     const transferId = transfer?.backendId || transfer?.id;
-    const managerUserId = reviewerUserId || backendAuthUser?.id || currentUser?.id || "";
+    const managerUserId =
+      reviewerUserId || backendAuthUser?.id || currentUser?.id || "";
 
     if (!transferId) {
       throw new Error("Employee transfer ID is required.");
@@ -1591,10 +1710,15 @@ useEffect(() => {
       rejectionReason: reason || "Rejected",
     });
 
-    const reviewedTransfer = mapBackendEmployeeTransferForState(reviewedTransferData);
+    const reviewedTransfer =
+      mapBackendEmployeeTransferForState(reviewedTransferData);
 
     setEmployeeTransferRequests((prev) =>
-      prev.filter((item) => normalizeScopeValue(item.id) !== normalizeScopeValue(reviewedTransfer.id))
+      prev.filter(
+        (item) =>
+          normalizeScopeValue(item.id) !==
+          normalizeScopeValue(reviewedTransfer.id),
+      ),
     );
 
     await refreshBackendEmployeeTransfers();
@@ -1652,8 +1776,9 @@ useEffect(() => {
       const next = [...(prev || [])];
       const index = next.findIndex(
         (item) =>
-          normalizeScopeValue(item.backendId || item.assetBackendId) === normalizeScopeValue(mappedAsset.backendId) ||
-          normalizeScopeValue(item.id) === normalizeScopeValue(mappedAsset.id)
+          normalizeScopeValue(item.backendId || item.assetBackendId) ===
+            normalizeScopeValue(mappedAsset.backendId) ||
+          normalizeScopeValue(item.id) === normalizeScopeValue(mappedAsset.id),
       );
 
       if (index === -1) return [mappedAsset, ...next];
@@ -1672,11 +1797,13 @@ useEffect(() => {
     setStations((prev) =>
       (prev || []).map((station) =>
         normalizeScopeValue(station.backendId || station.stationBackendId) ===
-          normalizeScopeValue(mappedStation.backendId || mappedStation.stationBackendId) ||
+          normalizeScopeValue(
+            mappedStation.backendId || mappedStation.stationBackendId,
+          ) ||
         tenantEntityMatches(station, mappedStation.id, mappedStation.companyId)
           ? { ...station, ...mappedStation }
-          : station
-      )
+          : station,
+      ),
     );
 
     return mappedStation;
@@ -1686,20 +1813,25 @@ useEffect(() => {
     const backendId =
       typeof assetOrId === "string"
         ? assetOrId
-        : assetOrId?.backendId || assetOrId?.assetBackendId || assetOrId?.id || "";
+        : assetOrId?.backendId ||
+          assetOrId?.assetBackendId ||
+          assetOrId?.id ||
+          "";
 
     setAssets((prev) =>
       (prev || []).filter(
         (item) =>
-          normalizeScopeValue(item.backendId || item.assetBackendId) !== normalizeScopeValue(backendId) &&
-          normalizeScopeValue(item.id) !== normalizeScopeValue(backendId)
-      )
+          normalizeScopeValue(item.backendId || item.assetBackendId) !==
+            normalizeScopeValue(backendId) &&
+          normalizeScopeValue(item.id) !== normalizeScopeValue(backendId),
+      ),
     );
   };
 
   const handleApproveAssetTransfer = async (transfer, reviewerUserId = "") => {
     const transferId = transfer?.backendId || transfer?.id;
-    const managerUserId = reviewerUserId || backendAuthUser?.id || currentUser?.id || "";
+    const managerUserId =
+      reviewerUserId || backendAuthUser?.id || currentUser?.id || "";
 
     if (!transferId) {
       throw new Error("Asset transfer ID is required.");
@@ -1714,17 +1846,23 @@ useEffect(() => {
       approve: true,
     });
 
-    const reviewedTransfer = mapBackendAssetTransferForState(reviewedTransferData);
+    const reviewedTransfer =
+      mapBackendAssetTransferForState(reviewedTransferData);
 
     setAssetTransferRequests((prev) => {
       if (String(reviewedTransfer.status || "").toUpperCase() === "APPROVED") {
-        return (prev || []).filter((item) => normalizeScopeValue(item.id) !== normalizeScopeValue(reviewedTransfer.id));
+        return (prev || []).filter(
+          (item) =>
+            normalizeScopeValue(item.id) !==
+            normalizeScopeValue(reviewedTransfer.id),
+        );
       }
 
       return (prev || []).map((item) =>
-        normalizeScopeValue(item.id) === normalizeScopeValue(reviewedTransfer.id)
+        normalizeScopeValue(item.id) ===
+        normalizeScopeValue(reviewedTransfer.id)
           ? reviewedTransfer
-          : item
+          : item,
       );
     });
 
@@ -1742,9 +1880,14 @@ useEffect(() => {
     return reviewedTransfer;
   };
 
-  const handleRejectAssetTransfer = async (transfer, reason = "", reviewerUserId = "") => {
+  const handleRejectAssetTransfer = async (
+    transfer,
+    reason = "",
+    reviewerUserId = "",
+  ) => {
     const transferId = transfer?.backendId || transfer?.id;
-    const managerUserId = reviewerUserId || backendAuthUser?.id || currentUser?.id || "";
+    const managerUserId =
+      reviewerUserId || backendAuthUser?.id || currentUser?.id || "";
 
     if (!transferId) {
       throw new Error("Asset transfer ID is required.");
@@ -1760,10 +1903,15 @@ useEffect(() => {
       rejectionReason: reason || "Rejected",
     });
 
-    const reviewedTransfer = mapBackendAssetTransferForState(reviewedTransferData);
+    const reviewedTransfer =
+      mapBackendAssetTransferForState(reviewedTransferData);
 
     setAssetTransferRequests((prev) =>
-      (prev || []).filter((item) => normalizeScopeValue(item.id) !== normalizeScopeValue(reviewedTransfer.id))
+      (prev || []).filter(
+        (item) =>
+          normalizeScopeValue(item.id) !==
+          normalizeScopeValue(reviewedTransfer.id),
+      ),
     );
 
     await refreshBackendAssetTransfers();
@@ -1771,9 +1919,13 @@ useEffect(() => {
     return reviewedTransfer;
   };
 
-  const handleApproveStationTransfer = async (transfer, reviewerUserId = "") => {
+  const handleApproveStationTransfer = async (
+    transfer,
+    reviewerUserId = "",
+  ) => {
     const transferId = transfer?.backendId || transfer?.id;
-    const managerUserId = reviewerUserId || backendAuthUser?.id || currentUser?.id || "";
+    const managerUserId =
+      reviewerUserId || backendAuthUser?.id || currentUser?.id || "";
 
     if (!transferId) {
       throw new Error("Station transfer ID is required.");
@@ -1788,23 +1940,31 @@ useEffect(() => {
       approve: true,
     });
 
-    const reviewedTransfer = mapBackendStationTransferForState(reviewedTransferData);
+    const reviewedTransfer =
+      mapBackendStationTransferForState(reviewedTransferData);
 
     setStationTransferRequests((prev) => {
       if (String(reviewedTransfer.status || "").toUpperCase() === "APPROVED") {
-        return (prev || []).filter((item) => normalizeScopeValue(item.id) !== normalizeScopeValue(reviewedTransfer.id));
+        return (prev || []).filter(
+          (item) =>
+            normalizeScopeValue(item.id) !==
+            normalizeScopeValue(reviewedTransfer.id),
+        );
       }
 
       return (prev || []).map((item) =>
-        normalizeScopeValue(item.id) === normalizeScopeValue(reviewedTransfer.id)
+        normalizeScopeValue(item.id) ===
+        normalizeScopeValue(reviewedTransfer.id)
           ? reviewedTransfer
-          : item
+          : item,
       );
     });
 
     if (String(reviewedTransfer.status || "").toUpperCase() === "APPROVED") {
       try {
-        const stationData = await fetchStationById(reviewedTransfer.stationBackendId);
+        const stationData = await fetchStationById(
+          reviewedTransfer.stationBackendId,
+        );
         replaceBackendStationInState(stationData);
       } catch (error) {
         try {
@@ -1817,9 +1977,13 @@ useEffect(() => {
           const mappedStations = backendStations.map(mapBackendStationForState);
           setStations((prev) => {
             const otherCompanies = (prev || []).filter(
-              (station) => !companyMatches(getItemCompanyId(station), currentCompanyId)
+              (station) =>
+                !companyMatches(getItemCompanyId(station), currentCompanyId),
             );
-            return filterDuplicateTenantEntities([...mappedStations, ...otherCompanies]);
+            return filterDuplicateTenantEntities([
+              ...mappedStations,
+              ...otherCompanies,
+            ]);
           });
         } catch (_refreshError) {
           // Keep the approval flow resilient; the next page refresh will reload stations.
@@ -1832,9 +1996,14 @@ useEffect(() => {
     return reviewedTransfer;
   };
 
-  const handleRejectStationTransfer = async (transfer, reason = "", reviewerUserId = "") => {
+  const handleRejectStationTransfer = async (
+    transfer,
+    reason = "",
+    reviewerUserId = "",
+  ) => {
     const transferId = transfer?.backendId || transfer?.id;
-    const managerUserId = reviewerUserId || backendAuthUser?.id || currentUser?.id || "";
+    const managerUserId =
+      reviewerUserId || backendAuthUser?.id || currentUser?.id || "";
 
     if (!transferId) {
       throw new Error("Station transfer ID is required.");
@@ -1850,10 +2019,15 @@ useEffect(() => {
       rejectionReason: reason || "Rejected",
     });
 
-    const reviewedTransfer = mapBackendStationTransferForState(reviewedTransferData);
+    const reviewedTransfer =
+      mapBackendStationTransferForState(reviewedTransferData);
 
     setStationTransferRequests((prev) =>
-      (prev || []).filter((item) => normalizeScopeValue(item.id) !== normalizeScopeValue(reviewedTransfer.id))
+      (prev || []).filter(
+        (item) =>
+          normalizeScopeValue(item.id) !==
+          normalizeScopeValue(reviewedTransfer.id),
+      ),
     );
 
     await refreshBackendStationTransfers();
@@ -1930,8 +2104,17 @@ useEffect(() => {
     if (action === "odometer_reset") {
       const resetResult = await resetAssetOdometer(backendAssetId, {
         newOdometer:
-          Number(values.newOdometerAfterReset ?? values.newOdometer ?? values.newReading ?? 0) || 0,
-        reason: values.reason || payload.reason || request.details || "Odometer reset approved",
+          Number(
+            values.newOdometerAfterReset ??
+              values.newOdometer ??
+              values.newReading ??
+              0,
+          ) || 0,
+        reason:
+          values.reason ||
+          payload.reason ||
+          request.details ||
+          "Odometer reset approved",
         effectiveAt: values.effectiveDate || values.effectiveAt || undefined,
         createdByUserId: backendAuthUser?.id || currentUser?.id || undefined,
       });
@@ -1940,7 +2123,10 @@ useEffect(() => {
         replaceBackendAssetInState(resetResult.asset);
       }
 
-      if (resetResult?.resetRecord && typeof setAssetOdometerHistory === "function") {
+      if (
+        resetResult?.resetRecord &&
+        typeof setAssetOdometerHistory === "function"
+      ) {
         const record = resetResult.resetRecord;
         setAssetOdometerHistory((prev) => [
           ...(prev || []),
@@ -1972,7 +2158,9 @@ useEffect(() => {
     const values = payload.values || {};
     const action = payload.action || values.action || "";
 
-    if (!["zero_balance_adjustment", "stock_count_adjustment"].includes(action)) {
+    if (
+      !["zero_balance_adjustment", "stock_count_adjustment"].includes(action)
+    ) {
       throw new Error("Unsupported station approval action.");
     }
 
@@ -2009,7 +2197,9 @@ useEffect(() => {
       "";
 
     if (!backendStationId && action === "zero_balance_adjustment") {
-      throw new Error("Station backend ID is required for zero balance approval.");
+      throw new Error(
+        "Station backend ID is required for zero balance approval.",
+      );
     }
 
     const reason =
@@ -2031,7 +2221,9 @@ useEffect(() => {
       }
 
       const balanceBefore =
-        Number(payload.oldValue ?? values.oldValue ?? payload.systemStockBefore ?? 0) || 0;
+        Number(
+          payload.oldValue ?? values.oldValue ?? payload.systemStockBefore ?? 0,
+        ) || 0;
 
       setApprovedStationStockAdjustments((prev) => [
         ...prev,
@@ -2053,17 +2245,22 @@ useEffect(() => {
     }
 
     if (!backendStationId && action === "stock_count_adjustment") {
-      throw new Error("Station backend ID is required for inventory adjustment approval.");
+      throw new Error(
+        "Station backend ID is required for inventory adjustment approval.",
+      );
     }
 
     const systemQty = Number(payload.oldValue ?? values.oldValue ?? 0) || 0;
     const actualQty = Number(payload.newValue ?? values.newValue ?? 0) || 0;
 
-    const inventoryAdjustmentResult = await adjustStationInventory(backendStationId, {
-      actualStock: actualQty,
-      reason,
-      createdByUserId: backendAuthUser?.id || currentUser?.id || undefined,
-    });
+    const inventoryAdjustmentResult = await adjustStationInventory(
+      backendStationId,
+      {
+        actualStock: actualQty,
+        reason,
+        createdByUserId: backendAuthUser?.id || currentUser?.id || undefined,
+      },
+    );
 
     const confirmedSystemQty =
       inventoryAdjustmentResult?.balanceBefore !== undefined &&
@@ -2106,7 +2303,7 @@ useEffect(() => {
     trackActivity?.(
       "Inventory Adjustment Approved",
       "stations",
-      `${requestedStationId} adjusted from ${formatNumber(confirmedSystemQty)} L to ${formatNumber(confirmedActualQty)} L. Difference: ${formatNumber(adjustmentQty)} L.`
+      `${requestedStationId} adjusted from ${formatNumber(confirmedSystemQty)} L to ${formatNumber(confirmedActualQty)} L. Difference: ${formatNumber(adjustmentQty)} L.`,
     );
 
     return inventoryAdjustmentResult;
@@ -2114,10 +2311,7 @@ useEffect(() => {
 
   const mapBackendUserForState = (user = {}) => {
     const roleName =
-      user.role?.name ||
-      user.roleName ||
-      user.role ||
-      "Operator";
+      user.role?.name || user.roleName || user.role || "Operator";
 
     const isActive =
       user.isActive === false ||
@@ -2144,12 +2338,17 @@ useEffect(() => {
       role: normalizeBackendRoleName(roleName),
       roleName,
       roleId: user.roleId || user.role?.id || "",
-      companyId: user.companyId || user.company?.id || currentUser?.companyId || "",
+      companyId:
+        user.companyId || user.company?.id || currentUser?.companyId || "",
       companyName: user.company?.name || user.companyName || "",
       status: isActive ? "Active" : "Inactive",
       isActive,
-      passwordResetRequired: Boolean(user.mustChangePassword ?? user.passwordResetRequired),
-      mustChangePassword: Boolean(user.mustChangePassword ?? user.passwordResetRequired),
+      passwordResetRequired: Boolean(
+        user.mustChangePassword ?? user.passwordResetRequired,
+      ),
+      mustChangePassword: Boolean(
+        user.mustChangePassword ?? user.passwordResetRequired,
+      ),
       lastLogin: user.lastLogin || "",
       createdAt: user.createdAt || "",
       updatedAt: user.updatedAt || "",
@@ -2163,8 +2362,9 @@ useEffect(() => {
 
     setUsers((prev) => [
       savedUser,
-      ...prev.filter((user) =>
-        normalizeScopeValue(user.id) !== normalizeScopeValue(savedUser.id)
+      ...prev.filter(
+        (user) =>
+          normalizeScopeValue(user.id) !== normalizeScopeValue(savedUser.id),
       ),
     ]);
 
@@ -2183,14 +2383,13 @@ useEffect(() => {
       prev.map((user) =>
         normalizeScopeValue(user.id) === normalizeScopeValue(savedUser.id)
           ? savedUser
-          : user
-      )
+          : user,
+      ),
     );
 
     return savedUser;
   };
 
- 
   const refreshBackendUsers = async (companyId = "", options = {}) => {
     const { force = false, silent = false } = options || {};
     const normalizedCompanyId = normalizeScopeValue(companyId);
@@ -2229,7 +2428,7 @@ useEffect(() => {
         setUsersLoadError(
           error?.response?.data?.message ||
             error?.message ||
-            "Users backend API is not available."
+            "Users backend API is not available.",
         );
       }
 
@@ -2239,7 +2438,6 @@ useEffect(() => {
     }
   };
 
- 
   useEffect(() => {
     if (backendAuthLoading) return;
     if (!currentUser?.id) return;
@@ -2254,7 +2452,7 @@ useEffect(() => {
           } catch (error) {
             console.warn(
               "Public companies API is not available. Using Platform Console fallback only.",
-              error
+              error,
             );
 
             return mergePlatformConsoleWithCompanies([]);
@@ -2291,7 +2489,13 @@ useEffect(() => {
               showToast?.("warning", NETWORK_OFFLINE_MESSAGE);
               return [];
             }
-            showToast?.("warning", getFriendlyApiErrorMessage(error, "Assets backend API is not available."));
+            showToast?.(
+              "warning",
+              getFriendlyApiErrorMessage(
+                error,
+                "Assets backend API is not available.",
+              ),
+            );
             return [];
           }
         };
@@ -2311,12 +2515,21 @@ useEffect(() => {
             if (!canUseNetwork(showToast)) return [];
             return await fetchOperations(currentUserRef.current || currentUser);
           } catch (error) {
-            logHandledApiIssue("Operations backend API is not available", error);
+            logHandledApiIssue(
+              "Operations backend API is not available",
+              error,
+            );
             if (isNetworkConnectionError(error)) {
               showToast?.("warning", NETWORK_OFFLINE_MESSAGE);
               return [];
             }
-            showToast?.("warning", getFriendlyApiErrorMessage(error, "Operations backend API is not available."));
+            showToast?.(
+              "warning",
+              getFriendlyApiErrorMessage(
+                error,
+                "Operations backend API is not available.",
+              ),
+            );
             return [];
           }
         };
@@ -2341,8 +2554,11 @@ useEffect(() => {
         setHeaders(OPERATION_HEADERS);
         setData(
           backendOperations
-            .filter((operation) => String(operation.status || "").toUpperCase() === "COMPLETED")
-            .map(mapBackendOperationForState)
+            .filter(
+              (operation) =>
+                String(operation.status || "").toUpperCase() === "COMPLETED",
+            )
+            .map(mapBackendOperationForState),
         );
 
         // ASSETS - backend only. No CSV fallback.
@@ -2359,33 +2575,35 @@ useEffect(() => {
                   }
                 : mappedAsset;
             })
-            .filter((asset) => asset.id)
+            .filter((asset) => asset.id),
         );
 
         // STATIONS - backend only. No CSV fallback.
         setStations(
           backendStations
             .map(mapBackendStationForState)
-            .filter((station) => station.id)
+            .filter((station) => station.id),
         );
 
         // TEAM - backend only. No CSV fallback.
         setFuelers(
           backendEmployees
             .map(mapBackendEmployeeForState)
-            .filter((employee) => employee.id)
+            .filter((employee) => employee.id),
         );
 
         // PROJECTS - backend only. No CSV fallback.
         setProjects(
           backendProjects
             .map(mapBackendProjectForState)
-            .filter((project) => project.id)
+            .filter((project) => project.id),
         );
 
         // COMPANIES - now loaded from NestJS/PostgreSQL public endpoint only.
         // Platform Console is a frontend tenant context option, not customer operational data.
-        const mappedCompanies = mergePlatformConsoleWithCompanies(backendCompanies)
+        const mappedCompanies = mergePlatformConsoleWithCompanies(
+          backendCompanies,
+        )
           .map((company) => ({
             id: company.id,
             name: company.name || company.id,
@@ -2396,9 +2614,13 @@ useEffect(() => {
             timezone: company.timezone || "Asia/Riyadh",
             language: company.language || "EN-AR",
             subscriptionPlan: company.subscriptionPlan || "trial",
-            status: company.isActive === false ? "Inactive" : company.status || "Active",
+            status:
+              company.isActive === false
+                ? "Inactive"
+                : company.status || "Active",
             isActive: company.isActive !== false,
-            isPlatformContext: Boolean(company.isPlatformContext) || isPlatformCompany(company),
+            isPlatformContext:
+              Boolean(company.isPlatformContext) || isPlatformCompany(company),
             createdAt: company.createdAt || "",
             updatedAt: company.updatedAt || "",
           }))
@@ -2407,7 +2629,13 @@ useEffect(() => {
         setCompanies(mappedCompanies);
       } catch (error) {
         logHandledApiIssue("Failed to load Fleet Fuel PRO data", error);
-        showToast?.("warning", getFriendlyApiErrorMessage(error, "Failed to load Fleet Fuel PRO data."));
+        showToast?.(
+          "warning",
+          getFriendlyApiErrorMessage(
+            error,
+            "Failed to load Fleet Fuel PRO data.",
+          ),
+        );
         setHeaders([]);
         setData([]);
         setAssets([]);
@@ -2420,18 +2648,29 @@ useEffect(() => {
     }
 
     fetchData();
-  }, [backendAuthLoading, currentUser?.id, currentUser?.role, currentUser?.fullName]);
+  }, [
+    backendAuthLoading,
+    currentUser?.id,
+    currentUser?.role,
+    currentUser?.fullName,
+  ]);
 
   useEffect(() => {
     const firstAllowedPage = getPreferredPageOrder().find((pageKey) =>
-      canAccessPage(pageKey)
+      canAccessPage(pageKey),
     );
 
     if (firstAllowedPage && !canAccessPage(page)) {
       setPage(firstAllowedPage);
     }
-  }, [page, currentUser?.id, currentUser?.role, backendIsLoggedIn, backendAuthUser?.id]);
- 
+  }, [
+    page,
+    currentUser?.id,
+    currentUser?.role,
+    backendIsLoggedIn,
+    backendAuthUser?.id,
+  ]);
+
   const [priceHistory, setPriceHistory] = useState([
     {
       price: 2.33,
@@ -2459,12 +2698,16 @@ useEffect(() => {
 
   const literPrice = getLiterPriceByDate(new Date().toISOString());
 
-  const currentCompanyId = currentUser?.role === "PlatformAdmin" ? selectedCompanyId || getPlatformCompanyId(companies) : currentUser?.companyId || selectedCompanyId;
+  const currentCompanyId =
+    currentUser?.role === "PlatformAdmin"
+      ? selectedCompanyId || getPlatformCompanyId(companies)
+      : currentUser?.companyId || selectedCompanyId;
   const isPlatformConsoleContext = isPlatformContextValue(currentCompanyId);
-  const currentCompany = companies.find((company) =>
-    companyMatches(company.id, currentCompanyId) ||
-    companyMatches(company.code, currentCompanyId) ||
-    companyMatches(company.name, currentCompanyId)
+  const currentCompany = companies.find(
+    (company) =>
+      companyMatches(company.id, currentCompanyId) ||
+      companyMatches(company.code, currentCompanyId) ||
+      companyMatches(company.name, currentCompanyId),
   );
 
   const companyUsers = isPlatformAdminUser(currentUser)
@@ -2512,7 +2755,10 @@ useEffect(() => {
     if (!currentCompanyId || isPlatformContextValue(currentCompanyId)) return;
     if (!hasBackendPermission?.("team.read")) return;
 
-    refreshBackendEmployees(currentCompanyId, currentUser?.id || backendAuthUser?.id || "");
+    refreshBackendEmployees(
+      currentCompanyId,
+      currentUser?.id || backendAuthUser?.id || "",
+    );
     refreshBackendEmployeeTransfers();
     refreshBackendAssetTransfers();
     refreshBackendStationTransfers();
@@ -2524,10 +2770,32 @@ useEffect(() => {
     hasBackendPermission,
   ]);
 
-  const companyProjects = filterByCompany(projects, currentCompanyId, currentUser);
-  const companyAssets = filterByCompanyWithProjectFallback(assets, currentCompanyId, currentUser, companyProjects, "project");
-  const companyStations = filterByCompanyWithProjectFallback(stations, currentCompanyId, currentUser, companyProjects, "project");
-  const companyFuelers = filterByCompanyWithProjectFallback(fuelers, currentCompanyId, currentUser, companyProjects, "projectName");
+  const companyProjects = filterByCompany(
+    projects,
+    currentCompanyId,
+    currentUser,
+  );
+  const companyAssets = filterByCompanyWithProjectFallback(
+    assets,
+    currentCompanyId,
+    currentUser,
+    companyProjects,
+    "project",
+  );
+  const companyStations = filterByCompanyWithProjectFallback(
+    stations,
+    currentCompanyId,
+    currentUser,
+    companyProjects,
+    "project",
+  );
+  const companyFuelers = filterByCompanyWithProjectFallback(
+    fuelers,
+    currentCompanyId,
+    currentUser,
+    companyProjects,
+    "projectName",
+  );
   const companyData = filterTransactionRowsByCompany({
     rows: data,
     headers,
@@ -2541,7 +2809,9 @@ useEffect(() => {
   const baseCurrentUserProjectScopeValues = useMemo(() => {
     if (!currentUser?.id) return [];
 
-    if (["PlatformAdmin", "Admin", "TopManagement"].includes(currentUser.role)) {
+    if (
+      ["PlatformAdmin", "Admin", "TopManagement"].includes(currentUser.role)
+    ) {
       return ["all"];
     }
 
@@ -2554,11 +2824,16 @@ useEffect(() => {
 
     if (currentUser.role === "Manager") {
       companyProjects
-        .filter((project) =>
-          normalizeScopeValue(project.projectManagerId) === normalizeScopeValue(currentUser.id) ||
-          normalizeScopeValue(project.managerUserId) === normalizeScopeValue(currentUser.id) ||
-          normalizeScopeValue(project.managerId) === normalizeScopeValue(currentUser.id) ||
-          normalizeScopeValue(project.projectManager?.id) === normalizeScopeValue(currentUser.id)
+        .filter(
+          (project) =>
+            normalizeScopeValue(project.projectManagerId) ===
+              normalizeScopeValue(currentUser.id) ||
+            normalizeScopeValue(project.managerUserId) ===
+              normalizeScopeValue(currentUser.id) ||
+            normalizeScopeValue(project.managerId) ===
+              normalizeScopeValue(currentUser.id) ||
+            normalizeScopeValue(project.projectManager?.id) ===
+              normalizeScopeValue(currentUser.id),
         )
         .forEach(addProjectValues);
 
@@ -2566,14 +2841,16 @@ useEffect(() => {
     }
 
     companyFuelers
-      .filter((employee) =>
-        normalizeScopeValue(employee.linkedUserId) === normalizeScopeValue(currentUser.id) ||
-        normalizeScopeValue(employee.linkedUser?.id) === normalizeScopeValue(currentUser.id) ||
-        (
-          currentUser.email &&
-          employee.email &&
-          normalizeScopeValue(employee.email) === normalizeScopeValue(currentUser.email)
-        )
+      .filter(
+        (employee) =>
+          normalizeScopeValue(employee.linkedUserId) ===
+            normalizeScopeValue(currentUser.id) ||
+          normalizeScopeValue(employee.linkedUser?.id) ===
+            normalizeScopeValue(currentUser.id) ||
+          (currentUser.email &&
+            employee.email &&
+            normalizeScopeValue(employee.email) ===
+              normalizeScopeValue(currentUser.email)),
       )
       .forEach((employee) => {
         [employee.projectId, employee.projectName, employee.project]
@@ -2621,11 +2898,18 @@ useEffect(() => {
     }
 
     const allowedProjects = companyProjects.filter((project) => {
-      const projectValues = [project?.id, project?.backendId, project?.code, project?.name]
+      const projectValues = [
+        project?.id,
+        project?.backendId,
+        project?.code,
+        project?.name,
+      ]
         .filter(Boolean)
         .map(normalizeScopeValue);
 
-      return projectValues.some((value) => baseCurrentUserProjectScopeValues.includes(value));
+      return projectValues.some((value) =>
+        baseCurrentUserProjectScopeValues.includes(value),
+      );
     });
 
     const individualProjectOptions = allowedProjects.map((project) => ({
@@ -2660,18 +2944,29 @@ useEffect(() => {
     }
 
     const selectedStillAvailable = projectScopeOptions.some(
-      (option) => normalizeScopeValue(option.value) === normalizeScopeValue(selectedProjectScope)
+      (option) =>
+        normalizeScopeValue(option.value) ===
+        normalizeScopeValue(selectedProjectScope),
     );
 
     if (!selectedStillAvailable) {
       setSelectedProjectScope(projectScopeOptions[0].value);
     }
-  }, [currentUser?.id, currentUser?.role, selectedProjectScope, projectScopeOptions]);
+  }, [
+    currentUser?.id,
+    currentUser?.role,
+    selectedProjectScope,
+    projectScopeOptions,
+  ]);
 
   const selectedProjectScopeOption =
     projectScopeOptions.find(
-      (option) => normalizeScopeValue(option.value) === normalizeScopeValue(selectedProjectScope)
-    ) || projectScopeOptions[0] || null;
+      (option) =>
+        normalizeScopeValue(option.value) ===
+        normalizeScopeValue(selectedProjectScope),
+    ) ||
+    projectScopeOptions[0] ||
+    null;
 
   const selectedProjectScopeValues = useMemo(() => {
     if (!selectedProjectScopeOption) return [];
@@ -2704,17 +2999,25 @@ useEffect(() => {
     selectedProjectScopeOption?.project?.code ||
     "All Projects";
 
-  const currentUserCanAccessAllOperationalProjects = currentUserProjectScopeValues.includes("all");
+  const currentUserCanAccessAllOperationalProjects =
+    currentUserProjectScopeValues.includes("all");
 
   const projectMatchesCurrentScope = (project) => {
     if (currentUserCanAccessAllOperationalProjects) return true;
     if (!project?.id) return false;
 
-    const projectValues = [project.id, project.backendId, project.code, project.name]
+    const projectValues = [
+      project.id,
+      project.backendId,
+      project.code,
+      project.name,
+    ]
       .filter(Boolean)
       .map(normalizeScopeValue);
 
-    return projectValues.some((value) => currentUserProjectScopeValues.includes(value));
+    return projectValues.some((value) =>
+      currentUserProjectScopeValues.includes(value),
+    );
   };
 
   const projectValueMatchesCurrentScope = (projectValue) => {
@@ -2722,21 +3025,23 @@ useEffect(() => {
     if (!projectValue) return false;
 
     const normalizedProjectValue = normalizeScopeValue(projectValue);
-    if (currentUserProjectScopeValues.includes(normalizedProjectValue)) return true;
+    if (currentUserProjectScopeValues.includes(normalizedProjectValue))
+      return true;
 
     const matchedProject = companyProjects.find((project) =>
       [project.id, project.backendId, project.code, project.name]
         .filter(Boolean)
         .map(normalizeScopeValue)
-        .includes(normalizedProjectValue)
+        .includes(normalizedProjectValue),
     );
 
     return matchedProject ? projectMatchesCurrentScope(matchedProject) : false;
   };
 
-  const scopedProjects = (currentUserCanAccessAllOperationalProjects
-    ? companyProjects
-    : companyProjects.filter(projectMatchesCurrentScope)
+  const scopedProjects = (
+    currentUserCanAccessAllOperationalProjects
+      ? companyProjects
+      : companyProjects.filter(projectMatchesCurrentScope)
   ).filter((project) => {
     const isHeadOffice = normalizeScopeValue(project.name) === "head office";
     if (!isHeadOffice) return true;
@@ -2755,22 +3060,30 @@ useEffect(() => {
 
   const scopedAssets = currentUserCanAccessAllOperationalProjects
     ? companyAssets
-    : companyAssets.filter((asset) => projectValueMatchesCurrentScope(asset.project));
+    : companyAssets.filter((asset) =>
+        projectValueMatchesCurrentScope(asset.project),
+      );
 
   const scopedStations = currentUserCanAccessAllOperationalProjects
     ? companyStations
-    : companyStations.filter((station) => projectValueMatchesCurrentScope(station.project));
+    : companyStations.filter((station) =>
+        projectValueMatchesCurrentScope(station.project),
+      );
 
   const scopedFuelers = currentUserCanAccessAllOperationalProjects
     ? companyFuelers
     : companyFuelers.filter((fueler) =>
-        projectValueMatchesCurrentScope(fueler.projectName || fueler.projectId || fueler.project)
+        projectValueMatchesCurrentScope(
+          fueler.projectName || fueler.projectId || fueler.project,
+        ),
       );
 
   const scopedTeamMembers = scopedFuelers.map((member) => {
     const explicitlyLinkedUser =
-      companyUsers.find((user) =>
-        normalizeScopeValue(user.id) === normalizeScopeValue(member.linkedUserId)
+      companyUsers.find(
+        (user) =>
+          normalizeScopeValue(user.id) ===
+          normalizeScopeValue(member.linkedUserId),
       ) || null;
 
     const linkedUserIsActive = explicitlyLinkedUser
@@ -2779,13 +3092,16 @@ useEffect(() => {
 
     return {
       ...member,
-      role: explicitlyLinkedUser?.role || member.role || member.jobTitle || "Operator",
+      role:
+        explicitlyLinkedUser?.role ||
+        member.role ||
+        member.jobTitle ||
+        "Operator",
       userStatus:
-        member.linkedUserId && linkedUserIsActive
-          ? "Linked"
-          : "Not Linked",
+        member.linkedUserId && linkedUserIsActive ? "Linked" : "Not Linked",
       linkedUserId: member.linkedUserId || "",
-      linkedUserName: explicitlyLinkedUser?.fullName || member.linkedUserName || "",
+      linkedUserName:
+        explicitlyLinkedUser?.fullName || member.linkedUserName || "",
       linkedUserIsActive,
     };
   });
@@ -2793,12 +3109,9 @@ useEffect(() => {
   const scopedData = currentUserCanAccessAllOperationalProjects
     ? companyData
     : companyData.filter((row) =>
-        getRowProjectValues(
-          row,
-          headers,
-          companyAssets,
-          companyStations
-        ).some(projectValueMatchesCurrentScope)
+        getRowProjectValues(row, headers, companyAssets, companyStations).some(
+          projectValueMatchesCurrentScope,
+        ),
       );
 
   /*
@@ -2839,15 +3152,14 @@ useEffect(() => {
     const addAsset = (asset) => {
       if (!asset) return;
 
-      const identity =
-        normalizeScopeValue(
-          asset.backendId ||
+      const identity = normalizeScopeValue(
+        asset.backendId ||
           asset.assetBackendId ||
           asset.id ||
           asset.assetId ||
           asset.equipmentNo ||
-          asset.equipmentNumber
-        );
+          asset.equipmentNumber,
+      );
 
       if (identity) {
         visibleAssets.set(identity, asset);
@@ -2897,12 +3209,7 @@ useEffect(() => {
     });
 
     return Array.from(visibleAssets.values());
-  }, [
-    scopedAssets,
-    scopedData,
-    headers,
-    companyAssetLookup,
-  ]);
+  }, [scopedAssets, scopedData, headers, companyAssetLookup]);
 
   const loadPendingBackendOperationApprovals = async () => {
     if (!currentUser?.id || currentUser.status !== "Active") {
@@ -2916,7 +3223,8 @@ useEffect(() => {
     }
 
     try {
-      const pendingApprovals = await fetchPendingOperationApprovals(currentUser);
+      const pendingApprovals =
+        await fetchPendingOperationApprovals(currentUser);
       setBackendOperationApprovals(pendingApprovals);
     } catch (error) {
       setBackendOperationApprovals([]);
@@ -2962,7 +3270,7 @@ useEffect(() => {
         const completedOperations = backendOperations
           .filter(
             (operation) =>
-              String(operation?.status || "").toUpperCase() === "COMPLETED"
+              String(operation?.status || "").toUpperCase() === "COMPLETED",
           )
           .map(mapBackendOperationForState);
 
@@ -2988,22 +3296,40 @@ useEffect(() => {
     .filter(Boolean);
 
   const backendOperationCorrectionRequests = backendOperationCorrections
-    .map((item) => mapBackendOperationCorrectionForFrontend(item, currentUser, companyAssets, companyStations))
+    .map((item) =>
+      mapBackendOperationCorrectionForFrontend(
+        item,
+        currentUser,
+        companyAssets,
+        companyStations,
+      ),
+    )
     .filter(Boolean);
 
   const employeeTransferApprovals = employeeTransferRequests
-    .filter((transfer) => ["PENDING", "PARTIALLY_APPROVED"].includes(String(transfer.status || "").toUpperCase()))
+    .filter((transfer) =>
+      ["PENDING", "PARTIALLY_APPROVED"].includes(
+        String(transfer.status || "").toUpperCase(),
+      ),
+    )
     .map((transfer) => {
-      const requestedBy = companyUsers.find((user) => user.id === transfer.requestedByUserId) || currentUser;
+      const requestedBy =
+        companyUsers.find((user) => user.id === transfer.requestedByUserId) ||
+        currentUser;
       const isManagerTransfer = Boolean(transfer.isManagerTransfer);
 
       const requiredApprovers = (transfer.approvals || [])
         .filter((approval) => ["Pending", "Approved"].includes(approval.status))
         .map((approval) => {
-          const approverUser = companyUsers.find((user) => user.id === approval.approverUserId);
+          const approverUser = companyUsers.find(
+            (user) => user.id === approval.approverUserId,
+          );
           return {
             userId: approval.approverUserId,
-            userName: approverUser?.fullName || approverUser?.email || approval.approverUserId,
+            userName:
+              approverUser?.fullName ||
+              approverUser?.email ||
+              approval.approverUserId,
             role: isManagerTransfer ? "Admin" : "Manager",
             projectId: approval.projectId || "-",
             approvalStage: approval.approvalStage || "Project Manager",
@@ -3040,13 +3366,18 @@ useEffect(() => {
         sensitivity: "Sensitive",
         riskLevel: "High",
         approvalRoute: {
-          routeType: isManagerTransfer ? "admin_manager_transfer" : "dual_project_manager",
-          sourceProject: transfer.fromProjectName || transfer.fromProjectId || "-",
-          destinationProject: transfer.toProjectName || transfer.toProjectId || "-",
+          routeType: isManagerTransfer
+            ? "admin_manager_transfer"
+            : "dual_project_manager",
+          sourceProject:
+            transfer.fromProjectName || transfer.fromProjectId || "-",
+          destinationProject:
+            transfer.toProjectName || transfer.toProjectId || "-",
           requiredApprovers,
           routeStatus: "Pending",
         },
-        requestedById: requestedBy?.id || transfer.requestedByUserId || "System",
+        requestedById:
+          requestedBy?.id || transfer.requestedByUserId || "System",
         requestedByName: requestedBy?.fullName || requestedBy?.name || "System",
         requestedByRole: requestedBy?.role || "System",
         requestedAt: transfer.createdAt || new Date().toISOString(),
@@ -3057,16 +3388,27 @@ useEffect(() => {
     });
 
   const assetTransferApprovals = assetTransferRequests
-    .filter((transfer) => ["PENDING", "PARTIALLY_APPROVED"].includes(String(transfer.status || "").toUpperCase()))
+    .filter((transfer) =>
+      ["PENDING", "PARTIALLY_APPROVED"].includes(
+        String(transfer.status || "").toUpperCase(),
+      ),
+    )
     .map((transfer) => {
-      const requestedBy = companyUsers.find((user) => user.id === transfer.requestedByUserId) || currentUser;
+      const requestedBy =
+        companyUsers.find((user) => user.id === transfer.requestedByUserId) ||
+        currentUser;
       const requiredApprovers = (transfer.approvals || [])
         .filter((approval) => ["Pending", "Approved"].includes(approval.status))
         .map((approval) => {
-          const approverUser = companyUsers.find((user) => user.id === approval.approverUserId);
+          const approverUser = companyUsers.find(
+            (user) => user.id === approval.approverUserId,
+          );
           return {
             userId: approval.approverUserId,
-            userName: approverUser?.fullName || approverUser?.email || approval.approverUserId,
+            userName:
+              approverUser?.fullName ||
+              approverUser?.email ||
+              approval.approverUserId,
             role: "Manager",
             projectId: approval.projectId || "-",
             approvalStage: approval.approvalStage || "Project Manager",
@@ -3106,12 +3448,15 @@ useEffect(() => {
         riskLevel: "High",
         approvalRoute: {
           routeType: "dual_project_manager",
-          sourceProject: transfer.fromProjectName || transfer.fromProjectId || "-",
-          destinationProject: transfer.toProjectName || transfer.toProjectId || "-",
+          sourceProject:
+            transfer.fromProjectName || transfer.fromProjectId || "-",
+          destinationProject:
+            transfer.toProjectName || transfer.toProjectId || "-",
           requiredApprovers,
           routeStatus: "Pending",
         },
-        requestedById: requestedBy?.id || transfer.requestedByUserId || "System",
+        requestedById:
+          requestedBy?.id || transfer.requestedByUserId || "System",
         requestedByName: requestedBy?.fullName || requestedBy?.name || "System",
         requestedByRole: requestedBy?.role || "System",
         requestedAt: transfer.createdAt || new Date().toISOString(),
@@ -3122,16 +3467,27 @@ useEffect(() => {
     });
 
   const stationTransferApprovals = stationTransferRequests
-    .filter((transfer) => ["PENDING", "PARTIALLY_APPROVED"].includes(String(transfer.status || "").toUpperCase()))
+    .filter((transfer) =>
+      ["PENDING", "PARTIALLY_APPROVED"].includes(
+        String(transfer.status || "").toUpperCase(),
+      ),
+    )
     .map((transfer) => {
-      const requestedBy = companyUsers.find((user) => user.id === transfer.requestedByUserId) || currentUser;
+      const requestedBy =
+        companyUsers.find((user) => user.id === transfer.requestedByUserId) ||
+        currentUser;
       const requiredApprovers = (transfer.approvals || [])
         .filter((approval) => ["Pending", "Approved"].includes(approval.status))
         .map((approval) => {
-          const approverUser = companyUsers.find((user) => user.id === approval.approverUserId);
+          const approverUser = companyUsers.find(
+            (user) => user.id === approval.approverUserId,
+          );
           return {
             userId: approval.approverUserId,
-            userName: approverUser?.fullName || approverUser?.email || approval.approverUserId,
+            userName:
+              approverUser?.fullName ||
+              approverUser?.email ||
+              approval.approverUserId,
             role: "Manager",
             projectId: approval.projectId || "-",
             approvalStage: approval.approvalStage || "Project Manager",
@@ -3167,12 +3523,15 @@ useEffect(() => {
         riskLevel: "High",
         approvalRoute: {
           routeType: "dual_project_manager",
-          sourceProject: transfer.fromProjectName || transfer.fromProjectId || "-",
-          destinationProject: transfer.toProjectName || transfer.toProjectId || "-",
+          sourceProject:
+            transfer.fromProjectName || transfer.fromProjectId || "-",
+          destinationProject:
+            transfer.toProjectName || transfer.toProjectId || "-",
           requiredApprovers,
           routeStatus: "Pending",
         },
-        requestedById: requestedBy?.id || transfer.requestedByUserId || "System",
+        requestedById:
+          requestedBy?.id || transfer.requestedByUserId || "System",
         requestedByName: requestedBy?.fullName || requestedBy?.name || "System",
         requestedByRole: requestedBy?.role || "System",
         requestedAt: transfer.createdAt || new Date().toISOString(),
@@ -3198,9 +3557,12 @@ useEffect(() => {
     readMap: notificationReadMap,
   });
 
-  const unreadNotificationCount = notifications.filter((item) => !item.read).length;
+  const unreadNotificationCount = notifications.filter(
+    (item) => !item.read,
+  ).length;
   const routedPendingApprovalCount = allApprovalRequests.filter(
-    (item) => item.status === "Pending" && canUserViewApproval(currentUser, item)
+    (item) =>
+      item.status === "Pending" && canUserViewApproval(currentUser, item),
   ).length;
 
   const markNotificationRead = (notificationId) => {
@@ -3216,7 +3578,7 @@ useEffect(() => {
       return next;
     });
   };
- 
+
   const renderPage = () => {
     if (page === "operations") {
       return (
@@ -3246,7 +3608,7 @@ useEffect(() => {
         />
       );
     }
- 
+
     if (page === "assets") {
       return (
         <AssetsPage
@@ -3270,343 +3632,348 @@ useEffect(() => {
         />
       );
     }
- 
+
     if (page === "stations") {
       return (
-      <StationsPage
-  stations={scopedStations}
-  setStations={setStations}
-  projects={scopedProjects}
-  transferProjects={transferDestinationProjects}
-  data={scopedData}
-  headers={headers}
-  showToast={showToast}
-  literPrice={literPrice}
-  priceHistory={priceHistory}
+        <StationsPage
+          stations={scopedStations}
+          setStations={setStations}
+          projects={scopedProjects}
+          transferProjects={transferDestinationProjects}
+          data={scopedData}
+          headers={headers}
+          showToast={showToast}
+          literPrice={literPrice}
+          priceHistory={priceHistory}
           stationCounterResetHistory={stationCounterResetHistory}
           setStationCounterResetHistory={setStationCounterResetHistory}
-  setPriceHistory={setPriceHistory}
-  getLiterPriceByDate={getLiterPriceByDate}
-  currency={currency}
-  currentUser={currentUser}
-  hasPermission={hasPermission}
-  trackActivity={trackActivity}
-  submitApprovalRequest={submitApprovalRequest}
-  onStationTransferCreated={upsertStationTransferRequest}
-  externalStockAdjustments={approvedStationStockAdjustments}
-/>
+          setPriceHistory={setPriceHistory}
+          getLiterPriceByDate={getLiterPriceByDate}
+          currency={currency}
+          currentUser={currentUser}
+          hasPermission={hasPermission}
+          trackActivity={trackActivity}
+          submitApprovalRequest={submitApprovalRequest}
+          onStationTransferCreated={upsertStationTransferRequest}
+          externalStockAdjustments={approvedStationStockAdjustments}
+        />
       );
     }
     if (page === "team") {
-  return (
-    <TeamPage
-      fuelers={scopedTeamMembers}
-      users={companyUsers}
-      projects={scopedProjects}
-      transferProjects={transferDestinationProjects}
-      data={scopedData}
-      headers={headers}
-      showToast={showToast}
-      currentUser={currentUser}
-      hasPermission={hasPermission}
-      submitApprovalRequest={submitApprovalRequest}
-      onCreateEmployee={handleCreateEmployee}
-      onUpdateEmployee={handleUpdateEmployee}
-      onCreateEmployeeTransfer={handleCreateEmployeeTransfer}
-      onCreateBulkEmployeeTransfer={handleCreateBulkEmployeeTransfer}
-      onCreateUserFromEmployee={handleCreateUserFromEmployee}
-      onUpdateUserStatus={handleUpdateUserStatusFromTeam}
-      onLoadRoles={fetchRoles}
-      pendingEmployeeTransfers={employeeTransferRequests}
-      companies={companies}
-    />
-  );
-}
- 
-if (page === "projects") {
-  return (
-    <ProjectsPage
-      projects={scopedProjects}
-      assets={scopedAssets}
-      stations={scopedStations}
-      fuelers={scopedFuelers}
-      data={scopedData}
-      headers={headers}
-      showToast={showToast}
-      currency={currency}
-      getLiterPriceByDate={getLiterPriceByDate}
-      assetProjectHistory={assetProjectHistory}
-      currentUser={currentUser}
-      currentCompany={currentCompany}
-      currentCompanyId={currentCompanyId}
-      hasPermission={hasPermission}
-      trackActivity={trackActivity}
-      submitApprovalRequest={submitApprovalRequest}
-      onCreateProject={handleCreateProject}
-      onUpdateProject={handleUpdateProject}
-      onDeleteProject={handleDeleteProject}
-      onAssignProjectManager={handleAssignProjectManager}
-      onProjectFuelPriceUpdated={handleProjectFuelPriceUpdated}
-      users={companyUsers}
-      theme={theme}
-    />
-  );
-}
+      return (
+        <TeamPage
+          fuelers={scopedTeamMembers}
+          users={companyUsers}
+          projects={scopedProjects}
+          transferProjects={transferDestinationProjects}
+          data={scopedData}
+          headers={headers}
+          showToast={showToast}
+          currentUser={currentUser}
+          hasPermission={hasPermission}
+          submitApprovalRequest={submitApprovalRequest}
+          onCreateEmployee={handleCreateEmployee}
+          onUpdateEmployee={handleUpdateEmployee}
+          onCreateEmployeeTransfer={handleCreateEmployeeTransfer}
+          onCreateBulkEmployeeTransfer={handleCreateBulkEmployeeTransfer}
+          onCreateUserFromEmployee={handleCreateUserFromEmployee}
+          onUpdateUserStatus={handleUpdateUserStatusFromTeam}
+          onLoadRoles={fetchRoles}
+          pendingEmployeeTransfers={employeeTransferRequests}
+          companies={companies}
+        />
+      );
+    }
 
-if (page === "reports") {
-  return (
-    <ReportsPage
-      data={scopedData}
-      headers={headers}
-      projects={scopedProjects}
-      assets={scopedAssets}
-      stations={scopedStations}
-      assetTransferRequests={assetTransferRequests}
-      currency={currency}
-      currentUser={currentUser}
-      currentCompany={currentCompany}
-    />
-  );
-}
+    if (page === "projects") {
+      return (
+        <ProjectsPage
+          projects={scopedProjects}
+          assets={scopedAssets}
+          stations={scopedStations}
+          fuelers={scopedFuelers}
+          data={scopedData}
+          headers={headers}
+          showToast={showToast}
+          currency={currency}
+          getLiterPriceByDate={getLiterPriceByDate}
+          assetProjectHistory={assetProjectHistory}
+          currentUser={currentUser}
+          currentCompany={currentCompany}
+          currentCompanyId={currentCompanyId}
+          hasPermission={hasPermission}
+          trackActivity={trackActivity}
+          submitApprovalRequest={submitApprovalRequest}
+          onCreateProject={handleCreateProject}
+          onUpdateProject={handleUpdateProject}
+          onDeleteProject={handleDeleteProject}
+          onAssignProjectManager={handleAssignProjectManager}
+          onProjectFuelPriceUpdated={handleProjectFuelPriceUpdated}
+          users={companyUsers}
+          theme={theme}
+        />
+      );
+    }
 
-if (page === "notifications") {
-  return (
-    <NotificationCenterPage
-      notifications={notifications}
-      currentUser={currentUser}
-      markNotificationRead={markNotificationRead}
-      markAllNotificationsRead={markAllNotificationsRead}
-      setPage={setPage}
-    />
-  );
-}
+    if (page === "reports") {
+      return (
+        <ReportsPage
+          data={scopedData}
+          headers={headers}
+          projects={scopedProjects}
+          assets={scopedAssets}
+          stations={scopedStations}
+          assetTransferRequests={assetTransferRequests}
+          currency={currency}
+          currentUser={currentUser}
+          currentCompany={currentCompany}
+        />
+      );
+    }
 
-if (page === "auditTimeline") {
-  return (
-    <AuditTimelinePage
-      approvals={allApprovalRequests}
-      activityLog={activityLog}
-      currentUser={currentUser}
-      hasPermission={hasPermission}
-    />
-  );
-}
+    if (page === "notifications") {
+      return (
+        <NotificationCenterPage
+          notifications={notifications}
+          currentUser={currentUser}
+          markNotificationRead={markNotificationRead}
+          markAllNotificationsRead={markAllNotificationsRead}
+          setPage={setPage}
+        />
+      );
+    }
 
-if (page === "approvals") {
-  return (
-    <ApprovalsPage
-      approvals={allApprovalRequests}
-      setApprovals={setPendingApprovals}
-      currentUser={currentUser}
-      hasPermission={hasPermission}
-      setData={setData}
-      trackActivity={trackActivity}
-      showToast={showToast}
-      onApproveEmployeeTransfer={handleApproveEmployeeTransfer}
-      onRejectEmployeeTransfer={handleRejectEmployeeTransfer}
-      onApproveAssetTransfer={handleApproveAssetTransfer}
-      onRejectAssetTransfer={handleRejectAssetTransfer}
-      onApproveStationTransfer={handleApproveStationTransfer}
-      onRejectStationTransfer={handleRejectStationTransfer}
-      onApproveAssetAction={handleApproveAssetAction}
-      onApproveStationAction={handleApproveStationAction}
-      onOperationApprovalReviewed={loadPendingBackendOperationApprovals}
-      onOperationCorrectionReviewed={loadPendingBackendOperationCorrections}
-      onOperationsWorkspaceRefresh={refreshOperationsWorkspace}
-      runWithActionLoading={runWithActionLoading}
-    />
-  );
-}
+    if (page === "auditTimeline") {
+      return (
+        <AuditTimelinePage
+          approvals={allApprovalRequests}
+          activityLog={activityLog}
+          currentUser={currentUser}
+          hasPermission={hasPermission}
+        />
+      );
+    }
 
-if (page === "companies") {
-  return (
-    <CompaniesPage
-      companies={companies}
-      setCompanies={setCompanies}
-      currentUser={currentUser}
-      contextCompanyId={selectedCompanyId}
-      showToast={showToast}
-    />
-  );
-}
+    if (page === "approvals") {
+      return (
+        <ApprovalsPage
+          approvals={allApprovalRequests}
+          setApprovals={setPendingApprovals}
+          currentUser={currentUser}
+          hasPermission={hasPermission}
+          setData={setData}
+          trackActivity={trackActivity}
+          showToast={showToast}
+          onApproveEmployeeTransfer={handleApproveEmployeeTransfer}
+          onRejectEmployeeTransfer={handleRejectEmployeeTransfer}
+          onApproveAssetTransfer={handleApproveAssetTransfer}
+          onRejectAssetTransfer={handleRejectAssetTransfer}
+          onApproveStationTransfer={handleApproveStationTransfer}
+          onRejectStationTransfer={handleRejectStationTransfer}
+          onApproveAssetAction={handleApproveAssetAction}
+          onApproveStationAction={handleApproveStationAction}
+          onOperationApprovalReviewed={loadPendingBackendOperationApprovals}
+          onOperationCorrectionReviewed={loadPendingBackendOperationCorrections}
+          onOperationsWorkspaceRefresh={refreshOperationsWorkspace}
+          runWithActionLoading={runWithActionLoading}
+        />
+      );
+    }
 
-if (page === "users") {
-  return (
-    <UsersPage
-      users={usersPageUsers}
-      setUsers={setUsers}
-      usersLoading={usersLoading}
-      usersLoaded={usersLoaded}
-      usersLoadError={usersLoadError}
-      refreshUsers={refreshBackendUsers}
-      setFuelers={setFuelers}
-      companies={companies}
-      projects={filterAvailableProjects(companyProjects)}
-      currentUser={currentUser}
-      contextCompanyId={selectedCompanyId}
-      setSelectedCompanyId={setSelectedCompanyId}
-      hasPermission={hasPermission}
-      activityLog={activityLog}
-      setActivityLog={setActivityLog}
-      trackActivity={trackActivity}
-      showToast={showToast}
-    />
-  );
-}
-     return (
+    if (page === "companies") {
+      return (
+        <CompaniesPage
+          companies={companies}
+          setCompanies={setCompanies}
+          currentUser={currentUser}
+          contextCompanyId={selectedCompanyId}
+          showToast={showToast}
+        />
+      );
+    }
+
+    if (page === "users") {
+      return (
+        <UsersPage
+          users={usersPageUsers}
+          setUsers={setUsers}
+          usersLoading={usersLoading}
+          usersLoaded={usersLoaded}
+          usersLoadError={usersLoadError}
+          refreshUsers={refreshBackendUsers}
+          setFuelers={setFuelers}
+          companies={companies}
+          projects={filterAvailableProjects(companyProjects)}
+          currentUser={currentUser}
+          contextCompanyId={selectedCompanyId}
+          setSelectedCompanyId={setSelectedCompanyId}
+          hasPermission={hasPermission}
+          activityLog={activityLog}
+          setActivityLog={setActivityLog}
+          trackActivity={trackActivity}
+          showToast={showToast}
+        />
+      );
+    }
+    return (
       <div className="bg-gray-900 min-h-screen text-white p-6">
         <h2 className="text-xl sm:text-2xl font-bold">{page} Page</h2>
       </div>
     );
   };
- const [toast, setToast] = useState(null);
+  const [toast, setToast] = useState(null);
 
-const showToast = (type, message) => {
-  setToast({ type, message });
+  const showToast = (type, message) => {
+    setToast({ type, message });
 
-  setTimeout(() => {
-    setToast(null);
-  }, 3000);
-};
-
-const [isOnline, setIsOnline] = useState(() =>
-  typeof navigator === "undefined" ? true : navigator.onLine
-);
-
-useEffect(() => {
-  if (typeof window === "undefined") return undefined;
-
-  const handleOffline = () => {
-    setIsOnline(false);
-    showToast("warning", NETWORK_OFFLINE_MESSAGE);
+    setTimeout(() => {
+      setToast(null);
+    }, 3000);
   };
 
-  const handleOnline = () => {
-    setIsOnline(true);
-    showToast("success", "Internet connection restored.");
-  };
+  const [isOnline, setIsOnline] = useState(() =>
+    typeof navigator === "undefined" ? true : navigator.onLine,
+  );
 
-  window.addEventListener("offline", handleOffline);
-  window.addEventListener("online", handleOnline);
+  useEffect(() => {
+    if (typeof window === "undefined") return undefined;
 
-  if (navigator.onLine === false) {
-    handleOffline();
+    const handleOffline = () => {
+      setIsOnline(false);
+      showToast("warning", NETWORK_OFFLINE_MESSAGE);
+    };
+
+    const handleOnline = () => {
+      setIsOnline(true);
+      showToast("success", "Internet connection restored.");
+    };
+
+    window.addEventListener("offline", handleOffline);
+    window.addEventListener("online", handleOnline);
+
+    if (navigator.onLine === false) {
+      handleOffline();
+    }
+
+    return () => {
+      window.removeEventListener("offline", handleOffline);
+      window.removeEventListener("online", handleOnline);
+    };
+  }, []);
+
+  const sidebarItems = [
+    { key: "operations", label: "Operations", Icon: LayoutDashboard },
+    { key: "assets", label: "Assets", Icon: Truck },
+    { key: "stations", label: "Stations", Icon: Fuel },
+    { key: "team", label: "Team", Icon: Users },
+    { key: "projects", label: "Projects / Sites", Icon: Building2 },
+    { key: "reports", label: "Reports", Icon: FileBarChart2 },
+    { key: "companies", label: "Companies", Icon: Building2 },
+    { key: "notifications", label: "Notifications", Icon: Bell },
+    { key: "auditTimeline", label: "Audit Timeline", Icon: FileBarChart2 },
+    { key: "approvals", label: "Approvals", Icon: FileBarChart2 },
+    { key: "users", label: "Users & Roles", Icon: Users },
+  ].filter((item) => canAccessPage(item.key));
+
+  const currentUserProjectSectionLabel =
+    currentUser?.role === "PlatformAdmin" ? "Access" : "Project Scope";
+
+  const currentUserProjectLabel =
+    selectedProjectScopeOption?.label ||
+    (currentUser?.role === "PlatformAdmin"
+      ? "Global Access"
+      : currentUser?.role === "Admin"
+        ? "All Projects"
+        : "No Project Assigned");
+
+  const projectScopeDropdownDisabled =
+    !projectScopeOptions.length ||
+    currentUser?.role === "PlatformAdmin" ||
+    (!["Admin", "TopManagement", "Manager"].includes(currentUser?.role) &&
+      projectScopeOptions.length <= 1);
+
+  const sidebarContentCollapsed = sidebarCollapsed && !mobileSidebarOpen;
+
+  if (backendAuthLoading) {
+    return (
+      <div className="min-h-screen bg-[#070b14] flex items-center justify-center text-slate-100">
+        <div className="rounded-2xl border border-slate-800 bg-slate-900/80 px-8 py-7 shadow-2xl text-center">
+          <div className="flex items-center justify-center gap-3 mb-4">
+            <img
+              src={
+                theme === "dark"
+                  ? "/icons/fleet-fuel-pro-dark.png"
+                  : "/icons/fleet-fuel-pro-light.png"
+              }
+              alt="Fleet Fuel PRO"
+              className="h-12 w-auto object-contain"
+              draggable={false}
+            />
+
+            <div className="text-left">
+              <h1 className="text-xl sm:text-2xl font-black text-amber-300 tracking-wide">
+                Fleet Fuel PRO
+              </h1>
+              <p className="text-[10px] uppercase tracking-[0.22em] text-slate-500">
+                Fleet Fuel Management System
+              </p>
+            </div>
+          </div>
+
+          <p className="text-sm text-slate-400 animate-pulse">
+            Loading System...
+          </p>
+        </div>
+      </div>
+    );
   }
 
-  return () => {
-    window.removeEventListener("offline", handleOffline);
-    window.removeEventListener("online", handleOnline);
-  };
-}, []);
-
-const sidebarItems = [
-  { key: "operations", label: "Operations", Icon: LayoutDashboard },
-  { key: "assets", label: "Assets", Icon: Truck },
-  { key: "stations", label: "Stations", Icon: Fuel },
-  { key: "team", label: "Team", Icon: Users },
-  { key: "projects", label: "Projects / Sites", Icon: Building2 },
-  { key: "reports", label: "Reports", Icon: FileBarChart2 },
-  { key: "companies", label: "Companies", Icon: Building2 },
-  { key: "notifications", label: "Notifications", Icon: Bell },
-  { key: "auditTimeline", label: "Audit Timeline", Icon: FileBarChart2 },
-  { key: "approvals", label: "Approvals", Icon: FileBarChart2 },
-  { key: "users", label: "Users & Roles", Icon: Users },
-].filter((item) => canAccessPage(item.key));
-
-const currentUserProjectSectionLabel =
-  currentUser?.role === "PlatformAdmin" ? "Access" : "Project Scope";
-
-const currentUserProjectLabel =
-  selectedProjectScopeOption?.label ||
-  (currentUser?.role === "PlatformAdmin"
-    ? "Global Access"
-    : currentUser?.role === "Admin"
-    ? "All Projects"
-    : "No Project Assigned");
-
-const projectScopeDropdownDisabled =
-  !projectScopeOptions.length ||
-  currentUser?.role === "PlatformAdmin" ||
-  (!["Admin", "TopManagement", "Manager"].includes(currentUser?.role) && projectScopeOptions.length <= 1);
-
-const sidebarContentCollapsed = sidebarCollapsed && !mobileSidebarOpen;
-
-if (backendAuthLoading) {
-  return (
-    <div className="min-h-screen bg-[#070b14] flex items-center justify-center text-slate-100">
-      <div className="rounded-2xl border border-slate-800 bg-slate-900/80 px-8 py-7 shadow-2xl text-center">
-        <div className="flex items-center justify-center gap-3 mb-4">
-          <img
-            src={theme === "dark" ? "/icons/fleet-fuel-pro-dark.png" : "/icons/fleet-fuel-pro-light.png"}
-            alt="Fleet Fuel PRO"
-            className="h-12 w-auto object-contain"
-            draggable={false}
-          />
-
-          <div className="text-left">
-            <h1 className="text-xl sm:text-2xl font-black text-amber-300 tracking-wide">
-              Fleet Fuel PRO
-            </h1>
-            <p className="text-[10px] uppercase tracking-[0.22em] text-slate-500">
-              Fleet Fuel Management System
-            </p>
+  if (!currentUser) {
+    return (
+      <>
+        {!isOnline && (
+          <div className="fixed top-0 left-0 right-0 z-[999998] bg-red-600 text-white text-center text-sm font-semibold py-2 shadow-lg">
+            {NETWORK_OFFLINE_MESSAGE}
           </div>
-        </div>
+        )}
+        <LoginPage
+          users={users}
+          companies={companies}
+          selectedCompanyId={selectedCompanyId}
+          setSelectedCompanyId={setSelectedCompanyId}
+          loginIdentifier={loginIdentifier}
+          setLoginIdentifier={setLoginIdentifier}
+          loginPassword={loginPassword}
+          setLoginPassword={setLoginPassword}
+          loginError={loginError}
+          handleLogin={handleLogin}
+          theme={theme}
+          setTheme={setTheme}
+          actionLoading={actionLoading}
+        />
+        {toast && <Toast type={toast.type} message={toast.message} />}
+      </>
+    );
+  }
 
-        <p className="text-sm text-slate-400 animate-pulse">
-          Loading System...
-        </p>
-      </div>
-    </div>
-  );
-}
-
-if (!currentUser) {
-  return (
-    <>
-      {!isOnline && (
-        <div className="fixed top-0 left-0 right-0 z-[999998] bg-red-600 text-white text-center text-sm font-semibold py-2 shadow-lg">
-          {NETWORK_OFFLINE_MESSAGE}
-        </div>
-      )}
-      <LoginPage
-        users={users}
-        companies={companies}
-        selectedCompanyId={selectedCompanyId}
-        setSelectedCompanyId={setSelectedCompanyId}
-        loginIdentifier={loginIdentifier}
-        setLoginIdentifier={setLoginIdentifier}
-        loginPassword={loginPassword}
-        setLoginPassword={setLoginPassword}
-        loginError={loginError}
-        handleLogin={handleLogin}
+  if (currentUser?.passwordResetRequired || forcePasswordChangeOpen) {
+    return (
+      <ForcePasswordChangePage
         theme={theme}
-        setTheme={setTheme}
-        actionLoading={actionLoading}
+        currentUser={currentUser}
+        currentPassword={forceCurrentPassword}
+        setCurrentPassword={setForceCurrentPassword}
+        newPassword={forceNewPassword}
+        setNewPassword={setForceNewPassword}
+        confirmPassword={forceConfirmPassword}
+        setConfirmPassword={setForceConfirmPassword}
+        error={forcePasswordError}
+        loading={forcePasswordLoading}
+        onSubmit={handleForcedPasswordChange}
+        onLogout={handleLogout}
       />
-      {toast && <Toast type={toast.type} message={toast.message} />}
-    </>
-  );
-}
-
-if (currentUser?.passwordResetRequired || forcePasswordChangeOpen) {
-  return (
-    <ForcePasswordChangePage
-      theme={theme}
-      currentUser={currentUser}
-      currentPassword={forceCurrentPassword}
-      setCurrentPassword={setForceCurrentPassword}
-      newPassword={forceNewPassword}
-      setNewPassword={setForceNewPassword}
-      confirmPassword={forceConfirmPassword}
-      setConfirmPassword={setForceConfirmPassword}
-      error={forcePasswordError}
-      loading={forcePasswordLoading}
-      onSubmit={handleForcedPasswordChange}
-      onLogout={handleLogout}
-    />
-  );
-}
+    );
+  }
 
   return (
     <>
@@ -3626,7 +3993,11 @@ if (currentUser?.passwordResetRequired || forcePasswordChangeOpen) {
 
         [data-theme="light"] .theme-main-bg {
           background:
-            radial-gradient(circle at top left, rgba(245, 158, 11, 0.10), transparent 34%),
+            radial-gradient(
+              circle at top left,
+              rgba(245, 158, 11, 0.1),
+              transparent 34%
+            ),
             #f4f7fb !important;
         }
 
@@ -3781,15 +4152,15 @@ if (currentUser?.passwordResetRequired || forcePasswordChangeOpen) {
         }
 
         [data-theme="light"] .bg-emerald-500\/15 {
-          background-color: rgba(5, 150, 105, 0.10) !important;
+          background-color: rgba(5, 150, 105, 0.1) !important;
         }
 
         [data-theme="light"] .bg-red-500\/15 {
-          background-color: rgba(220, 38, 38, 0.10) !important;
+          background-color: rgba(220, 38, 38, 0.1) !important;
         }
 
         [data-theme="light"] .bg-blue-500\/15 {
-          background-color: rgba(30, 58, 138, 0.10) !important;
+          background-color: rgba(30, 58, 138, 0.1) !important;
         }
 
         [data-theme="light"] .border-blue-500\/30 {
@@ -3845,7 +4216,6 @@ if (currentUser?.passwordResetRequired || forcePasswordChangeOpen) {
           background-color: #f1f5f9 !important;
         }
 
-
         /* Responsive step 3 safeguards */
         .theme-main-bg {
           min-width: 0;
@@ -3875,13 +4245,11 @@ if (currentUser?.passwordResetRequired || forcePasswordChangeOpen) {
           z-index: 5 !important;
         }
 
-
         /* Settings dropdown clipping fix */
         .fleet-page-shell,
         .settings-layer-safe {
           overflow: visible;
         }
-
 
         /* Mobile sidebar drawer */
         .fleet-mobile-topbar {
@@ -3902,7 +4270,6 @@ if (currentUser?.passwordResetRequired || forcePasswordChangeOpen) {
             width: 100%;
           }
         }
-
 
         /* Sidebar internal scrolling */
         .fleet-mobile-sidebar {
@@ -3930,12 +4297,10 @@ if (currentUser?.passwordResetRequired || forcePasswordChangeOpen) {
           }
         }
 
-
         /* Settings menu direction safety */
         .settings-layer-safe [class*="absolute left-0"] {
           max-width: calc(100vw - 1.5rem);
         }
-
 
         /* Portal modal top layer fix */
         .fleet-portal-modal-backdrop {
@@ -3948,270 +4313,298 @@ if (currentUser?.passwordResetRequired || forcePasswordChangeOpen) {
           position: relative !important;
           z-index: 100001 !important;
         }
-
-`}</style>
-
-      <div data-theme={theme} className="min-h-screen bg-[#070b14] flex overflow-hidden text-slate-100">
-      {mobileSidebarOpen && (
-        <button
-          type="button"
-          aria-label="Close mobile sidebar overlay"
-          onClick={() => setMobileSidebarOpen(false)}
-          className="fixed inset-0 z-[10030] bg-black/65 backdrop-blur-sm lg:hidden"
-        />
-      )}
+      `}</style>
 
       <div
-        className={`fleet-mobile-sidebar ${sidebarContentCollapsed ? "lg:w-20" : "lg:w-64"} fixed lg:sticky lg:top-0 inset-y-0 left-0 z-[10040] h-screen max-h-screen overflow-y-auto overscroll-contain shrink-0 bg-[#050814] text-white border-r border-slate-800/80 shadow-2xl p-4 flex flex-col transition-all duration-300 ${
-          mobileSidebarOpen ? "translate-x-0" : "-translate-x-full"
-        } lg:translate-x-0`}
+        data-theme={theme}
+        className="min-h-screen bg-[#070b14] flex overflow-hidden text-slate-100"
       >
-        <button
-          type="button"
-          onClick={() => setMobileSidebarOpen(false)}
-          className="lg:hidden absolute top-3 right-3 h-9 w-9 rounded-xl border border-slate-700 bg-slate-900 text-slate-300"
-          aria-label="Close sidebar menu"
-        >
-          ×
-        </button>
-
-        <div className="flex flex-col items-center mb-5">
-          <img
-            src={theme === "dark" ? "/icons/fleet-fuel-pro-dark.png" : "/icons/fleet-fuel-pro-light.png"}
-            alt="Fleet Fuel PRO"
-            className={`${sidebarContentCollapsed ? "w-12" : "w-28"} h-auto object-contain mb-3 select-none transition-all duration-300`}
-            draggable={false}
-          />
-
-          {!sidebarContentCollapsed && (
-            <p className="text-[11px] text-slate-500 uppercase tracking-[0.22em] text-center">
-              Fleet Fuel Management System
-            </p>
-          )}
-        </div>
-
-        <button
-          onClick={() => setSidebarCollapsed(!sidebarContentCollapsed)}
-          className="mb-4 w-full hidden lg:flex items-center justify-center gap-2 px-3 py-2 rounded-xl text-xs font-semibold cursor-pointer transition-all duration-200 text-slate-400 hover:bg-slate-800/70 hover:text-white border border-slate-800/80"
-          title={sidebarContentCollapsed ? "Expand sidebar" : "Collapse sidebar"}
-        >
-          <span>{sidebarContentCollapsed ? "»" : "«"}</span>
-          {!sidebarContentCollapsed && <span>Collapse</span>}
-        </button>
- 
-        <ul className="space-y-2">
-          {sidebarItems.map(({ key, label, Icon }) => (
-            <li key={key}>
-              <button
-                onClick={() => {
-                  setPage(key);
-                  setMobileSidebarOpen(false);
-                }}
-                className={`w-full flex items-center ${sidebarContentCollapsed ? "justify-center px-3" : "gap-3 text-left px-4"} py-3 rounded-xl text-sm font-semibold cursor-pointer transition-all duration-200 ${page === key ? "bg-amber-400 text-slate-950 shadow-lg shadow-amber-500/15" : "text-slate-300 hover:bg-slate-800/70 hover:text-white"}`}
-                title={label}
-              >
-                <Icon size={18} className="shrink-0" />
-                {!sidebarContentCollapsed && (
-                  <span className="flex items-center gap-2">
-                    <span>{label}</span>
-                    {key === "notifications" && unreadNotificationCount > 0 && (
-                      <span className="bg-amber-400 text-slate-950 text-[10px] px-2 py-0.5 rounded-full font-black">
-                        {unreadNotificationCount}
-                      </span>
-                    )}
-                    {key === "approvals" && routedPendingApprovalCount > 0 && (
-                      <span className="bg-red-500 text-white text-[10px] px-2 py-0.5 rounded-full">
-                        {routedPendingApprovalCount}
-                      </span>
-                    )}
-                  </span>
-                )}
-              </button>
-            </li>
-          ))}
-        </ul>
-
-        {!sidebarContentCollapsed && currentUser && (
-          <div className="mt-4 rounded-2xl border border-slate-800/80 bg-slate-900/60 p-3">
-            <p className="text-[10px] uppercase tracking-[0.2em] text-slate-500 mb-1">Signed in as</p>
-            <p className="login-text text-sm font-bold text-slate-100 truncate">{currentUser.fullName}</p>
-            <p className="text-xs text-amber-300 mt-0.5">{currentUser.role}</p>
-            <div className="mt-2 rounded-xl border border-slate-800/80 bg-slate-950/40 px-3 py-2">
-              <p className="text-[9px] uppercase tracking-[0.16em] text-slate-500 mb-1">{currentUserProjectSectionLabel}</p>
-              <select
-                value={selectedProjectScopeOption?.value || ""}
-                onChange={(event) => setSelectedProjectScope(event.target.value)}
-                disabled={projectScopeDropdownDisabled}
-                className={`w-full rounded-lg border border-slate-700 bg-slate-950 px-2 py-1.5 text-xs font-semibold text-slate-100 outline-none transition ${
-                  projectScopeDropdownDisabled
-                    ? "cursor-not-allowed opacity-70"
-                    : "cursor-pointer hover:border-amber-400/70 focus:border-amber-400"
-                }`}
-                title={currentUserProjectLabel}
-              >
-                {projectScopeOptions.length ? (
-                  projectScopeOptions.map((option) => (
-                    <option key={option.value} value={option.value}>
-                      {option.label}
-                    </option>
-                  ))
-                ) : (
-                  <option value="">No Project Assigned</option>
-                )}
-              </select>
-            </div>
-
-            <div className="mt-3 pt-3 border-t border-slate-800/80">
-              <button
-                type="button"
-                onClick={handleLogout}
-                className="w-full rounded-lg border border-red-500/30 bg-red-500/10 px-3 py-2 text-xs font-bold text-red-300 hover:bg-red-500/20 transition"
-              >
-                Logout
-              </button>
-            </div>
-          </div>
-        )}
-
-        <div className="mt-auto pt-4 border-t border-slate-800/80">
-          <div className="relative">
-            <button
-              onClick={() => setShowThemeSettings(!showThemeSettings)}
-              className={`w-full flex items-center ${sidebarContentCollapsed ? "justify-center px-3" : "justify-between gap-3 px-4"} py-3 rounded-xl text-sm font-semibold cursor-pointer transition-all duration-200 text-slate-300 hover:bg-slate-800/70 hover:text-white`}
-            >
-              <span className="flex flex-wrap items-center gap-3">
-                <SidebarSvgIcon size={18} className="shrink-0">
-                  <circle cx="12" cy="12" r="3" />
-                  <path d="M12 2v2" />
-                  <path d="M12 20v2" />
-                  <path d="m4.93 4.93 1.41 1.41" />
-                  <path d="m17.66 17.66 1.41 1.41" />
-                  <path d="M2 12h2" />
-                  <path d="M20 12h2" />
-                  <path d="m6.34 17.66-1.41 1.41" />
-                  <path d="m19.07 4.93-1.41 1.41" />
-                </SidebarSvgIcon>
-                {!sidebarContentCollapsed && <span>Settings</span>}
-              </span>
-              {!sidebarContentCollapsed && <span className="text-xs text-slate-500">Theme</span>}
-            </button>
-
-            {showThemeSettings && (
-              <div className="absolute left-0 bottom-full mb-2 w-full bg-slate-950 border border-slate-700 rounded-2xl shadow-2xl overflow-hidden z-[999999]">
-                <button
-                  onClick={() => {
-                    setTheme("dark");
-                    setShowThemeSettings(false);
-                  }}
-                  className={`w-full text-left px-4 py-3 text-sm transition-colors ${
-                    theme === "dark"
-                      ? "bg-amber-400 text-slate-950 font-bold"
-                      : "text-slate-200 hover:bg-slate-800"
-                  }`}
-                >
-                  Dark Theme
-                </button>
-
-                <button
-                  onClick={() => {
-                    setTheme("light");
-                    setShowThemeSettings(false);
-                  }}
-                  className={`w-full text-left px-4 py-3 text-sm border-t border-slate-700 transition-colors ${
-                    theme === "light"
-                      ? "bg-amber-400 text-slate-950 font-bold"
-                      : "text-slate-200 hover:bg-slate-800"
-                  }`}
-                >
-                  Light Theme
-                </button>
-              </div>
-            )}
-          </div>
-        </div>
-      </div>
- 
-      <div className="theme-main-bg flex-1 min-w-0 overflow-hidden bg-[radial-gradient(circle_at_top_left,rgba(245,158,11,0.08),transparent_34%),#0b1220]">
-        <div className="fleet-mobile-topbar lg:hidden sticky top-0 z-[10010] items-center justify-between gap-3 px-3 py-3 border-b border-slate-800 bg-[#050814]/95 backdrop-blur text-white">
+        {mobileSidebarOpen && (
           <button
             type="button"
-            onClick={() => setMobileSidebarOpen(true)}
-            className="h-10 w-10 flex items-center justify-center rounded-xl border border-slate-700 bg-slate-900 text-amber-300 shadow-lg"
-            aria-label="Open sidebar menu"
+            aria-label="Close mobile sidebar overlay"
+            onClick={() => setMobileSidebarOpen(false)}
+            className="fixed inset-0 z-[10030] bg-black/65 backdrop-blur-sm lg:hidden"
+          />
+        )}
+
+        <div
+          className={`fleet-mobile-sidebar ${sidebarContentCollapsed ? "lg:w-20" : "lg:w-64"} fixed lg:sticky lg:top-0 inset-y-0 left-0 z-[10040] h-screen max-h-screen overflow-y-auto overscroll-contain shrink-0 bg-[#050814] text-white border-r border-slate-800/80 shadow-2xl p-4 flex flex-col transition-all duration-300 ${
+            mobileSidebarOpen ? "translate-x-0" : "-translate-x-full"
+          } lg:translate-x-0`}
+        >
+          <button
+            type="button"
+            onClick={() => setMobileSidebarOpen(false)}
+            className="lg:hidden absolute top-3 right-3 h-9 w-9 rounded-xl border border-slate-700 bg-slate-900 text-slate-300"
+            aria-label="Close sidebar menu"
           >
-            ☰
+            ×
           </button>
 
-          <div className="flex items-center gap-2 min-w-0">
+          <div className="flex flex-col items-center mb-5">
             <img
-              src={theme === "dark" ? "/icons/fleet-fuel-pro-dark.png" : "/icons/fleet-fuel-pro-light.png"}
+              src={
+                theme === "dark"
+                  ? "/icons/fleet-fuel-pro-dark.png"
+                  : "/icons/fleet-fuel-pro-light.png"
+              }
               alt="Fleet Fuel PRO"
-              className="h-8 w-auto object-contain shrink-0"
+              className={`${sidebarContentCollapsed ? "w-12" : "w-28"} h-auto object-contain mb-3 select-none transition-all duration-300`}
               draggable={false}
             />
-            <div className="min-w-0">
-              <p className="text-sm font-black text-slate-100 truncate">Fleet Fuel PRO</p>
-              <p className="text-[10px] uppercase tracking-[0.14em] text-slate-500 truncate">
-                {currentUser?.role || "User"} • {currentUserProjectLabel}
+
+            {!sidebarContentCollapsed && (
+              <p className="text-[11px] text-slate-500 uppercase tracking-[0.22em] text-center">
+                Fleet Fuel Management System
               </p>
-            </div>
+            )}
           </div>
 
           <button
-            type="button"
-            onClick={() => setShowThemeSettings((prev) => !prev)}
-            className="h-10 w-10 flex items-center justify-center rounded-xl border border-slate-700 bg-slate-900 text-slate-300 shadow-lg"
-            aria-label="Open theme settings"
+            onClick={() => setSidebarCollapsed(!sidebarContentCollapsed)}
+            className="mb-4 w-full hidden lg:flex items-center justify-center gap-2 px-3 py-2 rounded-xl text-xs font-semibold cursor-pointer transition-all duration-200 text-slate-400 hover:bg-slate-800/70 hover:text-white border border-slate-800/80"
+            title={
+              sidebarContentCollapsed ? "Expand sidebar" : "Collapse sidebar"
+            }
           >
-            ⚙
+            <span>{sidebarContentCollapsed ? "»" : "«"}</span>
+            {!sidebarContentCollapsed && <span>Collapse</span>}
           </button>
+
+          <ul className="space-y-2">
+            {sidebarItems.map(({ key, label, Icon }) => (
+              <li key={key}>
+                <button
+                  onClick={() => {
+                    setPage(key);
+                    setMobileSidebarOpen(false);
+                  }}
+                  className={`w-full flex items-center ${sidebarContentCollapsed ? "justify-center px-3" : "gap-3 text-left px-4"} py-3 rounded-xl text-sm font-semibold cursor-pointer transition-all duration-200 ${page === key ? "bg-amber-400 text-slate-950 shadow-lg shadow-amber-500/15" : "text-slate-300 hover:bg-slate-800/70 hover:text-white"}`}
+                  title={label}
+                >
+                  <Icon size={18} className="shrink-0" />
+                  {!sidebarContentCollapsed && (
+                    <span className="flex items-center gap-2">
+                      <span>{label}</span>
+                      {key === "notifications" &&
+                        unreadNotificationCount > 0 && (
+                          <span className="bg-amber-400 text-slate-950 text-[10px] px-2 py-0.5 rounded-full font-black">
+                            {unreadNotificationCount}
+                          </span>
+                        )}
+                      {key === "approvals" &&
+                        routedPendingApprovalCount > 0 && (
+                          <span className="bg-red-500 text-white text-[10px] px-2 py-0.5 rounded-full">
+                            {routedPendingApprovalCount}
+                          </span>
+                        )}
+                    </span>
+                  )}
+                </button>
+              </li>
+            ))}
+          </ul>
+
+          {!sidebarContentCollapsed && currentUser && (
+            <div className="mt-4 rounded-2xl border border-slate-800/80 bg-slate-900/60 p-3">
+              <p className="text-[10px] uppercase tracking-[0.2em] text-slate-500 mb-1">
+                Signed in as
+              </p>
+              <p className="login-text text-sm font-bold text-slate-100 truncate">
+                {currentUser.fullName}
+              </p>
+              <p className="text-xs text-amber-300 mt-0.5">
+                {currentUser.role}
+              </p>
+              <div className="mt-2 rounded-xl border border-slate-800/80 bg-slate-950/40 px-3 py-2">
+                <p className="text-[9px] uppercase tracking-[0.16em] text-slate-500 mb-1">
+                  {currentUserProjectSectionLabel}
+                </p>
+                <select
+                  value={selectedProjectScopeOption?.value || ""}
+                  onChange={(event) =>
+                    setSelectedProjectScope(event.target.value)
+                  }
+                  disabled={projectScopeDropdownDisabled}
+                  className={`w-full rounded-lg border border-slate-700 bg-slate-950 px-2 py-1.5 text-xs font-semibold text-slate-100 outline-none transition ${
+                    projectScopeDropdownDisabled
+                      ? "cursor-not-allowed opacity-70"
+                      : "cursor-pointer hover:border-amber-400/70 focus:border-amber-400"
+                  }`}
+                  title={currentUserProjectLabel}
+                >
+                  {projectScopeOptions.length ? (
+                    projectScopeOptions.map((option) => (
+                      <option key={option.value} value={option.value}>
+                        {option.label}
+                      </option>
+                    ))
+                  ) : (
+                    <option value="">No Project Assigned</option>
+                  )}
+                </select>
+              </div>
+
+              <div className="mt-3 pt-3 border-t border-slate-800/80">
+                <button
+                  type="button"
+                  onClick={handleLogout}
+                  className="w-full rounded-lg border border-red-500/30 bg-red-500/10 px-3 py-2 text-xs font-bold text-red-300 hover:bg-red-500/20 transition"
+                >
+                  Logout
+                </button>
+              </div>
+            </div>
+          )}
+
+          <div className="mt-auto pt-4 border-t border-slate-800/80">
+            <div className="relative">
+              <button
+                onClick={() => setShowThemeSettings(!showThemeSettings)}
+                className={`w-full flex items-center ${sidebarContentCollapsed ? "justify-center px-3" : "justify-between gap-3 px-4"} py-3 rounded-xl text-sm font-semibold cursor-pointer transition-all duration-200 text-slate-300 hover:bg-slate-800/70 hover:text-white`}
+              >
+                <span className="flex flex-wrap items-center gap-3">
+                  <SidebarSvgIcon size={18} className="shrink-0">
+                    <circle cx="12" cy="12" r="3" />
+                    <path d="M12 2v2" />
+                    <path d="M12 20v2" />
+                    <path d="m4.93 4.93 1.41 1.41" />
+                    <path d="m17.66 17.66 1.41 1.41" />
+                    <path d="M2 12h2" />
+                    <path d="M20 12h2" />
+                    <path d="m6.34 17.66-1.41 1.41" />
+                    <path d="m19.07 4.93-1.41 1.41" />
+                  </SidebarSvgIcon>
+                  {!sidebarContentCollapsed && <span>Settings</span>}
+                </span>
+                {!sidebarContentCollapsed && (
+                  <span className="text-xs text-slate-500">Theme</span>
+                )}
+              </button>
+
+              {showThemeSettings && (
+                <div className="absolute left-0 bottom-full mb-2 w-full bg-slate-950 border border-slate-700 rounded-2xl shadow-2xl overflow-hidden z-[999999]">
+                  <button
+                    onClick={() => {
+                      setTheme("dark");
+                      setShowThemeSettings(false);
+                    }}
+                    className={`w-full text-left px-4 py-3 text-sm transition-colors ${
+                      theme === "dark"
+                        ? "bg-amber-400 text-slate-950 font-bold"
+                        : "text-slate-200 hover:bg-slate-800"
+                    }`}
+                  >
+                    Dark Theme
+                  </button>
+
+                  <button
+                    onClick={() => {
+                      setTheme("light");
+                      setShowThemeSettings(false);
+                    }}
+                    className={`w-full text-left px-4 py-3 text-sm border-t border-slate-700 transition-colors ${
+                      theme === "light"
+                        ? "bg-amber-400 text-slate-950 font-bold"
+                        : "text-slate-200 hover:bg-slate-800"
+                    }`}
+                  >
+                    Light Theme
+                  </button>
+                </div>
+              )}
+            </div>
+          </div>
         </div>
 
-        {showThemeSettings && (
-          <div className="lg:hidden fixed right-3 top-[62px] z-[10020] w-44 bg-slate-950 border border-slate-700 rounded-2xl shadow-2xl overflow-hidden">
+        <div className="theme-main-bg flex-1 min-w-0 overflow-hidden bg-[radial-gradient(circle_at_top_left,rgba(245,158,11,0.08),transparent_34%),#0b1220]">
+          <div className="fleet-mobile-topbar lg:hidden sticky top-0 z-[10010] items-center justify-between gap-3 px-3 py-3 border-b border-slate-800 bg-[#050814]/95 backdrop-blur text-white">
             <button
-              onClick={() => {
-                setTheme("dark");
-                setShowThemeSettings(false);
-              }}
-              className={`w-full text-left px-4 py-3 text-sm transition-colors ${
-                theme === "dark"
-                  ? "bg-amber-400 text-slate-950 font-bold"
-                  : "text-slate-200 hover:bg-slate-800"
-              }`}
+              type="button"
+              onClick={() => setMobileSidebarOpen(true)}
+              className="h-10 w-10 flex items-center justify-center rounded-xl border border-slate-700 bg-slate-900 text-amber-300 shadow-lg"
+              aria-label="Open sidebar menu"
             >
-              Dark Theme
+              ☰
             </button>
 
+            <div className="flex items-center gap-2 min-w-0">
+              <img
+                src={
+                  theme === "dark"
+                    ? "/icons/fleet-fuel-pro-dark.png"
+                    : "/icons/fleet-fuel-pro-light.png"
+                }
+                alt="Fleet Fuel PRO"
+                className="h-8 w-auto object-contain shrink-0"
+                draggable={false}
+              />
+              <div className="min-w-0">
+                <p className="text-sm font-black text-slate-100 truncate">
+                  Fleet Fuel PRO
+                </p>
+                <p className="text-[10px] uppercase tracking-[0.14em] text-slate-500 truncate">
+                  {currentUser?.role || "User"} • {currentUserProjectLabel}
+                </p>
+              </div>
+            </div>
+
             <button
-              onClick={() => {
-                setTheme("light");
-                setShowThemeSettings(false);
-              }}
-              className={`w-full text-left px-4 py-3 text-sm border-t border-slate-700 transition-colors ${
-                theme === "light"
-                  ? "bg-amber-400 text-slate-950 font-bold"
-                  : "text-slate-200 hover:bg-slate-800"
-              }`}
+              type="button"
+              onClick={() => setShowThemeSettings((prev) => !prev)}
+              className="h-10 w-10 flex items-center justify-center rounded-xl border border-slate-700 bg-slate-900 text-slate-300 shadow-lg"
+              aria-label="Open theme settings"
             >
-              Light Theme
+              ⚙
             </button>
           </div>
-        )}
 
-        {renderPage()}
-	{!isOnline && (
-        <div className="fixed top-0 left-0 right-0 z-[999998] bg-red-600 text-white text-center text-sm font-semibold py-2 shadow-lg">
-          {NETWORK_OFFLINE_MESSAGE}
+          {showThemeSettings && (
+            <div className="lg:hidden fixed right-3 top-[62px] z-[10020] w-44 bg-slate-950 border border-slate-700 rounded-2xl shadow-2xl overflow-hidden">
+              <button
+                onClick={() => {
+                  setTheme("dark");
+                  setShowThemeSettings(false);
+                }}
+                className={`w-full text-left px-4 py-3 text-sm transition-colors ${
+                  theme === "dark"
+                    ? "bg-amber-400 text-slate-950 font-bold"
+                    : "text-slate-200 hover:bg-slate-800"
+                }`}
+              >
+                Dark Theme
+              </button>
+
+              <button
+                onClick={() => {
+                  setTheme("light");
+                  setShowThemeSettings(false);
+                }}
+                className={`w-full text-left px-4 py-3 text-sm border-t border-slate-700 transition-colors ${
+                  theme === "light"
+                    ? "bg-amber-400 text-slate-950 font-bold"
+                    : "text-slate-200 hover:bg-slate-800"
+                }`}
+              >
+                Light Theme
+              </button>
+            </div>
+          )}
+
+          {renderPage()}
+          {!isOnline && (
+            <div className="fixed top-0 left-0 right-0 z-[999998] bg-red-600 text-white text-center text-sm font-semibold py-2 shadow-lg">
+              {NETWORK_OFFLINE_MESSAGE}
+            </div>
+          )}
+          {toast && <Toast type={toast.type} message={toast.message} />}
         </div>
-      )}
-      {toast && <Toast type={toast.type} message={toast.message} />}
       </div>
-    </div>
     </>
   );
 }
- 
+
 function LoginPage({
   users = [],
   companies = [],
@@ -4227,15 +4620,18 @@ function LoginPage({
   setTheme,
   actionLoading = { active: false, label: "" },
 }) {
-
   const loginCompanies = useMemo(
     () =>
-      mergePlatformConsoleWithCompanies(companies).filter((company, index, list) =>
-        company?.id &&
-        normalizeSystemUserStatus(company.status || "Active") === "Active" &&
-        list.findIndex((item) => normalizeScopeValue(item.id) === normalizeScopeValue(company.id)) === index
+      mergePlatformConsoleWithCompanies(companies).filter(
+        (company, index, list) =>
+          company?.id &&
+          normalizeSystemUserStatus(company.status || "Active") === "Active" &&
+          list.findIndex(
+            (item) =>
+              normalizeScopeValue(item.id) === normalizeScopeValue(company.id),
+          ) === index,
       ),
-    [companies]
+    [companies],
   );
 
   const activeUsers = users.filter((user) => user.status === "Active");
@@ -4244,7 +4640,6 @@ function LoginPage({
     const email = String(loginIdentifier || "")
       .trim()
       .toLowerCase();
-
 
     if (!email || !email.includes("@")) {
       setSelectedCompanyId?.("");
@@ -4256,7 +4651,7 @@ function LoginPage({
     const timer = window.setTimeout(async () => {
       try {
         const response = await api.get(
-          `/auth/login-company?email=${encodeURIComponent(email)}`
+          `/auth/login-company?email=${encodeURIComponent(email)}`,
         );
 
         if (cancelled) return;
@@ -4268,7 +4663,6 @@ function LoginPage({
           : info.companyId || "";
 
         setSelectedCompanyId?.(nextCompanyId);
-
       } catch (error) {
         if (cancelled) return;
 
@@ -4287,7 +4681,11 @@ function LoginPage({
       <style jsx global>{`
         [data-theme="light"] .theme-main-bg {
           background:
-            radial-gradient(circle at top left, rgba(245, 158, 11, 0.10), transparent 34%),
+            radial-gradient(
+              circle at top left,
+              rgba(245, 158, 11, 0.1),
+              transparent 34%
+            ),
             #f4f7fb !important;
         }
 
@@ -4329,13 +4727,12 @@ function LoginPage({
           color: #b45309 !important;
         }
 
-
         /* Projects page polish */
         [data-theme="light"] .project-card-print {
           background: #ffffff !important;
           color: #0f172a !important;
           border-color: #cbd5e1 !important;
-          box-shadow: 0 18px 35px rgba(15, 23, 42, 0.10) !important;
+          box-shadow: 0 18px 35px rgba(15, 23, 42, 0.1) !important;
         }
 
         [data-theme="light"] .project-card-print .project-title {
@@ -4358,7 +4755,7 @@ function LoginPage({
         [data-theme="light"] .project-card-print .metric {
           background: #f8fafc !important;
           border-color: #cbd5e1 !important;
-          box-shadow: inset 0 1px 0 rgba(255,255,255,0.75) !important;
+          box-shadow: inset 0 1px 0 rgba(255, 255, 255, 0.75) !important;
         }
 
         [data-theme="light"] .project-card-print .text-slate-400,
@@ -4377,7 +4774,6 @@ function LoginPage({
         [data-theme="light"] .project-card-print .border-gray-700 {
           border-color: #cbd5e1 !important;
         }
-
 
         /* Global clickable cursor */
         button,
@@ -4403,14 +4799,23 @@ function LoginPage({
 
         /* Project cards theme fix */
         [data-theme="light"] .project-card-print {
-          background: linear-gradient(135deg, #ffffff 0%, #f8fafc 100%) !important;
+          background: linear-gradient(
+            135deg,
+            #ffffff 0%,
+            #f8fafc 100%
+          ) !important;
           color: #0f172a !important;
           border-color: #cbd5e1 !important;
-          box-shadow: 0 18px 35px rgba(15, 23, 42, 0.10) !important;
+          box-shadow: 0 18px 35px rgba(15, 23, 42, 0.1) !important;
         }
 
         [data-theme="light"] .project-card-print::before {
-          background: linear-gradient(90deg, rgba(245, 158, 11, 0.95), rgba(59, 130, 246, 0.55), transparent) !important;
+          background: linear-gradient(
+            90deg,
+            rgba(245, 158, 11, 0.95),
+            rgba(59, 130, 246, 0.55),
+            transparent
+          ) !important;
         }
 
         [data-theme="light"] .project-card-print .project-title {
@@ -4469,142 +4874,182 @@ function LoginPage({
         </div>
       )}
 
-
       <div
         data-theme={theme}
         className="theme-main-bg min-h-screen bg-[#070b14] text-slate-100 flex items-center justify-center p-6"
       >
-      <div className="w-full max-w-5xl grid lg:grid-cols-[1.05fr_0.95fr] gap-6 items-stretch">
-        <div className="login-surface rounded-3xl border border-slate-800 bg-slate-900/70 shadow-2xl p-8 flex flex-col justify-between overflow-hidden relative">
-          <div className="absolute -top-20 -left-20 h-64 w-64 rounded-full bg-amber-400/10 blur-3xl" />
-          <div className="absolute -bottom-24 -right-20 h-72 w-72 rounded-full bg-blue-500/10 blur-3xl" />
+        <div className="w-full max-w-5xl grid lg:grid-cols-[1.05fr_0.95fr] gap-6 items-stretch">
+          <div className="login-surface rounded-3xl border border-slate-800 bg-slate-900/70 shadow-2xl p-8 flex flex-col justify-between overflow-hidden relative">
+            <div className="absolute -top-20 -left-20 h-64 w-64 rounded-full bg-amber-400/10 blur-3xl" />
+            <div className="absolute -bottom-24 -right-20 h-72 w-72 rounded-full bg-blue-500/10 blur-3xl" />
 
-          <div className="relative">
-            <div className="flex items-center gap-4 mb-8">
-              <img
-                src={theme === "dark" ? "/icons/fleet-fuel-pro-dark.png" : "/icons/fleet-fuel-pro-light.png"}
-                alt="Fleet Fuel PRO"
-                className="w-20 h-auto object-contain"
-                draggable={false}
-              />
-              <div>
-                <p className="text-[11px] uppercase tracking-[0.25em] text-amber-300 font-bold">
-                  Enterprise Access
+            <div className="relative">
+              <div className="flex items-center gap-4 mb-8">
+                <img
+                  src={
+                    theme === "dark"
+                      ? "/icons/fleet-fuel-pro-dark.png"
+                      : "/icons/fleet-fuel-pro-light.png"
+                  }
+                  alt="Fleet Fuel PRO"
+                  className="w-20 h-auto object-contain"
+                  draggable={false}
+                />
+                <div>
+                  <p className="text-[11px] uppercase tracking-[0.25em] text-amber-300 font-bold">
+                    Enterprise Access
+                  </p>
+                  <h1 className="login-title text-3xl font-black text-white mt-1">
+                    Fleet Fuel PRO
+                  </h1>
+                </div>
+              </div>
+
+              <h2 className="login-text text-xl font-bold text-slate-100 mb-3">
+                Sign in to Diesel Management System
+              </h2>
+              <p className="login-muted text-sm text-slate-400 leading-6 max-w-xl">
+                Enter your username and password. Company users sign in with
+                company code plus employee ID, for example ffp.2062.
+              </p>
+            </div>
+
+            <div className="relative mt-8 grid sm:grid-cols-3 gap-3">
+              <div className="login-soft rounded-2xl border border-slate-800 bg-slate-950/40 p-4">
+                <p className="text-2xl font-black text-amber-300">
+                  {activeUsers.length}
                 </p>
-                <h1 className="login-title text-3xl font-black text-white mt-1">Fleet Fuel PRO</h1>
+                <p className="login-muted text-xs text-slate-500 mt-1">
+                  Active Users
+                </p>
+              </div>
+              <div className="login-soft rounded-2xl border border-slate-800 bg-slate-950/40 p-4">
+                <p className="text-2xl font-black text-emerald-300">
+                  {activeUsers.filter((user) => user.role === "Manager").length}
+                </p>
+                <p className="login-muted text-xs text-slate-500 mt-1">
+                  Managers
+                </p>
+              </div>
+              <div className="login-soft rounded-2xl border border-slate-800 bg-slate-950/40 p-4">
+                <p className="text-2xl font-black text-blue-300">
+                  {
+                    activeUsers.filter((user) => user.role === "Operator")
+                      .length
+                  }
+                </p>
+                <p className="login-muted text-xs text-slate-500 mt-1">
+                  Operators
+                </p>
               </div>
             </div>
-
-            <h2 className="login-text text-xl font-bold text-slate-100 mb-3">
-              Sign in to Diesel Management System
-            </h2>
-            <p className="login-muted text-sm text-slate-400 leading-6 max-w-xl">
-              Enter your username and password. Company users sign in with company code plus employee ID, for example ffp.2062.
-            </p>
           </div>
 
-          <div className="relative mt-8 grid sm:grid-cols-3 gap-3">
-            <div className="login-soft rounded-2xl border border-slate-800 bg-slate-950/40 p-4">
-              <p className="text-2xl font-black text-amber-300">{activeUsers.length}</p>
-              <p className="login-muted text-xs text-slate-500 mt-1">Active Users</p>
-            </div>
-            <div className="login-soft rounded-2xl border border-slate-800 bg-slate-950/40 p-4">
-              <p className="text-2xl font-black text-emerald-300">
-                {activeUsers.filter((user) => user.role === "Manager").length}
-              </p>
-              <p className="login-muted text-xs text-slate-500 mt-1">Managers</p>
-            </div>
-            <div className="login-soft rounded-2xl border border-slate-800 bg-slate-950/40 p-4">
-              <p className="text-2xl font-black text-blue-300">
-                {activeUsers.filter((user) => user.role === "Operator").length}
-              </p>
-              <p className="login-muted text-xs text-slate-500 mt-1">Operators</p>
-            </div>
-          </div>
-        </div>
-
-        <form
-          onSubmit={handleLogin}
-          className="login-card rounded-3xl border border-slate-800 bg-slate-900/90 shadow-2xl p-6 sm:p-8"
-        >
-          <div className="flex items-center justify-between gap-4 mb-7">
-            <div>
-              <p className="login-muted text-[10px] uppercase tracking-[0.22em] text-slate-500 font-bold">Backend JWT Session</p>
-              <h3 className="login-title text-2xl font-black text-white mt-1">Login</h3>
-            </div>
-            <button
-              type="button"
-              onClick={() => setTheme(theme === "dark" ? "light" : "dark")}
-              className="login-theme-button rounded-xl border border-slate-700 px-3 py-2 text-xs font-bold text-slate-300 hover:border-amber-400 hover:text-amber-300 transition"
-            >
-              {theme === "dark" ? "Switch to Light" : "Switch to Dark"}
-            </button>
-          </div>
-
-          <label className="block mb-4">
-            <span className="login-muted text-xs font-bold text-slate-400">Username</span>
-            <input
-              value={loginIdentifier}
-              onChange={(e) => setLoginIdentifier(e.target.value.toLowerCase())}
-              placeholder="ffp.2062"
-              className="login-input mt-2 w-full rounded-2xl border border-slate-700 bg-slate-950 px-4 py-3 text-sm text-white outline-none focus:border-amber-400 focus:ring-2 focus:ring-amber-400/20"
-              autoFocus
-            />
-            <p className="login-muted mt-2 text-[11px] text-slate-500">
-              Company users use companycode.employeeId. Platform Console users can use their platform email if configured.
-            </p>
-          </label>
-
-          <label className="block mb-4">
-            <span className="login-muted text-xs font-bold text-slate-400">Password</span>
-            <input
-              value={loginPassword}
-              onChange={(e) => setLoginPassword?.(e.target.value)}
-              placeholder="Admin@12345"
-              type="password"
-              className="login-input mt-2 w-full rounded-2xl border border-slate-700 bg-slate-950 px-4 py-3 text-sm text-white outline-none focus:border-amber-400 focus:ring-2 focus:ring-amber-400/20"
-            />
-          </label>
-
-          {loginError && (
-            <div className="mb-5 rounded-2xl border border-red-500/30 bg-red-500/10 px-4 py-3 text-sm text-red-300">
-              {loginError}
-            </div>
-          )}
-
-          <button
-            type="submit"
-            disabled={actionLoading.active}
-            className="w-full rounded-2xl bg-amber-400 px-4 py-3 text-sm font-black text-slate-950 hover:bg-amber-300 transition shadow-lg shadow-amber-500/20 disabled:cursor-not-allowed disabled:opacity-60"
+          <form
+            onSubmit={handleLogin}
+            className="login-card rounded-3xl border border-slate-800 bg-slate-900/90 shadow-2xl p-6 sm:p-8"
           >
-            {actionLoading.active ? "Signing In..." : "Sign In"}
-          </button>
-
-          <div className="login-soft mt-6 rounded-2xl border border-slate-800 bg-slate-950/40 p-4">
-            <p className="login-muted text-xs font-bold text-slate-400 mb-3">Available test users</p>
-            <div className="max-h-52 overflow-y-auto space-y-2 pr-1">
-              {activeUsers.map((user) => (
-                <button
-                  key={makeTenantEntityKey(user)}
-                  type="button"
-                  onClick={() => setLoginIdentifier(String(user.username || user.email || user.id || "").toLowerCase())}
-                  className="login-card w-full text-left rounded-xl border border-slate-800 bg-slate-900 px-3 py-2 hover:border-amber-400 transition"
-                >
-                  <div className="flex items-center justify-between gap-3">
-                    <span className="login-text text-sm font-bold text-slate-100 truncate">{user.username || user.fullName}</span>
-                    <span className="text-[10px] rounded-full bg-amber-400/10 text-amber-300 px-2 py-0.5 border border-amber-400/20">
-                      {user.role}
-                    </span>
-                  </div>
-                  <div className="login-muted text-xs text-slate-500 mt-1">{user.fullName || user.email || user.id} · {user.teamProject || "Global"}</div>
-                </button>
-              ))}
+            <div className="flex items-center justify-between gap-4 mb-7">
+              <div>
+                <p className="login-muted text-[10px] uppercase tracking-[0.22em] text-slate-500 font-bold">
+                  Backend JWT Session
+                </p>
+                <h3 className="login-title text-2xl font-black text-white mt-1">
+                  Login
+                </h3>
+              </div>
+              <button
+                type="button"
+                onClick={() => setTheme(theme === "dark" ? "light" : "dark")}
+                className="login-theme-button rounded-xl border border-slate-700 px-3 py-2 text-xs font-bold text-slate-300 hover:border-amber-400 hover:text-amber-300 transition"
+              >
+                {theme === "dark" ? "Switch to Light" : "Switch to Dark"}
+              </button>
             </div>
-          </div>
-        </form>
-      </div>
+
+            <label className="block mb-4">
+              <span className="login-muted text-xs font-bold text-slate-400">
+                Username
+              </span>
+              <input
+                value={loginIdentifier}
+                onChange={(e) =>
+                  setLoginIdentifier(e.target.value.toLowerCase())
+                }
+                placeholder="ffp.2062"
+                className="login-input mt-2 w-full rounded-2xl border border-slate-700 bg-slate-950 px-4 py-3 text-sm text-white outline-none focus:border-amber-400 focus:ring-2 focus:ring-amber-400/20"
+                autoFocus
+              />
+              <p className="login-muted mt-2 text-[11px] text-slate-500">
+                Company users use companycode.employeeId. Platform Console users
+                can use their platform email if configured.
+              </p>
+            </label>
+
+            <label className="block mb-4">
+              <span className="login-muted text-xs font-bold text-slate-400">
+                Password
+              </span>
+              <input
+                value={loginPassword}
+                onChange={(e) => setLoginPassword?.(e.target.value)}
+                placeholder="Admin@12345"
+                type="password"
+                className="login-input mt-2 w-full rounded-2xl border border-slate-700 bg-slate-950 px-4 py-3 text-sm text-white outline-none focus:border-amber-400 focus:ring-2 focus:ring-amber-400/20"
+              />
+            </label>
+
+            {loginError && (
+              <div className="mb-5 rounded-2xl border border-red-500/30 bg-red-500/10 px-4 py-3 text-sm text-red-300">
+                {loginError}
+              </div>
+            )}
+
+            <button
+              type="submit"
+              disabled={actionLoading.active}
+              className="w-full rounded-2xl bg-amber-400 px-4 py-3 text-sm font-black text-slate-950 hover:bg-amber-300 transition shadow-lg shadow-amber-500/20 disabled:cursor-not-allowed disabled:opacity-60"
+            >
+              {actionLoading.active ? "Signing In..." : "Sign In"}
+            </button>
+
+            <div className="login-soft mt-6 rounded-2xl border border-slate-800 bg-slate-950/40 p-4">
+              <p className="login-muted text-xs font-bold text-slate-400 mb-3">
+                Available test users
+              </p>
+              <div className="max-h-52 overflow-y-auto space-y-2 pr-1">
+                {activeUsers.map((user) => (
+                  <button
+                    key={makeTenantEntityKey(user)}
+                    type="button"
+                    onClick={() =>
+                      setLoginIdentifier(
+                        String(
+                          user.username || user.email || user.id || "",
+                        ).toLowerCase(),
+                      )
+                    }
+                    className="login-card w-full text-left rounded-xl border border-slate-800 bg-slate-900 px-3 py-2 hover:border-amber-400 transition"
+                  >
+                    <div className="flex items-center justify-between gap-3">
+                      <span className="login-text text-sm font-bold text-slate-100 truncate">
+                        {user.username || user.fullName}
+                      </span>
+                      <span className="text-[10px] rounded-full bg-amber-400/10 text-amber-300 px-2 py-0.5 border border-amber-400/20">
+                        {user.role}
+                      </span>
+                    </div>
+                    <div className="login-muted text-xs text-slate-500 mt-1">
+                      {user.fullName || user.email || user.id} ·{" "}
+                      {user.teamProject || "Global"}
+                    </div>
+                  </button>
+                ))}
+              </div>
+            </div>
+          </form>
+        </div>
       </div>
     </>
   );
 }
-

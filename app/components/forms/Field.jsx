@@ -13,7 +13,7 @@ export default function Field({
 }) {
   return (
     <div className="grid grid-cols-1 sm:grid-cols-3 items-start gap-2 sm:gap-4">
-      <label className="font-medium text-gray-700 pt-2">
+      <label className="pt-2 font-medium text-slate-300">
         {label}
       </label>
  
@@ -24,11 +24,11 @@ export default function Field({
           onChange={onChange}
           disabled={disabled}
           list={list || undefined}
-          className={`w-full border rounded-lg p-2 ${
+          className={`w-full rounded-lg border bg-slate-900 p-2 text-white placeholder:text-slate-500 outline-none focus:ring-2 ${
             error
-              ? "border-red-500 bg-red-50 focus:outline-none focus:ring-2 focus:ring-red-200"
-              : "border-gray-300"
-          } ${disabled ? "bg-gray-100 text-gray-400 cursor-not-allowed" : ""}`}
+              ? "border-red-500 bg-red-500/10 focus:ring-red-500/30"
+              : "border-slate-700 focus:border-amber-400 focus:ring-amber-400/20"
+          } ${disabled ? "bg-slate-700 text-slate-500 cursor-not-allowed opacity-70" : ""}`}
           placeholder={placeholder}
         />
         {list && Array.isArray(datalistOptions) && datalistOptions.length > 0 && (
@@ -39,7 +39,7 @@ export default function Field({
           </datalist>
         )}
         {error && (
-          <p className="mt-1 text-xs font-semibold text-red-600">
+          <p className="mt-1 text-xs font-semibold text-red-300">
             {error}
           </p>
         )}

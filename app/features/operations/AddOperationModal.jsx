@@ -758,32 +758,32 @@ export default function AddOperationModal({
 
   return (
     <div className="fleet-modal-backdrop fixed inset-0 z-[9998] bg-black/70 flex items-center justify-center p-4">
-      <div className="bg-white text-black w-full max-w-3xl rounded-2xl shadow-2xl overflow-hidden">
-        <div className="flex justify-between items-center p-5 border-b">
+      <div className="w-full max-w-3xl overflow-hidden rounded-2xl border border-slate-700 bg-slate-950 text-slate-100 shadow-2xl">
+        <div className="flex justify-between items-center p-5 border-b border-slate-700">
           <div>
-            <h2 className="text-2xl font-extrabold text-slate-900">Add Diesel Operation</h2>
-            <p className="text-sm text-gray-500 mt-1">
+            <h2 className="text-2xl font-extrabold text-white">Add Diesel Operation</h2>
+            <p className="text-sm text-slate-400 mt-1">
               Select the operation type first, then complete all required fields and the 3 mandatory photos.
             </p>
           </div>
 
           <button
             onClick={closeForm}
-            className="text-2xl text-gray-500 hover:text-red-500 cursor-pointer"
+            className="text-2xl text-slate-400 hover:text-red-400 cursor-pointer"
           >
             ×
           </button>
         </div>
 
         <div className="p-5 grid grid-cols-1 gap-4 max-h-[80vh] overflow-y-auto">
-          <div className="bg-yellow-100 border border-yellow-300 rounded-xl p-3 text-sm">
+          <div className="rounded-xl border border-amber-500/30 bg-amber-500/10 p-3 text-sm text-amber-300">
             User Project Scope:{" "}
             <span className="font-bold">
               {userProjectDisplayName}
             </span>
           </div>
 
-          <div className="bg-slate-50 border border-slate-200 rounded-xl p-3 text-sm text-slate-700">
+          <div className="rounded-xl border border-slate-700 bg-slate-900 p-3 text-sm text-slate-300">
             Created By:{" "}
             <span className="font-bold">
               {currentUser?.fullName || currentUser?.username || currentUser?.email || currentUser?.id || "-"}
@@ -826,9 +826,9 @@ export default function AddOperationModal({
                   {shouldShowSourceStationBalance && (
                     <div className="grid grid-cols-1 sm:grid-cols-3 gap-2 sm:gap-4 -mt-2">
                       <div />
-                      <p className="col-span-2 text-xs text-slate-500 px-1">
+                      <p className="col-span-2 text-xs text-slate-400 px-1">
                         Current balance:{" "}
-                        <span className="font-semibold text-slate-700">
+                        <span className="font-semibold text-slate-200">
                           {sourceStationBalance === null
                             ? "-"
                             : `${formatNumber(sourceStationBalance)} L`}
@@ -839,8 +839,8 @@ export default function AddOperationModal({
 
                   {sourceStation && (
                     <div className="grid grid-cols-1 sm:grid-cols-3 items-start sm:items-center gap-2 sm:gap-4">
-                      <label className="font-medium text-gray-700">Source Project</label>
-                      <div className="col-span-2 bg-yellow-100 border border-yellow-300 rounded-lg p-2 text-gray-800 font-semibold">
+                      <label className="font-medium text-slate-300">Source Project</label>
+                      <div className="col-span-2 rounded-lg border border-amber-500/30 bg-amber-500/10 p-2 font-semibold text-amber-300">
                         {selectedSourceStation?.project || "-"}
                       </div>
                     </div>
@@ -867,9 +867,9 @@ export default function AddOperationModal({
               {shouldShowDestinationStationBalance && (
                 <div className="grid grid-cols-1 sm:grid-cols-3 gap-2 sm:gap-4 -mt-2">
                   <div />
-                  <p className="col-span-2 text-xs text-slate-500 px-1">
+                  <p className="col-span-2 text-xs text-slate-400 px-1">
                     Current balance:{" "}
-                    <span className="font-semibold text-slate-700">
+                    <span className="font-semibold text-slate-200">
                       {destinationStationBalance === null
                         ? "-"
                         : `${formatNumber(destinationStationBalance)} L`}
@@ -880,8 +880,8 @@ export default function AddOperationModal({
 
               {isExternalTransfer && destinationId && (
                 <div className="grid grid-cols-1 sm:grid-cols-3 items-start sm:items-center gap-2 sm:gap-4">
-                  <label className="font-medium text-gray-700">Destination Project</label>
-                  <div className="col-span-2 bg-blue-50 border border-blue-200 rounded-lg p-2 text-gray-800 font-semibold">
+                  <label className="font-medium text-slate-300">Destination Project</label>
+                  <div className="col-span-2 rounded-lg border border-blue-500/30 bg-blue-500/15 p-2 font-semibold text-blue-300">
                     {selectedDestinationStation?.project || "-"}
                   </div>
                 </div>
@@ -889,8 +889,8 @@ export default function AddOperationModal({
 
               {isAssetRefuel && destinationId && (
                 <div className="grid grid-cols-1 sm:grid-cols-3 items-start sm:items-center gap-2 sm:gap-4">
-                  <label className="font-medium text-gray-700">Tank Capacity</label>
-                  <div className="col-span-2 bg-gray-100 border rounded-lg p-2 text-gray-700">
+                  <label className="font-medium text-slate-300">Tank Capacity</label>
+                  <div className="col-span-2 rounded-lg border border-slate-700 bg-slate-900 p-2 text-slate-300">
                     {tankCapacity > 0 ? `${formatNumber(tankCapacity)} L` : "-"}
                   </div>
                 </div>
@@ -950,10 +950,10 @@ export default function AddOperationModal({
                 placeholder="Optional notes"
               />
 
-              <div className="border-t pt-4">
+              <div className="border-t border-slate-700 pt-4">
                 <h3 className="text-lg font-bold italic underline mb-3">Required Photos - 3 Mandatory Photos</h3>
 
-                <div className="bg-red-50 border border-red-200 rounded-xl p-3 text-sm text-red-700 mb-4">
+                <div className="mb-4 rounded-xl border border-red-500/35 bg-red-500/10 p-3 text-sm text-red-300">
                   All three photos below are required before saving this operation.
                 </div>
 
@@ -971,10 +971,10 @@ export default function AddOperationModal({
           )}
         </div>
 
-        <div className="flex justify-end gap-3 p-5 border-t">
+        <div className="flex justify-end gap-3 border-t border-slate-700 bg-slate-900/80 p-5">
           <button
             onClick={closeForm}
-            className="bg-gray-200 px-4 py-2 rounded-xl cursor-pointer"
+            className="cursor-pointer rounded-xl border border-slate-700 bg-slate-800 px-4 py-2 text-slate-200 hover:bg-slate-800/70"
           >
             Cancel
           </button>
@@ -985,7 +985,7 @@ export default function AddOperationModal({
             className={`px-5 py-2 rounded-xl font-semibold transition-all ${
               canSaveOperation
                 ? "bg-green-600 hover:bg-green-700 text-white cursor-pointer"
-                : "bg-gray-300 text-gray-500 cursor-not-allowed"
+                : "bg-slate-700 text-slate-400 opacity-60 cursor-not-allowed"
             }`}
           >
             Save Operation
@@ -1078,7 +1078,7 @@ function SearchableSelectField({
 
   return (
     <div className="grid grid-cols-1 sm:grid-cols-3 items-start sm:items-center gap-2 sm:gap-4">
-      <label className="font-medium text-gray-700">{label}</label>
+      <label className="font-medium text-slate-300">{label}</label>
 
       <div ref={dropdownRef} className="col-span-2 relative">
         <button
@@ -1093,27 +1093,27 @@ function SearchableSelectField({
           }}
           className={`w-full border rounded-lg p-3 text-left flex justify-between items-center ${
             disabled
-              ? "bg-gray-100 text-gray-400 cursor-not-allowed"
-              : "bg-white hover:border-yellow-500 cursor-pointer"
+              ? "bg-slate-800 text-slate-500 cursor-not-allowed"
+              : "bg-slate-900 text-slate-100 hover:border-amber-400 cursor-pointer"
           }`}
         >
-          <span className={value ? "text-black" : "text-gray-400"}>
+          <span className={value ? "text-slate-100" : "text-slate-500"}>
             {value || placeholder}
           </span>
 
-          <span className="text-gray-500">▾</span>
+          <span className="text-slate-400">▾</span>
         </button>
 
         {open && !disabled && (
           <div
             style={dropdownStyle}
-            className="bg-white border border-gray-300 rounded-xl shadow-2xl p-3 overflow-hidden"
+            className="overflow-hidden rounded-xl border border-slate-700 bg-slate-950 p-3 text-slate-100 shadow-2xl"
           >
             <input
               value={searchValue}
               onChange={(e) => setSearchValue(e.target.value)}
               placeholder={`Search ${label.toLowerCase()}...`}
-              className="w-full border rounded-lg p-2 mb-2"
+              className="mb-2 w-full rounded-lg border border-slate-700 bg-slate-900 p-2 text-white placeholder:text-slate-500 outline-none focus:border-amber-400"
               autoFocus
             />
 
@@ -1128,8 +1128,8 @@ function SearchableSelectField({
                       setSearchValue("");
                       setOpen(false);
                     }}
-                    className={`block w-full text-left px-3 py-2 rounded-lg hover:bg-yellow-100 cursor-pointer ${
-                      value === item ? "bg-yellow-200 font-bold" : ""
+                    className={`block w-full text-left px-3 py-2 rounded-lg hover:bg-amber-500/10 cursor-pointer ${
+                      value === item ? "bg-amber-500/20 text-amber-300 font-bold" : ""
                     }`}
                   >
                     {item}
@@ -1157,7 +1157,7 @@ function ImageField({ label, preview, setPreview, onUpload, showToast }) {
 
   return (
     <div className="grid grid-cols-1 sm:grid-cols-3 items-start gap-2 sm:gap-4 mb-4">
-      <label className="font-medium text-gray-700">{label}</label>
+      <label className="font-medium text-slate-300">{label}</label>
 
       <div className="col-span-2">
         <input

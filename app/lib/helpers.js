@@ -8,7 +8,6 @@ export function cleanCsvCell(value) {
     .trim();
 }
 
-
 export function parseCSV(csvText) {
   const rows = [];
   let currentRow = [];
@@ -64,35 +63,34 @@ export function parseCSV(csvText) {
   return rows;
 }
 
-
 export function normalizeSystemUserStatus(value) {
   const normalized = String(value || "")
     .trim()
     .toLowerCase()
     .replace(/[\s_-]+/g, "");
 
-  if (["inactive", "disabled", "deactivated"].includes(normalized)) return "Inactive";
+  if (["inactive", "disabled", "deactivated"].includes(normalized))
+    return "Inactive";
   if (["suspended", "blocked"].includes(normalized)) return "Suspended";
   return "Active";
 }
 
-
 export function normalizeScopeValue(value) {
-  return String(value ?? "").trim().toLowerCase();
+  return String(value ?? "")
+    .trim()
+    .toLowerCase();
 }
-
 
 export function isActiveProject(project) {
   return normalizeScopeValue(project?.status || "Active") === "active";
 }
-
 
 export function hasAssignedProjectManager(project) {
   return Boolean(
     project?.projectManagerId ||
       project?.managerUserId ||
       project?.managerId ||
-      project?.projectManager?.id
+      project?.projectManager?.id,
   );
 }
 
@@ -102,10 +100,12 @@ export function filterActiveProjects(projects = []) {
 
 export function filterAvailableProjects(projects = []) {
   return projects.filter(
-    (project) => project?.id && isActiveProject(project) && hasAssignedProjectManager(project)
+    (project) =>
+      project?.id &&
+      isActiveProject(project) &&
+      hasAssignedProjectManager(project),
   );
 }
-
 
 export function normalizeBackendAssetStatusForState(status) {
   const normalized = String(status || "ACTIVE")
@@ -126,7 +126,6 @@ export function normalizeBackendStationStatusForState(status) {
   if (normalized === "INACTIVE") return "Inactive";
   return "Active";
 }
-
 
 export function mapFrontendStationStatusForBackend(status) {
   const normalized = String(status || "ACTIVE")
@@ -196,7 +195,6 @@ export function mapBackendAssetForState(asset = {}) {
   };
 }
 
-
 export function mapBackendStationForState(station = {}) {
   const projectName =
     station.project?.name ||
@@ -210,7 +208,12 @@ export function mapBackendStationForState(station = {}) {
     stationBackendId: station.id || "",
     id: station.stationId || station.id || "",
     stationId: station.stationId || station.id || "",
-    name: station.name || station.stationName || station.stationId || station.id || "",
+    name:
+      station.name ||
+      station.stationName ||
+      station.stationId ||
+      station.id ||
+      "",
     type: station.type || "",
     capacity:
       station.capacity === undefined || station.capacity === null
@@ -261,110 +264,133 @@ export function mapBackendStationForState(station = {}) {
 }
 
 export const mapBackendProjectForState = (project = {}) => ({
-    backendId: project.id || "",
-    id: project.code || project.id || "",
-    code: project.code || project.id || "",
-    name: project.name || project.code || project.id || "",
-    location: project.location || "",
-    description: project.description || "",
-    status: project.isActive === false ? "Inactive" : "Active",
-    isActive: project.isActive !== false,
-    approvalStatus: "Approved",
-    companyId: project.companyId || project.company?.id || "",
-    companyName: project.company?.name || "",
-    projectManagerId: project.projectManagerId || project.projectManager?.id || "",
-    projectManagerName: project.projectManager?.fullName || "",
-    projectManagerEmail: project.projectManager?.email || "",
-    currentFuelPrice: Number(project.currentFuelPrice || 0),
-    fuelPriceCurrency: project.fuelPriceCurrency || project.company?.currency || "SAR",
-    fuelPriceEffectiveFrom: project.fuelPriceEffectiveFrom || "",
-    source: "Backend",
-    createdAt: project.createdAt || "",
-    updatedAt: project.updatedAt || "",
-  });
+  backendId: project.id || "",
+  id: project.code || project.id || "",
+  code: project.code || project.id || "",
+  name: project.name || project.code || project.id || "",
+  location: project.location || "",
+  description: project.description || "",
+  status: project.isActive === false ? "Inactive" : "Active",
+  isActive: project.isActive !== false,
+  approvalStatus: "Approved",
+  companyId: project.companyId || project.company?.id || "",
+  companyName: project.company?.name || "",
+  projectManagerId:
+    project.projectManagerId || project.projectManager?.id || "",
+  projectManagerName: project.projectManager?.fullName || "",
+  projectManagerEmail: project.projectManager?.email || "",
+  currentFuelPrice: Number(project.currentFuelPrice || 0),
+  currentBaseFuelPrice:
+    project.currentBaseFuelPrice === null ||
+    project.currentBaseFuelPrice === undefined
+      ? null
+      : Number(project.currentBaseFuelPrice),
+  currentTransportCostPerLiter:
+    project.currentTransportCostPerLiter === null ||
+    project.currentTransportCostPerLiter === undefined
+      ? null
+      : Number(project.currentTransportCostPerLiter),
+  currentVatRate:
+    project.currentVatRate === null || project.currentVatRate === undefined
+      ? null
+      : Number(project.currentVatRate),
+  currentGrossFuelPrice:
+    project.currentGrossFuelPrice === null ||
+    project.currentGrossFuelPrice === undefined
+      ? null
+      : Number(project.currentGrossFuelPrice),
+  fuelPriceCurrency:
+    project.fuelPriceCurrency || project.company?.currency || "SAR",
+  fuelPriceEffectiveFrom: project.fuelPriceEffectiveFrom || "",
+  source: "Backend",
+  createdAt: project.createdAt || "",
+  updatedAt: project.updatedAt || "",
+});
 
 export const mapBackendEmployeeStatusForState = (status) => {
-    const normalized = String(status || "")
-      .trim()
-      .toUpperCase();
+  const normalized = String(status || "")
+    .trim()
+    .toUpperCase();
 
-    if (normalized === "VACATION") return "In Vacation";
-    if (normalized === "RETIRED_RESIGNED") return "Retired / Resigned";
-    return "On Duty";
-  };
+  if (normalized === "VACATION") return "In Vacation";
+  if (normalized === "RETIRED_RESIGNED") return "Retired / Resigned";
+  return "On Duty";
+};
 
 export const mapFrontendEmployeeStatusForBackend = (status) => {
-    const normalized = String(status || "")
-      .trim()
-      .toLowerCase()
-      .replace(/[\s_-]+/g, "");
+  const normalized = String(status || "")
+    .trim()
+    .toLowerCase()
+    .replace(/[\s_-]+/g, "");
 
-    if (normalized === "vacation" || normalized === "invacation") return "VACATION";
-    if (
-      normalized === "retiredresigned" ||
-      normalized === "retired/resigned" ||
-      normalized === "retired" ||
-      normalized === "resigned"
-    ) {
-      return "RETIRED_RESIGNED";
-    }
+  if (normalized === "vacation" || normalized === "invacation")
+    return "VACATION";
+  if (
+    normalized === "retiredresigned" ||
+    normalized === "retired/resigned" ||
+    normalized === "retired" ||
+    normalized === "resigned"
+  ) {
+    return "RETIRED_RESIGNED";
+  }
 
-    return "ON_DUTY";
-  };
+  return "ON_DUTY";
+};
 
 export const mapBackendEmployeeForState = (employee = {}) => {
-    const linkedUserRole = getLinkedUserRoleNameFromEmployee(employee);
+  const linkedUserRole = getLinkedUserRoleNameFromEmployee(employee);
 
-    return {
-      backendId: employee.id || "",
-      id: employee.employeeId || employee.id || "",
-      employeeId: employee.employeeId || employee.id || "",
-      name: employee.name || "",
-      mobile: employee.phone || "",
-      phone: employee.phone || "",
-      email: employee.email || "",
-      projectId: employee.projectId || employee.project?.id || "",
-      projectName:
-        employee.project?.name ||
-        employee.project?.code ||
-        employee.projectId ||
-        "-",
-      project: employee.project?.name || employee.projectId || "-",
-      companyId: employee.companyId || employee.company?.id || "",
-      linkedUserId: employee.linkedUserId || employee.linkedUser?.id || "",
-      linkedUserName: employee.linkedUser?.fullName || "",
-      linkedUserIsActive: employee.linkedUser?.isActive !== false,
-      linkedUserRole,
-      linkedUserRoleName: employee.linkedUser?.role?.name || employee.linkedUser?.roleName || "",
-      systemRole: linkedUserRole,
-      role: employee.jobTitle || "Operator",
-      jobTitle: employee.jobTitle || "Operator",
-      status: mapBackendEmployeeStatusForState(employee.status),
-      userStatus:
-        (employee.linkedUserId || employee.linkedUser?.id) &&
-        employee.linkedUser?.isActive !== false
-          ? "Linked"
-          : "Not Linked",
-      source: "Backend",
-      createdAt: employee.createdAt || "",
-      updatedAt: employee.updatedAt || "",
-    };
+  return {
+    backendId: employee.id || "",
+    id: employee.employeeId || employee.id || "",
+    employeeId: employee.employeeId || employee.id || "",
+    name: employee.name || "",
+    mobile: employee.phone || "",
+    phone: employee.phone || "",
+    email: employee.email || "",
+    projectId: employee.projectId || employee.project?.id || "",
+    projectName:
+      employee.project?.name ||
+      employee.project?.code ||
+      employee.projectId ||
+      "-",
+    project: employee.project?.name || employee.projectId || "-",
+    companyId: employee.companyId || employee.company?.id || "",
+    linkedUserId: employee.linkedUserId || employee.linkedUser?.id || "",
+    linkedUserName: employee.linkedUser?.fullName || "",
+    linkedUserIsActive: employee.linkedUser?.isActive !== false,
+    linkedUserRole,
+    linkedUserRoleName:
+      employee.linkedUser?.role?.name || employee.linkedUser?.roleName || "",
+    systemRole: linkedUserRole,
+    role: employee.jobTitle || "Operator",
+    jobTitle: employee.jobTitle || "Operator",
+    status: mapBackendEmployeeStatusForState(employee.status),
+    userStatus:
+      (employee.linkedUserId || employee.linkedUser?.id) &&
+      employee.linkedUser?.isActive !== false
+        ? "Linked"
+        : "Not Linked",
+    source: "Backend",
+    createdAt: employee.createdAt || "",
+    updatedAt: employee.updatedAt || "",
   };
+};
 
-
- export const getLinkedUserRoleNameFromEmployee = (employee = {}) =>
-    normalizeBackendRoleName(
-      employee?.linkedUser?.role?.name ||
-        employee?.linkedUser?.roleName ||
-        employee?.linkedUser?.role ||
-        ""
-    );
+export const getLinkedUserRoleNameFromEmployee = (employee = {}) =>
+  normalizeBackendRoleName(
+    employee?.linkedUser?.role?.name ||
+      employee?.linkedUser?.roleName ||
+      employee?.linkedUser?.role ||
+      "",
+  );
 
 export function normalizeBackendRoleName(roleName) {
   const normalized = String(roleName || "").trim();
   const compact = normalized.toLowerCase().replace(/[\s_-]+/g, "");
 
-  if (compact === "platformuser" || compact === "platformadmin") return "PlatformAdmin";
+  if (compact === "platformuser" || compact === "platformadmin")
+    return "PlatformAdmin";
   if (compact === "topmanagement") return "TopManagement";
   if (compact === "admin") return "Admin";
   if (compact === "manager") return "Manager";
@@ -375,7 +401,6 @@ export function normalizeBackendRoleName(roleName) {
   return normalized || "Operator";
 }
 
-
 export function toFrontendOperationType(value) {
   return String(value || "")
     .trim()
@@ -384,16 +409,22 @@ export function toFrontendOperationType(value) {
     .toLowerCase()
     .split("_")
     .map((part, index) =>
-      index === 0 ? part.charAt(0).toUpperCase() + part.slice(1) : part.charAt(0).toUpperCase() + part.slice(1)
+      index === 0
+        ? part.charAt(0).toUpperCase() + part.slice(1)
+        : part.charAt(0).toUpperCase() + part.slice(1),
     )
     .join("_");
 }
 
 export function isBackendStationOperationType(value) {
-  const normalized = String(value || "").trim().toUpperCase().replace(/[\s-]+/g, "_");
-  return ["INTERNAL_TRANSFER", "EXTERNAL_SUPPLY", "EXTERNAL_TRANSFER"].includes(normalized);
+  const normalized = String(value || "")
+    .trim()
+    .toUpperCase()
+    .replace(/[\s-]+/g, "_");
+  return ["INTERNAL_TRANSFER", "EXTERNAL_SUPPLY", "EXTERNAL_TRANSFER"].includes(
+    normalized,
+  );
 }
-
 
 export function mapBackendOperationForState(operation = {}) {
   const type = toFrontendOperationType(operation.type);
@@ -469,15 +500,11 @@ export function mapBackendOperationForState(operation = {}) {
 }
 
 export function normalizeHeader(value) {
-  return cleanCsvCell(value)
-    .toLowerCase()
-    .replace(/\s+/g, "_");
+  return cleanCsvCell(value).toLowerCase().replace(/\s+/g, "_");
 }
 
 export function normalizeText(value) {
-  return cleanCsvCell(value)
-    .toLowerCase()
-    .replace(/\s+/g, "_");
+  return cleanCsvCell(value).toLowerCase().replace(/\s+/g, "_");
 }
 
 export function getDuplicateIdError(inputId, existingItems = [], label = "ID") {
@@ -485,11 +512,13 @@ export function getDuplicateIdError(inputId, existingItems = [], label = "ID") {
 
   if (!normalizedInputId) return "";
 
-  const alreadyExists = existingItems.some((item) =>
-    normalizeText(item?.id) === normalizedInputId
+  const alreadyExists = existingItems.some(
+    (item) => normalizeText(item?.id) === normalizedInputId,
   );
 
-  return alreadyExists ? `${label} already exists. Please use a unique ID.` : "";
+  return alreadyExists
+    ? `${label} already exists. Please use a unique ID.`
+    : "";
 }
 
 export function isSameText(a, b) {
@@ -513,12 +542,12 @@ export function getValue(row, headers, possibleNames) {
 
   return index !== -1 ? cleanCsvCell(row[index]) : "";
 }
- 
+
 export function formatNumber(value) {
   const number = Number(value);
- 
+
   if (isNaN(number)) return value || "-";
- 
+
   return number.toLocaleString("en-US");
 }
 

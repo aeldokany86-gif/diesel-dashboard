@@ -8,6 +8,15 @@ export async function fetchProjects({ companyId = "" } = {}) {
   return Array.isArray(response.data) ? response.data : [];
 }
 
+export async function fetchProjectById(projectId) {
+  if (!projectId) {
+    throw new Error("Project backend ID is required.");
+  }
+
+  const response = await api.get(`/projects/${projectId}`);
+  return response.data;
+}
+
 export async function createProjectRecord(payload) {
   const response = await api.post("/projects", payload);
   return response.data;
@@ -47,7 +56,7 @@ export async function updateProjectFuelPrice(projectId, payload) {
 
   const response = await api.post(
     `/projects/${projectId}/update-fuel-price`,
-    payload
+    payload,
   );
 
   return response.data;
