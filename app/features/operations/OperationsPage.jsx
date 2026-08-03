@@ -2481,7 +2481,7 @@ const payload = mapFrontendOperationToBackendPayload({
               </button>
 
               {showEquipmentSummarySettings && (
-                <div className="absolute right-0 mt-2 w-44 bg-slate-950 border border-slate-700 rounded-xl shadow-2xl z-[9999] overflow-hidden">
+                <div className="absolute left-0 right-auto sm:left-auto sm:right-0 mt-2 w-44 max-w-[calc(100vw-2rem)] bg-slate-950 border border-slate-700 rounded-xl shadow-2xl z-[9999] overflow-hidden">
                   <button
                     onClick={exportEquipmentSummaryCSV}
                     className="block w-full cursor-pointer text-left px-4 py-3 hover:bg-slate-800 transition text-white"
@@ -2582,7 +2582,7 @@ const payload = mapFrontendOperationToBackendPayload({
                 </button>
 
                 {showEquipmentTypeSettings && (
-                  <div className="absolute right-0 mt-2 w-44 bg-slate-950 border border-slate-700 rounded-xl shadow-2xl z-[9999] overflow-hidden">
+                  <div className="absolute left-0 right-auto sm:left-auto sm:right-0 mt-2 w-44 max-w-[calc(100vw-2rem)] bg-slate-950 border border-slate-700 rounded-xl shadow-2xl z-[9999] overflow-hidden">
                     <button
                       onClick={exportEquipmentTypeSummaryCSV}
                       className="block w-full cursor-pointer text-left px-4 py-3 hover:bg-slate-800 transition text-white"
@@ -2667,7 +2667,7 @@ const payload = mapFrontendOperationToBackendPayload({
                 </button>
 
                 {showDailyConsumptionSettings && (
-                  <div className="absolute right-0 mt-2 w-44 bg-slate-950 border border-slate-700 rounded-xl shadow-2xl z-[9999] overflow-hidden">
+                  <div className="absolute left-0 right-auto sm:left-auto sm:right-0 mt-2 w-44 max-w-[calc(100vw-2rem)] bg-slate-950 border border-slate-700 rounded-xl shadow-2xl z-[9999] overflow-hidden">
                     <button
                       onClick={exportDailyConsumptionCSV}
                       className="block w-full cursor-pointer text-left px-4 py-3 hover:bg-slate-800 transition text-white"
