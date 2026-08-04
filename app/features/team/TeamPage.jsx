@@ -83,6 +83,12 @@ function isOfficerUser(user) {
   return user?.role === "Officer";
 }
 
+function isPlatformAdminUser(user) {
+  return normalizeBackendRoleName(
+    user?.role || user?.roleName || "",
+  ) === "PlatformAdmin";
+}
+
 function useOutsideClick(ref, callback) {
   useEffect(() => {
     const handleClickOutside = (event) => {
@@ -214,6 +220,7 @@ export default function TeamPage({
     name: "",
     mobile: "",
     email: "",
+    companyId: "",
     jobTitle: "Operator",
     projectId: "",
     projectName: "",
@@ -284,6 +291,37 @@ export default function TeamPage({
 
   const normalizeText = (value) => String(value || "").trim().toLowerCase();
 
+  const platformBootstrapMode = isPlatformAdminUser(currentUser);
+
+  const selectableCompanies = companies.filter((company) => {
+    const normalizedId = normalizeText(company?.id);
+    const normalizedCode = normalizeText(company?.code);
+    const normalizedName = normalizeText(company?.name);
+
+    return (
+      company?.id &&
+      !company?.deletedAt &&
+      company?.isActive !== false &&
+      normalizedId !== "platform" &&
+      normalizedCode !== "platform" &&
+      normalizedName !== "platform console"
+    );
+  });
+
+  const selectedBootstrapCompany = selectableCompanies.find(
+    (company) =>
+      normalizeText(company.id) === normalizeText(newFueler.companyId)
+  );
+
+  const isPlatformBootstrapEmployee = (fueler = {}) =>
+    platformBootstrapMode &&
+    !fueler.projectId &&
+    normalizeText(fueler.jobTitle) === "company admin";
+
+  const canManageFuelerUserStatus = (fueler = {}) =>
+    hasPermission("team", "edit") ||
+    (isPlatformBootstrapEmployee(fueler) && fueler.userStatus !== "Linked");
+
   const formatDisplayDate = (rawDate) => {
     if (!rawDate) return "-";
     const d = new Date(rawDate);
@@ -312,9 +350,24 @@ export default function TeamPage({
         ? localUpdate.linkedUserId
         : fueler.linkedUserId || "";
 
-    const explicitlyLinkedUser = users.find(
-      (user) => normalizeText(user.id) === normalizeText(effectiveLinkedUserId)
-    );
+    const explicitlyLinkedUser = users.find((user) => {
+      const userId = normalizeText(user.id);
+      const userLinkedEmployeeId = normalizeText(user.linkedEmployeeId);
+      const userEmployeeId = normalizeText(user.employeeId);
+      const fuelerBackendId = normalizeText(
+        fueler.backendId || fueler.employeeBackendId
+      );
+      const fuelerEmployeeId = normalizeText(fueler.employeeId || fueler.id);
+      const fuelerEmail = normalizeText(fueler.email);
+      const userEmail = normalizeText(user.email);
+
+      return (
+        (effectiveLinkedUserId && userId === normalizeText(effectiveLinkedUserId)) ||
+        (fuelerBackendId && userLinkedEmployeeId === fuelerBackendId) ||
+        (fuelerEmployeeId && userEmployeeId === fuelerEmployeeId) ||
+        (fuelerEmail && userEmail === fuelerEmail)
+      );
+    });
 
     const matchedEmailUser = !explicitlyLinkedUser
       ? users.find((user) => {
@@ -322,6 +375,16 @@ export default function TeamPage({
           return userEmail && userEmail === normalizeText(fueler.email);
         })
       : null;
+
+    const matchedCompany = companies.find((company) =>
+      companyMatches(
+        company.id,
+        fueler.companyId ||
+          explicitlyLinkedUser?.companyId ||
+          matchedEmailUser?.companyId ||
+          currentUser?.companyId
+      )
+    );
 
     const linkedUserIsActive =
       localUpdate.linkedUserIsActive !== undefined
@@ -355,7 +418,33 @@ export default function TeamPage({
         fueler.project ||
         "-",
       status: localUpdate.status || fueler.status || "On Duty",
-      role: explicitlyLinkedUser?.role || fueler.role || "Operator",
+      role:
+        explicitlyLinkedUser?.role ||
+        explicitlyLinkedUser?.roleName ||
+        fueler.role ||
+        "Operator",
+      linkedUserRole: normalizeBackendRoleName(
+        explicitlyLinkedUser?.role ||
+          explicitlyLinkedUser?.roleName ||
+          fueler.linkedUserRole ||
+          fueler.linkedUserRoleName ||
+          ""
+      ),
+      companyId:
+        fueler.companyId ||
+        explicitlyLinkedUser?.companyId ||
+        matchedEmailUser?.companyId ||
+        "",
+      companyName:
+        matchedCompany?.name ||
+        explicitlyLinkedUser?.companyName ||
+        fueler.companyName ||
+        "-",
+      companyCode:
+        matchedCompany?.code ||
+        explicitlyLinkedUser?.companyCode ||
+        fueler.companyCode ||
+        "",
       jobTitle: localUpdate.jobTitle || fueler.jobTitle || fueler.role || "Operator",
       userStatus:
         effectiveLinkedUserId && linkedUserIsActive
@@ -453,9 +542,28 @@ export default function TeamPage({
     (fueler) => !isRetiredTeamStatus(fueler.status)
   );
 
+  const platformVisibleTeamFuelers = platformBootstrapMode
+    ? activeTeamFuelers.filter((fueler) => {
+        const linkedRole = normalizeBackendRoleName(
+          fueler.linkedUserRole || fueler.role || ""
+        );
+        const isLinkedCompanyAdmin =
+          fueler.userStatus === "Linked" && linkedRole === "Admin";
+        const isUnlinkedBootstrapAdmin =
+          fueler.userStatus !== "Linked" &&
+          normalizeText(fueler.jobTitle) === "company admin" &&
+          !fueler.projectId;
+
+        return Boolean(
+          fueler.companyId &&
+          (isLinkedCompanyAdmin || isUnlinkedBootstrapAdmin)
+        );
+      })
+    : activeTeamFuelers;
+
   const normalizedTeamSearch = normalizeText(teamSearch);
   const visibleTeamFuelers = normalizedTeamSearch
-    ? activeTeamFuelers.filter((fueler) => {
+    ? platformVisibleTeamFuelers.filter((fueler) => {
         const searchableText = [
           fueler.id,
           fueler.name,
@@ -465,16 +573,19 @@ export default function TeamPage({
           fueler.projectName,
           fueler.status,
           fueler.userStatus,
+          ...(platformBootstrapMode
+            ? [fueler.companyName, fueler.companyCode]
+            : []),
         ]
           .map((value) => normalizeText(value))
           .join(" ");
 
         return searchableText.includes(normalizedTeamSearch);
       })
-    : activeTeamFuelers;
+    : platformVisibleTeamFuelers;
 
   const selectedTeamFuelers = selectedTeamMemberIds
-    .map((id) => activeTeamFuelers.find((fueler) => normalizeText(fueler.backendId || fueler.id) === normalizeText(id)))
+    .map((id) => platformVisibleTeamFuelers.find((fueler) => normalizeText(fueler.backendId || fueler.id) === normalizeText(id)))
     .filter(Boolean);
 
   const visibleSelectableFuelerIds = visibleTeamFuelers.map((fueler) => fueler.backendId || fueler.id);
@@ -482,7 +593,7 @@ export default function TeamPage({
     visibleSelectableFuelerIds.length > 0 &&
     visibleSelectableFuelerIds.every((id) => selectedTeamMemberIds.includes(id));
 
-  const chartData = activeTeamFuelers
+  const chartData = platformVisibleTeamFuelers
     .map((fueler) => ({
       name: fueler.name || fueler.id,
       dieselQty: Number(fueler.dieselQty) || 0,
@@ -490,18 +601,18 @@ export default function TeamPage({
     .sort((a, b) => b.dieselQty - a.dieselQty)
     .slice(0, 10);
 
-  const totalOperations = activeTeamFuelers.reduce(
+  const totalOperations = platformVisibleTeamFuelers.reduce(
     (sum, fueler) => sum + fueler.operationsCount,
     0
   );
 
-  const totalDiesel = activeTeamFuelers.reduce(
+  const totalDiesel = platformVisibleTeamFuelers.reduce(
     (sum, fueler) => sum + fueler.dieselQty,
     0
   );
 
   const assignedProjectsCount = new Set(
-    activeTeamFuelers
+    platformVisibleTeamFuelers
       .map((fueler) => fueler.projectName)
       .filter((projectName) => projectName && projectName !== "-")
   ).size;
@@ -890,6 +1001,7 @@ export default function TeamPage({
         "#",
         "Team Member ID",
         "Name",
+        ...(platformBootstrapMode ? ["Company"] : []),
         "Mobile",
         "Email",
         "Job Title",
@@ -897,10 +1009,11 @@ export default function TeamPage({
         "Project Name",
         "Work Status",
       ],
-      activeTeamFuelers.map((fueler, i) => [
+      platformVisibleTeamFuelers.map((fueler, i) => [
         i + 1,
         fueler.id,
         fueler.name || "-",
+        ...(platformBootstrapMode ? [fueler.companyName || "-"] : []),
         fueler.mobile || "-",
         fueler.email || "-",
         fueler.jobTitle || "Operator",
@@ -917,6 +1030,7 @@ export default function TeamPage({
       name: "",
       mobile: "",
       email: "",
+      companyId: "",
       jobTitle: "Operator",
       projectId: "",
       projectName: "",
@@ -939,12 +1053,17 @@ export default function TeamPage({
     const fuelerName = newFueler.name.trim();
     const mobile = newFueler.mobile.trim();
     const email = newFueler.email.trim();
-    const jobTitle = String(newFueler.jobTitle || "Operator").trim() || "Operator";
+    const jobTitle = platformBootstrapMode
+      ? "Company Admin"
+      : String(newFueler.jobTitle || "Operator").trim() || "Operator";
     const projectId = newFueler.projectId || newFueler.projectName || "";
     const selectedProject = transferProjects.find((project) =>
       normalizeText(project.backendId || project.id) === normalizeText(projectId) ||
       normalizeText(project.name) === normalizeText(projectId)
     );
+    const targetCompanyId = platformBootstrapMode
+      ? newFueler.companyId
+      : currentUser?.companyId || selectedProject?.companyId || "";
 
     if (!fuelerId) {
       notifyUser(typeof showToast !== "undefined" ? showToast : null, inferToastTypeFromMessage("Please enter Team Member ID."), "Please enter Team Member ID.");
@@ -961,7 +1080,16 @@ export default function TeamPage({
       return;
     }
 
-    if (!projectId) {
+    if (!targetCompanyId) {
+      notifyUser(
+        typeof showToast !== "undefined" ? showToast : null,
+        "warning",
+        "Please select Company."
+      );
+      return;
+    }
+
+    if (!platformBootstrapMode && !projectId) {
       notifyUser(typeof showToast !== "undefined" ? showToast : null, inferToastTypeFromMessage("Please select Project."), "Please select Project.");
       return;
     }
@@ -978,15 +1106,12 @@ export default function TeamPage({
     try {
       if (typeof onCreateEmployee === "function") {
         await onCreateEmployee({
-          companyId:
-            currentUser?.companyId ||
-            selectedProject?.companyId ||
-            "",
+          companyId: targetCompanyId,
           employeeId: fuelerId,
           name: fuelerName,
           phone: mobile,
           email: email || undefined,
-          projectId,
+          ...(platformBootstrapMode ? {} : { projectId }),
           jobTitle,
           status: mapFrontendEmployeeStatusForBackend(newFueler.status),
         });
@@ -1164,9 +1289,10 @@ export default function TeamPage({
 
   const normalizeBackendTeamRoles = (roles = []) => {
     const allowedRoleNames = new Set(
-      TEAM_CREATE_USER_ROLE_NAMES.map((roleName) =>
-        normalizeBackendRoleName(roleName)
-      )
+      (isPlatformAdminUser(currentUser)
+        ? ["Admin"]
+        : TEAM_CREATE_USER_ROLE_NAMES
+      ).map((roleName) => normalizeBackendRoleName(roleName))
     );
 
     return (roles || [])
@@ -1239,6 +1365,14 @@ export default function TeamPage({
   };
 
   const getDefaultTeamRoleId = (roles = []) => {
+    if (isPlatformAdminUser(currentUser)) {
+      return (
+        roles.find((role) => role.normalizedName === "Admin")?.id ||
+        roles[0]?.id ||
+        ""
+      );
+    }
+
     return (
       roles.find((role) => role.normalizedName === "Operator")?.id ||
       roles.find((role) => role.normalizedName === "Officer")?.id ||
@@ -1286,7 +1420,9 @@ export default function TeamPage({
   };
 
   const handleUserLinkStatusChange = async (fueler, nextStatus) => {
-    if (!hasPermission("team", "edit")) {
+    const canManageUserLink = canManageFuelerUserStatus(fueler);
+
+    if (!canManageUserLink) {
       showToast?.("warning", "Read-only access: you cannot link team members to users.");
       return;
     }
@@ -1413,6 +1549,22 @@ export default function TeamPage({
       const selectedTeamNormalizedRole = normalizeBackendRoleName(
         selectedTeamRole?.normalizedName || selectedTeamRoleName
       );
+
+      if (
+        isPlatformAdminUser(currentUser) &&
+        selectedTeamNormalizedRole !== "Admin"
+      ) {
+        showToast?.(
+          "warning",
+          "Platform User can create the first company user with Admin role only."
+        );
+        setSavingLinkedUser(false);
+        setUpdatingUserStatusByFuelerId((prev) => ({
+          ...prev,
+          [fuelerId]: false,
+        }));
+        return;
+      }
 
       const createdUser = await onCreateUserFromEmployee({
         employeeId,
@@ -1826,11 +1978,14 @@ export default function TeamPage({
         </div>
 
         <div className="grid grid-cols-1 sm:grid-cols-2 2xl:grid-cols-4 gap-3 mb-4">
-          <Card title="Total Team Members" value={formatNumber(fuelersWithKpi.length)} />
+          <Card
+            title={platformBootstrapMode ? "Company Admins" : "Total Team Members"}
+            value={formatNumber(platformVisibleTeamFuelers.length)}
+          />
           <Card
             title="On Duty"
             value={formatNumber(
-              fuelersWithKpi.filter(
+              platformVisibleTeamFuelers.filter(
                 (fueler) =>
                   isSameText(fueler.status, "On Duty") ||
                   isSameText(fueler.status, "Active")
@@ -1854,7 +2009,7 @@ export default function TeamPage({
 
             <div className="flex flex-wrap items-center gap-3">
               <span className="text-sm text-slate-400">
-                {visibleTeamFuelers.length} shown / {activeTeamFuelers.length} active team members
+                {visibleTeamFuelers.length} shown / {platformVisibleTeamFuelers.length} active team members
               </span>
 
               <div ref={fuelersSettingsRef} className="relative">
@@ -1898,7 +2053,11 @@ export default function TeamPage({
                 <input
                   value={teamSearch}
                   onChange={(e) => setTeamSearch(e.target.value)}
-                  placeholder="Search by employee ID, name, mobile, email, job title, project..."
+                  placeholder={
+                    platformBootstrapMode
+                      ? "Search by company, employee ID, name, email..."
+                      : "Search by employee ID, name, mobile, email, job title, project..."
+                  }
                   className="w-full sm:w-[420px] rounded-xl border border-slate-700 bg-slate-950 px-3 py-2 text-sm text-white outline-none focus:border-amber-400"
                 />
                 {teamSearch && (
@@ -1954,6 +2113,7 @@ export default function TeamPage({
                   <Th>#</Th>
                   <Th>Team Member ID</Th>
                   <Th>Name</Th>
+                  {platformBootstrapMode && <Th>Company</Th>}
                   <Th>Mobile</Th>
                   <Th>Email</Th>
                   <Th>Job Title</Th>
@@ -2019,6 +2179,19 @@ export default function TeamPage({
                         </span>
                       )}
                     </Td>
+
+                    {platformBootstrapMode && (
+                      <Td strong>
+                        <div className="flex flex-col">
+                          <span>{fueler.companyName || "-"}</span>
+                          {fueler.companyCode && (
+                            <span className="text-[10px] font-normal text-slate-400">
+                              {fueler.companyCode}
+                            </span>
+                          )}
+                        </div>
+                      </Td>
+                    )}
 
                     <Td>
                       {hasPermission("team", "edit") &&
@@ -2112,7 +2285,7 @@ export default function TeamPage({
                           <span className="h-3 w-3 animate-spin rounded-full border-2 border-amber-200 border-t-transparent" />
                           Updating...
                         </span>
-                      ) : hasPermission("team", "edit") ? (
+                      ) : canManageFuelerUserStatus(fueler) ? (
                         <select
                           value={fueler.userStatus === "Linked" ? "Linked" : "Not Linked"}
                           onChange={(e) => handleUserLinkStatusChange(fueler, e.target.value)}
@@ -2201,7 +2374,9 @@ export default function TeamPage({
 
                 {visibleTeamFuelers.length === 0 && (
                   <tr>
-                    <Td colSpan={10}>No team members found.</Td>
+                    <Td colSpan={platformBootstrapMode ? 11 : 10}>
+                      No team members found.
+                    </Td>
                   </tr>
                 )}
               </tbody>
@@ -2589,7 +2764,9 @@ export default function TeamPage({
                 <div>
                   <h2 className="text-xl sm:text-2xl font-bold">Add Team Member</h2>
                   <p className="text-sm text-slate-400 mt-1">
-                    Create an employee record and assign the initial project
+                    {platformBootstrapMode
+                      ? "Create the first Company Admin employee before the first project"
+                      : "Create an employee record and assign the initial project"}
                   </p>
                 </div>
 
@@ -2602,8 +2779,42 @@ export default function TeamPage({
               </div>
 
               <div className="grid grid-cols-1 md:grid-cols-2 gap-4 mb-4">
+                {platformBootstrapMode && (
+                  <div className="md:col-span-2">
+                    <label className="font-medium text-slate-300">
+                      Company
+                    </label>
+                    <select
+                      value={newFueler.companyId}
+                      onChange={(e) =>
+                        setNewFueler({
+                          ...newFueler,
+                          companyId: e.target.value,
+                          projectId: "",
+                          projectName: "",
+                          jobTitle: "Company Admin",
+                        })
+                      }
+                      className="w-full mt-2 rounded-lg border border-slate-700 bg-slate-900 p-3 text-white outline-none focus:border-amber-400 focus:ring-2 focus:ring-amber-400/20"
+                    >
+                      <option value="">Select Company</option>
+                      {selectableCompanies.map((company) => (
+                        <option key={company.id} value={company.id}>
+                          {company.code ? `${company.code} — ` : ""}
+                          {company.name || company.id}
+                        </option>
+                      ))}
+                    </select>
+                    {selectedBootstrapCompany && (
+                      <p className="mt-2 text-xs text-amber-300">
+                        The first Admin employee will be created without a project.
+                      </p>
+                    )}
+                  </div>
+                )}
+
                 <div>
-                  <label className="font-medium text-slate-300">Operator ID</label>
+                  <label className="font-medium text-slate-300">Team ID</label>
                   <input
                     type="text"
                     value={newFueler.id}
@@ -2613,7 +2824,7 @@ export default function TeamPage({
                         ? "border-red-500 bg-red-500/10 focus:ring-red-500/30"
                         : "border-slate-700 focus:border-amber-400 focus:ring-amber-400/20"
                     }`}
-                    placeholder="Example: FL-001"
+                    placeholder="Example: TM-0001"
                   />
                   {teamMemberIdDuplicateError && (
                     <p className="mt-1 text-xs font-semibold text-red-300">
@@ -2659,9 +2870,12 @@ export default function TeamPage({
                   <label className="font-medium text-slate-300">Job Title</label>
                   <input
                     type="text"
-                    value={newFueler.jobTitle}
-                    onChange={(e) => setNewFueler({ ...newFueler, jobTitle: e.target.value })}
-                    className="w-full mt-2 rounded-lg border border-slate-700 bg-slate-900 p-3 text-white placeholder:text-slate-500 outline-none focus:border-amber-400 focus:ring-2 focus:ring-amber-400/20"
+                    value={platformBootstrapMode ? "Company Admin" : newFueler.jobTitle}
+                    onChange={(e) =>
+                      setNewFueler({ ...newFueler, jobTitle: e.target.value })
+                    }
+                    disabled={platformBootstrapMode}
+                    className="w-full mt-2 rounded-lg border border-slate-700 bg-slate-900 p-3 text-white placeholder:text-slate-500 outline-none focus:border-amber-400 focus:ring-2 focus:ring-amber-400/20 disabled:cursor-not-allowed disabled:opacity-70"
                     placeholder="Example: Operator, Fueler, Mechanic, Manager"
                   />
                 </div>
@@ -2680,32 +2894,34 @@ export default function TeamPage({
                 </div>
               </div>
 
-              <div className="mb-5">
-                <label className="font-medium text-slate-300">Project Name</label>
-                <select
-                  value={newFueler.projectId}
-                  onChange={(e) => {
-                    const projectId = e.target.value;
-                    const selectedProject = filterActiveProjects(transferProjects).find((project) =>
-                      normalizeText(project.backendId || project.id) === normalizeText(projectId)
-                    );
+              {!platformBootstrapMode && (
+                <div className="mb-5">
+                  <label className="font-medium text-slate-300">Project Name</label>
+                  <select
+                    value={newFueler.projectId}
+                    onChange={(e) => {
+                      const projectId = e.target.value;
+                      const selectedProject = filterActiveProjects(transferProjects).find((project) =>
+                        normalizeText(project.backendId || project.id) === normalizeText(projectId)
+                      );
 
-                    setNewFueler({
-                      ...newFueler,
-                      projectId,
-                      projectName: selectedProject?.name || selectedProject?.id || "",
-                    });
-                  }}
-                  className="w-full mt-2 rounded-lg border border-slate-700 bg-slate-900 p-3 text-white outline-none focus:border-amber-400 focus:ring-2 focus:ring-amber-400/20"
-                >
-                  <option value="">Select Project</option>
-                  {filterActiveProjects(transferProjects).map((project) => (
-                    <option key={makeTenantEntityKey(project, project.name)} value={project.backendId || project.id}>
-                      {project.name || project.id}
-                    </option>
-                  ))}
-                </select>
-              </div>
+                      setNewFueler({
+                        ...newFueler,
+                        projectId,
+                        projectName: selectedProject?.name || selectedProject?.id || "",
+                      });
+                    }}
+                    className="w-full mt-2 rounded-lg border border-slate-700 bg-slate-900 p-3 text-white outline-none focus:border-amber-400 focus:ring-2 focus:ring-amber-400/20"
+                  >
+                    <option value="">Select Project</option>
+                    {filterActiveProjects(transferProjects).map((project) => (
+                      <option key={makeTenantEntityKey(project, project.name)} value={project.backendId || project.id}>
+                        {project.name || project.id}
+                      </option>
+                    ))}
+                  </select>
+                </div>
+              )}
 
               <div className="-mx-6 -mb-6 flex justify-end gap-3 rounded-b-2xl border-t border-slate-700/80 bg-slate-900/80 px-6 py-5">
                 <button
@@ -2717,9 +2933,15 @@ export default function TeamPage({
 
                 <button
                   onClick={saveNewFueler}
-                  disabled={Boolean(teamMemberIdDuplicateError) || !newFueler.id.trim()}
+                  disabled={
+                    Boolean(teamMemberIdDuplicateError) ||
+                    !newFueler.id.trim() ||
+                    (platformBootstrapMode && !newFueler.companyId)
+                  }
                   className={`px-3 lg:px-4 py-2 rounded-lg font-semibold ${
-                    teamMemberIdDuplicateError || !newFueler.id.trim()
+                    teamMemberIdDuplicateError ||
+                    !newFueler.id.trim() ||
+                    (platformBootstrapMode && !newFueler.companyId)
                       ? "bg-slate-700 text-slate-400 opacity-60 cursor-not-allowed"
                       : "bg-yellow-500 hover:bg-yellow-400 text-black"
                   }`}

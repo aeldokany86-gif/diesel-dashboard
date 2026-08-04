@@ -26,7 +26,9 @@ import TeamPage from "./features/team/TeamPage";
 import ProjectsPage from "./features/projects/ProjectsPage";
 import UsersPage from "./features/users/UsersPage";
 import ApprovalsPage from "./features/approvals/ApprovalsPage";
-import CompaniesPage from "./features/companies/CompaniesPage";
+import CompaniesPage, {
+  ForcePasswordChangePage,
+} from "./features/companies/CompaniesPage";
 import NotificationCenterPage from "./features/notifications/NotificationCenterPage";
 import AuditTimelinePage from "./features/audit/AuditTimelinePage";
 import ReportsPage from "./features/reports/ReportsPage";
@@ -68,6 +70,7 @@ import {
   fetchProjects,
   fetchProjectById,
   createProjectRecord,
+  createBootstrapFirstProject,
   updateProjectRecord,
   assignProjectManager,
   deleteProjectRecord,
@@ -321,6 +324,8 @@ function buildLegacyUserFromAuthUser(authUser) {
           "",
     teamStatus: authUser.teamStatus || linkedEmployee?.status || "",
     passwordResetRequired: Boolean(authUser.mustChangePassword),
+    requiresFirstProject: Boolean(authUser.requiresFirstProject),
+    requiredSetupStep: authUser.requiredSetupStep || null,
     lastLogin: "",
     createdAt: new Date().toISOString(),
     backendPermissions: authUser.permissions || [],
@@ -1089,13 +1094,19 @@ export default function Home() {
   };
 
   const hasPermission = (module, action = "view") => {
-    // Users & Roles is a governance page. Keep it available only for Admin and PlatformAdmin,
-    // even if a backend permission is accidentally returned for another role.
-    if (
-      module === "users" &&
-      !["Admin", "PlatformAdmin"].includes(currentUser?.role)
-    ) {
+    // Users & Roles is a governance page. Keep it available only for Admin.
+    if (module === "users" && currentUser?.role !== "Admin") {
       return false;
+    }
+
+    // PlatformAdmin has one narrowly scoped Team write permission:
+    // create an employee. User linking is handled explicitly inside TeamPage.
+    if (
+      currentUser?.role === "PlatformAdmin" &&
+      module === "team" &&
+      action === "add"
+    ) {
+      return true;
     }
 
     if (backendIsLoggedIn) {
@@ -1114,7 +1125,17 @@ export default function Home() {
     // Users & Roles should not appear for Manager/Officer/Supervisor/Operator.
     // Admin and PlatformAdmin remain the only roles that can open it.
     if (pageKey === "users") {
-      return ["Admin", "PlatformAdmin"].includes(currentUser?.role);
+      return currentUser?.role === "Admin";
+    }
+
+    // PlatformAdmin needs access to the Reports page for the platform-only
+    // Companies Master Report even though the current platform role does not
+    // carry the tenant-level reports.read permission.
+    if (
+      ["reports", "team"].includes(pageKey) &&
+      currentUser?.role === "PlatformAdmin"
+    ) {
+      return true;
     }
 
     if (backendIsLoggedIn) {
@@ -1128,7 +1149,13 @@ export default function Home() {
 
   const getPreferredPageOrder = () => {
     if (isPlatformAdminUser(currentUser)) {
-      return ["companies", "users", "notifications", "auditTimeline"];
+      return [
+        "companies",
+        "team",
+        "reports",
+        "notifications",
+        "auditTimeline",
+      ];
     }
 
     return [
@@ -1231,6 +1258,34 @@ export default function Home() {
     ]);
 
     return createdProject;
+  };
+
+  const handleCreateBootstrapFirstProject = async (payload) => {
+    const result = await createBootstrapFirstProject({
+      ...payload,
+      companyId: currentUser?.companyId || payload.companyId,
+    });
+
+    const createdProject = mapBackendProjectForState(
+      result?.project || result,
+    );
+
+    setProjects((prev) => [
+      createdProject,
+      ...prev.filter(
+        (project) =>
+          normalizeScopeValue(project.backendId || project.id) !==
+          normalizeScopeValue(createdProject.backendId || createdProject.id),
+      ),
+    ]);
+
+    return createdProject;
+  };
+
+  const handleBootstrapProjectCompleted = async () => {
+    // Reloading forces AuthContext to call /auth/me again. The backend will now
+    // return requiresFirstProject=false and the normal application can open.
+    window.location.reload();
   };
 
   const handleUpdateProject = async (project, payload) => {
@@ -4003,6 +4058,38 @@ export default function Home() {
         onSubmit={handleForcedPasswordChange}
         onLogout={handleLogout}
       />
+    );
+  }
+
+  if (
+    currentUser?.requiresFirstProject &&
+    currentUser?.requiredSetupStep === "CREATE_FIRST_PROJECT"
+  ) {
+    return (
+      <>
+        <ProjectsPage
+          projects={[]}
+          assets={[]}
+          stations={[]}
+          fuelers={[]}
+          data={[]}
+          headers={[]}
+          showToast={showToast}
+          currency={currentCompany?.currency || "SAR"}
+          currentUser={currentUser}
+          currentCompany={currentCompany}
+          currentCompanyId={currentUser.companyId}
+          hasPermission={hasPermission}
+          trackActivity={trackActivity}
+          onCreateProject={handleCreateBootstrapFirstProject}
+          users={[]}
+          theme={theme}
+          bootstrapFirstProject
+          onBootstrapCancel={handleLogout}
+          onBootstrapCompleted={handleBootstrapProjectCompleted}
+        />
+        {toast && <Toast type={toast.type} message={toast.message} />}
+      </>
     );
   }
 

@@ -16,7 +16,34 @@ const number = (value) =>
 const dateTime = (value) =>
   value ? new Date(value).toLocaleString("en-GB") : "-";
 const projectId = (project) =>
-  project?.id || project?.projectId || project?._id || "";
+  project?.backendId || project?.projectId || project?._id || project?.id || "";
+const projectManagerId = (project) =>
+  project?.projectManagerId ||
+  project?.managerId ||
+  project?.projectManager?.id ||
+  "";
+const projectManagerName = (project) =>
+  project?.projectManagerName ||
+  project?.managerName ||
+  project?.projectManager?.fullName ||
+  project?.projectManager?.name ||
+  "";
+const projectAliases = (project) =>
+  [
+    project?.backendId,
+    project?.projectId,
+    project?._id,
+    project?.id,
+    project?.code,
+    project?.projectCode,
+  ]
+    .filter(Boolean)
+    .map((value) => String(value).trim().toLowerCase());
+const rowMatchesProject = (row, project) => {
+  if (!project) return false;
+  const aliases = new Set(projectAliases(project));
+  return projectAliases(row).some((value) => aliases.has(value));
+};
 const companyId = (company) =>
   company?.id || company?.companyId || company?._id || "";
 const userName = (user) =>
@@ -66,9 +93,16 @@ export default function ProjectsReportsPage({
     setLoading(true);
     setError("");
     try {
+      const selectedProject =
+        nextFilters.projectId === "all"
+          ? null
+          : projects.find((project) =>
+              projectAliases(project).includes(
+                String(nextFilters.projectId).trim().toLowerCase(),
+              ),
+            );
       const common = {
         companyId: selectedCompanyId,
-        projectId: nextFilters.projectId === "all" ? "" : nextFilters.projectId,
       };
       const result = isMaster
         ? await fetchProjectsMasterReport({
@@ -80,15 +114,19 @@ export default function ProjectsReportsPage({
             dateFrom: nextFilters.dateFrom,
             dateTo: nextFilters.dateTo,
           });
+      const projectRows =
+        nextFilters.projectId === "all"
+          ? result.rows
+          : result.rows.filter((row) => rowMatchesProject(row, selectedProject));
       const reportRows = isMaster
-        ? result.rows.filter(
+        ? projectRows.filter(
             (row) =>
               (nextFilters.location === "all" ||
                 (row.location || "") === nextFilters.location) &&
               (nextFilters.managerId === "all" ||
                 (row.managerId || "") === nextFilters.managerId),
           )
-        : result.rows;
+        : projectRows;
       setRows(reportRows);
       setSummary(
         isMaster
@@ -101,6 +139,9 @@ export default function ProjectsReportsPage({
               inactiveProjects: reportRows.filter(
                 (row) => row.status === "INACTIVE",
               ).length,
+              endedProjects: reportRows.filter(
+                (row) => row.status === "ENDED",
+              ).length,
               consumedQuantity: reportRows.reduce(
                 (total, row) => total + Number(row.consumedQuantity || 0),
                 0,
@@ -110,7 +151,20 @@ export default function ProjectsReportsPage({
                 0,
               ),
             }
-          : result.summary,
+          : {
+              ...result.summary,
+              priceChanges: reportRows.length,
+              affectedProjects: new Set(
+                reportRows.map(
+                  (row) => row.projectId || row.projectCode || row.projectName,
+                ),
+              ).size,
+              pricedOperations: reportRows.reduce(
+                (total, row) =>
+                  total + Number(row.pricedOperationsCount || 0),
+                0,
+              ),
+            },
       );
       setHasGenerated(true);
       setFiltersOpen(false);
@@ -154,15 +208,13 @@ export default function ProjectsReportsPage({
       );
     if (isMaster) {
       const selectedManager = projects.find(
-        (project) =>
-          (project.managerId || project.projectManager?.id) ===
-          filters.managerId,
+        (project) => projectManagerId(project) === filters.managerId,
       );
       values.push(
         `Location: ${filters.location === "all" ? "All Locations" : filters.location}`,
       );
       values.push(
-        `Manager: ${filters.managerId === "all" ? "All Managers" : selectedManager?.managerName || selectedManager?.projectManager?.fullName || "Selected Manager"}`,
+        `Manager: ${filters.managerId === "all" ? "All Managers" : projectManagerName(selectedManager) || "Selected Manager"}`,
       );
     }
     if (!isMaster) {
@@ -182,11 +234,8 @@ export default function ProjectsReportsPage({
   const managers = useMemo(() => {
     const values = new Map();
     projects.forEach((project) => {
-      const id = project.managerId || project.projectManager?.id;
-      const name =
-        project.managerName ||
-        project.projectManager?.fullName ||
-        project.projectManager?.name;
+      const id = projectManagerId(project);
+      const name = projectManagerName(project);
       if (id && name) values.set(id, name);
     });
     return [...values.entries()].map(([id, name]) => ({ id, name }));
@@ -198,18 +247,15 @@ export default function ProjectsReportsPage({
     "Status",
     "Manager",
     "Location",
+    "Project Start Date",
+    "Project End Date",
     "Assets",
     "Stations",
     "Employees",
     "Fuel Operations",
     "Consumed Qty",
     "Total Cost",
-    "Base / L",
-    "Delivery / L",
-    "Operational / L",
-    "VAT",
-    "Incl. VAT / L",
-    "Effective From",
+    "Operational Price / L",
   ];
   const historyColumns = [
     "Project ID",
@@ -232,18 +278,15 @@ export default function ProjectsReportsPage({
         row.status,
         row.managerName || "-",
         row.location || "-",
+        dateTime(row.projectStartDate),
+        dateTime(row.projectEndDate),
         row.assetsCount,
         row.stationsCount,
         row.employeesCount,
         row.refuelOperationsCount,
         `${number(row.consumedQuantity)} L`,
         money(row.totalCost, row.currency),
-        money(row.basePricePerLiter, row.currency),
-        money(row.transportCostPerLiter, row.currency),
         money(row.operationalPricePerLiter, row.currency),
-        row.vatRate == null ? "-" : `${number(row.vatRate)}%`,
-        money(row.grossPricePerLiter, row.currency),
-        dateTime(row.priceEffectiveFrom),
       ])
     : rows.map((row) => [
         row.projectCode,
@@ -290,18 +333,15 @@ export default function ProjectsReportsPage({
               Status: row.status,
               Manager: row.managerName || "",
               Location: row.location || "",
+              "Project Start Date": dateTime(row.projectStartDate),
+              "Project End Date": dateTime(row.projectEndDate),
               Assets: row.assetsCount,
               Stations: row.stationsCount,
               Employees: row.employeesCount,
               "Fuel Operations": row.refuelOperationsCount,
               "Consumed Quantity": row.consumedQuantity,
               [`Total Cost (${row.currency || currency})`]: row.totalCost,
-              "Base Price / L": row.basePricePerLiter,
-              "Delivery / L": row.transportCostPerLiter,
               "Operational Price / L": row.operationalPricePerLiter,
-              "VAT %": row.vatRate,
-              "Price incl. VAT / L": row.grossPricePerLiter,
-              "Effective From": dateTime(row.priceEffectiveFrom),
             }
           : {
               "Project ID": row.projectCode,
@@ -361,7 +401,7 @@ export default function ProjectsReportsPage({
         {hasGenerated ? (
           <>
             {isMaster ? (
-              <section className="grid gap-3 sm:grid-cols-2 xl:grid-cols-5">
+              <section className="grid gap-3 sm:grid-cols-2 xl:grid-cols-6">
                 <Stat
                   label="Total Projects"
                   value={summary.totalProjects || 0}
@@ -376,6 +416,11 @@ export default function ProjectsReportsPage({
                   label="Inactive"
                   value={summary.inactiveProjects || 0}
                   tone="text-rose-300"
+                />
+                <Stat
+                  label="Ended"
+                  value={summary.endedProjects || 0}
+                  tone="text-violet-300"
                 />
                 <Stat
                   label="Consumed Quantity"
@@ -552,6 +597,7 @@ export default function ProjectsReportsPage({
                       <option value="all">All Statuses</option>
                       <option value="ACTIVE">Active</option>
                       <option value="INACTIVE">Inactive</option>
+                      <option value="ENDED">Ended</option>
                     </select>
                   </label>
                   <label className="block text-sm font-bold text-slate-300">

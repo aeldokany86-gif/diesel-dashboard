@@ -61,7 +61,7 @@ export const ROLE_PERMISSIONS = {
     operations: { view: true, add: false, edit: false, delete: false, approve: false, export: true, print: true },
     assets: { view: true, add: false, edit: false, delete: false, approve: false, export: true, print: true },
     stations: { view: true, add: false, edit: false, delete: false, approve: false, adjustInventory: false, updatePrice: false, export: true, print: true },
-    team: { view: true, add: false, edit: false, delete: false, approve: false, export: true, print: true },
+    team: { view: true, add: true, edit: false, delete: false, approve: false, export: true, print: true },
     projects: { view: true, add: false, edit: false, delete: false, approve: false, export: true, print: true },
     reports: { view: true, export: true, print: true },
     users: { view: true, add: true, edit: true, deactivate: true, resetPassword: true, assignRoles: true },

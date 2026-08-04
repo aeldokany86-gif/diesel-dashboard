@@ -38,3 +38,15 @@ export async function updateCompanyStatus(companyId, isActive) {
 
   return response.data;
 }
+
+
+export async function fetchCompaniesMasterReport(params = {}) {
+  const response = await api.get("/companies/reports/master", {
+    params,
+  });
+
+  return {
+    summary: response.data?.summary || {},
+    rows: Array.isArray(response.data?.rows) ? response.data.rows : [],
+  };
+}

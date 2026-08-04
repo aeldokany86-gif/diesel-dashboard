@@ -204,6 +204,9 @@ export default function ProjectsPage({
   onAssignProjectManager,
   users = [],
   theme = "dark",
+  bootstrapFirstProject = false,
+  onBootstrapCancel = () => {},
+  onBootstrapCompleted = () => {},
 }) {
   const [showForm, setShowForm] = useState(false);
   const [searchTerm, setSearchTerm] = useState("");
@@ -221,6 +224,15 @@ export default function ProjectsPage({
     initialVatRate: "15",
     approvalStatus: "Pending Approval",
   });
+
+  useEffect(() => {
+    if (!bootstrapFirstProject) return;
+
+    setShowForm(true);
+    setSelectedProject(null);
+    setPendingProjectConfirmation(null);
+    setProjectRejection(null);
+  }, [bootstrapFirstProject]);
 
   const [fuelPriceModalOpen, setFuelPriceModalOpen] = useState(false);
   const [selectedProjectForFuelPrice, setSelectedProjectForFuelPrice] =
@@ -1090,6 +1102,15 @@ export default function ProjectsPage({
     });
   };
 
+  const handleProjectFormCancel = () => {
+    if (bootstrapFirstProject) {
+      onBootstrapCancel?.();
+      return;
+    }
+
+    closeForm();
+  };
+
   const showProjectRejection = ({
     title = "Project cannot be created",
     message,
@@ -1111,11 +1132,20 @@ export default function ProjectsPage({
 
   const cancelProjectCreation = () => {
     setProjectRejection(null);
+
+    if (bootstrapFirstProject) {
+      onBootstrapCancel?.();
+      return;
+    }
+
     closeForm();
   };
 
   const saveProject = async () => {
-    if (!hasPermission("projects", "add")) {
+    if (
+      !bootstrapFirstProject &&
+      !hasPermission("projects", "add")
+    ) {
       showProjectRejection({
         title: "Action not allowed",
         message: "Read-only access: you cannot add projects.",
@@ -1221,7 +1251,18 @@ export default function ProjectsPage({
           "projects",
           `${pendingProjectConfirmation.id} created from backend.`,
         );
-        showToast?.("success", "Project saved successfully.");
+        showToast?.(
+          "success",
+          bootstrapFirstProject
+            ? "First project created and Admin employee assigned successfully."
+            : "Project saved successfully.",
+        );
+
+        if (bootstrapFirstProject) {
+          await onBootstrapCompleted?.();
+          return;
+        }
+
         closeForm();
         return;
       }
@@ -2612,11 +2653,20 @@ export default function ProjectsPage({
                     Final confirmation
                   </p>
                   <h2 className="text-xl sm:text-2xl font-extrabold mt-1">
-                    Create Project
+                    {bootstrapFirstProject
+                      ? "Create First Project"
+                      : "Create Project"}
                   </h2>
                 </div>
                 <button
-                  onClick={() => setPendingProjectConfirmation(null)}
+                  onClick={() => {
+                    if (bootstrapFirstProject) {
+                      onBootstrapCancel?.();
+                      return;
+                    }
+
+                    setPendingProjectConfirmation(null);
+                  }}
                   className="h-9 w-9 rounded-full border border-slate-600 text-slate-300 hover:text-white hover:bg-slate-800 transition"
                 >
                   ×
@@ -2804,12 +2854,14 @@ export default function ProjectsPage({
                       Projects / Sites
                     </p>
                     <h2 className="mt-1 text-2xl font-extrabold text-white">
-                      Add Project
+                      {bootstrapFirstProject
+                        ? "Create First Project"
+                        : "Add Project"}
                     </h2>
                   </div>
 
                   <button
-                    onClick={closeForm}
+                    onClick={handleProjectFormCancel}
                     className="flex h-9 w-9 items-center justify-center rounded-full border border-slate-600 text-slate-300 transition hover:bg-slate-800 hover:text-white"
                   >
                     ×
@@ -3041,7 +3093,7 @@ export default function ProjectsPage({
 
                 <div className="flex flex-col justify-end gap-3 border-t border-slate-700 bg-slate-950/95 px-6 py-5 sm:flex-row">
                   <button
-                    onClick={closeForm}
+                    onClick={handleProjectFormCancel}
                     className="rounded-xl border border-slate-600 bg-slate-900 px-5 py-2.5 font-bold text-slate-200 transition hover:bg-slate-800"
                   >
                     Cancel

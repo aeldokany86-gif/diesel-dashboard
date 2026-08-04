@@ -22,6 +22,15 @@ export async function createProjectRecord(payload) {
   return response.data;
 }
 
+export async function createBootstrapFirstProject(payload) {
+  const response = await api.post(
+    "/projects/bootstrap-first-project",
+    payload,
+  );
+
+  return response.data;
+}
+
 export async function updateProjectRecord(projectId, payload) {
   if (!projectId) {
     throw new Error("Project backend ID is required.");

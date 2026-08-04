@@ -930,7 +930,7 @@ export default function CompaniesPage({ companies = [], setCompanies, currentUse
 }
 
 
-function ForcePasswordChangePage({
+export function ForcePasswordChangePage({
   theme = "dark",
   currentUser,
   currentPassword,

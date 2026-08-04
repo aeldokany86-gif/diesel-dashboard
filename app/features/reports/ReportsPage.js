@@ -8,6 +8,7 @@ import { fetchStationStockMovements } from "../../services/stationsService";
 import StationsReportsPage from "./stations/StationsReportsPage";
 import EmployeesReportsPage from "./employees/EmployeesReportsPage";
 import ProjectsReportsPage from "./projects/ProjectsReportsPage";
+import CompaniesReportsPage from "./companies/CompaniesReportsPage";
 import { fetchOperationsSummaryReport } from "../../services/operationsService";
 import {
   fetchAssetTransferHistory,
@@ -121,6 +122,16 @@ const PROJECTS_REPORTS = [
   },
 ];
 
+const COMPANIES_REPORTS = [
+  {
+    id: "companies-master",
+    title: "Companies Master Report",
+    description:
+      "Platform-level company register including status, subscription, company resources, completed fuel operations and total fuel consumption.",
+    available: true,
+  },
+];
+
 const REPORT_MODULES = [
   {
     id: "operations",
@@ -165,6 +176,16 @@ const REPORT_MODULES = [
     icon: "📁",
     reports: PROJECTS_REPORTS,
     available: true,
+  },
+  {
+    id: "companies",
+    title: "Companies",
+    description:
+      "Platform-level company register, subscriptions and consolidated operating scale.",
+    icon: "🏢",
+    reports: COMPANIES_REPORTS,
+    available: true,
+    platformOnly: true,
   },
   {
     id: "users",
@@ -5154,6 +5175,27 @@ function AssetMeterHistoryReport({
   );
 }
 
+function isPlatformReportsUser(user) {
+  const roleValues = [
+    user?.role,
+    user?.roleName,
+    user?.role?.name,
+    user?.userRole,
+    user?.type,
+  ]
+    .filter(Boolean)
+    .map((value) =>
+      String(value)
+        .trim()
+        .toLowerCase()
+        .replace(/[\s_-]+/g, ""),
+    );
+
+  return roleValues.some((value) =>
+    ["platformadmin", "platformuser"].includes(value),
+  );
+}
+
 export default function ReportsPage({
   currentUser,
   currentCompany,
@@ -5174,6 +5216,11 @@ export default function ReportsPage({
   const [operationsReportRows, setOperationsReportRows] = useState([]);
   const [operationsReportLoading, setOperationsReportLoading] = useState(false);
   const [operationsReportError, setOperationsReportError] = useState("");
+
+  const isPlatformUser = isPlatformReportsUser(currentUser);
+  const visibleReportModules = isPlatformUser
+    ? REPORT_MODULES.filter((module) => module.id === "companies")
+    : REPORT_MODULES.filter((module) => !module.platformOnly);
 
   const availableAssets = useMemo(() => {
     if (draftFilters.project === "all") return assets;
@@ -5466,6 +5513,16 @@ export default function ReportsPage({
       setOperationsReportLoading(false);
     }
   };
+
+  if (selectedReport?.id === "companies-master") {
+    return (
+      <CompaniesReportsPage
+        selectedReport={selectedReport}
+        currentUser={currentUser}
+        onBack={handleBackToReports}
+      />
+    );
+  }
 
   if (
     [
@@ -5997,7 +6054,7 @@ export default function ReportsPage({
     );
   }
 
-  const activeModule = REPORT_MODULES.find(
+  const activeModule = visibleReportModules.find(
     (module) => module.id === selectedReportModule,
   );
 
@@ -6020,7 +6077,7 @@ export default function ReportsPage({
           </section>
 
           <section className="grid gap-4 sm:grid-cols-2 xl:grid-cols-3">
-            {REPORT_MODULES.map((module) => {
+            {visibleReportModules.map((module) => {
               const availableReports = module.reports.filter(
                 (report) => report.available,
               ).length;
