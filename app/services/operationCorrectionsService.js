@@ -60,3 +60,27 @@ export async function fetchOdometerCorrectionHistory(params = {}) {
 
   return Array.isArray(response.data) ? response.data : [];
 }
+
+export async function fetchOperationCorrectionsReport(
+  params = {},
+  currentUser = {}
+) {
+  const response = await api.get(
+    "/operation-corrections/reports/corrections",
+    {
+      params,
+      headers: buildOperationRequestHeaders(currentUser),
+    }
+  );
+
+  return {
+    summary: response.data?.summary || {
+      total: 0,
+      pending: 0,
+      approved: 0,
+      applied: 0,
+      rejected: 0,
+    },
+    data: Array.isArray(response.data?.data) ? response.data.data : [],
+  };
+}

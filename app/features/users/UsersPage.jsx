@@ -463,10 +463,6 @@ export default function UsersPage({
     }
   };
 
-  useEffect(() => {
-    refreshUsersAndRolesFromBackend();
-  }, [canUseBackendUsersApi, currentUser?.companyId, contextCompanyId, currentUser?.role]);
-
   const filteredUsers = users.filter((user) => {
     const search = normalizeScopeValue(searchTerm);
     const userRoleName = user.roleName || user.role || "";
@@ -1053,7 +1049,7 @@ export default function UsersPage({
               Users & Roles
             </h1>
             <p className="text-slate-400 text-sm">
-              Manage backend users, roles, password resets, and account status inside the current company.
+              Manage users, roles, password resets, and account status inside the current company.
             </p>
           </div>
 
@@ -1161,13 +1157,6 @@ export default function UsersPage({
           </div>
         </div>
 
-        
-        {usersLoading && (
-          <div className="mb-4 flex items-center gap-3 rounded-2xl border border-amber-400/30 bg-amber-500/10 px-4 py-3 text-sm font-semibold text-amber-200">
-            <span className="h-4 w-4 animate-spin rounded-full border-2 border-amber-200 border-t-transparent" />
-            Loading users from backend...
-          </div>
-        )}
 
         {usersLoadError && !usersLoading && (
           <div className="mb-4 rounded-2xl border border-red-400/30 bg-red-500/10 px-4 py-3 text-sm font-semibold text-red-200">
@@ -1270,7 +1259,11 @@ export default function UsersPage({
                 {!filteredUsers.length && (
                   <tr>
                     <td colSpan={7} className="p-8 text-center text-slate-500">
-                      {usersLoading ? "Loading users..." : usersLoaded ? "No users found." : "Users are not loaded yet."}
+                      {usersLoading
+                        ? "Loading users..."
+                        : usersLoaded
+                          ? "No users found."
+                          : "No user data is available."}
                     </td>
                   </tr>
                 )}

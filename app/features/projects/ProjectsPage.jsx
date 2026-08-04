@@ -1956,7 +1956,7 @@ export default function ProjectsPage({
                     <p
                       className={`label text-[11px] ${theme === "light" ? "text-slate-500" : "text-gray-400"}`}
                     >
-                      Fuelers
+                      Team
                     </p>
 
                     <p

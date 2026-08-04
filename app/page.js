@@ -723,7 +723,7 @@ export default function Home() {
   const [approvedStationStockAdjustments, setApprovedStationStockAdjustments] =
     useState([]);
   const [notificationReadMap, setNotificationReadMap] = useState({});
-  const [loginPassword, setLoginPassword] = useState("Admin@12345");
+  const [loginPassword, setLoginPassword] = useState("");
   const [forcePasswordChangeOpen, setForcePasswordChangeOpen] = useState(false);
   const [forceCurrentPassword, setForceCurrentPassword] = useState("");
   const [forceNewPassword, setForceNewPassword] = useState("");
@@ -994,6 +994,7 @@ export default function Home() {
 
       setLoginError("");
       setLoginIdentifier("");
+      setLoginPassword("");
       trackActivity(
         "Login",
         "auth",
@@ -1089,6 +1090,8 @@ export default function Home() {
     backendLogout?.();
     localStorage.removeItem(COMPANY_CONTEXT_STORAGE_KEY);
     setSelectedCompanyId("");
+    setLoginIdentifier("");
+    setLoginPassword("");
     setPage("companies");
     setMobileSidebarOpen(false);
   };
@@ -4390,28 +4393,31 @@ export default function Home() {
         }
 
         /* Sidebar internal scrolling */
-        .fleet-mobile-sidebar {
+        .fleet-sidebar-scroll {
           scrollbar-width: thin;
-          scrollbar-color: rgba(245, 158, 11, 0.55) rgba(15, 23, 42, 0.35);
+          scrollbar-color: rgba(245, 158, 11, 0.55) transparent;
         }
 
-        .fleet-mobile-sidebar::-webkit-scrollbar {
+        .fleet-sidebar-scroll::-webkit-scrollbar {
           width: 7px;
         }
 
-        .fleet-mobile-sidebar::-webkit-scrollbar-track {
-          background: rgba(15, 23, 42, 0.35);
-          border-radius: 999px;
+        .fleet-sidebar-scroll::-webkit-scrollbar-track {
+          background: transparent;
         }
 
-        .fleet-mobile-sidebar::-webkit-scrollbar-thumb {
+        .fleet-sidebar-scroll::-webkit-scrollbar-thumb {
           background: rgba(245, 158, 11, 0.55);
           border-radius: 999px;
         }
 
+        .fleet-sidebar-scroll::-webkit-scrollbar-thumb:hover {
+          background: rgba(245, 158, 11, 0.8);
+        }
+
         @media (max-width: 1023px) {
-          .fleet-mobile-sidebar {
-            padding-bottom: 1.5rem;
+          .fleet-sidebar-scroll {
+            padding-bottom: 1rem;
           }
         }
 
@@ -4447,7 +4453,7 @@ export default function Home() {
         )}
 
         <div
-          className={`fleet-mobile-sidebar ${sidebarContentCollapsed ? "lg:w-20" : "lg:w-64"} fixed lg:sticky lg:top-0 inset-y-0 left-0 z-[10040] h-screen max-h-screen overflow-y-auto overscroll-contain shrink-0 bg-[#050814] text-white border-r border-slate-800/80 shadow-2xl p-4 flex flex-col transition-all duration-300 ${
+          className={`fleet-mobile-sidebar ${sidebarContentCollapsed ? "lg:w-20" : "lg:w-64"} fixed lg:sticky lg:top-0 inset-y-0 left-0 z-[10040] h-screen max-h-screen overflow-hidden shrink-0 bg-[#050814] text-white border-r border-slate-800/80 shadow-2xl p-4 flex flex-col transition-all duration-300 ${
             mobileSidebarOpen ? "translate-x-0" : "-translate-x-full"
           } lg:translate-x-0`}
         >
@@ -4460,6 +4466,7 @@ export default function Home() {
             ×
           </button>
 
+          <div className="fleet-sidebar-scroll flex min-h-0 flex-1 flex-col overflow-y-auto overscroll-contain pr-1">
           <div className="flex flex-col items-center mb-5">
             <img
               src={
@@ -4576,7 +4583,9 @@ export default function Home() {
             </div>
           )}
 
-          <div className="mt-auto pt-4 border-t border-slate-800/80">
+          </div>
+
+          <div className="shrink-0 pt-4 border-t border-slate-800/80">
             <div className="relative">
               <button
                 onClick={() => setShowThemeSettings(!showThemeSettings)}
@@ -4738,6 +4747,10 @@ function LoginPage({
   setTheme,
   actionLoading = { active: false, label: "" },
 }) {
+  const [showPassword, setShowPassword] = useState(false);
+  const [loginFieldsReady, setLoginFieldsReady] = useState(false);
+  const [forgotPasswordOpen, setForgotPasswordOpen] = useState(false);
+
   const loginCompanies = useMemo(
     () =>
       mergePlatformConsoleWithCompanies(companies).filter(
@@ -4752,7 +4765,6 @@ function LoginPage({
     [companies],
   );
 
-  const activeUsers = users.filter((user) => user.status === "Active");
 
   useEffect(() => {
     const email = String(loginIdentifier || "")
@@ -4994,131 +5006,184 @@ function LoginPage({
 
       <div
         data-theme={theme}
-        className="theme-main-bg min-h-screen bg-[#070b14] text-slate-100 flex items-center justify-center p-6"
+        className="theme-main-bg min-h-screen bg-[#070b14] text-slate-100 flex items-center justify-center p-4 sm:p-6"
       >
-        <div className="w-full max-w-5xl grid lg:grid-cols-[1.05fr_0.95fr] gap-6 items-stretch">
-          <div className="login-surface rounded-3xl border border-slate-800 bg-slate-900/70 shadow-2xl p-8 flex flex-col justify-between overflow-hidden relative">
-            <div className="absolute -top-20 -left-20 h-64 w-64 rounded-full bg-amber-400/10 blur-3xl" />
-            <div className="absolute -bottom-24 -right-20 h-72 w-72 rounded-full bg-blue-500/10 blur-3xl" />
+        <div className="w-full max-w-4xl grid lg:grid-cols-[0.95fr_1.05fr] overflow-hidden rounded-[2rem] border border-slate-800 bg-slate-900/80 shadow-2xl shadow-black/30">
+          <section className="login-surface relative overflow-hidden border-b border-slate-800 p-7 sm:p-10 lg:border-b-0 lg:border-r">
+            <div className="absolute -top-24 -left-24 h-72 w-72 rounded-full bg-amber-400/10 blur-3xl" />
+            <div className="absolute -bottom-28 -right-24 h-80 w-80 rounded-full bg-blue-500/10 blur-3xl" />
 
-            <div className="relative">
-              <div className="flex items-center gap-4 mb-8">
-                <img
-                  src={
-                    theme === "dark"
-                      ? "/icons/fleet-fuel-pro-dark.png"
-                      : "/icons/fleet-fuel-pro-light.png"
-                  }
-                  alt="Fleet Fuel PRO"
-                  className="w-20 h-auto object-contain"
-                  draggable={false}
-                />
-                <div>
-                  <p className="text-[11px] uppercase tracking-[0.25em] text-amber-300 font-bold">
-                    Enterprise Access
+            <div className="relative flex h-full min-h-[360px] flex-col justify-between">
+              <div>
+                <div className="flex items-center gap-4">
+                  <img
+                    src={
+                      theme === "dark"
+                        ? "/icons/fleet-fuel-pro-dark.png"
+                        : "/icons/fleet-fuel-pro-light.png"
+                    }
+                    alt="Fleet Fuel PRO"
+                    className="h-auto w-24 object-contain"
+                    draggable={false}
+                  />
+                  <div>
+                    <p className="text-[11px] font-bold uppercase tracking-[0.25em] text-amber-300">
+                      Secure Workspace
+                    </p>
+                    <h1 className="login-title mt-1 text-3xl font-black text-white">
+                      Fleet Fuel PRO
+                    </h1>
+                  </div>
+                </div>
+
+                <div className="mt-10">
+                  <h2 className="login-text text-2xl font-black text-slate-100">
+                    Fuel operations, controlled.
+                  </h2>
+                  <p className="login-muted mt-4 max-w-md text-sm leading-7 text-slate-400">
+                    Sign in to your company workspace using the credentials
+                    provided by your administrator. First-time users will be
+                    guided through password setup automatically.
                   </p>
-                  <h1 className="login-title text-3xl font-black text-white mt-1">
-                    Fleet Fuel PRO
-                  </h1>
                 </div>
               </div>
 
-              <h2 className="login-text text-xl font-bold text-slate-100 mb-3">
-                Sign in to Diesel Management System
-              </h2>
-              <p className="login-muted text-sm text-slate-400 leading-6 max-w-xl">
-                Enter your username and password. Company users sign in with
-                company code plus employee ID, for example ffp.2062.
-              </p>
-            </div>
-
-            <div className="relative mt-8 grid sm:grid-cols-3 gap-3">
-              <div className="login-soft rounded-2xl border border-slate-800 bg-slate-950/40 p-4">
-                <p className="text-2xl font-black text-amber-300">
-                  {activeUsers.length}
-                </p>
-                <p className="login-muted text-xs text-slate-500 mt-1">
-                  Active Users
-                </p>
-              </div>
-              <div className="login-soft rounded-2xl border border-slate-800 bg-slate-950/40 p-4">
-                <p className="text-2xl font-black text-emerald-300">
-                  {activeUsers.filter((user) => user.role === "Manager").length}
-                </p>
-                <p className="login-muted text-xs text-slate-500 mt-1">
-                  Managers
-                </p>
-              </div>
-              <div className="login-soft rounded-2xl border border-slate-800 bg-slate-950/40 p-4">
-                <p className="text-2xl font-black text-blue-300">
-                  {
-                    activeUsers.filter((user) => user.role === "Operator")
-                      .length
-                  }
-                </p>
-                <p className="login-muted text-xs text-slate-500 mt-1">
-                  Operators
-                </p>
+              <div className="login-soft mt-10 rounded-2xl border border-slate-800 bg-slate-950/40 p-4">
+                <div className="flex items-start gap-3">
+                  <span className="mt-0.5 flex h-8 w-8 shrink-0 items-center justify-center rounded-xl border border-emerald-400/20 bg-emerald-400/10 text-emerald-300">
+                    ✓
+                  </span>
+                  <div>
+                    <p className="login-text text-sm font-bold text-slate-100">
+                      Protected company access
+                    </p>
+                    <p className="login-muted mt-1 text-xs leading-5 text-slate-500">
+                      Your account, company, role, and project scope are verified
+                      securely before access is granted.
+                    </p>
+                  </div>
+                </div>
               </div>
             </div>
-          </div>
+          </section>
 
           <form
             onSubmit={handleLogin}
-            className="login-card rounded-3xl border border-slate-800 bg-slate-900/90 shadow-2xl p-6 sm:p-8"
+            autoComplete="on"
+            className="login-card bg-slate-900/95 p-7 sm:p-10"
           >
-            <div className="flex items-center justify-between gap-4 mb-7">
+            <div className="mb-8 flex items-start justify-between gap-4">
               <div>
-                <p className="login-muted text-[10px] uppercase tracking-[0.22em] text-slate-500 font-bold">
-                  Backend JWT Session
+                <p className="login-muted text-[10px] font-bold uppercase tracking-[0.22em] text-slate-500">
+                  Account Access
                 </p>
-                <h3 className="login-title text-2xl font-black text-white mt-1">
-                  Login
+                <h3 className="login-title mt-1 text-3xl font-black text-white">
+                  Welcome back
                 </h3>
+                <p className="login-muted mt-2 text-sm text-slate-500">
+                  Enter your username and password to continue.
+                </p>
               </div>
+
               <button
                 type="button"
                 onClick={() => setTheme(theme === "dark" ? "light" : "dark")}
-                className="login-theme-button rounded-xl border border-slate-700 px-3 py-2 text-xs font-bold text-slate-300 hover:border-amber-400 hover:text-amber-300 transition"
+                className="login-theme-button shrink-0 rounded-xl border border-slate-700 px-3 py-2 text-xs font-bold text-slate-300 transition hover:border-amber-400 hover:text-amber-300"
               >
-                {theme === "dark" ? "Switch to Light" : "Switch to Dark"}
+                {theme === "dark" ? "Light" : "Dark"}
               </button>
             </div>
 
-            <label className="block mb-4">
+            <label className="block">
               <span className="login-muted text-xs font-bold text-slate-400">
                 Username
               </span>
               <input
+                name="username"
                 value={loginIdentifier}
-                onChange={(e) =>
-                  setLoginIdentifier(e.target.value.toLowerCase())
-                }
-                placeholder="ffp.2062"
-                className="login-input mt-2 w-full rounded-2xl border border-slate-700 bg-slate-950 px-4 py-3 text-sm text-white outline-none focus:border-amber-400 focus:ring-2 focus:ring-amber-400/20"
-                autoFocus
+                onFocus={() => setLoginFieldsReady(true)}
+                onMouseDown={() => setLoginFieldsReady(true)}
+                onChange={(e) => {
+                  setLoginIdentifier(e.target.value.toLowerCase());
+                  setLoginPassword?.("");
+                }}
+                placeholder="Enter your username"
+                autoComplete="username"
+                readOnly={!loginFieldsReady}
+                className="login-input mt-2 w-full rounded-2xl border border-slate-700 bg-slate-950 px-4 py-3.5 text-sm text-white outline-none transition focus:border-amber-400 focus:ring-2 focus:ring-amber-400/20"
               />
               <p className="login-muted mt-2 text-[11px] text-slate-500">
-                Company users use companycode.employeeId. Platform Console users
-                can use their platform email if configured.
+                Use the username supplied by your company administrator.
               </p>
             </label>
 
-            <label className="block mb-4">
-              <span className="login-muted text-xs font-bold text-slate-400">
-                Password
-              </span>
-              <input
-                value={loginPassword}
-                onChange={(e) => setLoginPassword?.(e.target.value)}
-                placeholder="Admin@12345"
-                type="password"
-                className="login-input mt-2 w-full rounded-2xl border border-slate-700 bg-slate-950 px-4 py-3 text-sm text-white outline-none focus:border-amber-400 focus:ring-2 focus:ring-amber-400/20"
-              />
+            <label className="mt-5 block">
+              <div className="flex items-center justify-between gap-3">
+                <span className="login-muted text-xs font-bold text-slate-400">
+                  Password
+                </span>
+                <button
+                  type="button"
+                  onClick={() => setForgotPasswordOpen(true)}
+                  className="text-xs font-bold text-amber-300 transition hover:text-amber-200 hover:underline"
+                >
+                  Forgot password?
+                </button>
+              </div>
+
+              <div className="relative mt-2">
+                <input
+                  name="password"
+                  value={loginPassword}
+                  onFocus={() => setLoginFieldsReady(true)}
+                  onMouseDown={() => setLoginFieldsReady(true)}
+                  onChange={(e) => setLoginPassword?.(e.target.value)}
+                  placeholder="Enter your password"
+                  type={showPassword ? "text" : "password"}
+                  autoComplete="current-password"
+                  readOnly={!loginFieldsReady}
+                  className="login-input w-full rounded-2xl border border-slate-700 bg-slate-950 py-3.5 pl-4 pr-14 text-sm text-white outline-none transition focus:border-amber-400 focus:ring-2 focus:ring-amber-400/20"
+                />
+                <button
+                  type="button"
+                  onClick={() => setShowPassword((prev) => !prev)}
+                  className="absolute inset-y-0 right-0 flex w-14 items-center justify-center text-slate-400 transition hover:text-amber-300"
+                  aria-label={showPassword ? "Hide password" : "Show password"}
+                  title={showPassword ? "Hide password" : "Show password"}
+                >
+                  {showPassword ? (
+                    <svg
+                      viewBox="0 0 24 24"
+                      className="h-5 w-5"
+                      fill="none"
+                      stroke="currentColor"
+                      strokeWidth="1.8"
+                      aria-hidden="true"
+                    >
+                      <path d="M3 3l18 18" />
+                      <path d="M10.6 10.7a2 2 0 002.7 2.7" />
+                      <path d="M9.9 4.3A10.6 10.6 0 0112 4c5 0 8.5 4 9.5 6-.4.9-1.2 2.1-2.4 3.2" />
+                      <path d="M6.2 6.2C4.4 7.5 3.2 9.1 2.5 10c1 2 4.5 6 9.5 6 1.1 0 2.1-.2 3-.5" />
+                    </svg>
+                  ) : (
+                    <svg
+                      viewBox="0 0 24 24"
+                      className="h-5 w-5"
+                      fill="none"
+                      stroke="currentColor"
+                      strokeWidth="1.8"
+                      aria-hidden="true"
+                    >
+                      <path d="M2.5 12s3.5-6 9.5-6 9.5 6 9.5 6-3.5 6-9.5 6-9.5-6-9.5-6z" />
+                      <circle cx="12" cy="12" r="2.5" />
+                    </svg>
+                  )}
+                </button>
+              </div>
             </label>
 
             {loginError && (
-              <div className="mb-5 rounded-2xl border border-red-500/30 bg-red-500/10 px-4 py-3 text-sm text-red-300">
+              <div className="mt-5 rounded-2xl border border-red-500/30 bg-red-500/10 px-4 py-3 text-sm text-red-300">
                 {loginError}
               </div>
             )}
@@ -5126,48 +5191,56 @@ function LoginPage({
             <button
               type="submit"
               disabled={actionLoading.active}
-              className="w-full rounded-2xl bg-amber-400 px-4 py-3 text-sm font-black text-slate-950 hover:bg-amber-300 transition shadow-lg shadow-amber-500/20 disabled:cursor-not-allowed disabled:opacity-60"
+              className="mt-7 w-full rounded-2xl bg-amber-400 px-4 py-3.5 text-sm font-black text-slate-950 shadow-lg shadow-amber-500/20 transition hover:bg-amber-300 disabled:cursor-not-allowed disabled:opacity-60"
             >
               {actionLoading.active ? "Signing In..." : "Sign In"}
             </button>
 
-            <div className="login-soft mt-6 rounded-2xl border border-slate-800 bg-slate-950/40 p-4">
-              <p className="login-muted text-xs font-bold text-slate-400 mb-3">
-                Available test users
-              </p>
-              <div className="max-h-52 overflow-y-auto space-y-2 pr-1">
-                {activeUsers.map((user) => (
-                  <button
-                    key={makeTenantEntityKey(user)}
-                    type="button"
-                    onClick={() =>
-                      setLoginIdentifier(
-                        String(
-                          user.username || user.email || user.id || "",
-                        ).toLowerCase(),
-                      )
-                    }
-                    className="login-card w-full text-left rounded-xl border border-slate-800 bg-slate-900 px-3 py-2 hover:border-amber-400 transition"
-                  >
-                    <div className="flex items-center justify-between gap-3">
-                      <span className="login-text text-sm font-bold text-slate-100 truncate">
-                        {user.username || user.fullName}
-                      </span>
-                      <span className="text-[10px] rounded-full bg-amber-400/10 text-amber-300 px-2 py-0.5 border border-amber-400/20">
-                        {user.role}
-                      </span>
-                    </div>
-                    <div className="login-muted text-xs text-slate-500 mt-1">
-                      {user.fullName || user.email || user.id} ·{" "}
-                      {user.teamProject || "Global"}
-                    </div>
-                  </button>
-                ))}
-              </div>
-            </div>
+            <p className="login-muted mt-5 text-center text-xs leading-5 text-slate-500">
+              Access problems? Use “Forgot password?” or contact your company
+              administrator.
+            </p>
           </form>
         </div>
       </div>
+
+      {forgotPasswordOpen && (
+        <div className="fixed inset-0 z-[100000] flex items-center justify-center bg-black/75 p-4 backdrop-blur-sm">
+          <div className="login-card w-full max-w-md rounded-3xl border border-slate-700 bg-slate-900 p-6 shadow-2xl">
+            <div className="flex items-start justify-between gap-4">
+              <div>
+                <p className="text-[10px] font-bold uppercase tracking-[0.22em] text-amber-300">
+                  Account Recovery
+                </p>
+                <h3 className="login-title mt-1 text-2xl font-black text-white">
+                  Forgot Password
+                </h3>
+              </div>
+
+              <button
+                type="button"
+                onClick={() => setForgotPasswordOpen(false)}
+                className="flex h-9 w-9 items-center justify-center rounded-xl border border-slate-700 text-slate-400 transition hover:border-red-400 hover:text-red-300"
+                aria-label="Close password recovery"
+              >
+                ×
+              </button>
+            </div>
+
+            <p className="login-muted mt-5 text-sm leading-6 text-slate-300">
+              Please contact your company administrator to obtain a new temporary password.
+            </p>
+
+            <button
+              type="button"
+              onClick={() => setForgotPasswordOpen(false)}
+              className="mt-6 w-full rounded-2xl bg-amber-400 px-4 py-3 text-sm font-black text-slate-950 transition hover:bg-amber-300"
+            >
+              OK
+            </button>
+          </div>
+        </div>
+      )}
     </>
   );
 }

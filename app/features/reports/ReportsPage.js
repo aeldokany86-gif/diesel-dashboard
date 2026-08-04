@@ -1,6 +1,6 @@
 "use client";
 
-import { useMemo, useState } from "react";
+import { useEffect, useMemo, useState } from "react";
 import ReportToolbar from "./components/ReportToolbar";
 import { printReport } from "./utils/printReport";
 import { exportReportToExcel } from "./utils/exportReportToExcel";
@@ -14,7 +14,10 @@ import {
   fetchAssetTransferHistory,
   fetchAssetMeterHistory,
 } from "../../services/assetsService";
-import { fetchOdometerCorrectionHistory } from "../../services/operationCorrectionsService";
+import {
+  fetchOdometerCorrectionHistory,
+  fetchOperationCorrectionsReport,
+} from "../../services/operationCorrectionsService";
 
 const OPERATIONS_REPORTS = [
   {
@@ -29,6 +32,13 @@ const OPERATIONS_REPORTS = [
     title: "Station Movements Report",
     description:
       "Complete station stock ledger showing opening balance, inbound, outbound, balance after each movement and closing balance.",
+    available: true,
+  },
+  {
+    id: "operation-corrections",
+    title: "Operation Corrections Report",
+    description:
+      "Complete audit report of operation correction requests showing changed fields, previous and new values, requester, reviewer, reason and final status.",
     available: true,
   },
   {
@@ -322,6 +332,143 @@ function formatNumber(value, maximumFractionDigits = 2) {
   return new Intl.NumberFormat("en-US", {
     maximumFractionDigits,
   }).format(number);
+}
+
+
+const DEFAULT_REPORT_PAGE_SIZE = 25;
+const REPORT_PAGE_SIZE_OPTIONS = [10, 25, 50, "all"];
+
+function useReportPagination(
+  items = [],
+  initialPageSize = DEFAULT_REPORT_PAGE_SIZE,
+) {
+  const normalizedInitialPageSize = REPORT_PAGE_SIZE_OPTIONS.includes(
+    initialPageSize,
+  )
+    ? initialPageSize
+    : DEFAULT_REPORT_PAGE_SIZE;
+
+  const [currentPage, setCurrentPage] = useState(1);
+  const [pageSize, setPageSizeState] = useState(normalizedInitialPageSize);
+
+  const totalItems = items.length;
+  const showAll = pageSize === "all";
+  const effectivePageSize = showAll
+    ? Math.max(totalItems, 1)
+    : Number(pageSize) || DEFAULT_REPORT_PAGE_SIZE;
+  const totalPages = showAll
+    ? 1
+    : Math.max(1, Math.ceil(totalItems / effectivePageSize));
+  const safeCurrentPage = Math.min(currentPage, totalPages);
+  const startIndex = showAll
+    ? 0
+    : (safeCurrentPage - 1) * effectivePageSize;
+  const endIndex = showAll
+    ? totalItems
+    : Math.min(startIndex + effectivePageSize, totalItems);
+
+  const paginatedItems = useMemo(
+    () => items.slice(startIndex, endIndex),
+    [items, startIndex, endIndex],
+  );
+
+  useEffect(() => {
+    if (currentPage > totalPages) setCurrentPage(totalPages);
+  }, [currentPage, totalPages]);
+
+  const goToPage = (page) => {
+    const nextPage = Math.min(Math.max(Number(page) || 1, 1), totalPages);
+    setCurrentPage(nextPage);
+  };
+
+  const setPageSize = (value) => {
+    const nextSize =
+      value === "all"
+        ? "all"
+        : REPORT_PAGE_SIZE_OPTIONS.includes(Number(value))
+          ? Number(value)
+          : DEFAULT_REPORT_PAGE_SIZE;
+
+    setPageSizeState(nextSize);
+    setCurrentPage(1);
+  };
+
+  const resetPage = () => setCurrentPage(1);
+
+  return {
+    paginatedItems,
+    currentPage: safeCurrentPage,
+    totalPages,
+    totalItems,
+    pageSize,
+    startItem: totalItems ? startIndex + 1 : 0,
+    endItem: endIndex,
+    goToPage,
+    setPageSize,
+    resetPage,
+  };
+}
+
+function ReportPagination({ pagination, itemLabel = "records" }) {
+  if (!pagination || pagination.totalItems <= 0) return null;
+
+  const {
+    currentPage,
+    totalPages,
+    totalItems,
+    pageSize,
+    startItem,
+    endItem,
+    goToPage,
+    setPageSize,
+  } = pagination;
+
+  return (
+    <div className="flex flex-col gap-3 border-t border-slate-800 bg-slate-950/40 px-5 py-4 sm:flex-row sm:items-center sm:justify-between">
+      <div className="flex flex-wrap items-center gap-3 text-sm text-slate-400">
+        <span>
+          Showing <strong className="text-slate-200">{startItem}–{endItem}</strong>{" "}
+          of <strong className="text-slate-200">{totalItems}</strong> {itemLabel}
+        </span>
+        <label className="flex items-center gap-2 text-xs font-bold text-slate-500">
+          Rows per page
+          <select
+            value={pageSize}
+            onChange={(event) => setPageSize(event.target.value)}
+            className="rounded-lg border border-slate-700 bg-slate-950 px-2 py-1.5 text-xs font-bold text-slate-200 outline-none focus:border-amber-500"
+          >
+            {REPORT_PAGE_SIZE_OPTIONS.map((size) => (
+              <option key={size} value={size}>
+                {size === "all" ? "All" : size}
+              </option>
+            ))}
+          </select>
+        </label>
+      </div>
+
+      <div className="flex items-center gap-2">
+        <button
+          type="button"
+          onClick={() => goToPage(currentPage - 1)}
+          disabled={currentPage <= 1}
+          className="rounded-lg border border-slate-700 bg-slate-950 px-3 py-2 text-xs font-extrabold text-slate-300 transition hover:border-amber-500/60 hover:text-amber-300 disabled:cursor-not-allowed disabled:opacity-40"
+        >
+          Previous
+        </button>
+        <span className="min-w-[90px] text-center text-xs font-black text-slate-300">
+          Page {currentPage} of {totalPages}
+        </span>
+        <button
+          type="button"
+          onClick={() => goToPage(currentPage + 1)}
+          disabled={currentPage >= totalPages}
+          className="rounded-lg border border-slate-700 bg-slate-950 px-3 py-2 text-xs font-extrabold text-slate-300 transition hover:border-amber-500/60 hover:text-amber-300 disabled:cursor-not-allowed disabled:opacity-40"
+        >
+          Next
+        </button>
+      </div>
+    </div>
+  );
 }
 
 function formatMoney(value, currency = "SAR") {
@@ -1011,6 +1158,9 @@ function FuelSuppliersReport({
     });
   }, [supplyRows, appliedFilters]);
 
+  const pagination = useReportPagination(filteredRows);
+  const paginatedRows = pagination.paginatedItems;
+
   const totals = useMemo(
     () => ({
       deliveries: filteredRows.length,
@@ -1170,12 +1320,14 @@ function FuelSuppliersReport({
   const applyFilters = () => {
     setAppliedFilters(draftFilters);
     setReportGenerated(true);
+    pagination.resetPage();
     setFiltersOpen(false);
   };
 
   const resetFilters = () => {
     setDraftFilters(FUEL_SUPPLIER_FILTERS);
     setAppliedFilters(FUEL_SUPPLIER_FILTERS);
+    pagination.resetPage();
   };
 
   return (
@@ -1365,7 +1517,7 @@ function FuelSuppliersReport({
                   </thead>
                   <tbody>
                     {filteredRows.length ? (
-                      filteredRows.map((row) => (
+                      paginatedRows.map((row) => (
                         <tr
                           key={row.key}
                           className="border-b border-slate-800/70 transition hover:bg-slate-800/30"
@@ -1437,6 +1589,7 @@ function FuelSuppliersReport({
                   </tfoot>
                 </table>
               </div>
+              <ReportPagination pagination={pagination} itemLabel="delivery records" />
             </section>
           </>
         )}
@@ -1669,6 +1822,9 @@ function StationMovementsReport({
     [movements],
   );
 
+  const pagination = useReportPagination(rows);
+  const paginatedRows = pagination.paginatedItems;
+
   const totals = useMemo(() => {
     if (!rows.length) {
       return { opening: 0, inbound: 0, outbound: 0, closing: 0 };
@@ -1794,6 +1950,7 @@ function StationMovementsReport({
       setAppliedFilters(draftFilters);
       setMovements(Array.isArray(result) ? result : []);
       setReportGenerated(true);
+      pagination.resetPage();
       setFiltersOpen(false);
     } catch (requestError) {
       setError(
@@ -1887,6 +2044,7 @@ function StationMovementsReport({
   const handleReset = () => {
     setDraftFilters(STATION_MOVEMENT_FILTERS);
     setAppliedFilters(STATION_MOVEMENT_FILTERS);
+    pagination.resetPage();
   };
 
   return (
@@ -2028,7 +2186,7 @@ function StationMovementsReport({
                   </thead>
                   <tbody>
                     {rows.length ? (
-                      rows.map((row) => (
+                      paginatedRows.map((row) => (
                         <tr
                           key={row.key}
                           className="border-b border-slate-800/70 transition hover:bg-slate-800/30"
@@ -2098,6 +2256,7 @@ function StationMovementsReport({
                   </tfoot>
                 </table>
               </div>
+              <ReportPagination pagination={pagination} itemLabel="movements" />
             </section>
           </>
         )}
@@ -2569,6 +2728,9 @@ function AssetsMasterReport({
     });
   }, [rows, appliedFilters]);
 
+  const pagination = useReportPagination(filteredRows);
+  const paginatedRows = pagination.paginatedItems;
+
   const totals = useMemo(
     () => ({
       assets: filteredRows.length,
@@ -2686,12 +2848,14 @@ function AssetsMasterReport({
   const applyFilters = () => {
     setAppliedFilters(draftFilters);
     setReportGenerated(true);
+    pagination.resetPage();
     setFiltersOpen(false);
   };
 
   const resetFilters = () => {
     setDraftFilters(ASSETS_MASTER_FILTERS);
     setAppliedFilters(ASSETS_MASTER_FILTERS);
+    pagination.resetPage();
   };
 
   return (
@@ -2827,7 +2991,7 @@ function AssetsMasterReport({
                   </thead>
                   <tbody>
                     {filteredRows.length ? (
-                      filteredRows.map((row) => (
+                      paginatedRows.map((row) => (
                         <tr
                           key={row.key}
                           className="border-b border-slate-800/70 transition hover:bg-slate-800/30"
@@ -2882,6 +3046,7 @@ function AssetsMasterReport({
                   </tfoot>
                 </table>
               </div>
+              <ReportPagination pagination={pagination} itemLabel="assets" />
             </section>
           </>
         )}
@@ -3375,6 +3540,9 @@ function AssetTransferHistoryReport({
     });
   }, [rows, appliedFilters]);
 
+  const pagination = useReportPagination(filteredRows);
+  const paginatedRows = pagination.paginatedItems;
+
   const totals = useMemo(
     () => ({
       records: filteredRows.length,
@@ -3556,6 +3724,7 @@ function AssetTransferHistoryReport({
       setTransferHistory(Array.isArray(result) ? result : []);
       setAppliedFilters(draftFilters);
       setReportGenerated(true);
+      pagination.resetPage();
       setFiltersOpen(false);
     } catch (requestError) {
       setError(
@@ -3571,6 +3740,7 @@ function AssetTransferHistoryReport({
   const resetFilters = () => {
     setDraftFilters(ASSET_TRANSFER_FILTERS);
     setAppliedFilters(ASSET_TRANSFER_FILTERS);
+    pagination.resetPage();
   };
 
   return (
@@ -3705,7 +3875,7 @@ function AssetTransferHistoryReport({
                   </thead>
                   <tbody>
                     {filteredRows.length ? (
-                      filteredRows.map((row) => (
+                      paginatedRows.map((row) => (
                         <tr
                           key={row.key}
                           className="border-b border-slate-800/70 transition hover:bg-slate-800/30"
@@ -3778,6 +3948,7 @@ function AssetTransferHistoryReport({
                   </tbody>
                 </table>
               </div>
+              <ReportPagination pagination={pagination} itemLabel="transfers" />
             </section>
           </>
         )}
@@ -4625,6 +4796,9 @@ function AssetMeterHistoryReport({
     [rows],
   );
 
+  const pagination = useReportPagination(rows);
+  const paginatedRows = pagination.paginatedItems;
+
   const totals = useMemo(
     () => ({
       events: rows.length,
@@ -4723,6 +4897,7 @@ function AssetMeterHistoryReport({
       );
       setAppliedFilters(draftFilters);
       setReportGenerated(true);
+      pagination.resetPage();
       setFiltersOpen(false);
     } catch (requestError) {
       setError(
@@ -4800,6 +4975,7 @@ function AssetMeterHistoryReport({
   const resetFilters = () => {
     setDraftFilters(ASSET_METER_HISTORY_FILTERS);
     setAppliedFilters(ASSET_METER_HISTORY_FILTERS);
+    pagination.resetPage();
   };
 
   return (
@@ -4930,7 +5106,7 @@ function AssetMeterHistoryReport({
                   </thead>
                   <tbody>
                     {rows.length ? (
-                      rows.map((row) => {
+                      paginatedRows.map((row) => {
                         const isReset = row.eventType === "RESET";
                         const isCorrection = row.eventType === "CORRECTION";
                         const badgeClass = isReset
@@ -5001,6 +5177,7 @@ function AssetMeterHistoryReport({
                   </tbody>
                 </table>
               </div>
+              <ReportPagination pagination={pagination} itemLabel="meter events" />
             </section>
           </>
         )}
@@ -5175,6 +5352,675 @@ function AssetMeterHistoryReport({
   );
 }
 
+
+const OPERATION_CORRECTION_FILTERS = {
+  dateFrom: "",
+  dateTo: "",
+  projectId: "all",
+  operationNo: "",
+  status: "all",
+  fieldName: "all",
+  operationType: "all",
+};
+
+const OPERATION_CORRECTION_HEADERS = [
+  "Request Date",
+  "Operation No.",
+  "Operation Date",
+  "Project",
+  "Operation Type",
+  "Field",
+  "Old Value",
+  "New Value",
+  "Requested By",
+  "Reviewed By",
+  "Reason",
+  "Status",
+  "Applied / Rejected Date",
+];
+
+const OPERATION_CORRECTION_FIELDS = [
+  "ASSET_ID",
+  "SOURCE_STATION_ID",
+  "DESTINATION_STATION_ID",
+  "FUELER_ID",
+  "QUANTITY",
+  "ODOMETER",
+  "STATION_COUNTER",
+  "EXTERNAL_STATION_NAME",
+  "INVOICE_NUMBER",
+  "TOTAL_COST_AT_OPERATION",
+  "NOTES",
+];
+
+const OPERATION_CORRECTION_TYPES = [
+  "DIRECT_REFUEL",
+  "EXTERNAL_DIRECT_REFUEL",
+  "INTERNAL_TRANSFER",
+  "EXTERNAL_TRANSFER",
+  "EXTERNAL_SUPPLY",
+];
+
+function formatCorrectionValue(value) {
+  if (value === null || value === undefined || value === "") return "-";
+  if (typeof value === "object") {
+    try {
+      return JSON.stringify(value);
+    } catch {
+      return String(value);
+    }
+  }
+  return String(value);
+}
+
+function OperationCorrectionsReport({
+  selectedReport,
+  currentUser,
+  currentCompany,
+  projects = [],
+  onBack,
+}) {
+  const [filtersOpen, setFiltersOpen] = useState(true);
+  const [reportGenerated, setReportGenerated] = useState(false);
+  const [draftFilters, setDraftFilters] = useState(
+    OPERATION_CORRECTION_FILTERS,
+  );
+  const [appliedFilters, setAppliedFilters] = useState(
+    OPERATION_CORRECTION_FILTERS,
+  );
+  const [rows, setRows] = useState([]);
+  const [summary, setSummary] = useState({
+    total: 0,
+    pending: 0,
+    approved: 0,
+    applied: 0,
+    rejected: 0,
+  });
+  const [loading, setLoading] = useState(false);
+  const [error, setError] = useState("");
+
+  const pagination = useReportPagination(rows);
+  const paginatedRows = pagination.paginatedItems;
+
+  const filterSummary = useMemo(() => {
+    const selectedProject = projects.find(
+      (project) =>
+        normalizeValue(getProjectBackendId(project)) ===
+        normalizeValue(appliedFilters.projectId),
+    );
+
+    return [
+      {
+        label: "Period",
+        value:
+          appliedFilters.dateFrom || appliedFilters.dateTo
+            ? `${formatReportDate(appliedFilters.dateFrom)} → ${formatReportDate(appliedFilters.dateTo)}`
+            : "All dates",
+      },
+      {
+        label: "Project",
+        value:
+          appliedFilters.projectId === "all"
+            ? "All Projects"
+            : getProjectLabel(selectedProject),
+      },
+      {
+        label: "Operation No.",
+        value: appliedFilters.operationNo || "All Operations",
+      },
+      {
+        label: "Field",
+        value:
+          appliedFilters.fieldName === "all"
+            ? "All Fields"
+            : formatOperationType(appliedFilters.fieldName),
+      },
+      {
+        label: "Status",
+        value:
+          appliedFilters.status === "all"
+            ? "All Statuses"
+            : formatOperationType(appliedFilters.status),
+      },
+    ];
+  }, [appliedFilters, projects]);
+
+  const reportMeta = {
+    title: selectedReport?.title || "Operation Corrections Report",
+    companyName: currentCompany?.name || "Fleet Fuel PRO",
+    generatedBy: getUserDisplayName(currentUser),
+    generatedAt: new Date().toLocaleString("en-GB"),
+    filters: filterSummary,
+  };
+
+  const loadReport = async () => {
+    setLoading(true);
+    setError("");
+
+    try {
+      const companyId = getCompanyBackendId(currentCompany, currentUser);
+
+      if (!companyId) {
+        throw new Error("Company ID is required to generate this report.");
+      }
+
+      const result = await fetchOperationCorrectionsReport(
+        {
+          companyId,
+          projectId:
+            draftFilters.projectId === "all"
+              ? ""
+              : draftFilters.projectId,
+          operationNo: draftFilters.operationNo.trim(),
+          status:
+            draftFilters.status === "all" ? "" : draftFilters.status,
+          fieldName:
+            draftFilters.fieldName === "all"
+              ? ""
+              : draftFilters.fieldName,
+          operationType:
+            draftFilters.operationType === "all"
+              ? ""
+              : draftFilters.operationType,
+          dateFrom: draftFilters.dateFrom,
+          dateTo: draftFilters.dateTo,
+        },
+        currentUser,
+      );
+
+      setRows(Array.isArray(result.data) ? result.data : []);
+      setSummary({
+        total: Number(result.summary?.total || 0),
+        pending: Number(result.summary?.pending || 0),
+        approved: Number(result.summary?.approved || 0),
+        applied: Number(result.summary?.applied || 0),
+        rejected: Number(result.summary?.rejected || 0),
+      });
+      setAppliedFilters(draftFilters);
+      setReportGenerated(true);
+      pagination.resetPage();
+      setFiltersOpen(false);
+    } catch (requestError) {
+      setError(
+        requestError?.response?.data?.message ||
+          requestError?.message ||
+          "Failed to load operation corrections.",
+      );
+    } finally {
+      setLoading(false);
+    }
+  };
+
+  const resetFilters = () => {
+    setDraftFilters(OPERATION_CORRECTION_FILTERS);
+    pagination.resetPage();
+  };
+
+  const handlePrint = () => {
+    printReport({
+      ...reportMeta,
+      totals: [
+        { label: "Total Corrections", value: summary.total },
+        { label: "Pending", value: summary.pending },
+        { label: "Applied", value: summary.applied },
+        { label: "Rejected", value: summary.rejected },
+      ],
+      columns: OPERATION_CORRECTION_HEADERS,
+      rows: rows.map((row) => [
+        formatDateTime(row.requestDate),
+        row.operationNo || "-",
+        formatDateTime(row.operationDate),
+        row.projectName || "-",
+        formatOperationType(row.operationType),
+        formatOperationType(row.fieldName),
+        formatCorrectionValue(row.oldValueLabel ?? row.oldValue),
+        formatCorrectionValue(row.newValueLabel ?? row.newValue),
+        row.requestedBy || "-",
+        row.reviewedBy || "-",
+        row.reason || "-",
+        formatOperationType(row.status),
+        formatDateTime(row.appliedAt || row.rejectedAt),
+      ]),
+    });
+  };
+
+  const handleExport = () => {
+    exportReportToExcel({
+      fileName: "Operation_Corrections_Report",
+      sheetName: "Corrections",
+      ...reportMeta,
+      rows: rows.map((row) => ({
+        "Request Date": formatDateTime(row.requestDate),
+        "Operation No.": row.operationNo || "",
+        "Operation Date": formatDateTime(row.operationDate),
+        Project: row.projectName || "",
+        "Operation Type": formatOperationType(row.operationType),
+        Field: formatOperationType(row.fieldName),
+        "Old Value": formatCorrectionValue(row.oldValueLabel ?? row.oldValue),
+        "New Value": formatCorrectionValue(row.newValueLabel ?? row.newValue),
+        "Requested By": row.requestedBy || "",
+        "Reviewed By": row.reviewedBy || "",
+        Reason: row.reason || "",
+        "Review Note": row.reviewNote || "",
+        Status: formatOperationType(row.status),
+        "Applied Date": row.appliedAt
+          ? formatDateTime(row.appliedAt)
+          : "",
+        "Rejected Date": row.rejectedAt
+          ? formatDateTime(row.rejectedAt)
+          : "",
+      })),
+      totals: {
+        "Request Date": "Totals",
+        "Operation No.": summary.total,
+        Project: `Pending: ${summary.pending}`,
+        Field: `Applied: ${summary.applied}`,
+        Status: `Rejected: ${summary.rejected}`,
+      },
+    });
+  };
+
+  return (
+    <div className="min-h-full bg-slate-950 px-4 py-5 text-slate-100 sm:px-6 lg:px-8">
+      <div className="mx-auto max-w-[1900px] space-y-5">
+        <section className="rounded-2xl border border-slate-800 bg-slate-900/80 p-5 shadow-xl shadow-black/10">
+          <div className="flex flex-col gap-4 xl:flex-row xl:items-center xl:justify-between">
+            <div>
+              <button
+                type="button"
+                onClick={onBack}
+                className="mb-4 inline-flex items-center gap-2 rounded-lg border border-slate-700 bg-slate-950/70 px-3 py-2 text-sm font-bold text-slate-300 transition hover:border-amber-500/50 hover:text-amber-300"
+              >
+                <span aria-hidden="true">←</span> Back to Reports
+              </button>
+              <p className="text-xs font-bold uppercase tracking-[0.22em] text-amber-400">
+                Operations Reports
+              </p>
+              <h1 className="mt-1 text-2xl font-black text-white sm:text-3xl">
+                {selectedReport?.title}
+              </h1>
+              <p className="mt-2 max-w-4xl text-sm leading-6 text-slate-400">
+                {selectedReport?.description}
+              </p>
+            </div>
+
+            <ReportToolbar
+              onOpenFilters={() => setFiltersOpen(true)}
+              onPrint={handlePrint}
+              onExport={handleExport}
+              disabled={!reportGenerated || !rows.length}
+            />
+          </div>
+        </section>
+
+        {error ? (
+          <section className="rounded-2xl border border-red-500/30 bg-red-500/10 px-5 py-4 text-sm font-bold text-red-200">
+            {error}
+          </section>
+        ) : null}
+
+        {!reportGenerated ? (
+          <section className="rounded-2xl border border-amber-500/30 bg-slate-900/80 px-6 py-14 text-center shadow-xl shadow-black/10">
+            <div className="mx-auto flex max-w-xl flex-col items-center">
+              <div className="flex h-16 w-16 items-center justify-center rounded-2xl border border-amber-500/30 bg-amber-500/10 text-3xl">
+                ✎
+              </div>
+              <h2 className="mt-5 text-xl font-black text-white sm:text-2xl">
+                Select correction report filters first
+              </h2>
+              <p className="mt-3 text-sm leading-6 text-slate-400">
+                Choose the period, project, operation, changed field and
+                status, then generate the report.
+              </p>
+              <button
+                type="button"
+                onClick={() => setFiltersOpen(true)}
+                className="mt-6 rounded-xl border border-amber-500 bg-amber-500 px-5 py-3 text-sm font-extrabold text-slate-950 transition hover:bg-amber-400"
+              >
+                Set Report Filters
+              </button>
+            </div>
+          </section>
+        ) : (
+          <>
+            <section className="grid gap-3 sm:grid-cols-2 xl:grid-cols-5">
+              {filterSummary.map((item) => (
+                <div
+                  key={item.label}
+                  className="rounded-xl border border-slate-800 bg-slate-900/70 px-4 py-3"
+                >
+                  <p className="text-[11px] font-bold uppercase tracking-wider text-slate-500">
+                    {item.label}
+                  </p>
+                  <p className="mt-1 truncate text-sm font-extrabold text-slate-200">
+                    {item.value}
+                  </p>
+                </div>
+              ))}
+            </section>
+
+            <section className="grid gap-3 sm:grid-cols-2 xl:grid-cols-5">
+              {[
+                ["Total Corrections", summary.total],
+                ["Pending", summary.pending],
+                ["Approved", summary.approved],
+                ["Applied", summary.applied],
+                ["Rejected", summary.rejected],
+              ].map(([label, value]) => (
+                <div
+                  key={label}
+                  className="rounded-2xl border border-amber-500/25 bg-slate-900/80 p-4 shadow-lg shadow-black/10"
+                >
+                  <p className="text-xs font-bold uppercase tracking-wider text-amber-400">
+                    {label}
+                  </p>
+                  <p className="mt-2 text-2xl font-black text-white">
+                    {formatNumber(value, 0)}
+                  </p>
+                </div>
+              ))}
+            </section>
+
+            <section className="overflow-hidden rounded-2xl border border-slate-800 bg-slate-900/80 shadow-xl shadow-black/10">
+              <div className="flex flex-col gap-2 border-b border-slate-800 px-5 py-4 sm:flex-row sm:items-center sm:justify-between">
+                <div>
+                  <h2 className="font-extrabold text-white">
+                    Correction Request Details
+                  </h2>
+                  <p className="mt-1 text-xs text-slate-500">
+                    {rows.length} correction{rows.length === 1 ? "" : "s"} found
+                  </p>
+                </div>
+              </div>
+
+              <div className="overflow-x-auto">
+                <table className="min-w-[2200px] w-full border-collapse text-sm">
+                  <thead className="bg-slate-950/90">
+                    <tr>
+                      {OPERATION_CORRECTION_HEADERS.map((header) => (
+                        <th
+                          key={header}
+                          className="whitespace-nowrap border-b border-slate-800 px-3 py-3 text-left text-[11px] font-black uppercase tracking-wider text-slate-400"
+                        >
+                          {header}
+                        </th>
+                      ))}
+                    </tr>
+                  </thead>
+                  <tbody>
+                    {rows.length ? (
+                      paginatedRows.map((row) => (
+                        <tr
+                          key={row.correctionId || row.id}
+                          className="border-b border-slate-800/70 transition hover:bg-slate-800/30"
+                        >
+                          <td className="whitespace-nowrap px-3 py-3 text-slate-300">
+                            {formatDateTime(row.requestDate)}
+                          </td>
+                          <td className="whitespace-nowrap px-3 py-3 font-bold text-amber-300">
+                            {row.operationNo || "-"}
+                          </td>
+                          <td className="whitespace-nowrap px-3 py-3 text-slate-300">
+                            {formatDateTime(row.operationDate)}
+                          </td>
+                          <td className="whitespace-nowrap px-3 py-3 text-slate-300">
+                            {row.projectName || "-"}
+                          </td>
+                          <td className="whitespace-nowrap px-3 py-3 text-slate-300">
+                            {formatOperationType(row.operationType)}
+                          </td>
+                          <td className="whitespace-nowrap px-3 py-3 font-bold text-white">
+                            {formatOperationType(row.fieldName)}
+                          </td>
+                          <td className="max-w-[240px] break-words px-3 py-3 text-red-200">
+                            {formatCorrectionValue(row.oldValueLabel ?? row.oldValue)}
+                          </td>
+                          <td className="max-w-[240px] break-words px-3 py-3 text-emerald-300">
+                            {formatCorrectionValue(row.newValueLabel ?? row.newValue)}
+                          </td>
+                          <td className="whitespace-nowrap px-3 py-3 text-slate-300">
+                            {row.requestedBy || "-"}
+                          </td>
+                          <td className="whitespace-nowrap px-3 py-3 text-slate-300">
+                            {row.reviewedBy || "-"}
+                          </td>
+                          <td className="max-w-[300px] break-words px-3 py-3 text-slate-400">
+                            {row.reason || "-"}
+                          </td>
+                          <td className="whitespace-nowrap px-3 py-3 font-bold text-amber-300">
+                            {formatOperationType(row.status)}
+                          </td>
+                          <td className="whitespace-nowrap px-3 py-3 text-slate-300">
+                            {formatDateTime(row.appliedAt || row.rejectedAt)}
+                          </td>
+                        </tr>
+                      ))
+                    ) : (
+                      <tr>
+                        <td
+                          colSpan={OPERATION_CORRECTION_HEADERS.length}
+                          className="px-6 py-12 text-center text-slate-500"
+                        >
+                          No operation corrections match the selected filters.
+                        </td>
+                      </tr>
+                    )}
+                  </tbody>
+                </table>
+              </div>
+              <ReportPagination pagination={pagination} itemLabel="corrections" />
+            </section>
+          </>
+        )}
+
+        {filtersOpen ? (
+          <div className="fixed inset-0 z-[120] bg-black/70 backdrop-blur-sm">
+            <button
+              type="button"
+              aria-label="Close filters"
+              onClick={() => setFiltersOpen(false)}
+              className="absolute inset-0 h-full w-full"
+            />
+            <aside className="absolute right-0 top-0 z-10 flex h-full w-full max-w-md flex-col border-l border-slate-800 bg-slate-900 shadow-2xl shadow-black/50">
+              <div className="flex items-start justify-between border-b border-slate-800 px-5 py-4">
+                <div>
+                  <p className="text-xs font-bold uppercase tracking-[0.2em] text-amber-400">
+                    Report Setup
+                  </p>
+                  <h2 className="mt-1 text-xl font-black text-white">
+                    Correction Filters
+                  </h2>
+                </div>
+                <button
+                  type="button"
+                  onClick={() => setFiltersOpen(false)}
+                  className="flex h-9 w-9 items-center justify-center rounded-lg border border-slate-700 bg-slate-950/70 text-lg text-slate-400 hover:text-white"
+                >
+                  ×
+                </button>
+              </div>
+
+              <div className="flex-1 space-y-4 overflow-y-auto px-5 py-5">
+                <div className="grid grid-cols-2 gap-3">
+                  <label>
+                    <span className="mb-2 block text-sm font-bold text-slate-300">
+                      Date From
+                    </span>
+                    <input
+                      type="date"
+                      value={draftFilters.dateFrom}
+                      onChange={(e) =>
+                        setDraftFilters((prev) => ({
+                          ...prev,
+                          dateFrom: e.target.value,
+                        }))
+                      }
+                      className="w-full rounded-xl border border-slate-700 bg-slate-950 px-3 py-2.5 text-sm text-white outline-none focus:border-amber-500"
+                    />
+                  </label>
+                  <label>
+                    <span className="mb-2 block text-sm font-bold text-slate-300">
+                      Date To
+                    </span>
+                    <input
+                      type="date"
+                      value={draftFilters.dateTo}
+                      onChange={(e) =>
+                        setDraftFilters((prev) => ({
+                          ...prev,
+                          dateTo: e.target.value,
+                        }))
+                      }
+                      className="w-full rounded-xl border border-slate-700 bg-slate-950 px-3 py-2.5 text-sm text-white outline-none focus:border-amber-500"
+                    />
+                  </label>
+                </div>
+
+                <label className="block">
+                  <span className="mb-2 block text-sm font-bold text-slate-300">
+                    Project
+                  </span>
+                  <select
+                    value={draftFilters.projectId}
+                    onChange={(e) =>
+                      setDraftFilters((prev) => ({
+                        ...prev,
+                        projectId: e.target.value,
+                      }))
+                    }
+                    className="w-full rounded-xl border border-slate-700 bg-slate-950 px-3 py-2.5 text-sm text-white outline-none focus:border-amber-500"
+                  >
+                    <option value="all">All Projects</option>
+                    {projects.map((project) => (
+                      <option
+                        key={
+                          getProjectBackendId(project) ||
+                          getProjectLabel(project)
+                        }
+                        value={getProjectBackendId(project)}
+                      >
+                        {getProjectLabel(project)}
+                      </option>
+                    ))}
+                  </select>
+                </label>
+
+                <label className="block">
+                  <span className="mb-2 block text-sm font-bold text-slate-300">
+                    Operation No.
+                  </span>
+                  <input
+                    value={draftFilters.operationNo}
+                    onChange={(e) =>
+                      setDraftFilters((prev) => ({
+                        ...prev,
+                        operationNo: e.target.value,
+                      }))
+                    }
+                    placeholder="Search operation number"
+                    className="w-full rounded-xl border border-slate-700 bg-slate-950 px-3 py-2.5 text-sm text-white outline-none focus:border-amber-500"
+                  />
+                </label>
+
+                <label className="block">
+                  <span className="mb-2 block text-sm font-bold text-slate-300">
+                    Changed Field
+                  </span>
+                  <select
+                    value={draftFilters.fieldName}
+                    onChange={(e) =>
+                      setDraftFilters((prev) => ({
+                        ...prev,
+                        fieldName: e.target.value,
+                      }))
+                    }
+                    className="w-full rounded-xl border border-slate-700 bg-slate-950 px-3 py-2.5 text-sm text-white outline-none focus:border-amber-500"
+                  >
+                    <option value="all">All Fields</option>
+                    {OPERATION_CORRECTION_FIELDS.map((field) => (
+                      <option key={field} value={field}>
+                        {formatOperationType(field)}
+                      </option>
+                    ))}
+                  </select>
+                </label>
+
+                <label className="block">
+                  <span className="mb-2 block text-sm font-bold text-slate-300">
+                    Operation Type
+                  </span>
+                  <select
+                    value={draftFilters.operationType}
+                    onChange={(e) =>
+                      setDraftFilters((prev) => ({
+                        ...prev,
+                        operationType: e.target.value,
+                      }))
+                    }
+                    className="w-full rounded-xl border border-slate-700 bg-slate-950 px-3 py-2.5 text-sm text-white outline-none focus:border-amber-500"
+                  >
+                    <option value="all">All Operation Types</option>
+                    {OPERATION_CORRECTION_TYPES.map((type) => (
+                      <option key={type} value={type}>
+                        {formatOperationType(type)}
+                      </option>
+                    ))}
+                  </select>
+                </label>
+
+                <label className="block">
+                  <span className="mb-2 block text-sm font-bold text-slate-300">
+                    Status
+                  </span>
+                  <select
+                    value={draftFilters.status}
+                    onChange={(e) =>
+                      setDraftFilters((prev) => ({
+                        ...prev,
+                        status: e.target.value,
+                      }))
+                    }
+                    className="w-full rounded-xl border border-slate-700 bg-slate-950 px-3 py-2.5 text-sm text-white outline-none focus:border-amber-500"
+                  >
+                    <option value="all">All Statuses</option>
+                    <option value="PENDING">Pending</option>
+                    <option value="APPROVED">Approved</option>
+                    <option value="APPLIED">Applied</option>
+                    <option value="REJECTED">Rejected</option>
+                  </select>
+                </label>
+              </div>
+
+              <div className="grid grid-cols-2 gap-3 border-t border-slate-800 px-5 py-4">
+                <button
+                  type="button"
+                  onClick={resetFilters}
+                  disabled={loading}
+                  className="rounded-xl border border-slate-700 bg-slate-950 px-4 py-2.5 text-sm font-extrabold text-slate-300 hover:border-slate-500 hover:text-white disabled:opacity-50"
+                >
+                  Reset
+                </button>
+                <button
+                  type="button"
+                  onClick={loadReport}
+                  disabled={loading}
+                  className="rounded-xl border border-amber-500 bg-amber-500 px-4 py-2.5 text-sm font-extrabold text-slate-950 hover:bg-amber-400 disabled:cursor-wait disabled:opacity-60"
+                >
+                  {loading
+                    ? "Generating..."
+                    : reportGenerated
+                      ? "Update Report"
+                      : "Generate Report"}
+                </button>
+              </div>
+            </aside>
+          </div>
+        ) : null}
+      </div>
+    </div>
+  );
+}
+
 function isPlatformReportsUser(user) {
   const roleValues = [
     user?.role,
@@ -5314,6 +6160,9 @@ export default function ReportsPage({
     });
   }, [reportRows, appliedFilters, assets]);
 
+  const operationsPagination = useReportPagination(filteredRows);
+  const paginatedOperationRows = operationsPagination.paginatedItems;
+
   const totals = useMemo(
     () =>
       filteredRows.reduce(
@@ -5432,6 +6281,7 @@ export default function ReportsPage({
     setSelectedReport(report);
     setDraftFilters(EMPTY_FILTERS);
     setAppliedFilters(EMPTY_FILTERS);
+    operationsPagination.resetPage();
     setReportGenerated(false);
     setFiltersOpen(true);
   };
@@ -5502,6 +6352,7 @@ export default function ReportsPage({
       setOperationsReportRows(result.rows);
       setAppliedFilters(draftFilters);
       setReportGenerated(true);
+      operationsPagination.resetPage();
       setFiltersOpen(false);
     } catch (requestError) {
       setOperationsReportError(
@@ -5607,6 +6458,18 @@ export default function ReportsPage({
         assets={assets}
         data={data}
         headers={headers}
+        onBack={handleBackToReports}
+      />
+    );
+  }
+
+  if (selectedReport?.id === "operation-corrections") {
+    return (
+      <OperationCorrectionsReport
+        selectedReport={selectedReport}
+        currentUser={currentUser}
+        currentCompany={currentCompany}
+        projects={projects}
         onBack={handleBackToReports}
       />
     );
@@ -5765,7 +6628,7 @@ export default function ReportsPage({
                     <tbody>
                       {filteredRows.length ? (
                         <>
-                          {filteredRows.map((row) => (
+                          {paginatedOperationRows.map((row) => (
                             <tr
                               key={row.key}
                               className="border-b border-slate-800/80 transition hover:bg-slate-800/40"
@@ -5853,6 +6716,7 @@ export default function ReportsPage({
                     </tbody>
                   </table>
                 </div>
+                    <ReportPagination pagination={operationsPagination} itemLabel="operations" />
               </section>
             </>
           )}
