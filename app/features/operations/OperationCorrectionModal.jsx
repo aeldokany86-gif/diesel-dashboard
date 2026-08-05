@@ -4,13 +4,14 @@ import React from "react";
 
 import { isSameText } from "../../lib/helpers";
 import { makeTenantEntityKey } from "../../lib/companyHelpers";
+import { useLanguage } from "../../context/LanguageContext";
 
-function formatContextDate(value) {
+function formatContextDate(value, language = "en") {
   if (!value) return "-";
   const date = new Date(value);
   if (Number.isNaN(date.getTime())) return String(value);
 
-  return date.toLocaleString("en-GB", {
+  return date.toLocaleString(language === "ar" ? "ar-SA" : "en-GB", {
     year: "numeric",
     month: "2-digit",
     day: "2-digit",
@@ -37,6 +38,9 @@ export default function OperationCorrectionModal({
   getStationDisplayCode,
   getFuelerDisplayName,
 }) {
+  const { language, t } = useLanguage();
+  const isRtl = language === "ar";
+
   if (!editCell) return null;
 
   const externalStationOptions = Array.from(
@@ -52,18 +56,18 @@ export default function OperationCorrectionModal({
 
   const correctionTitle =
     editCell.field === "equipment"
-      ? "Equipment"
+      ? t("operationCorrection.fields.equipment")
       : editCell.field === "diesel"
-      ? "Diesel Quantity"
+      ? t("operationCorrection.fields.dieselQuantity")
       : editCell.field === "odometer"
-      ? "Odometer"
+      ? t("operationCorrection.fields.odometer")
       : editCell.field === "stationCounter"
-      ? "Station Counter"
+      ? t("operationCorrection.fields.stationCounter")
       : editCell.field === "station"
       ? editCell.isExternalDirectRefuel
-        ? "External Station"
-        : "Source Station"
-      : "Operator";
+        ? t("operationCorrection.fields.externalStation")
+        : t("operationCorrection.fields.sourceStation")
+      : t("operationCorrection.fields.operator");
 
   const projectName =
     operationContext?.projectNameAtOperation ||
@@ -75,10 +79,14 @@ export default function OperationCorrectionModal({
     ["equipment", "station", "fueler"].includes(editCell.field) &&
     !(editCell.field === "station" && editCell.isExternalDirectRefuel);
 
-  const optionState = (items, label) => {
+  const optionState = (items, labelKey) => {
     if (!fieldNeedsHistoricalOptions) return null;
     if (contextLoading) {
-      return <p className="mt-2 text-sm text-slate-500">Loading historical options...</p>;
+      return (
+        <p className="mt-2 text-sm text-slate-500">
+          {t("operationCorrection.messages.loadingHistoricalOptions")}
+        </p>
+      );
     }
     if (contextError) {
       return <p className="mt-2 text-sm font-medium text-red-600">{contextError}</p>;
@@ -86,7 +94,9 @@ export default function OperationCorrectionModal({
     if (!items.length) {
       return (
         <p className="mt-2 text-sm text-amber-700">
-          No eligible {label} were found in the operation project at the operation date.
+          {t("operationCorrection.messages.noEligibleOptions", {
+            item: t(labelKey),
+          })}
         </p>
       );
     }
@@ -94,12 +104,12 @@ export default function OperationCorrectionModal({
   };
 
   return (
-    <div className="fixed inset-0 bg-black/75 backdrop-blur-sm flex items-center justify-center z-[10010] p-3">
-      <div className="bg-white text-black w-[min(560px,calc(100vw-2rem))] rounded-2xl shadow-2xl overflow-hidden">
+    <div className="fixed inset-0 bg-black/75 backdrop-blur-sm flex items-center justify-center z-[10010] p-3" dir={isRtl ? "rtl" : "ltr"}>
+      <div className={`bg-white text-black w-[min(560px,calc(100vw-2rem))] rounded-2xl shadow-2xl overflow-hidden ${isRtl ? "text-right" : "text-left"}`}>
         <div className="p-6 pb-0">
           <div className="flex justify-between items-center mb-5 border-b pb-3">
             <h2 className="text-xl sm:text-2xl font-bold">
-              Request {correctionTitle} Correction
+              {t("operationCorrection.requestTitle", { field: correctionTitle })}
             </h2>
 
             <button
@@ -112,23 +122,23 @@ export default function OperationCorrectionModal({
 
           <div className="grid grid-cols-1 sm:grid-cols-2 gap-3 bg-slate-900 text-white rounded-xl p-4 mb-4">
             <div>
-              <p className="text-xs text-slate-400">Historical Project</p>
+              <p className="text-xs text-slate-400">{t("operationCorrection.context.historicalProject")}</p>
               <p className="font-bold">{projectName}</p>
             </div>
             <div>
-              <p className="text-xs text-slate-400">Operation Date</p>
+              <p className="text-xs text-slate-400">{t("operationCorrection.context.operationDate")}</p>
               <p className="font-bold">
-                {formatContextDate(operationContext?.operationDate)}
+                {formatContextDate(operationContext?.operationDate, language)}
               </p>
             </div>
             <div>
-              <p className="text-xs text-slate-400">Operation</p>
+              <p className="text-xs text-slate-400">{t("operationCorrection.context.operation")}</p>
               <p className="font-bold">
                 {operationContext?.operationNo || editCell.operationBackendId || "-"}
               </p>
             </div>
             <div>
-              <p className="text-xs text-slate-400">Operation Type</p>
+              <p className="text-xs text-slate-400">{t("operationCorrection.context.operationType")}</p>
               <p className="font-bold">
                 {operationContext?.operationType || editCell.operationType || "-"}
               </p>
@@ -136,7 +146,7 @@ export default function OperationCorrectionModal({
           </div>
 
           <div className="bg-gray-100 rounded-xl p-4 mb-4">
-            <p className="text-sm text-gray-600">Old Value</p>
+            <p className="text-sm text-gray-600">{t("operationCorrection.oldValue")}</p>
             <p className="text-xl font-bold">
               {editCell.oldValueDisplay ||
                 getDisplayValue?.(editCell.field, editCell.oldValue) ||
@@ -145,7 +155,7 @@ export default function OperationCorrectionModal({
           </div>
 
           <div className="mb-4">
-            <label className="font-medium text-gray-700">New Value</label>
+            <label className="font-medium text-gray-700">{t("operationCorrection.newValue")}</label>
 
             {editCell.field === "equipment" ? (
               <>
@@ -155,9 +165,10 @@ export default function OperationCorrectionModal({
                   onChange={(event) =>
                     setEditCell({ ...editCell, newValue: event.target.value })
                   }
-                  className="border rounded-lg p-3 w-full mt-2 disabled:bg-gray-100 disabled:cursor-not-allowed"
+                  dir={isRtl ? "rtl" : "ltr"}
+                  className={`border rounded-lg p-3 w-full mt-2 disabled:bg-gray-100 disabled:cursor-not-allowed ${isRtl ? "text-right" : "text-left"}`}
                 >
-                  <option value="">Select Equipment</option>
+                  <option value="">{t("operationCorrection.placeholders.selectEquipment")}</option>
                   {assets.map((asset) => {
                     const backendId =
                       asset.backendId || asset.assetBackendId || asset.id;
@@ -175,7 +186,7 @@ export default function OperationCorrectionModal({
                     );
                   })}
                 </select>
-                {optionState(assets, "equipment")}
+                {optionState(assets, "operationCorrection.items.equipment")}
               </>
             ) : editCell.field === "station" &&
               editCell.isExternalDirectRefuel ? (
@@ -184,9 +195,10 @@ export default function OperationCorrectionModal({
                 onChange={(event) =>
                   setEditCell({ ...editCell, newValue: event.target.value })
                 }
-                className="border rounded-lg p-3 w-full mt-2"
+                dir={isRtl ? "rtl" : "ltr"}
+                className={`border rounded-lg p-3 w-full mt-2 ${isRtl ? "text-right" : "text-left"}`}
               >
-                <option value="">Select External Station</option>
+                <option value="">{t("operationCorrection.placeholders.selectExternalStation")}</option>
                 {externalStationOptions.map((stationName) => (
                   <option key={stationName} value={stationName}>
                     {stationName}
@@ -201,9 +213,10 @@ export default function OperationCorrectionModal({
                   onChange={(event) =>
                     setEditCell({ ...editCell, newValue: event.target.value })
                   }
-                  className="border rounded-lg p-3 w-full mt-2 disabled:bg-gray-100 disabled:cursor-not-allowed"
+                  dir={isRtl ? "rtl" : "ltr"}
+                  className={`border rounded-lg p-3 w-full mt-2 disabled:bg-gray-100 disabled:cursor-not-allowed ${isRtl ? "text-right" : "text-left"}`}
                 >
-                  <option value="">Select Station</option>
+                  <option value="">{t("operationCorrection.placeholders.selectStation")}</option>
                   {stations
                     .filter(
                       (station) =>
@@ -231,7 +244,7 @@ export default function OperationCorrectionModal({
                       );
                     })}
                 </select>
-                {optionState(stations, "stations")}
+                {optionState(stations, "operationCorrection.items.stations")}
               </>
             ) : editCell.field === "fueler" ? (
               <>
@@ -241,9 +254,10 @@ export default function OperationCorrectionModal({
                   onChange={(event) =>
                     setEditCell({ ...editCell, newValue: event.target.value })
                   }
-                  className="border rounded-lg p-3 w-full mt-2 disabled:bg-gray-100 disabled:cursor-not-allowed"
+                  dir={isRtl ? "rtl" : "ltr"}
+                  className={`border rounded-lg p-3 w-full mt-2 disabled:bg-gray-100 disabled:cursor-not-allowed ${isRtl ? "text-right" : "text-left"}`}
                 >
-                  <option value="">Select Operator</option>
+                  <option value="">{t("operationCorrection.placeholders.selectOperator")}</option>
                   {fuelers.map((fueler) => {
                     const backendId =
                       fueler.backendId ||
@@ -258,12 +272,12 @@ export default function OperationCorrectionModal({
 
                     return (
                       <option key={makeTenantEntityKey(fueler)} value={backendId}>
-                        {displayName} - {fueler.role || fueler.jobTitle || "Operator"} - {fueler.status || "On Duty"}
+                        {displayName} - {fueler.role || fueler.jobTitle || t("operationCorrection.defaults.operator")} - {fueler.status || t("operationCorrection.defaults.onDuty")}
                       </option>
                     );
                   })}
                 </select>
-                {optionState(fuelers, "operators")}
+                {optionState(fuelers, "operationCorrection.items.operators")}
               </>
             ) : (
               <input
@@ -272,21 +286,23 @@ export default function OperationCorrectionModal({
                 onChange={(event) =>
                   setEditCell({ ...editCell, newValue: event.target.value })
                 }
-                className="border rounded-lg p-3 w-full mt-2"
-                placeholder="Enter new value"
+                dir={isRtl ? "rtl" : "ltr"}
+                className={`border rounded-lg p-3 w-full mt-2 ${isRtl ? "text-right" : "text-left"}`}
+                placeholder={t("operationCorrection.placeholders.enterNewValue")}
               />
             )}
           </div>
 
           <div className="mb-5">
-            <label className="font-medium text-gray-700">Edit Reason</label>
+            <label className="font-medium text-gray-700">{t("operationCorrection.editReason")}</label>
             <textarea
               value={editCell.reason}
               onChange={(event) =>
                 setEditCell({ ...editCell, reason: event.target.value })
               }
-              className="border rounded-lg p-3 w-full mt-2 h-24"
-              placeholder="Enter correction reason..."
+              dir={isRtl ? "rtl" : "ltr"}
+              className={`border rounded-lg p-3 w-full mt-2 h-24 ${isRtl ? "text-right" : "text-left"}`}
+              placeholder={t("operationCorrection.placeholders.enterReason")}
             />
           </div>
         </div>
@@ -296,7 +312,7 @@ export default function OperationCorrectionModal({
             onClick={onClose}
             className="bg-gray-200 px-3 lg:px-4 py-2 rounded-lg"
           >
-            Cancel
+            {t("common.cancel")}
           </button>
 
           <button
@@ -307,7 +323,9 @@ export default function OperationCorrectionModal({
             }
             className="bg-red-600 disabled:bg-red-300 disabled:cursor-not-allowed text-white px-3 lg:px-4 py-2 rounded-lg"
           >
-            {contextLoading ? "Loading..." : "Save Correction"}
+            {contextLoading
+              ? t("operationCorrection.loading")
+              : t("operationCorrection.saveCorrection")}
           </button>
         </div>
       </div>

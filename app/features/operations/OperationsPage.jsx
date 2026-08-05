@@ -52,6 +52,7 @@ import OperationCorrectionModal from "./OperationCorrectionModal";
 import AddOperationModal from "./AddOperationModal";
 import useOperationsData from "./hooks/useOperationsData";
 import { companyMatches } from "../../lib/companyHelpers";
+import { useLanguage } from "../../context/LanguageContext";
 
 const NETWORK_OFFLINE_MESSAGE =
   "No internet connection. Please check your connection and try again.";
@@ -207,6 +208,8 @@ export default function OperationsPage({
     currentUser,
     setData,
   });
+
+  const { language, t } = useLanguage();
 
   const getResetEffectiveTime = (resetRecord) => {
     if (!resetRecord) return 0;
@@ -809,7 +812,7 @@ const payload = mapFrontendOperationToBackendPayload({
       const createdOperation = await createOperation(payload, currentUser);
 
       const backendMessage =
-        createdOperation?.message || "Operation saved successfully.";
+        createdOperation?.message || t("operations.messages.operationSaved");
       const backendStatus = String(createdOperation?.status || "").toUpperCase();
       const toastType = backendStatus === "COMPLETED" ? "success" : "warning";
 
@@ -832,7 +835,7 @@ const payload = mapFrontendOperationToBackendPayload({
     } catch (error) {
       showToast?.(
         "warning",
-        getFriendlyApiErrorMessage(error, "Failed to save operation.")
+        getFriendlyApiErrorMessage(error, t("operations.messages.operationSaveFailed"))
       );
     }
   };
@@ -863,7 +866,7 @@ const payload = mapFrontendOperationToBackendPayload({
     URL.revokeObjectURL(url);
   };
 
-  const printTable = (tableId, title = "Table Report") => {
+  const printTable = (tableId, title = t("operations.export.tableReport")) => {
     const tableElement = document.getElementById(tableId);
 
     if (!tableElement) return;
@@ -925,7 +928,7 @@ const payload = mapFrontendOperationToBackendPayload({
         <body>
           <h2>${title}</h2>
           <div class="report-meta">
-            Generated at: ${new Date().toLocaleString()}
+            ${t("operations.export.generatedAt")}: ${new Date().toLocaleString(language === "ar" ? "ar-SA" : "en-GB")}
           </div>
 
           ${tableElement.outerHTML}
@@ -1013,7 +1016,7 @@ const payload = mapFrontendOperationToBackendPayload({
     const d = parseOperationDate(rawDate);
     if (!d) return rawDate || "-";
 
-    return d.toLocaleString("en-GB", {
+    return d.toLocaleString(language === "ar" ? "ar-SA" : "en-GB", {
       year: "numeric",
       month: "2-digit",
       day: "2-digit",
@@ -1023,7 +1026,7 @@ const payload = mapFrontendOperationToBackendPayload({
   };
 
   const getMonthName = (monthIndex) => {
-    return new Date(2026, monthIndex, 1).toLocaleString("en-US", {
+    return new Date(2026, monthIndex, 1).toLocaleString(language === "ar" ? "ar-SA" : "en-US", {
       month: "short",
     }).toUpperCase();
   };
@@ -1077,7 +1080,7 @@ const payload = mapFrontendOperationToBackendPayload({
 
     return (
       <div className="grid grid-cols-7 gap-1 text-center">
-        {["S", "M", "T", "W", "T", "F", "S"].map((day, i) => (
+        {t("operations.calendar.weekdays").split(",").map((day, i) => (
           <div key={i} className="text-[11px] text-gray-400 py-1">
             {day}
           </div>
@@ -1326,21 +1329,21 @@ const payload = mapFrontendOperationToBackendPayload({
   };
 
   const getEquipmentFilterLabel = () => {
-    if (selectedEquipment.length === 0) return "All Equipment";
+    if (selectedEquipment.length === 0) return t("operations.filters.allEquipment");
     if (selectedEquipment.length === 1) return selectedEquipment[0];
-    return `${selectedEquipment.length} Equipment Selected`;
+    return t("operations.filters.equipmentSelected", { count: selectedEquipment.length });
   };
 
   const getEquipmentTypeFilterLabel = () => {
-    if (selectedEquipmentType.length === 0) return "All Equipment Types";
+    if (selectedEquipmentType.length === 0) return t("operations.filters.allEquipmentTypes");
     if (selectedEquipmentType.length === 1) return selectedEquipmentType[0];
-    return `${selectedEquipmentType.length} Types Selected`;
+    return t("operations.filters.typesSelected", { count: selectedEquipmentType.length });
   };
 
   const getProjectFilterLabel = () => {
-    if (selectedProject.length === 0) return "All Projects";
+    if (selectedProject.length === 0) return t("operations.filters.allProjects");
     if (selectedProject.length === 1) return selectedProject[0];
-    return `${selectedProject.length} Projects Selected`;
+    return t("operations.filters.projectsSelected", { count: selectedProject.length });
   };
 
   const filteredDirectRefuelData = refuelTypeFilteredData.filter((item) => {
@@ -1963,7 +1966,7 @@ const payload = mapFrontendOperationToBackendPayload({
         return;
       }
 
-      fieldLabel = "Equipment";
+      fieldLabel = t("operations.table.equipment");
     }
 
     if (field === "diesel") {
@@ -2103,7 +2106,7 @@ const payload = mapFrontendOperationToBackendPayload({
       showToast?.(
         "success",
         responseBody?.message ||
-          "Correction request submitted and pending manager approval."
+          t("operations.messages.correctionPending")
       );
 
       if (typeof onOperationsWorkspaceRefresh === "function") {
@@ -2125,8 +2128,8 @@ const payload = mapFrontendOperationToBackendPayload({
       <div className="fleet-page-shell relative isolate w-full max-w-[1920px] mx-auto px-2 sm:px-3 lg:px-4 xl:px-5 2xl:px-8 py-3 sm:py-4 lg:py-5 text-[12px] lg:text-[13px]">
       <div className="flex flex-col sm:flex-row justify-between sm:items-start xl:items-center gap-3 mb-4">
         <div>
-          <h1 className="text-xl sm:text-2xl font-black tracking-tight text-slate-100">Diesel Dashboard</h1>
-          <p className="text-slate-400 text-sm">Fuel transactions monitoring</p>
+          <h1 className="text-xl sm:text-2xl font-black tracking-tight text-slate-100">{t("operations.title")}</h1>
+          <p className="text-slate-400 text-sm">{t("operations.subtitle")}</p>
           {isOfficerUser(currentUser) && (
             <p className="mt-2 inline-flex rounded-full bg-blue-500/15 border border-blue-500/30 px-3 py-1 text-xs text-blue-300 font-semibold">
               Officer access: Operations page is read-only.
@@ -2139,7 +2142,7 @@ const payload = mapFrontendOperationToBackendPayload({
             onClick={() => setShowForm(true)}
             className="bg-amber-400 hover:bg-amber-300 text-slate-950 px-4 py-2.5 rounded-xl font-bold shadow-lg shadow-amber-500/20 transition-all duration-200 active:scale-[0.98]"
           >
-            + Add Operation
+            {t("operations.addOperation")}
           </button>
         )}
       </div>
@@ -2153,14 +2156,16 @@ const payload = mapFrontendOperationToBackendPayload({
             >
               <span>
                 {fromDate || toDate
-                  ? `${fromDate || "Start"} → ${toDate || "End"}`
-                  : "Select date range"}
+                  ? `${fromDate || t("operations.filters.start")} → ${toDate || t("operations.filters.end")}`
+                  : t("operations.filters.selectDateRange")}
               </span>
               <span>▾</span>
             </button>
 
             {showDateFilter && (
-              <div className="absolute left-0 mt-3 bg-white text-slate-950 border border-slate-200 rounded-2xl z-[9999] w-[min(650px,calc(100vw-2rem))] shadow-2xl overflow-hidden">
+              <div className={`absolute mt-3 bg-white text-slate-950 border border-slate-200 rounded-2xl z-[9999] w-[min(650px,calc(100vw-2rem))] shadow-2xl overflow-hidden ${
+                language === "ar" ? "right-0 left-auto" : "left-0 right-auto"
+              }`}>
                 <div className="bg-slate-800 text-white p-3 flex justify-end border-b border-slate-700">
                   <button className="border border-gray-500 px-3 lg:px-4 py-2 rounded-lg text-sm">
                     Auto date range ▾
@@ -2169,7 +2174,7 @@ const payload = mapFrontendOperationToBackendPayload({
 
                 <div className="grid grid-cols-1 md:grid-cols-2 gap-4 lg:gap-8 p-3 sm:p-5">
                   <div>
-                    <p className="text-sm font-semibold mb-3">Start Date</p>
+                    <p className="text-sm font-semibold mb-3">{t("operations.filters.startDate")}</p>
 
                     <div className="flex justify-between items-center mb-3">
                       <button onClick={() => moveMonth("start", -1)}>‹</button>
@@ -2183,7 +2188,7 @@ const payload = mapFrontendOperationToBackendPayload({
                   </div>
 
                   <div>
-                    <p className="text-sm font-semibold mb-3">End Date</p>
+                    <p className="text-sm font-semibold mb-3">{t("operations.filters.endDate")}</p>
 
                     <div className="flex justify-between items-center mb-3">
                       <button onClick={() => moveMonth("end", -1)}>‹</button>
@@ -2222,7 +2227,10 @@ const payload = mapFrontendOperationToBackendPayload({
           <div ref={equipmentDropdownRef} className="relative z-[90] lg:flex-1 lg:min-w-0">
             <button
               onClick={() => setShowEquipmentDropdown(!showEquipmentDropdown)}
-              className="bg-[#080d19] border border-slate-700 hover:border-amber-400 focus:border-amber-400 focus:ring-2 focus:ring-amber-400/20 text-slate-100 px-3 lg:px-4 py-2.5 rounded-xl w-full min-w-0 2xl:min-w-[220px] shadow-inner transition-all duration-200 text-left text-[12px] lg:text-sm"
+              dir={language === "ar" ? "rtl" : "ltr"}
+              className={`bg-[#080d19] border border-slate-700 hover:border-amber-400 focus:border-amber-400 focus:ring-2 focus:ring-amber-400/20 text-slate-100 px-3 lg:px-4 py-2.5 rounded-xl w-full min-w-0 2xl:min-w-[220px] shadow-inner transition-all duration-200 text-[12px] lg:text-sm ${
+                language === "ar" ? "text-right" : "text-left"
+              }`}
             >
               {getEquipmentFilterLabel()} ▾
             </button>
@@ -2232,8 +2240,11 @@ const payload = mapFrontendOperationToBackendPayload({
                 <input
                   value={equipmentSearch}
                   onChange={(e) => setEquipmentSearch(e.target.value)}
-                  placeholder="Search equipment..."
-                  className="w-full bg-slate-900 border border-slate-700 rounded-lg p-2 mb-2 text-slate-100 outline-none focus:border-amber-400 focus:ring-2 focus:ring-amber-400/20"
+                  placeholder={t("operations.filters.searchEquipment")}
+                  dir={language === "ar" ? "rtl" : "ltr"}
+                  className={`w-full bg-slate-900 border border-slate-700 rounded-lg p-2 mb-2 text-slate-100 outline-none focus:border-amber-400 focus:ring-2 focus:ring-amber-400/20 ${
+                    language === "ar" ? "text-right" : "text-left"
+                  }`}
                 />
 
                 <button
@@ -2286,7 +2297,10 @@ const payload = mapFrontendOperationToBackendPayload({
               onClick={() =>
                 setShowEquipmentTypeDropdown(!showEquipmentTypeDropdown)
               }
-              className="bg-[#080d19] border border-slate-700 hover:border-amber-400 focus:border-amber-400 focus:ring-2 focus:ring-amber-400/20 text-slate-100 px-3 lg:px-4 py-2.5 rounded-xl w-full min-w-0 2xl:min-w-[220px] shadow-inner transition-all duration-200 text-left text-[12px] lg:text-sm"
+              dir={language === "ar" ? "rtl" : "ltr"}
+              className={`bg-[#080d19] border border-slate-700 hover:border-amber-400 focus:border-amber-400 focus:ring-2 focus:ring-amber-400/20 text-slate-100 px-3 lg:px-4 py-2.5 rounded-xl w-full min-w-0 2xl:min-w-[220px] shadow-inner transition-all duration-200 text-[12px] lg:text-sm ${
+                language === "ar" ? "text-right" : "text-left"
+              }`}
             >
               {getEquipmentTypeFilterLabel()} ▾
             </button>
@@ -2296,8 +2310,11 @@ const payload = mapFrontendOperationToBackendPayload({
                 <input
                   value={equipmentTypeSearch}
                   onChange={(e) => setEquipmentTypeSearch(e.target.value)}
-                  placeholder="Search type..."
-                  className="w-full bg-slate-900 border border-slate-700 rounded-lg p-2 mb-2 text-slate-100 outline-none focus:border-amber-400 focus:ring-2 focus:ring-amber-400/20"
+                  placeholder={t("operations.filters.searchType")}
+                  dir={language === "ar" ? "rtl" : "ltr"}
+                  className={`w-full bg-slate-900 border border-slate-700 rounded-lg p-2 mb-2 text-slate-100 outline-none focus:border-amber-400 focus:ring-2 focus:ring-amber-400/20 ${
+                    language === "ar" ? "text-right" : "text-left"
+                  }`}
                 />
 
                 <button
@@ -2349,7 +2366,10 @@ const payload = mapFrontendOperationToBackendPayload({
           <div ref={projectDropdownRef} className="relative z-[90] lg:flex-1 lg:min-w-0">
             <button
               onClick={() => setShowProjectDropdown(!showProjectDropdown)}
-              className="bg-[#080d19] border border-slate-700 hover:border-amber-400 focus:border-amber-400 focus:ring-2 focus:ring-amber-400/20 text-slate-100 px-3 lg:px-4 py-2.5 rounded-xl w-full min-w-0 2xl:min-w-[220px] shadow-inner transition-all duration-200 text-left text-[12px] lg:text-sm"
+              dir={language === "ar" ? "rtl" : "ltr"}
+              className={`bg-[#080d19] border border-slate-700 hover:border-amber-400 focus:border-amber-400 focus:ring-2 focus:ring-amber-400/20 text-slate-100 px-3 lg:px-4 py-2.5 rounded-xl w-full min-w-0 2xl:min-w-[220px] shadow-inner transition-all duration-200 text-[12px] lg:text-sm ${
+                language === "ar" ? "text-right" : "text-left"
+              }`}
             >
               {getProjectFilterLabel()} ▾
             </button>
@@ -2359,8 +2379,11 @@ const payload = mapFrontendOperationToBackendPayload({
                 <input
                   value={projectSearch}
                   onChange={(e) => setProjectSearch(e.target.value)}
-                  placeholder="Search project..."
-                  className="w-full bg-slate-900 border border-slate-700 rounded-lg p-2 mb-2 text-slate-100 outline-none focus:border-amber-400 focus:ring-2 focus:ring-amber-400/20"
+                  placeholder={t("operations.filters.searchProject")}
+                  dir={language === "ar" ? "rtl" : "ltr"}
+                  className={`w-full bg-slate-900 border border-slate-700 rounded-lg p-2 mb-2 text-slate-100 outline-none focus:border-amber-400 focus:ring-2 focus:ring-amber-400/20 ${
+                    language === "ar" ? "text-right" : "text-left"
+                  }`}
                 />
 
                 <button
@@ -2414,9 +2437,9 @@ const payload = mapFrontendOperationToBackendPayload({
             aria-label="Refuel operation type"
             className="bg-[#080d19] border border-slate-700 hover:border-amber-400 focus:border-amber-400 focus:ring-2 focus:ring-amber-400/20 text-slate-100 px-3 lg:px-4 py-2.5 rounded-xl w-full lg:flex-1 lg:min-w-0 shadow-inner transition-all duration-200 text-[12px] lg:text-sm outline-none"
           >
-            <option value="ALL">All Refuel Types</option>
-            <option value="DIRECT">Direct Refuel</option>
-            <option value="EXTERNAL">External Direct Refuel</option>
+            <option value="ALL">{t("operations.filters.allRefuelTypes")}</option>
+            <option value="DIRECT">{t("operations.filters.directRefuel")}</option>
+            <option value="EXTERNAL">{t("operations.filters.externalDirectRefuel")}</option>
           </select>
 
           <button
@@ -2433,26 +2456,26 @@ const payload = mapFrontendOperationToBackendPayload({
             }}
             className="w-full lg:w-auto lg:flex-none whitespace-nowrap bg-red-500/10 hover:bg-red-500/20 text-red-300 border border-red-500/35 px-3 lg:px-4 py-2.5 rounded-xl cursor-pointer transition-all duration-200"
           >
-            Reset Filters
+            {t("operations.filters.reset")}
           </button>
         </div>
       </div>
 
       <div className="relative z-0 grid grid-cols-1 sm:grid-cols-2 2xl:grid-cols-4 gap-3 mb-4">
-        <Card title="Total Quantity (L)" value={formatNumber(totalDiesel)} />
+        <Card title={t("operations.cards.totalQuantity")} value={formatNumber(totalDiesel)} />
 
         <Card
-          title={`Total Cost (${currency})`}
+          title={t("operations.cards.totalCost", { currency })}
           value={formatNumber(totalCost)}
         />
 
         <Card
-          title="Equipment Refuel Operations"
+          title={t("operations.cards.refuelOperations")}
           value={formatNumber(filteredDirectRefuelData.length)}
         />
 
         <Card
-          title="Active Equipment"
+          title={t("operations.cards.activeEquipment")}
           value={formatNumber(equipmentSummary.length)}
         />
       </div>
@@ -2460,12 +2483,12 @@ const payload = mapFrontendOperationToBackendPayload({
       <div className="relative z-0 bg-slate-900/80 rounded-2xl shadow-xl shadow-black/10 overflow-hidden mb-4 border border-slate-700/80">
         <div className="p-3 sm:p-4 border-b border-slate-700/80 flex flex-col sm:flex-row gap-2 sm:gap-3 justify-between sm:items-center bg-slate-900/60">
           <h2 className="text-base sm:text-lg font-extrabold text-amber-300">
-            Equipment Consumption Summary
+            {t("operations.sections.equipmentConsumptionSummary")}
           </h2>
 
           <div className="flex flex-wrap items-center gap-3">
             <span className="text-sm text-slate-400">
-              {equipmentSummary.length} records
+              {t("operations.sections.recordCount", { count: equipmentSummary.length })}
             </span>
 
             <div ref={equipmentSummarySettingsRef} className="relative">
@@ -2481,25 +2504,33 @@ const payload = mapFrontendOperationToBackendPayload({
               </button>
 
               {showEquipmentSummarySettings && (
-                <div className="absolute left-0 right-auto sm:left-auto sm:right-0 mt-2 w-44 max-w-[calc(100vw-2rem)] bg-slate-950 border border-slate-700 rounded-xl shadow-2xl z-[9999] overflow-hidden">
+                <div className={`absolute mt-2 w-44 max-w-[calc(100vw-2rem)] bg-slate-950 border border-slate-700 rounded-xl shadow-2xl z-[9999] overflow-hidden ${
+                    language === "ar" ? "left-0 right-auto" : "right-0 left-auto"
+                  }`}>
                   <button
                     onClick={exportEquipmentSummaryCSV}
-                    className="block w-full cursor-pointer text-left px-4 py-3 hover:bg-slate-800 transition text-white"
+                    dir={language === "ar" ? "rtl" : "ltr"}
+                    className={`block w-full cursor-pointer px-4 py-3 hover:bg-slate-800 transition text-white ${
+                      language === "ar" ? "text-right" : "text-left"
+                    }`}
                   >
-                    Export CSV
+                    {t("common.exportCsv")}
                   </button>
 
                   <button
                     onClick={() => {
                       printTable(
                         "equipment-summary-table",
-                        "Equipment Consumption Summary"
+                        t("operations.sections.equipmentConsumptionSummary")
                       );
                       setShowEquipmentSummarySettings(false);
                     }}
-                    className="block w-full cursor-pointer text-left px-4 py-3 hover:bg-slate-800 transition text-white border-t border-gray-700"
+                    dir={language === "ar" ? "rtl" : "ltr"}
+                    className={`block w-full cursor-pointer px-4 py-3 hover:bg-slate-800 transition text-white border-t border-gray-700 ${
+                      language === "ar" ? "text-right" : "text-left"
+                    }`}
                   >
-                    Print
+                    {t("common.print")}
                   </button>
                 </div>
               )}
@@ -2514,14 +2545,54 @@ const payload = mapFrontendOperationToBackendPayload({
             >
             <thead className="bg-slate-800 sticky top-0 z-[1] shadow-sm">
               <tr>
-                <Th>#</Th>
-                <Th>Equipment No.</Th>
-                <Th>Equipment Type</Th>
-                <Th>Last Odometer</Th>
-                <Th>Fuel Consumption</Th>
-                <Th>Total Cost</Th>
-                <Th>Distance</Th>
-                <Th>Efficiency</Th>
+                <Th
+                  dir={language === "ar" ? "rtl" : "ltr"}
+                  className={`align-middle ${
+                    language === "ar" ? "text-right" : "text-left"
+                  }`}
+                >#</Th>
+                <Th
+                  dir={language === "ar" ? "rtl" : "ltr"}
+                  className={`align-middle ${
+                    language === "ar" ? "text-right" : "text-left"
+                  }`}
+                >{t("operations.table.equipmentNo")}</Th>
+                <Th
+                  dir={language === "ar" ? "rtl" : "ltr"}
+                  className={`align-middle ${
+                    language === "ar" ? "text-right" : "text-left"
+                  }`}
+                >{t("operations.table.equipmentType")}</Th>
+                <Th
+                  dir={language === "ar" ? "rtl" : "ltr"}
+                  className={`align-middle ${
+                    language === "ar" ? "text-right" : "text-left"
+                  }`}
+                >{t("operations.table.lastOdometer")}</Th>
+                <Th
+                  dir={language === "ar" ? "rtl" : "ltr"}
+                  className={`align-middle ${
+                    language === "ar" ? "text-right" : "text-left"
+                  }`}
+                >{t("operations.table.fuelConsumption")}</Th>
+                <Th
+                  dir={language === "ar" ? "rtl" : "ltr"}
+                  className={`align-middle ${
+                    language === "ar" ? "text-right" : "text-left"
+                  }`}
+                >{t("operations.table.totalCost")}</Th>
+                <Th
+                  dir={language === "ar" ? "rtl" : "ltr"}
+                  className={`align-middle ${
+                    language === "ar" ? "text-right" : "text-left"
+                  }`}
+                >{t("operations.table.distance")}</Th>
+                <Th
+                  dir={language === "ar" ? "rtl" : "ltr"}
+                  className={`align-middle ${
+                    language === "ar" ? "text-right" : "text-left"
+                  }`}
+                >{t("operations.table.efficiency")}</Th>
               </tr>
             </thead>
 
@@ -2559,16 +2630,16 @@ const payload = mapFrontendOperationToBackendPayload({
           <div className="p-3 sm:p-4 border-b border-slate-700/80 flex flex-col sm:flex-row gap-2 sm:gap-3 justify-between sm:items-center bg-slate-900/60">
             <div>
               <h2 className="fleet-chart-title text-base font-extrabold text-amber-300">
-                Consumed Quantity per Equipment Type
+                {t("operations.sections.consumedByEquipmentType")}
               </h2>
               <p className="text-xs text-gray-400 mt-1">
-                Quantity and cost grouped by equipment type
+                {t("operations.sections.equipmentTypeDescription")}
               </p>
             </div>
 
             <div className="flex flex-wrap items-center gap-3">
               <span className="text-sm text-slate-400">
-                {equipmentTypeConsumptionSummary.length} types
+                {t("operations.sections.typeCount", { count: equipmentTypeConsumptionSummary.length })}
               </span>
 
               <div ref={equipmentTypeSettingsRef} className="relative">
@@ -2582,25 +2653,33 @@ const payload = mapFrontendOperationToBackendPayload({
                 </button>
 
                 {showEquipmentTypeSettings && (
-                  <div className="absolute left-0 right-auto sm:left-auto sm:right-0 mt-2 w-44 max-w-[calc(100vw-2rem)] bg-slate-950 border border-slate-700 rounded-xl shadow-2xl z-[9999] overflow-hidden">
+                  <div className={`absolute mt-2 w-44 max-w-[calc(100vw-2rem)] bg-slate-950 border border-slate-700 rounded-xl shadow-2xl z-[9999] overflow-hidden ${
+                    language === "ar" ? "left-0 right-auto" : "right-0 left-auto"
+                  }`}>
                     <button
                       onClick={exportEquipmentTypeSummaryCSV}
-                      className="block w-full cursor-pointer text-left px-4 py-3 hover:bg-slate-800 transition text-white"
+                      dir={language === "ar" ? "rtl" : "ltr"}
+                    className={`block w-full cursor-pointer px-4 py-3 hover:bg-slate-800 transition text-white ${
+                      language === "ar" ? "text-right" : "text-left"
+                    }`}
                     >
-                      Export CSV
+                      {t("common.exportCsv")}
                     </button>
 
                     <button
                       onClick={() => {
                         printTable(
                           "equipment-type-table",
-                          "Consumed Quantity per Equipment Type"
+                          t("operations.sections.consumedByEquipmentType")
                         );
                         setShowEquipmentTypeSettings(false);
                       }}
-                      className="block w-full cursor-pointer text-left px-4 py-3 hover:bg-slate-800 transition text-white border-t border-gray-700"
+                      dir={language === "ar" ? "rtl" : "ltr"}
+                    className={`block w-full cursor-pointer px-4 py-3 hover:bg-slate-800 transition text-white border-t border-gray-700 ${
+                      language === "ar" ? "text-right" : "text-left"
+                    }`}
                     >
-                      Print
+                      {t("common.print")}
                     </button>
                   </div>
                 )}
@@ -2615,10 +2694,30 @@ const payload = mapFrontendOperationToBackendPayload({
               >
               <thead className="bg-slate-800 sticky top-0 z-[1] shadow-sm">
                 <tr>
-                  <Th>#</Th>
-                  <Th>Equipment Type</Th>
-                  <Th>Qty Liters</Th>
-                  <Th>Total Cost</Th>
+                  <Th
+                  dir={language === "ar" ? "rtl" : "ltr"}
+                  className={`align-middle ${
+                    language === "ar" ? "text-right" : "text-left"
+                  }`}
+                >#</Th>
+                  <Th
+                  dir={language === "ar" ? "rtl" : "ltr"}
+                  className={`align-middle ${
+                    language === "ar" ? "text-right" : "text-left"
+                  }`}
+                >{t("operations.table.equipmentType")}</Th>
+                  <Th
+                  dir={language === "ar" ? "rtl" : "ltr"}
+                  className={`align-middle ${
+                    language === "ar" ? "text-right" : "text-left"
+                  }`}
+                >{t("operations.table.qtyLiters")}</Th>
+                  <Th
+                  dir={language === "ar" ? "rtl" : "ltr"}
+                  className={`align-middle ${
+                    language === "ar" ? "text-right" : "text-left"
+                  }`}
+                >{t("operations.table.totalCost")}</Th>
                 </tr>
               </thead>
 
@@ -2642,16 +2741,16 @@ const payload = mapFrontendOperationToBackendPayload({
           <div className="p-3 sm:p-4 border-b border-slate-700/80 flex flex-col sm:flex-row gap-2 sm:gap-3 justify-between sm:items-center bg-slate-900/60">
             <div>
               <h2 className="fleet-chart-title text-base font-extrabold text-amber-300">
-                Daily Consumption
+                {t("operations.sections.dailyConsumption")}
               </h2>
               <p className="text-xs text-gray-400 mt-1">
-                Daily quantity and cost based on selected filters
+                {t("operations.sections.dailyDescription")}
               </p>
             </div>
 
             <div className="flex flex-wrap items-center gap-3">
               <span className="text-sm text-slate-400">
-                {dailyConsumptionSummary.length} days
+                {t("operations.sections.dayCount", { count: dailyConsumptionSummary.length })}
               </span>
 
               <div ref={dailyConsumptionSettingsRef} className="relative">
@@ -2667,25 +2766,33 @@ const payload = mapFrontendOperationToBackendPayload({
                 </button>
 
                 {showDailyConsumptionSettings && (
-                  <div className="absolute left-0 right-auto sm:left-auto sm:right-0 mt-2 w-44 max-w-[calc(100vw-2rem)] bg-slate-950 border border-slate-700 rounded-xl shadow-2xl z-[9999] overflow-hidden">
+                  <div className={`absolute mt-2 w-44 max-w-[calc(100vw-2rem)] bg-slate-950 border border-slate-700 rounded-xl shadow-2xl z-[9999] overflow-hidden ${
+                    language === "ar" ? "left-0 right-auto" : "right-0 left-auto"
+                  }`}>
                     <button
                       onClick={exportDailyConsumptionCSV}
-                      className="block w-full cursor-pointer text-left px-4 py-3 hover:bg-slate-800 transition text-white"
+                      dir={language === "ar" ? "rtl" : "ltr"}
+                    className={`block w-full cursor-pointer px-4 py-3 hover:bg-slate-800 transition text-white ${
+                      language === "ar" ? "text-right" : "text-left"
+                    }`}
                     >
-                      Export CSV
+                      {t("common.exportCsv")}
                     </button>
 
                     <button
                       onClick={() => {
                         printTable(
                           "daily-consumption-table",
-                          "Daily Consumption"
+                          t("operations.sections.dailyConsumption")
                         );
                         setShowDailyConsumptionSettings(false);
                       }}
-                      className="block w-full cursor-pointer text-left px-4 py-3 hover:bg-slate-800 transition text-white border-t border-gray-700"
+                      dir={language === "ar" ? "rtl" : "ltr"}
+                    className={`block w-full cursor-pointer px-4 py-3 hover:bg-slate-800 transition text-white border-t border-gray-700 ${
+                      language === "ar" ? "text-right" : "text-left"
+                    }`}
                     >
-                      Print
+                      {t("common.print")}
                     </button>
                   </div>
                 )}
@@ -2700,10 +2807,30 @@ const payload = mapFrontendOperationToBackendPayload({
               >
               <thead className="bg-slate-800 sticky top-0 z-[1] shadow-sm">
                 <tr>
-                  <Th>#</Th>
-                  <Th>Date</Th>
-                  <Th>Qty Liters</Th>
-                  <Th>Total Cost</Th>
+                  <Th
+                  dir={language === "ar" ? "rtl" : "ltr"}
+                  className={`align-middle ${
+                    language === "ar" ? "text-right" : "text-left"
+                  }`}
+                >#</Th>
+                  <Th
+                  dir={language === "ar" ? "rtl" : "ltr"}
+                  className={`align-middle ${
+                    language === "ar" ? "text-right" : "text-left"
+                  }`}
+                >{t("operations.table.date")}</Th>
+                  <Th
+                  dir={language === "ar" ? "rtl" : "ltr"}
+                  className={`align-middle ${
+                    language === "ar" ? "text-right" : "text-left"
+                  }`}
+                >{t("operations.table.qtyLiters")}</Th>
+                  <Th
+                  dir={language === "ar" ? "rtl" : "ltr"}
+                  className={`align-middle ${
+                    language === "ar" ? "text-right" : "text-left"
+                  }`}
+                >{t("operations.table.totalCost")}</Th>
                 </tr>
               </thead>
 
@@ -2726,7 +2853,7 @@ const payload = mapFrontendOperationToBackendPayload({
 
       <div className="fleet-chart-card relative z-0 bg-slate-900/80 p-3 sm:p-4 rounded-2xl mb-4 border border-slate-700/80 shadow-xl shadow-black/10 overflow-visible">
         <h3 className="fleet-chart-title text-base sm:text-lg font-extrabold text-amber-300 mb-3">
-          Consumed Quantity Over Time
+          {t("operations.charts.consumedOverTime")}
         </h3>
 
         <div className="h-[260px] sm:h-[300px] xl:h-[340px]">
@@ -2770,7 +2897,7 @@ const payload = mapFrontendOperationToBackendPayload({
       <div className="fleet-chart-grid grid grid-cols-1 xl:grid-cols-2 gap-4 2xl:gap-5 mb-5">
         <div className="fleet-chart-card relative z-0 bg-slate-900/80 rounded-2xl shadow-xl shadow-black/10 overflow-visible border border-slate-700/80 p-3 lg:p-4">
           <h2 className="fleet-chart-title text-base sm:text-lg font-extrabold text-amber-300 mb-3">
-            Consumed Quantity Per Equipment No.
+            {t("operations.charts.consumedPerEquipment")}
           </h2>
 
           <div className="h-[300px] sm:h-[340px] xl:h-[360px]">
@@ -2787,7 +2914,7 @@ const payload = mapFrontendOperationToBackendPayload({
 
         <div className="fleet-chart-card relative z-0 bg-slate-900/80 rounded-2xl shadow-xl shadow-black/10 overflow-visible border border-slate-700/80 p-3 lg:p-4">
           <h2 className="fleet-chart-title text-base sm:text-lg font-extrabold text-amber-300 mb-3">
-            Consumed Quantity Ratio per Asset Type
+            {t("operations.charts.consumedRatioPerAssetType")}
           </h2>
 
           <div className="grid grid-cols-1 gap-3">
@@ -2873,10 +3000,10 @@ const payload = mapFrontendOperationToBackendPayload({
             <div className="p-3 sm:p-5 border-b border-gray-700 flex justify-between items-start gap-3">
               <div>
                 <h2 className="text-xl sm:text-2xl font-bold text-yellow-400 italic underline">
-                  Equipment Operations History
+                  {t("operations.history.title")}
                 </h2>
                 <p className="text-gray-400 mt-1">
-                  Equipment:{" "}
+                  {t("operations.history.equipment")}: {" "}
                   <span className="text-blue-300 font-semibold">
                     {selectedEquipmentHistory.equipmentNo}
                   </span>
@@ -2895,18 +3022,78 @@ const payload = mapFrontendOperationToBackendPayload({
               <table className="min-w-[1160px] lg:min-w-[1280px] xl:min-w-[1420px] 2xl:min-w-[1500px] w-full border-collapse text-[11px] sm:text-xs lg:text-sm">
                 <thead className="bg-slate-800 sticky top-0 z-[1] shadow-sm">
                   <tr>
-                    <Th>#</Th>
-                    <Th>Date</Th>
-                    <Th>Operation ID</Th>
-                    <Th>Type</Th>
-                    <Th>Project</Th>
-                    <Th>Source / External</Th>
-                    <Th>Fueler</Th>
-                    <Th>Equipment</Th>
-                    <Th>Liters</Th>
-                    <Th>Cost</Th>
-                    <Th>Odometer</Th>
-                    <Th>Photos</Th>
+                    <Th
+                  dir={language === "ar" ? "rtl" : "ltr"}
+                  className={`align-middle ${
+                    language === "ar" ? "text-right" : "text-left"
+                  }`}
+                >#</Th>
+                    <Th
+                  dir={language === "ar" ? "rtl" : "ltr"}
+                  className={`align-middle ${
+                    language === "ar" ? "text-right" : "text-left"
+                  }`}
+                >{t("operations.table.date")}</Th>
+                    <Th
+                  dir={language === "ar" ? "rtl" : "ltr"}
+                  className={`align-middle ${
+                    language === "ar" ? "text-right" : "text-left"
+                  }`}
+                >{t("operations.history.operationId")}</Th>
+                    <Th
+                  dir={language === "ar" ? "rtl" : "ltr"}
+                  className={`align-middle ${
+                    language === "ar" ? "text-right" : "text-left"
+                  }`}
+                >{t("operations.history.type")}</Th>
+                    <Th
+                  dir={language === "ar" ? "rtl" : "ltr"}
+                  className={`align-middle ${
+                    language === "ar" ? "text-right" : "text-left"
+                  }`}
+                >{t("operations.history.project")}</Th>
+                    <Th
+                  dir={language === "ar" ? "rtl" : "ltr"}
+                  className={`align-middle ${
+                    language === "ar" ? "text-right" : "text-left"
+                  }`}
+                >{t("operations.history.sourceExternal")}</Th>
+                    <Th
+                  dir={language === "ar" ? "rtl" : "ltr"}
+                  className={`align-middle ${
+                    language === "ar" ? "text-right" : "text-left"
+                  }`}
+                >{t("operations.history.fueler")}</Th>
+                    <Th
+                  dir={language === "ar" ? "rtl" : "ltr"}
+                  className={`align-middle ${
+                    language === "ar" ? "text-right" : "text-left"
+                  }`}
+                >{t("operations.table.equipment")}</Th>
+                    <Th
+                  dir={language === "ar" ? "rtl" : "ltr"}
+                  className={`align-middle ${
+                    language === "ar" ? "text-right" : "text-left"
+                  }`}
+                >{t("operations.history.liters")}</Th>
+                    <Th
+                  dir={language === "ar" ? "rtl" : "ltr"}
+                  className={`align-middle ${
+                    language === "ar" ? "text-right" : "text-left"
+                  }`}
+                >{t("operations.history.cost")}</Th>
+                    <Th
+                  dir={language === "ar" ? "rtl" : "ltr"}
+                  className={`align-middle ${
+                    language === "ar" ? "text-right" : "text-left"
+                  }`}
+                >{t("operations.history.odometer")}</Th>
+                    <Th
+                  dir={language === "ar" ? "rtl" : "ltr"}
+                  className={`align-middle ${
+                    language === "ar" ? "text-right" : "text-left"
+                  }`}
+                >{t("operations.history.photos")}</Th>
                   </tr>
                 </thead>
 
@@ -2962,7 +3149,7 @@ const payload = mapFrontendOperationToBackendPayload({
                                   ? "text-purple-200 hover:text-yellow-300"
                                   : "text-blue-300 hover:text-yellow-400"
                               }`}
-                              title={isExternalDirectRefuelRow ? "External fuel station" : "Source station"}
+                              title={isExternalDirectRefuelRow ? t("operations.history.externalFuelStation") : t("operations.history.sourceStation")}
                             >
                               {sourceDisplayValue || "-"}
                             </button>
@@ -3038,7 +3225,7 @@ const payload = mapFrontendOperationToBackendPayload({
               {auditLog.length > 0 && (
                 <div className="mt-6 bg-gray-950 border border-gray-700 rounded-2xl p-4">
                   <h3 className="text-yellow-400 font-semibold mb-3">
-                    Local Audit Log
+                    {t("operations.audit.title")}
                   </h3>
 
                   <div className="max-h-44 overflow-auto">
@@ -3074,10 +3261,10 @@ const payload = mapFrontendOperationToBackendPayload({
             <div className="p-4 border-b border-slate-700 flex items-start justify-between gap-3">
               <div>
                 <h2 className="text-xl font-bold text-yellow-400 italic underline">
-                  Operation Photos
+                  {t("operations.photos.title")}
                 </h2>
                 <p className="text-gray-400 mt-1">
-                  Operation: <span className="text-blue-300 font-semibold">{operationPhotoViewer.operationNo}</span>
+                  {t("operations.photos.operation")}: <span className="text-blue-300 font-semibold">{operationPhotoViewer.operationNo}</span>
                 </p>
               </div>
 
@@ -3091,7 +3278,7 @@ const payload = mapFrontendOperationToBackendPayload({
 
             <div className="p-4 overflow-auto max-h-[75vh]">
               {operationPhotoViewerLoading ? (
-                <div className="text-center text-slate-300 py-10">Loading photos...</div>
+                <div className="text-center text-slate-300 py-10">{t("operations.photos.loading")}</div>
               ) : operationPhotoViewer.photos?.length ? (
                 <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-4">
                   {operationPhotoViewer.photos.map((photo, index) => (
@@ -3124,7 +3311,7 @@ const payload = mapFrontendOperationToBackendPayload({
                   ))}
                 </div>
               ) : (
-                <div className="text-center text-slate-400 py-10">No photos attached.</div>
+                <div className="text-center text-slate-400 py-10">{t("operations.photos.none")}</div>
               )}
             </div>
           </div>

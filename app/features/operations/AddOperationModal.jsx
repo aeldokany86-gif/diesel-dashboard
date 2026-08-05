@@ -21,6 +21,7 @@ import {
 } from "../../lib/operationHelpers";
 
 import { uploadOperationPhotoFile } from "../../services/operationsService";
+import { useLanguage } from "../../context/LanguageContext";
 
 const NETWORK_OFFLINE_MESSAGE =
   "No internet connection. Please check your connection and try again.";
@@ -168,6 +169,9 @@ export default function AddOperationModal({
   onSaveOperation,
   showToast,
 }) {
+  const { language, t } = useLanguage();
+  const isRtl = language === "ar";
+
   const [sourceStation, setSourceStation] = useState("");
   const [destinationId, setDestinationId] = useState("");
   const [dieselQuantity, setDieselQuantity] = useState("");
@@ -198,7 +202,7 @@ export default function AddOperationModal({
       return activeProjectScopeLabel;
     }
 
-    if (isAllProjectsUser) return "All Projects";
+    if (isAllProjectsUser) return t("addOperation.allProjects");
 
     const linkedProjectName =
       currentUser?.linkedEmployee?.projectName ||
@@ -282,6 +286,24 @@ export default function AddOperationModal({
   const isDirectRefuel = isSameText(transactionType, "Direct_Refuel");
   const isExternalSource = isExternalSourceOperation(transactionType);
   const isStationCounterOperation = isStationCounterTransactionType(transactionType);
+
+  const getTransactionTypeLabel = (value) => {
+    const normalized = String(value || "")
+      .trim()
+      .toUpperCase()
+      .replace(/[\s-]+/g, "_");
+
+    const labelMap = {
+      DIRECT_REFUEL: t("addOperation.transactionTypes.directRefuel"),
+      EXTERNAL_DIRECT_REFUEL: t("addOperation.transactionTypes.externalDirectRefuel"),
+      INTERNAL_TRANSFER: t("addOperation.transactionTypes.internalTransfer"),
+      EXTERNAL_SUPPLY: t("addOperation.transactionTypes.externalSupply"),
+      EXTERNAL_TRANSFER: t("addOperation.transactionTypes.externalTransfer"),
+    };
+
+    return labelMap[normalized] || value || "-";
+  };
+
   const externalSourceHistoryOptions = isExternalSupply
     ? externalSupplierHistory
     : isExternalDirectRefuel
@@ -448,41 +470,41 @@ export default function AddOperationModal({
 
     if (isDirectRefuel) {
       return withDestinationOwner([
-        { key: "stationMeterPhoto", label: "Odometer Photo *", value: stationMeterPhoto, setValue: setStationMeterPhoto, photoType: "odometer" },
-        { key: "assetPhoto", label: "Asset Photo *", value: assetPhoto, setValue: setAssetPhoto, photoType: "asset" },
-        { key: "assetMeterPhoto", label: "Fuel Quantity Photo *", value: assetMeterPhoto, setValue: setAssetMeterPhoto, photoType: "asset-meter" },
+        { key: "stationMeterPhoto", label: t("addOperation.photos.odometerPhotoRequired"), value: stationMeterPhoto, setValue: setStationMeterPhoto, photoType: "odometer" },
+        { key: "assetPhoto", label: t("addOperation.photos.assetPhotoRequired"), value: assetPhoto, setValue: setAssetPhoto, photoType: "asset" },
+        { key: "assetMeterPhoto", label: t("addOperation.photos.fuelQuantityPhotoRequired"), value: assetMeterPhoto, setValue: setAssetMeterPhoto, photoType: "asset-meter" },
       ]);
     }
 
     if (isExternalDirectRefuel) {
       return withDestinationOwner([
-        { key: "invoicePhoto", label: "Invoice Photo *", value: invoicePhoto, setValue: setInvoicePhoto, photoType: "invoice" },
-        { key: "stationMeterPhoto", label: "Meter Photo *", value: stationMeterPhoto, setValue: setStationMeterPhoto, photoType: "asset-meter" },
-        { key: "assetPhoto", label: "Asset Photo *", value: assetPhoto, setValue: setAssetPhoto, photoType: "asset" },
+        { key: "invoicePhoto", label: t("addOperation.photos.invoicePhotoRequired"), value: invoicePhoto, setValue: setInvoicePhoto, photoType: "invoice" },
+        { key: "stationMeterPhoto", label: t("addOperation.photos.meterPhotoRequired"), value: stationMeterPhoto, setValue: setStationMeterPhoto, photoType: "asset-meter" },
+        { key: "assetPhoto", label: t("addOperation.photos.assetPhotoRequired"), value: assetPhoto, setValue: setAssetPhoto, photoType: "asset" },
       ]);
     }
 
     if (isInternalTransfer) {
       return withDestinationOwner([
-        { key: "stationMeterPhoto", label: "Destination Station Counter Photo *", value: stationMeterPhoto, setValue: setStationMeterPhoto, photoType: "destination-meter" },
-        { key: "assetPhoto", label: "Station Number Photo *", value: assetPhoto, setValue: setAssetPhoto, photoType: "station-number" },
-        { key: "assetMeterPhoto", label: "Fuel Quantity Photo *", value: assetMeterPhoto, setValue: setAssetMeterPhoto, photoType: "fuel-quantity" },
+        { key: "stationMeterPhoto", label: t("addOperation.photos.destinationCounterPhotoRequired"), value: stationMeterPhoto, setValue: setStationMeterPhoto, photoType: "destination-meter" },
+        { key: "assetPhoto", label: t("addOperation.photos.stationNumberPhotoRequired"), value: assetPhoto, setValue: setAssetPhoto, photoType: "station-number" },
+        { key: "assetMeterPhoto", label: t("addOperation.photos.fuelQuantityPhotoRequired"), value: assetMeterPhoto, setValue: setAssetMeterPhoto, photoType: "fuel-quantity" },
       ]);
     }
 
     if (isExternalSupply) {
       return withDestinationOwner([
-        { key: "stationMeterPhoto", label: "Destination Station Counter Photo *", value: stationMeterPhoto, setValue: setStationMeterPhoto, photoType: "destination-meter" },
-        { key: "assetPhoto", label: "Station Number Photo *", value: assetPhoto, setValue: setAssetPhoto, photoType: "station-number" },
-        { key: "invoicePhoto", label: "Invoice Photo *", value: invoicePhoto, setValue: setInvoicePhoto, photoType: "invoice" },
+        { key: "stationMeterPhoto", label: t("addOperation.photos.destinationCounterPhotoRequired"), value: stationMeterPhoto, setValue: setStationMeterPhoto, photoType: "destination-meter" },
+        { key: "assetPhoto", label: t("addOperation.photos.stationNumberPhotoRequired"), value: assetPhoto, setValue: setAssetPhoto, photoType: "station-number" },
+        { key: "invoicePhoto", label: t("addOperation.photos.invoicePhotoRequired"), value: invoicePhoto, setValue: setInvoicePhoto, photoType: "invoice" },
       ]);
     }
 
     if (isExternalTransfer) {
       return withDestinationOwner([
-        { key: "stationMeterPhoto", label: "Source Station Counter Photo *", value: stationMeterPhoto, setValue: setStationMeterPhoto, photoType: "source-meter" },
-        { key: "assetPhoto", label: "Destination Station Counter Photo *", value: assetPhoto, setValue: setAssetPhoto, photoType: "destination-meter" },
-        { key: "assetMeterPhoto", label: "Fuel Quantity Photo *", value: assetMeterPhoto, setValue: setAssetMeterPhoto, photoType: "fuel-quantity" },
+        { key: "stationMeterPhoto", label: t("addOperation.photos.sourceCounterPhotoRequired"), value: stationMeterPhoto, setValue: setStationMeterPhoto, photoType: "source-meter" },
+        { key: "assetPhoto", label: t("addOperation.photos.destinationCounterPhotoRequired"), value: assetPhoto, setValue: setAssetPhoto, photoType: "destination-meter" },
+        { key: "assetMeterPhoto", label: t("addOperation.photos.fuelQuantityPhotoRequired"), value: assetMeterPhoto, setValue: setAssetMeterPhoto, photoType: "fuel-quantity" },
       ]);
     }
 
@@ -499,15 +521,15 @@ export default function AddOperationModal({
     if (!file) return null;
 
     if (!operationCompanyId) {
-      throw new Error("Company ID is required before uploading photos.");
+      throw new Error(t("addOperation.validation.companyRequiredUpload"));
     }
 
     if (!photoConfig?.ownerType || !photoConfig?.ownerCode) {
-      throw new Error("Please select the related station, asset, or supplier before uploading this photo.");
+      throw new Error(t("addOperation.validation.relatedEntityRequired"));
     }
 
     if (!photoConfig?.photoType) {
-      throw new Error("Photo type is missing.");
+      throw new Error(t("addOperation.validation.photoTypeMissing"));
     }
 
     return uploadOperationPhotoFile({
@@ -521,16 +543,18 @@ export default function AddOperationModal({
     });
   };
 
-  const destinationLabel = isAssetRefuel ? "Asset" : "Destination Station";
+  const destinationLabel = isAssetRefuel
+    ? t("addOperation.fields.asset")
+    : t("addOperation.fields.destinationStation");
   const readingLabel = isAssetRefuel
-    ? "Odometer / Hour Meter"
+    ? t("addOperation.fields.odometerHourMeter")
     : isExternalTransfer
-    ? "Destination Station Counter"
-    : "Station Meter / Counter";
+    ? t("addOperation.fields.destinationStationCounter")
+    : t("addOperation.fields.stationMeterCounter");
 
   const readingPlaceholder = isAssetRefuel
-    ? "Previous reading is filled automatically; replace it with the new reading"
-    : "Previous counter is filled automatically; replace it with the new counter";
+    ? t("addOperation.placeholders.newAssetReading")
+    : t("addOperation.placeholders.newStationCounter");
 
   const needsSourceStation = Boolean(transactionType) && !isExternalSource;
   const needsExternalSourceDetails = isExternalDirectRefuel || isExternalSupply;
@@ -541,46 +565,54 @@ export default function AddOperationModal({
     tankCapacity > 0 &&
     Number(dieselQuantity || 0) > tankCapacity;
   const dieselQuantityError = isDieselQuantityOverTankCapacity
-    ? `Diesel quantity cannot exceed tank capacity (${formatNumber(tankCapacity)} L).`
+    ? t("addOperation.validation.tankCapacityExceeded", {
+        capacity: formatNumber(tankCapacity),
+      })
     : "";
 
   const validateBeforeSave = () => {
     if (!transactionType) {
-      notifyUser(typeof showToast !== "undefined" ? showToast : null, inferToastTypeFromMessage("Please select transaction type."), "Please select transaction type.");
+      notifyUser(showToast, "warning", t("addOperation.validation.selectTransactionType"));
       return false;
     }
 
     if (!transactionTypesForAdd.includes(transactionType)) {
-      notifyUser(typeof showToast !== "undefined" ? showToast : null, inferToastTypeFromMessage("You are not allowed to add this transaction type."), "You are not allowed to add this transaction type.");
+      notifyUser(showToast, "warning", t("addOperation.validation.transactionNotAllowed"));
       return false;
     }
 
     if (needsSourceStation && !sourceStation) {
-      notifyUser(typeof showToast !== "undefined" ? showToast : null, inferToastTypeFromMessage("Please select source station."), "Please select source station.");
+      notifyUser(showToast, "warning", t("addOperation.validation.selectSourceStation"));
       return false;
     }
 
     if (!destinationId) {
-      notifyUser(typeof showToast !== "undefined" ? showToast : null, inferToastTypeFromMessage("Please select destination."), "Please select destination.");
+      notifyUser(showToast, "warning", t("addOperation.validation.selectDestination"));
       return false;
     }
 
-    if (isInternalTransfer && sourceStation && isSameText(sourceStation, destinationId)) {
-      notifyUser(typeof showToast !== "undefined" ? showToast : null, inferToastTypeFromMessage("Source station and destination station cannot be the same."), "Source station and destination station cannot be the same.");
+    if (
+      isInternalTransfer &&
+      sourceStation &&
+      isSameText(sourceStation, destinationId)
+    ) {
+      notifyUser(showToast, "warning", t("addOperation.validation.sameStation"));
       return false;
     }
 
     if (needsExternalSourceDetails && !externalStationName.trim()) {
       notifyUser(
-        typeof showToast !== "undefined" ? showToast : null,
-        inferToastTypeFromMessage(isExternalSupply ? "Please enter supplier / external source." : "Please enter external station name."),
-        isExternalSupply ? "Please enter supplier / external source." : "Please enter external station name."
+        showToast,
+        "warning",
+        isExternalSupply
+          ? t("addOperation.validation.enterSupplier")
+          : t("addOperation.validation.enterExternalStation")
       );
       return false;
     }
 
     if (needsInvoiceNumber && !invoiceNumber.trim()) {
-      notifyUser(typeof showToast !== "undefined" ? showToast : null, inferToastTypeFromMessage("Please enter invoice / receipt number."), "Please enter invoice / receipt number.");
+      notifyUser(showToast, "warning", t("addOperation.validation.enterInvoiceNumber"));
       return false;
     }
 
@@ -588,7 +620,7 @@ export default function AddOperationModal({
       const invoiceAmount = Number(externalInvoiceAmount);
 
       if (!Number.isFinite(invoiceAmount) || invoiceAmount <= 0) {
-        notifyUser(typeof showToast !== "undefined" ? showToast : null, inferToastTypeFromMessage("Please enter invoice amount greater than zero."), "Please enter invoice amount greater than zero.");
+        notifyUser(showToast, "warning", t("addOperation.validation.invoiceAmountPositive"));
         return false;
       }
     }
@@ -596,12 +628,18 @@ export default function AddOperationModal({
     const qty = Number(dieselQuantity);
 
     if (!qty || qty <= 0) {
-      notifyUser(typeof showToast !== "undefined" ? showToast : null, inferToastTypeFromMessage("Diesel quantity must be greater than 0."), "Diesel quantity must be greater than 0.");
+      notifyUser(showToast, "warning", t("addOperation.validation.quantityPositive"));
       return false;
     }
 
     if (isAssetRefuel && tankCapacity > 0 && qty > tankCapacity) {
-      notifyUser(typeof showToast !== "undefined" ? showToast : null, inferToastTypeFromMessage(`Diesel quantity cannot exceed tank capacity (${formatNumber(tankCapacity)} L).`), `Diesel quantity cannot exceed tank capacity (${formatNumber(tankCapacity)} L).`);
+      notifyUser(
+        showToast,
+        "warning",
+        t("addOperation.validation.tankCapacityExceeded", {
+          capacity: formatNumber(tankCapacity),
+        })
+      );
       return false;
     }
 
@@ -609,25 +647,43 @@ export default function AddOperationModal({
 
     if (needsReading && (!newReading || newReading <= 0)) {
       notifyUser(
-        typeof showToast !== "undefined" ? showToast : null,
-        inferToastTypeFromMessage(isAssetRefuel ? "Please enter valid odometer / hour meter." : "Please enter valid station counter."),
-        isAssetRefuel ? "Please enter valid odometer / hour meter." : "Please enter valid station counter."
+        showToast,
+        "warning",
+        isAssetRefuel
+          ? t("addOperation.validation.validOdometer")
+          : t("addOperation.validation.validStationCounter")
       );
       return false;
     }
 
     if (isAssetRefuel && lastOdometer > 0 && newReading < lastOdometer) {
-      notifyUser(typeof showToast !== "undefined" ? showToast : null, inferToastTypeFromMessage(`Odometer / hour meter cannot be less than last reading (${formatNumber(lastOdometer)}).`), `Odometer / hour meter cannot be less than last reading (${formatNumber(lastOdometer)}).`);
+      notifyUser(
+        showToast,
+        "warning",
+        t("addOperation.validation.odometerBelowLast", {
+          reading: formatNumber(lastOdometer),
+        })
+      );
       return false;
     }
 
-    if (isStationCounterOperation && lastStationCounter > 0 && newReading < lastStationCounter) {
-      notifyUser(typeof showToast !== "undefined" ? showToast : null, inferToastTypeFromMessage(`Station meter / counter cannot be less than last reading (${formatNumber(lastStationCounter)}).`), `Station meter / counter cannot be less than last reading (${formatNumber(lastStationCounter)}).`);
+    if (
+      isStationCounterOperation &&
+      lastStationCounter > 0 &&
+      newReading < lastStationCounter
+    ) {
+      notifyUser(
+        showToast,
+        "warning",
+        t("addOperation.validation.counterBelowLast", {
+          reading: formatNumber(lastStationCounter),
+        })
+      );
       return false;
     }
 
     if (!requiredPhotosComplete) {
-      notifyUser(typeof showToast !== "undefined" ? showToast : null, inferToastTypeFromMessage("The 3 required photos are mandatory for this operation."), "The 3 required photos are mandatory for this operation.");
+      notifyUser(showToast, "warning", t("addOperation.validation.threePhotosRequired"));
       return false;
     }
 
@@ -638,7 +694,7 @@ export default function AddOperationModal({
     if (!validateBeforeSave()) return;
 
     const qty = Number(dieselQuantity);
-    const createdByName = currentUser?.fullName || currentUser?.username || currentUser?.email || currentUser?.id || "System";
+    const createdByName = currentUser?.fullName || currentUser?.username || currentUser?.email || currentUser?.id || t("addOperation.systemUser");
     const operationId = `OP-${Date.now()}`;
 
     const uploadedPhotosByKey = {};
@@ -650,15 +706,15 @@ export default function AddOperationModal({
           const file = photo.value?.file;
 
           if (!file) {
-            throw new Error(`${photo.label.replace(" *", "")} is required.`);
+            throw new Error(t("addOperation.validation.photoRequired", { photo: photo.label.replace(" *", "") }));
           }
 
           if (!operationCompanyId) {
-            throw new Error("Company ID is required before saving operation photos.");
+            throw new Error(t("addOperation.validation.companyRequiredSave"));
           }
 
           if (!photo.ownerType || !photo.ownerCode) {
-            throw new Error("Please select the destination asset or station before saving photos.");
+            throw new Error(t("addOperation.validation.destinationRequiredPhotos"));
           }
 
           photo.setValue?.({
@@ -710,7 +766,7 @@ export default function AddOperationModal({
         })
       );
     } catch (error) {
-      const message = getFriendlyApiErrorMessage(error, "Photo upload failed. Operation was not saved.");
+      const message = getFriendlyApiErrorMessage(error, t("addOperation.messages.photoUploadOperationFailed"));
       notifyUser(typeof showToast !== "undefined" ? showToast : null, "warning", message);
       return;
     }
@@ -757,13 +813,13 @@ export default function AddOperationModal({
     requiredPhotosComplete;
 
   return (
-    <div className="fleet-modal-backdrop fixed inset-0 z-[9998] bg-black/70 flex items-center justify-center p-4">
-      <div className="w-full max-w-3xl overflow-hidden rounded-2xl border border-slate-700 bg-slate-950 text-slate-100 shadow-2xl">
-        <div className="flex justify-between items-center p-5 border-b border-slate-700">
+    <div className="fleet-modal-backdrop fixed inset-0 z-[9998] bg-black/70 flex items-center justify-center p-4" dir={isRtl ? "rtl" : "ltr"}>
+      <div className={`w-full max-w-3xl overflow-hidden rounded-2xl border border-slate-700 bg-slate-950 text-slate-100 shadow-2xl ${isRtl ? "text-right" : "text-left"}`}>
+        <div className="flex justify-between items-center gap-4 p-5 border-b border-slate-700">
           <div>
-            <h2 className="text-2xl font-extrabold text-white">Add Diesel Operation</h2>
+            <h2 className="text-2xl font-extrabold text-white">{t("addOperation.title")}</h2>
             <p className="text-sm text-slate-400 mt-1">
-              Select the operation type first, then complete all required fields and the 3 mandatory photos.
+              {t("addOperation.subtitle")}
             </p>
           </div>
 
@@ -777,30 +833,33 @@ export default function AddOperationModal({
 
         <div className="p-5 grid grid-cols-1 gap-4 max-h-[80vh] overflow-y-auto">
           <div className="rounded-xl border border-amber-500/30 bg-amber-500/10 p-3 text-sm text-amber-300">
-            User Project Scope:{" "}
+            {t("addOperation.projectScope")}:{" "}
             <span className="font-bold">
               {userProjectDisplayName}
             </span>
           </div>
 
           <div className="rounded-xl border border-slate-700 bg-slate-900 p-3 text-sm text-slate-300">
-            Created By:{" "}
+            {t("addOperation.createdBy")}:{" "}
             <span className="font-bold">
               {currentUser?.fullName || currentUser?.username || currentUser?.email || currentUser?.id || "-"}
             </span>
           </div>
 
           <SearchableSelectField
-            label="Transaction Type"
+            label={t("addOperation.fields.transactionType")}
             value={transactionType}
             onChange={(value) => {
               setTransactionType(value);
               resetAfterTransactionTypeChange(value);
             }}
             options={transactionTypesForAdd}
-            placeholder="Select Transaction Type"
+            placeholder={t("addOperation.placeholders.selectTransactionType")}
             searchValue={transactionTypeSearch}
             setSearchValue={setTransactionTypeSearch}
+            getOptionLabel={getTransactionTypeLabel}
+            language={language}
+            t={t}
           />
 
           {transactionType && (
@@ -808,7 +867,7 @@ export default function AddOperationModal({
               {needsSourceStation && (
                 <>
                   <SearchableSelectField
-                    label="Source Station"
+                    label={t("addOperation.fields.sourceStation")}
                     value={sourceStation}
                     onChange={(value) => {
                       setSourceStation(value);
@@ -818,16 +877,18 @@ export default function AddOperationModal({
                       resetPhotos();
                     }}
                     options={sourceStationOptions}
-                    placeholder="Search / Select Source Station"
+                    placeholder={t("addOperation.placeholders.selectSourceStation")}
                     searchValue={sourceStationSearch}
                     setSearchValue={setSourceStationSearch}
+                    language={language}
+                    t={t}
                   />
 
                   {shouldShowSourceStationBalance && (
                     <div className="grid grid-cols-1 sm:grid-cols-3 gap-2 sm:gap-4 -mt-2">
                       <div />
                       <p className="col-span-2 text-xs text-slate-400 px-1">
-                        Current balance:{" "}
+                        {t("addOperation.currentBalance")}:{" "}
                         <span className="font-semibold text-slate-200">
                           {sourceStationBalance === null
                             ? "-"
@@ -838,8 +899,8 @@ export default function AddOperationModal({
                   )}
 
                   {sourceStation && (
-                    <div className="grid grid-cols-1 sm:grid-cols-3 items-start sm:items-center gap-2 sm:gap-4">
-                      <label className="font-medium text-slate-300">Source Project</label>
+                    <div className={`grid grid-cols-1 sm:grid-cols-3 items-start sm:items-center gap-2 sm:gap-4 ${isRtl ? "text-right" : "text-left"}`}>
+                      <label className="font-medium text-slate-300">{t("addOperation.fields.sourceProject")}</label>
                       <div className="col-span-2 rounded-lg border border-amber-500/30 bg-amber-500/10 p-2 font-semibold text-amber-300">
                         {selectedSourceStation?.project || "-"}
                       </div>
@@ -855,20 +916,22 @@ export default function AddOperationModal({
                 options={destinationOptions}
                 placeholder={
                   isAssetRefuel
-                    ? "Search / Select Active Asset in Your Project"
+                    ? t("addOperation.placeholders.selectActiveAsset")
                     : isExternalTransfer
-                    ? "Search / Select Station from Other Projects"
-                    : "Search / Select Destination Station"
+                    ? t("addOperation.placeholders.selectOtherProjectStation")
+                    : t("addOperation.placeholders.selectDestinationStation")
                 }
                 searchValue={destinationSearch}
                 setSearchValue={setDestinationSearch}
+                language={language}
+                t={t}
               />
 
               {shouldShowDestinationStationBalance && (
                 <div className="grid grid-cols-1 sm:grid-cols-3 gap-2 sm:gap-4 -mt-2">
                   <div />
                   <p className="col-span-2 text-xs text-slate-400 px-1">
-                    Current balance:{" "}
+                    {t("addOperation.currentBalance")}:{" "}
                     <span className="font-semibold text-slate-200">
                       {destinationStationBalance === null
                         ? "-"
@@ -880,7 +943,7 @@ export default function AddOperationModal({
 
               {isExternalTransfer && destinationId && (
                 <div className="grid grid-cols-1 sm:grid-cols-3 items-start sm:items-center gap-2 sm:gap-4">
-                  <label className="font-medium text-slate-300">Destination Project</label>
+                  <label className="font-medium text-slate-300">{t("addOperation.fields.destinationProject")}</label>
                   <div className="col-span-2 rounded-lg border border-blue-500/30 bg-blue-500/15 p-2 font-semibold text-blue-300">
                     {selectedDestinationStation?.project || "-"}
                   </div>
@@ -889,7 +952,7 @@ export default function AddOperationModal({
 
               {isAssetRefuel && destinationId && (
                 <div className="grid grid-cols-1 sm:grid-cols-3 items-start sm:items-center gap-2 sm:gap-4">
-                  <label className="font-medium text-slate-300">Tank Capacity</label>
+                  <label className="font-medium text-slate-300">{t("addOperation.fields.tankCapacity")}</label>
                   <div className="col-span-2 rounded-lg border border-slate-700 bg-slate-900 p-2 text-slate-300">
                     {tankCapacity > 0 ? `${formatNumber(tankCapacity)} L` : "-"}
                   </div>
@@ -899,39 +962,39 @@ export default function AddOperationModal({
               {needsExternalSourceDetails && (
                 <>
                   <Field
-                    label={isExternalSupply ? "Supplier / External Source" : "External Station Name"}
+                    label={isExternalSupply ? t("addOperation.fields.supplierExternalSource") : t("addOperation.fields.externalStationName")}
                     value={externalStationName}
                     onChange={(e) => setExternalStationName(e.target.value)}
-                    placeholder={isExternalSupply ? "Enter supplier or external source" : "Enter external fuel station name"}
+                    placeholder={isExternalSupply ? t("addOperation.placeholders.enterSupplier") : t("addOperation.placeholders.enterExternalStation")}
                     list={externalSourceDatalistId}
                     datalistOptions={externalSourceHistoryOptions}
                   />
 
                   <Field
-                    label="Invoice / Receipt Number"
+                    label={t("addOperation.fields.invoiceReceiptNumber")}
                     value={invoiceNumber}
                     onChange={(e) => setInvoiceNumber(e.target.value)}
-                    placeholder="Enter invoice or receipt number"
+                    placeholder={t("addOperation.placeholders.enterInvoiceNumber")}
                   />
 
                   {isExternalDirectRefuel && (
                     <Field
-                      label="Invoice Amount (SAR)"
+                      label={t("addOperation.fields.invoiceAmount", { currency: "SAR" })}
                       type="number"
                       value={externalInvoiceAmount}
                       onChange={(e) => setExternalInvoiceAmount(e.target.value)}
-                      placeholder="Enter total invoice amount"
+                      placeholder={t("addOperation.placeholders.enterInvoiceAmount")}
                     />
                   )}
                 </>
               )}
 
               <Field
-                label="Diesel Quantity"
+                label={t("addOperation.fields.dieselQuantity")}
                 value={dieselQuantity}
                 onChange={(e) => setDieselQuantity(e.target.value)}
                 type="number"
-                placeholder="Enter quantity in liters"
+                placeholder={t("addOperation.placeholders.enterQuantity")}
                 error={dieselQuantityError}
               />
 
@@ -944,17 +1007,17 @@ export default function AddOperationModal({
               />
 
               <Field
-                label="Notes"
+                label={t("addOperation.fields.notes")}
                 value={operationNotes}
                 onChange={(e) => setOperationNotes(e.target.value)}
-                placeholder="Optional notes"
+                placeholder={t("addOperation.placeholders.optionalNotes")}
               />
 
               <div className="border-t border-slate-700 pt-4">
-                <h3 className="text-lg font-bold italic underline mb-3">Required Photos - 3 Mandatory Photos</h3>
+                <h3 className="text-lg font-bold italic underline mb-3">{t("addOperation.photos.sectionTitle")}</h3>
 
                 <div className="mb-4 rounded-xl border border-red-500/35 bg-red-500/10 p-3 text-sm text-red-300">
-                  All three photos below are required before saving this operation.
+                  {t("addOperation.photos.allRequiredNotice")}
                 </div>
 
                 {requiredPhotoConfigs.map((photo) => (
@@ -964,6 +1027,8 @@ export default function AddOperationModal({
                     preview={photo.value}
                     setPreview={photo.setValue}
                     showToast={showToast}
+                    language={language}
+                    t={t}
                   />
                 ))}
               </div>
@@ -976,7 +1041,7 @@ export default function AddOperationModal({
             onClick={closeForm}
             className="cursor-pointer rounded-xl border border-slate-700 bg-slate-800 px-4 py-2 text-slate-200 hover:bg-slate-800/70"
           >
-            Cancel
+            {t("common.cancel")}
           </button>
 
           <button
@@ -988,7 +1053,7 @@ export default function AddOperationModal({
                 : "bg-slate-700 text-slate-400 opacity-60 cursor-not-allowed"
             }`}
           >
-            Save Operation
+            {t("addOperation.saveOperation")}
           </button>
         </div>
       </div>
@@ -1023,6 +1088,9 @@ function SearchableSelectField({
   searchValue,
   setSearchValue,
   disabled = false,
+  getOptionLabel = (item) => item,
+  language = "en",
+  t = (key) => key,
 }) {
   const [open, setOpen] = useState(false);
   const [dropdownStyle, setDropdownStyle] = useState({});
@@ -1071,10 +1139,12 @@ function SearchableSelectField({
   }, [open]);
 
   const filteredOptions = (options || []).filter((item) =>
-    String(item || "")
+    String(getOptionLabel(item) || "")
       .toLowerCase()
       .includes(String(searchValue || "").toLowerCase())
   );
+
+  const isRtl = language === "ar";
 
   return (
     <div className="grid grid-cols-1 sm:grid-cols-3 items-start sm:items-center gap-2 sm:gap-4">
@@ -1091,14 +1161,17 @@ function SearchableSelectField({
               requestAnimationFrame(updateDropdownPosition);
             }
           }}
-          className={`w-full border rounded-lg p-3 text-left flex justify-between items-center ${
+          dir={isRtl ? "rtl" : "ltr"}
+          className={`w-full border rounded-lg p-3 flex justify-between items-center ${
+            isRtl ? "text-right" : "text-left"
+          } ${
             disabled
               ? "bg-slate-800 text-slate-500 cursor-not-allowed"
               : "bg-slate-900 text-slate-100 hover:border-amber-400 cursor-pointer"
           }`}
         >
           <span className={value ? "text-slate-100" : "text-slate-500"}>
-            {value || placeholder}
+            {value ? getOptionLabel(value) : placeholder}
           </span>
 
           <span className="text-slate-400">▾</span>
@@ -1112,8 +1185,11 @@ function SearchableSelectField({
             <input
               value={searchValue}
               onChange={(e) => setSearchValue(e.target.value)}
-              placeholder={`Search ${label.toLowerCase()}...`}
-              className="mb-2 w-full rounded-lg border border-slate-700 bg-slate-900 p-2 text-white placeholder:text-slate-500 outline-none focus:border-amber-400"
+              placeholder={t("addOperation.searchPlaceholder", { field: label })}
+              dir={isRtl ? "rtl" : "ltr"}
+              className={`mb-2 w-full rounded-lg border border-slate-700 bg-slate-900 p-2 text-white placeholder:text-slate-500 outline-none focus:border-amber-400 ${
+                isRtl ? "text-right" : "text-left"
+              }`}
               autoFocus
             />
 
@@ -1128,16 +1204,19 @@ function SearchableSelectField({
                       setSearchValue("");
                       setOpen(false);
                     }}
-                    className={`block w-full text-left px-3 py-2 rounded-lg hover:bg-amber-500/10 cursor-pointer ${
+                    dir={isRtl ? "rtl" : "ltr"}
+                    className={`block w-full px-3 py-2 rounded-lg hover:bg-amber-500/10 cursor-pointer ${
+                      isRtl ? "text-right" : "text-left"
+                    } ${
                       value === item ? "bg-amber-500/20 text-amber-300 font-bold" : ""
                     }`}
                   >
-                    {item}
+                    {getOptionLabel(item)}
                   </button>
                 ))
               ) : (
                 <div className="text-sm text-red-500 px-3 py-2">
-                  No matching results found.
+                  {t("addOperation.noMatchingResults")}
                 </div>
               )}
             </div>
@@ -1148,15 +1227,16 @@ function SearchableSelectField({
   );
 }
 
-function ImageField({ label, preview, setPreview, onUpload, showToast }) {
+function ImageField({ label, preview, setPreview, onUpload, showToast, language = "en", t = (key) => key }) {
   const isMobile = /Android|iPhone|iPad|iPod/i.test(navigator.userAgent);
   const previewUrl = typeof preview === "string" ? preview : preview?.previewUrl;
   const isUploading = Boolean(preview?.uploading);
   const uploadError = preview?.uploadError || "";
   const uploadedPath = preview?.path || "";
+  const isRtl = language === "ar";
 
   return (
-    <div className="grid grid-cols-1 sm:grid-cols-3 items-start gap-2 sm:gap-4 mb-4">
+    <div className={`grid grid-cols-1 sm:grid-cols-3 items-start gap-2 sm:gap-4 mb-4 ${isRtl ? "text-right" : "text-left"}`}>
       <label className="font-medium text-slate-300">{label}</label>
 
       <div className="col-span-2">
@@ -1202,9 +1282,9 @@ function ImageField({ label, preview, setPreview, onUpload, showToast }) {
                 sizeBytes: uploaded?.size || localPreview.sizeBytes,
               });
 
-              notifyUser(showToast, "success", `${label.replace(" *", "")} uploaded successfully.`);
+              notifyUser(showToast, "success", t("addOperation.messages.photoUploaded", { photo: label.replace(" *", "") }));
             } catch (error) {
-              const message = getFriendlyApiErrorMessage(error, "Photo upload failed.");
+              const message = getFriendlyApiErrorMessage(error, t("addOperation.messages.photoUploadFailed"));
 
               setPreview({
                 ...localPreview,
@@ -1220,13 +1300,13 @@ function ImageField({ label, preview, setPreview, onUpload, showToast }) {
 
         {isUploading && (
           <div className="mt-2 text-sm text-amber-700 font-semibold">
-            Uploading photo...
+            {t("addOperation.photos.uploading")}
           </div>
         )}
 
         {uploadedPath && !isUploading && !uploadError && (
           <div className="mt-2 text-sm text-green-700 font-semibold break-all">
-            ✅ Uploaded: {uploadedPath}
+            ✅ {t("addOperation.photos.uploaded")}: {uploadedPath}
           </div>
         )}
 
