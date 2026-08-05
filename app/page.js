@@ -5,6 +5,7 @@
 
 import { useEffect, useMemo, useRef, useState } from "react";
 import { useAuth } from "./context/AuthContext";
+import { useLanguage } from "./context/LanguageContext";
 import api from "./services/api";
 
 import SidebarSvgIcon from "./components/icons/SidebarSvgIcon";
@@ -329,6 +330,7 @@ function buildLegacyUserFromAuthUser(authUser) {
     lastLogin: "",
     createdAt: new Date().toISOString(),
     backendPermissions: authUser.permissions || [],
+    preferredLanguage: authUser.preferredLanguage || "en",
   };
 }
 
@@ -679,7 +681,8 @@ function filterTransactionRowsByCompany({
 export default function Home() {
   const [page, setPage] = useState("companies");
   const [theme, setTheme] = useState("light");
-  const [showThemeSettings, setShowThemeSettings] = useState(false);
+  const [showSettingsMenu, setShowSettingsMenu] = useState(false);
+  const [activeSettingsSection, setActiveSettingsSection] = useState(null);
   const [sidebarCollapsed, setSidebarCollapsed] = useState(false);
   const [mobileSidebarOpen, setMobileSidebarOpen] = useState(false);
 
@@ -810,6 +813,13 @@ export default function Home() {
     changePassword: changeBackendPassword,
     hasPermission: hasBackendPermission,
   } = useAuth();
+
+  const {
+    language,
+    setLanguage,
+    isUpdatingLanguage,
+    t,
+  } = useLanguage();
 
   const backendLegacyUser = useMemo(
     () => buildLegacyUserFromAuthUser(backendAuthUser),
@@ -969,7 +979,7 @@ export default function Home() {
       .toLowerCase();
 
     if (!rawLoginValue || !loginPassword) {
-      setLoginError("Username and password are required.");
+      setLoginError(t("login.usernamePasswordRequired"));
       return;
     }
 
@@ -1009,7 +1019,7 @@ export default function Home() {
           ? NETWORK_OFFLINE_MESSAGE
           : Array.isArray(backendMessage)
             ? backendMessage.join(", ")
-            : backendMessage || "Login failed. Check username and password.",
+            : backendMessage || t("login.loginFailed"),
       );
       if (isNetworkConnectionError(error)) {
         showToast?.("warning", NETWORK_OFFLINE_MESSAGE);
@@ -3951,29 +3961,29 @@ export default function Home() {
   }, []);
 
   const sidebarItems = [
-    { key: "operations", label: "Operations", Icon: LayoutDashboard },
-    { key: "assets", label: "Assets", Icon: Truck },
-    { key: "stations", label: "Stations", Icon: Fuel },
-    { key: "team", label: "Team", Icon: Users },
-    { key: "projects", label: "Projects / Sites", Icon: Building2 },
-    { key: "reports", label: "Reports", Icon: FileBarChart2 },
-    { key: "companies", label: "Companies", Icon: Building2 },
-    { key: "notifications", label: "Notifications", Icon: Bell },
-    { key: "auditTimeline", label: "Audit Timeline", Icon: FileBarChart2 },
-    { key: "approvals", label: "Approvals", Icon: FileBarChart2 },
-    { key: "users", label: "Users & Roles", Icon: Users },
+    { key: "operations", label: t("sidebar.operations"), Icon: LayoutDashboard },
+    { key: "assets", label: t("sidebar.assets"), Icon: Truck },
+    { key: "stations", label: t("sidebar.stations"), Icon: Fuel },
+    { key: "team", label: t("sidebar.team"), Icon: Users },
+    { key: "projects", label: t("sidebar.projects"), Icon: Building2 },
+    { key: "reports", label: t("sidebar.reports"), Icon: FileBarChart2 },
+    { key: "companies", label: t("sidebar.companies"), Icon: Building2 },
+    { key: "notifications", label: t("sidebar.notifications"), Icon: Bell },
+    { key: "auditTimeline", label: t("sidebar.auditTimeline"), Icon: FileBarChart2 },
+    { key: "approvals", label: t("sidebar.approvals"), Icon: FileBarChart2 },
+    { key: "users", label: t("sidebar.usersRoles"), Icon: Users },
   ].filter((item) => canAccessPage(item.key));
 
   const currentUserProjectSectionLabel =
-    currentUser?.role === "PlatformAdmin" ? "Access" : "Project Scope";
+    currentUser?.role === "PlatformAdmin" ? t("sidebar.access") : t("sidebar.projectScope");
 
   const currentUserProjectLabel =
     selectedProjectScopeOption?.label ||
     (currentUser?.role === "PlatformAdmin"
-      ? "Global Access"
+      ? t("sidebar.globalAccess")
       : currentUser?.role === "Admin"
-        ? "All Projects"
-        : "No Project Assigned");
+        ? t("sidebar.allProjects")
+        : t("sidebar.noProjectAssigned"));
 
   const projectScopeDropdownDisabled =
     !projectScopeOptions.length ||
@@ -4004,13 +4014,13 @@ export default function Home() {
                 Fleet Fuel PRO
               </h1>
               <p className="text-[10px] uppercase tracking-[0.22em] text-slate-500">
-                Fleet Fuel Management System
+                {t("common.systemName")}
               </p>
             </div>
           </div>
 
           <p className="text-sm text-slate-400 animate-pulse">
-            Loading System...
+            {t("common.loadingSystem")}
           </p>
         </div>
       </div>
@@ -4481,7 +4491,7 @@ export default function Home() {
 
             {!sidebarContentCollapsed && (
               <p className="text-[11px] text-slate-500 uppercase tracking-[0.22em] text-center">
-                Fleet Fuel Management System
+                {t("common.systemName")}
               </p>
             )}
           </div>
@@ -4534,7 +4544,7 @@ export default function Home() {
           {!sidebarContentCollapsed && currentUser && (
             <div className="mt-4 rounded-2xl border border-slate-800/80 bg-slate-900/60 p-3">
               <p className="text-[10px] uppercase tracking-[0.2em] text-slate-500 mb-1">
-                Signed in as
+                {t("sidebar.signedInAs")}
               </p>
               <p className="login-text text-sm font-bold text-slate-100 truncate">
                 {currentUser.fullName}
@@ -4566,7 +4576,7 @@ export default function Home() {
                       </option>
                     ))
                   ) : (
-                    <option value="">No Project Assigned</option>
+                    <option value="">{t("sidebar.noProjectAssigned")}</option>
                   )}
                 </select>
               </div>
@@ -4577,7 +4587,7 @@ export default function Home() {
                   onClick={handleLogout}
                   className="w-full rounded-lg border border-red-500/30 bg-red-500/10 px-3 py-2 text-xs font-bold text-red-300 hover:bg-red-500/20 transition"
                 >
-                  Logout
+                  {t("sidebar.logout")}
                 </button>
               </div>
             </div>
@@ -4588,7 +4598,10 @@ export default function Home() {
           <div className="shrink-0 pt-4 border-t border-slate-800/80">
             <div className="relative">
               <button
-                onClick={() => setShowThemeSettings(!showThemeSettings)}
+                onClick={() => {
+                  setShowSettingsMenu((prev) => !prev);
+                  setActiveSettingsSection(null);
+                }}
                 className={`w-full flex items-center ${sidebarContentCollapsed ? "justify-center px-3" : "justify-between gap-3 px-4"} py-3 rounded-xl text-sm font-semibold cursor-pointer transition-all duration-200 text-slate-300 hover:bg-slate-800/70 hover:text-white`}
               >
                 <span className="flex flex-wrap items-center gap-3">
@@ -4603,42 +4616,37 @@ export default function Home() {
                     <path d="m6.34 17.66-1.41 1.41" />
                     <path d="m19.07 4.93-1.41 1.41" />
                   </SidebarSvgIcon>
-                  {!sidebarContentCollapsed && <span>Settings</span>}
+                  {!sidebarContentCollapsed && <span>{t("common.settings")}</span>}
                 </span>
                 {!sidebarContentCollapsed && (
-                  <span className="text-xs text-slate-500">Theme</span>
+                  <span className="text-xs text-slate-500">{language.toUpperCase()}</span>
                 )}
               </button>
 
-              {showThemeSettings && (
+              {showSettingsMenu && (
                 <div className="absolute left-0 bottom-full mb-2 w-full bg-slate-950 border border-slate-700 rounded-2xl shadow-2xl overflow-hidden z-[999999]">
-                  <button
-                    onClick={() => {
-                      setTheme("dark");
-                      setShowThemeSettings(false);
-                    }}
-                    className={`w-full text-left px-4 py-3 text-sm transition-colors ${
-                      theme === "dark"
-                        ? "bg-amber-400 text-slate-950 font-bold"
-                        : "text-slate-200 hover:bg-slate-800"
-                    }`}
-                  >
-                    Dark Theme
-                  </button>
-
-                  <button
-                    onClick={() => {
-                      setTheme("light");
-                      setShowThemeSettings(false);
-                    }}
-                    className={`w-full text-left px-4 py-3 text-sm border-t border-slate-700 transition-colors ${
-                      theme === "light"
-                        ? "bg-amber-400 text-slate-950 font-bold"
-                        : "text-slate-200 hover:bg-slate-800"
-                    }`}
-                  >
-                    Light Theme
-                  </button>
+                  {!activeSettingsSection ? (
+                    <>
+                      <button type="button" onClick={() => setActiveSettingsSection("theme")} className="w-full flex items-center justify-between px-4 py-3 text-sm text-slate-200 hover:bg-slate-800 transition-colors">
+                        <span>{t("common.theme")}</span><span className="text-slate-500">›</span>
+                      </button>
+                      <button type="button" onClick={() => setActiveSettingsSection("language")} className="w-full flex items-center justify-between px-4 py-3 text-sm text-slate-200 border-t border-slate-700 hover:bg-slate-800 transition-colors">
+                        <span>{t("common.language")}</span><span className="text-slate-500">›</span>
+                      </button>
+                    </>
+                  ) : activeSettingsSection === "theme" ? (
+                    <>
+                      <button type="button" onClick={() => setActiveSettingsSection(null)} className="w-full flex items-center gap-2 px-4 py-2 text-[11px] font-bold uppercase tracking-[0.14em] text-slate-500 hover:bg-slate-900"><span>‹</span><span>{t("common.theme")}</span></button>
+                      <button onClick={() => { setTheme("dark"); setShowSettingsMenu(false); setActiveSettingsSection(null); }} className={`w-full text-start px-4 py-3 text-sm transition-colors ${theme === "dark" ? "bg-amber-400 text-slate-950 font-bold" : "text-slate-200 hover:bg-slate-800"}`}>{t("common.darkTheme")}</button>
+                      <button onClick={() => { setTheme("light"); setShowSettingsMenu(false); setActiveSettingsSection(null); }} className={`w-full text-start px-4 py-3 text-sm border-t border-slate-700 transition-colors ${theme === "light" ? "bg-amber-400 text-slate-950 font-bold" : "text-slate-200 hover:bg-slate-800"}`}>{t("common.lightTheme")}</button>
+                    </>
+                  ) : (
+                    <>
+                      <button type="button" onClick={() => setActiveSettingsSection(null)} className="w-full flex items-center gap-2 px-4 py-2 text-[11px] font-bold uppercase tracking-[0.14em] text-slate-500 hover:bg-slate-900"><span>‹</span><span>{t("common.language")}</span></button>
+                      <button type="button" disabled={isUpdatingLanguage} onClick={async () => { try { await setLanguage("en"); setShowSettingsMenu(false); setActiveSettingsSection(null); } catch (error) { showToast?.("error", getFriendlyApiErrorMessage(error, t("common.languageSaveFailed"))); } }} className={`w-full text-start px-4 py-3 text-sm transition-colors disabled:cursor-wait disabled:opacity-60 ${language === "en" ? "bg-amber-400 text-slate-950 font-bold" : "text-slate-200 hover:bg-slate-800"}`}>{isUpdatingLanguage && language !== "en" ? t("common.saving") : t("common.english")}</button>
+                      <button type="button" disabled={isUpdatingLanguage} onClick={async () => { try { await setLanguage("ar"); setShowSettingsMenu(false); setActiveSettingsSection(null); } catch (error) { showToast?.("error", getFriendlyApiErrorMessage(error, t("common.languageSaveFailed"))); } }} className={`w-full text-start px-4 py-3 text-sm border-t border-slate-700 transition-colors disabled:cursor-wait disabled:opacity-60 ${language === "ar" ? "bg-amber-400 text-slate-950 font-bold" : "text-slate-200 hover:bg-slate-800"}`}>{isUpdatingLanguage && language !== "ar" ? t("common.saving") : t("common.arabic")}</button>
+                    </>
+                  )}
                 </div>
               )}
             </div>
@@ -4679,43 +4687,37 @@ export default function Home() {
 
             <button
               type="button"
-              onClick={() => setShowThemeSettings((prev) => !prev)}
+              onClick={() => {
+                setShowSettingsMenu((prev) => !prev);
+                setActiveSettingsSection(null);
+              }}
               className="h-10 w-10 flex items-center justify-center rounded-xl border border-slate-700 bg-slate-900 text-slate-300 shadow-lg"
-              aria-label="Open theme settings"
+              aria-label={t("common.settings")}
             >
               ⚙
             </button>
           </div>
 
-          {showThemeSettings && (
-            <div className="lg:hidden fixed right-3 top-[62px] z-[10020] w-44 bg-slate-950 border border-slate-700 rounded-2xl shadow-2xl overflow-hidden">
-              <button
-                onClick={() => {
-                  setTheme("dark");
-                  setShowThemeSettings(false);
-                }}
-                className={`w-full text-left px-4 py-3 text-sm transition-colors ${
-                  theme === "dark"
-                    ? "bg-amber-400 text-slate-950 font-bold"
-                    : "text-slate-200 hover:bg-slate-800"
-                }`}
-              >
-                Dark Theme
-              </button>
-
-              <button
-                onClick={() => {
-                  setTheme("light");
-                  setShowThemeSettings(false);
-                }}
-                className={`w-full text-left px-4 py-3 text-sm border-t border-slate-700 transition-colors ${
-                  theme === "light"
-                    ? "bg-amber-400 text-slate-950 font-bold"
-                    : "text-slate-200 hover:bg-slate-800"
-                }`}
-              >
-                Light Theme
-              </button>
+          {showSettingsMenu && (
+            <div className="lg:hidden fixed end-3 top-[62px] z-[10020] w-52 bg-slate-950 border border-slate-700 rounded-2xl shadow-2xl overflow-hidden">
+              {!activeSettingsSection ? (
+                <>
+                  <button type="button" onClick={() => setActiveSettingsSection("theme")} className="w-full flex items-center justify-between px-4 py-3 text-sm text-slate-200 hover:bg-slate-800 transition-colors"><span>{t("common.theme")}</span><span className="text-slate-500">›</span></button>
+                  <button type="button" onClick={() => setActiveSettingsSection("language")} className="w-full flex items-center justify-between px-4 py-3 text-sm text-slate-200 border-t border-slate-700 hover:bg-slate-800 transition-colors"><span>{t("common.language")}</span><span className="text-slate-500">›</span></button>
+                </>
+              ) : activeSettingsSection === "theme" ? (
+                <>
+                  <button type="button" onClick={() => setActiveSettingsSection(null)} className="w-full flex items-center gap-2 px-4 py-2 text-[11px] font-bold uppercase tracking-[0.14em] text-slate-500 hover:bg-slate-900"><span>‹</span><span>{t("common.theme")}</span></button>
+                  <button onClick={() => { setTheme("dark"); setShowSettingsMenu(false); setActiveSettingsSection(null); }} className={`w-full text-start px-4 py-3 text-sm transition-colors ${theme === "dark" ? "bg-amber-400 text-slate-950 font-bold" : "text-slate-200 hover:bg-slate-800"}`}>{t("common.darkTheme")}</button>
+                  <button onClick={() => { setTheme("light"); setShowSettingsMenu(false); setActiveSettingsSection(null); }} className={`w-full text-start px-4 py-3 text-sm border-t border-slate-700 transition-colors ${theme === "light" ? "bg-amber-400 text-slate-950 font-bold" : "text-slate-200 hover:bg-slate-800"}`}>{t("common.lightTheme")}</button>
+                </>
+              ) : (
+                <>
+                  <button type="button" onClick={() => setActiveSettingsSection(null)} className="w-full flex items-center gap-2 px-4 py-2 text-[11px] font-bold uppercase tracking-[0.14em] text-slate-500 hover:bg-slate-900"><span>‹</span><span>{t("common.language")}</span></button>
+                  <button type="button" disabled={isUpdatingLanguage} onClick={async () => { try { await setLanguage("en"); setShowSettingsMenu(false); setActiveSettingsSection(null); } catch (error) { showToast?.("error", getFriendlyApiErrorMessage(error, t("common.languageSaveFailed"))); } }} className={`w-full text-start px-4 py-3 text-sm transition-colors disabled:cursor-wait disabled:opacity-60 ${language === "en" ? "bg-amber-400 text-slate-950 font-bold" : "text-slate-200 hover:bg-slate-800"}`}>{isUpdatingLanguage && language !== "en" ? t("common.saving") : t("common.english")}</button>
+                  <button type="button" disabled={isUpdatingLanguage} onClick={async () => { try { await setLanguage("ar"); setShowSettingsMenu(false); setActiveSettingsSection(null); } catch (error) { showToast?.("error", getFriendlyApiErrorMessage(error, t("common.languageSaveFailed"))); } }} className={`w-full text-start px-4 py-3 text-sm border-t border-slate-700 transition-colors disabled:cursor-wait disabled:opacity-60 ${language === "ar" ? "bg-amber-400 text-slate-950 font-bold" : "text-slate-200 hover:bg-slate-800"}`}>{isUpdatingLanguage && language !== "ar" ? t("common.saving") : t("common.arabic")}</button>
+                </>
+              )}
             </div>
           )}
 
@@ -4747,6 +4749,7 @@ function LoginPage({
   setTheme,
   actionLoading = { active: false, label: "" },
 }) {
+  const { t } = useLanguage();
   const [showPassword, setShowPassword] = useState(false);
   const [loginFieldsReady, setLoginFieldsReady] = useState(false);
   const [forgotPasswordOpen, setForgotPasswordOpen] = useState(false);
@@ -5028,7 +5031,7 @@ function LoginPage({
                   />
                   <div>
                     <p className="text-[11px] font-bold uppercase tracking-[0.25em] text-amber-300">
-                      Secure Workspace
+                      {t("login.secureWorkspace")}
                     </p>
                     <h1 className="login-title mt-1 text-3xl font-black text-white">
                       Fleet Fuel PRO
@@ -5038,12 +5041,10 @@ function LoginPage({
 
                 <div className="mt-10">
                   <h2 className="login-text text-2xl font-black text-slate-100">
-                    Fuel operations, controlled.
+                    {t("login.heroTitle")}
                   </h2>
                   <p className="login-muted mt-4 max-w-md text-sm leading-7 text-slate-400">
-                    Sign in to your company workspace using the credentials
-                    provided by your administrator. First-time users will be
-                    guided through password setup automatically.
+                    {t("login.heroDescription")}
                   </p>
                 </div>
               </div>
@@ -5055,11 +5056,10 @@ function LoginPage({
                   </span>
                   <div>
                     <p className="login-text text-sm font-bold text-slate-100">
-                      Protected company access
+                      {t("login.protectedAccess")}
                     </p>
                     <p className="login-muted mt-1 text-xs leading-5 text-slate-500">
-                      Your account, company, role, and project scope are verified
-                      securely before access is granted.
+                      {t("login.protectedDescription")}
                     </p>
                   </div>
                 </div>
@@ -5075,13 +5075,13 @@ function LoginPage({
             <div className="mb-8 flex items-start justify-between gap-4">
               <div>
                 <p className="login-muted text-[10px] font-bold uppercase tracking-[0.22em] text-slate-500">
-                  Account Access
+                  {t("login.accountAccess")}
                 </p>
                 <h3 className="login-title mt-1 text-3xl font-black text-white">
-                  Welcome back
+                  {t("login.welcomeBack")}
                 </h3>
                 <p className="login-muted mt-2 text-sm text-slate-500">
-                  Enter your username and password to continue.
+                  {t("login.enterCredentials")}
                 </p>
               </div>
 
@@ -5090,13 +5090,13 @@ function LoginPage({
                 onClick={() => setTheme(theme === "dark" ? "light" : "dark")}
                 className="login-theme-button shrink-0 rounded-xl border border-slate-700 px-3 py-2 text-xs font-bold text-slate-300 transition hover:border-amber-400 hover:text-amber-300"
               >
-                {theme === "dark" ? "Light" : "Dark"}
+                {theme === "dark" ? t("login.light") : t("login.dark")}
               </button>
             </div>
 
             <label className="block">
               <span className="login-muted text-xs font-bold text-slate-400">
-                Username
+                {t("login.username")}
               </span>
               <input
                 name="username"
@@ -5107,27 +5107,27 @@ function LoginPage({
                   setLoginIdentifier(e.target.value.toLowerCase());
                   setLoginPassword?.("");
                 }}
-                placeholder="Enter your username"
+                placeholder={t("login.usernamePlaceholder")}
                 autoComplete="username"
                 readOnly={!loginFieldsReady}
                 className="login-input mt-2 w-full rounded-2xl border border-slate-700 bg-slate-950 px-4 py-3.5 text-sm text-white outline-none transition focus:border-amber-400 focus:ring-2 focus:ring-amber-400/20"
               />
               <p className="login-muted mt-2 text-[11px] text-slate-500">
-                Use the username supplied by your company administrator.
+                {t("login.usernameHelp")}
               </p>
             </label>
 
             <label className="mt-5 block">
               <div className="flex items-center justify-between gap-3">
                 <span className="login-muted text-xs font-bold text-slate-400">
-                  Password
+                  {t("login.password")}
                 </span>
                 <button
                   type="button"
                   onClick={() => setForgotPasswordOpen(true)}
                   className="text-xs font-bold text-amber-300 transition hover:text-amber-200 hover:underline"
                 >
-                  Forgot password?
+                  {t("login.forgotPassword")}
                 </button>
               </div>
 
@@ -5138,7 +5138,7 @@ function LoginPage({
                   onFocus={() => setLoginFieldsReady(true)}
                   onMouseDown={() => setLoginFieldsReady(true)}
                   onChange={(e) => setLoginPassword?.(e.target.value)}
-                  placeholder="Enter your password"
+                  placeholder={t("login.passwordPlaceholder")}
                   type={showPassword ? "text" : "password"}
                   autoComplete="current-password"
                   readOnly={!loginFieldsReady}
@@ -5148,8 +5148,8 @@ function LoginPage({
                   type="button"
                   onClick={() => setShowPassword((prev) => !prev)}
                   className="absolute inset-y-0 right-0 flex w-14 items-center justify-center text-slate-400 transition hover:text-amber-300"
-                  aria-label={showPassword ? "Hide password" : "Show password"}
-                  title={showPassword ? "Hide password" : "Show password"}
+                  aria-label={showPassword ? t("login.hidePassword") : t("login.showPassword")}
+                  title={showPassword ? t("login.hidePassword") : t("login.showPassword")}
                 >
                   {showPassword ? (
                     <svg
@@ -5193,12 +5193,11 @@ function LoginPage({
               disabled={actionLoading.active}
               className="mt-7 w-full rounded-2xl bg-amber-400 px-4 py-3.5 text-sm font-black text-slate-950 shadow-lg shadow-amber-500/20 transition hover:bg-amber-300 disabled:cursor-not-allowed disabled:opacity-60"
             >
-              {actionLoading.active ? "Signing In..." : "Sign In"}
+              {actionLoading.active ? t("login.signingIn") : t("login.signIn")}
             </button>
 
             <p className="login-muted mt-5 text-center text-xs leading-5 text-slate-500">
-              Access problems? Use “Forgot password?” or contact your company
-              administrator.
+              {t("login.accessProblems")}
             </p>
           </form>
         </div>
@@ -5210,10 +5209,10 @@ function LoginPage({
             <div className="flex items-start justify-between gap-4">
               <div>
                 <p className="text-[10px] font-bold uppercase tracking-[0.22em] text-amber-300">
-                  Account Recovery
+                  {t("login.accountRecovery")}
                 </p>
                 <h3 className="login-title mt-1 text-2xl font-black text-white">
-                  Forgot Password
+                  {t("login.forgotPasswordTitle")}
                 </h3>
               </div>
 
@@ -5221,14 +5220,14 @@ function LoginPage({
                 type="button"
                 onClick={() => setForgotPasswordOpen(false)}
                 className="flex h-9 w-9 items-center justify-center rounded-xl border border-slate-700 text-slate-400 transition hover:border-red-400 hover:text-red-300"
-                aria-label="Close password recovery"
+                aria-label={t("login.closeRecovery")}
               >
                 ×
               </button>
             </div>
 
             <p className="login-muted mt-5 text-sm leading-6 text-slate-300">
-              Please contact your company administrator to obtain a new temporary password.
+              {t("login.recoveryMessage")}
             </p>
 
             <button
@@ -5236,7 +5235,7 @@ function LoginPage({
               onClick={() => setForgotPasswordOpen(false)}
               className="mt-6 w-full rounded-2xl bg-amber-400 px-4 py-3 text-sm font-black text-slate-950 transition hover:bg-amber-300"
             >
-              OK
+              {t("common.ok")}
             </button>
           </div>
         </div>

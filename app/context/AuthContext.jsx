@@ -27,6 +27,22 @@ export function AuthProvider({ children }) {
     return user || null;
   }
 
+  function updateCurrentUser(updates) {
+    setCurrentUser((previousUser) => {
+      if (!previousUser) return previousUser;
+
+      const nextUser = {
+        ...previousUser,
+        ...(typeof updates === "function"
+          ? updates(previousUser)
+          : updates || {}),
+      };
+
+      setPermissions(nextUser?.permissions || []);
+      return nextUser;
+    });
+  }
+
   async function loadCurrentUser() {
     try {
       const user = await getCurrentUser();
@@ -87,6 +103,7 @@ export function AuthProvider({ children }) {
         login,
         logout,
         changePassword,
+        updateCurrentUser,
         reloadUser: loadCurrentUser,
       }}
     >

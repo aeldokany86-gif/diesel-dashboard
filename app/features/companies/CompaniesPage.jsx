@@ -4,6 +4,7 @@
 "use client";
 
 import { useEffect, useMemo, useRef, useState } from "react";
+import { useLanguage } from "../../context/LanguageContext";
 
 import StatusBadge from "../../components/feedback/StatusBadge";
 import ModalPortal from "../../components/ui/ModalPortal";
@@ -944,6 +945,8 @@ export function ForcePasswordChangePage({
   onSubmit,
   onLogout,
 }) {
+  const { t } = useLanguage();
+
   return (
     <div
       data-theme={theme}
@@ -959,51 +962,51 @@ export function ForcePasswordChangePage({
           />
           <div>
             <p className="text-[10px] uppercase tracking-[0.22em] text-amber-300 font-bold">
-              Password Security
+              {t("passwordChange.security")}
             </p>
-            <h1 className="text-2xl font-black text-white mt-1">Change Temporary Password</h1>
+            <h1 className="text-2xl font-black text-white mt-1">{t("passwordChange.title")}</h1>
           </div>
         </div>
 
         <p className="text-sm text-slate-400 leading-6 mb-6">
-          Your password was reset by an administrator. For security, you must create a new password before accessing Fleet Fuel PRO.
+          {t("passwordChange.description")}
         </p>
 
         <div className="mb-5 rounded-2xl border border-amber-400/20 bg-amber-400/10 px-4 py-3">
-          <p className="text-xs text-slate-400">Signed in as</p>
+          <p className="text-xs text-slate-400">{t("sidebar.signedInAs")}</p>
           <p className="mt-1 text-sm font-bold text-slate-100">{currentUser?.fullName || currentUser?.email || "User"}</p>
         </div>
 
         <form onSubmit={onSubmit} className="space-y-4 px-6 py-5">
           <label className="block">
-            <span className="text-xs font-bold text-slate-400">Temporary Password</span>
+            <span className="text-xs font-bold text-slate-400">{t("passwordChange.currentPassword")}</span>
             <input
               value={currentPassword}
               onChange={(e) => setCurrentPassword?.(e.target.value)}
               type="password"
-              placeholder="Enter temporary password"
+              placeholder={t("passwordChange.currentPlaceholder")}
               className="mt-2 w-full rounded-2xl border border-slate-700 bg-slate-950 px-4 py-3 text-sm text-white outline-none focus:border-amber-400 focus:ring-2 focus:ring-amber-400/20"
             />
           </label>
 
           <label className="block">
-            <span className="text-xs font-bold text-slate-400">New Password</span>
+            <span className="text-xs font-bold text-slate-400">{t("passwordChange.newPassword")}</span>
             <input
               value={newPassword}
               onChange={(e) => setNewPassword?.(e.target.value)}
               type="password"
-              placeholder="At least 8 characters"
+              placeholder={t("passwordChange.newPlaceholder")}
               className="mt-2 w-full rounded-2xl border border-slate-700 bg-slate-950 px-4 py-3 text-sm text-white outline-none focus:border-amber-400 focus:ring-2 focus:ring-amber-400/20"
             />
           </label>
 
           <label className="block">
-            <span className="text-xs font-bold text-slate-400">Confirm New Password</span>
+            <span className="text-xs font-bold text-slate-400">{t("passwordChange.confirmPassword")}</span>
             <input
               value={confirmPassword}
               onChange={(e) => setConfirmPassword?.(e.target.value)}
               type="password"
-              placeholder="Re-enter new password"
+              placeholder={t("passwordChange.confirmPlaceholder")}
               className="mt-2 w-full rounded-2xl border border-slate-700 bg-slate-950 px-4 py-3 text-sm text-white outline-none focus:border-amber-400 focus:ring-2 focus:ring-amber-400/20"
             />
           </label>
@@ -1020,7 +1023,7 @@ export function ForcePasswordChangePage({
               disabled={loading}
               className="flex-1 rounded-2xl bg-amber-400 px-4 py-3 text-sm font-black text-slate-950 hover:bg-amber-300 transition disabled:cursor-not-allowed disabled:opacity-60"
             >
-              {loading ? "Saving..." : "Save New Password"}
+              {loading ? t("passwordChange.changing") : t("passwordChange.submit")}
             </button>
 
             <button
@@ -1029,7 +1032,7 @@ export function ForcePasswordChangePage({
               disabled={loading}
               className="rounded-2xl border border-slate-700 px-4 py-3 text-sm font-bold text-slate-300 hover:border-red-400 hover:text-red-300 transition disabled:cursor-not-allowed disabled:opacity-60"
             >
-              Logout
+              {t("sidebar.logout")}
             </button>
           </div>
         </form>

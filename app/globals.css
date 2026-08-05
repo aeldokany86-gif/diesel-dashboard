@@ -24,3 +24,30 @@ body {
   color: var(--foreground);
   font-family: Arial, Helvetica, sans-serif;
 }
+
+
+html[dir="ltr"] {
+  direction: ltr;
+}
+
+html[dir="rtl"] {
+  direction: rtl;
+}
+
+html[dir="rtl"] body {
+  text-align: right;
+}
+
+html[dir="ltr"] body {
+  text-align: left;
+}
+
+/* Foundation for direction-aware components. Existing pages can migrate
+   gradually to logical properties without changing their business logic. */
+.i18n-text-start {
+  text-align: start;
+}
+
+.i18n-text-end {
+  text-align: end;
+}
