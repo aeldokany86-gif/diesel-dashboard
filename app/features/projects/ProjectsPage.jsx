@@ -7,6 +7,7 @@ import ModalPortal from "../../components/ui/ModalPortal";
 import Th from "../../components/ui/Th";
 import Td from "../../components/ui/Td";
 import Card from "../../components/ui/Card";
+import { useLanguage } from "../../context/LanguageContext";
 
 import {
   formatNumber,
@@ -49,14 +50,14 @@ function notifyUser(showToastFn, type, message) {
   }
 }
 
-function formatProjectFuelPriceDate(value) {
+function formatProjectFuelPriceDate(value, locale = "en-GB") {
   if (!value) return "-";
 
   const date = new Date(value);
 
   if (Number.isNaN(date.getTime())) return "-";
 
-  return date.toLocaleString("en-GB", {
+  return date.toLocaleString(locale || "en-GB", {
     year: "numeric",
     month: "2-digit",
     day: "2-digit",
@@ -208,6 +209,43 @@ export default function ProjectsPage({
   onBootstrapCancel = () => {},
   onBootstrapCompleted = () => {},
 }) {
+  const { language, t } = useLanguage();
+  const isRtl = language === "ar";
+
+  const getProjectStatusLabel = (status) => {
+    const normalized = String(status || "").trim().toLowerCase();
+    if (normalized === "active") return t("projects.status.active");
+    if (normalized === "inactive") return t("projects.status.inactive");
+    if (normalized === "ended") return t("projects.status.ended");
+    return status || "-";
+  };
+
+  const getApprovalStatusLabel = (status) => {
+    const normalized = String(status || "").trim().toLowerCase();
+    if (normalized === "approved") return t("projects.approval.approved");
+    if (normalized === "pending approval" || normalized === "pending") {
+      return t("projects.approval.pending");
+    }
+    if (normalized === "rejected") return t("projects.approval.rejected");
+    return status || "-";
+  };
+
+  const renderProjectStatusBadge = (status) => {
+    const normalized = String(status || "").trim().toLowerCase();
+    const statusClass =
+      normalized === "active"
+        ? "border-emerald-500/50 bg-emerald-500/15 text-emerald-300"
+        : normalized === "inactive"
+          ? "border-red-500/50 bg-red-500/15 text-red-300"
+          : "border-slate-500/50 bg-slate-500/15 text-slate-300";
+
+    return (
+      <span className={`inline-flex items-center justify-center rounded-full border px-3 py-1 text-xs font-bold ${statusClass}`}>
+        {getProjectStatusLabel(status)}
+      </span>
+    );
+  };
+
   const [showForm, setShowForm] = useState(false);
   const [searchTerm, setSearchTerm] = useState("");
   const [selectedProject, setSelectedProject] = useState(null);
@@ -278,7 +316,7 @@ export default function ProjectsPage({
     if (!hasPermission("projects", "edit")) {
       showToast?.(
         "warning",
-        "Read-only access: you cannot update project fuel price.",
+        t("projectWorkflows.messages.readOnlyPrice"),
       );
       return;
     }
@@ -286,7 +324,7 @@ export default function ProjectsPage({
     if (!project?.backendId) {
       showToast?.(
         "warning",
-        "Project must be saved in backend before updating fuel price.",
+        t("projectWorkflows.validation.projectMustBeSavedForPrice"),
       );
       return;
     }
@@ -326,7 +364,7 @@ export default function ProjectsPage({
 
   const saveProjectFuelPrice = async () => {
     if (!selectedProjectForFuelPrice?.backendId) {
-      showToast?.("warning", "Project backend ID is required.");
+      showToast?.("warning", t("projectWorkflows.validation.backendIdRequired"));
       return;
     }
 
@@ -339,13 +377,13 @@ export default function ProjectsPage({
     if (!pricing.isValid) {
       showToast?.(
         "warning",
-        "Enter a base fuel price above zero, a non-negative delivery cost, and VAT between 0% and 100%.",
+        t("projectWorkflows.validation.validPricing"),
       );
       return;
     }
 
     if (!fuelPriceForm.effectiveFrom) {
-      showToast?.("warning", "Effective date is required.");
+      showToast?.("warning", t("projectWorkflows.validation.effectiveDateRequired"));
       return;
     }
 
@@ -360,7 +398,7 @@ export default function ProjectsPage({
           effectiveFrom: new Date(fuelPriceForm.effectiveFrom).toISOString(),
           reason:
             fuelPriceForm.reason?.trim() ||
-            "Project component fuel price update",
+            t("projectWorkflows.defaults.priceReason"),
           ...(currentUser?.id ? { createdByUserId: currentUser.id } : {}),
         })) || {};
       const nextCurrency =
@@ -449,14 +487,14 @@ export default function ProjectsPage({
       showToast?.(
         "success",
         isEffectiveNow
-          ? "Project fuel price updated successfully."
-          : `Fuel price scheduled for ${formatProjectFuelPriceDate(nextEffectiveFrom)}.`,
+          ? t("projectWorkflows.messages.priceUpdated")
+          : t("projectWorkflows.messages.priceScheduled", { date: formatProjectFuelPriceDate(nextEffectiveFrom, language === "ar" ? "ar-SA" : "en-GB") }),
       );
       closeFuelPriceModal();
     } catch (error) {
       const backendMessage =
         error?.response?.data?.message ||
-        "Failed to update project fuel price.";
+        t("projectWorkflows.messages.priceUpdateFailed");
 
       notifyUser(
         typeof showToast !== "undefined" ? showToast : null,
@@ -597,20 +635,20 @@ export default function ProjectsPage({
 
   const requestProjectManagerChange = (project, managerUserId) => {
     if (!isAdminProjectManagerEditor) {
-      showToast?.("warning", "Only Admin can change the Project Manager.");
+      showToast?.("warning", t("projectWorkflows.messages.adminOnlyManager"));
       return;
     }
 
     if (!project?.backendId) {
       showToast?.(
         "warning",
-        "Project must be saved in backend before assigning a manager.",
+        t("projectWorkflows.validation.projectMustBeSavedForManager"),
       );
       return;
     }
 
     if (!managerUserId) {
-      showToast?.("warning", "Please select a Project Manager.");
+      showToast?.("warning", t("projectWorkflows.validation.selectManager"));
       return;
     }
 
@@ -684,11 +722,11 @@ export default function ProjectsPage({
         `${pendingManagerConfirmation.project.id} manager changed to ${pendingManagerConfirmation.managerName}.`,
       );
 
-      showToast?.("success", "Project Manager changed successfully.");
+      showToast?.("success", t("projectWorkflows.messages.managerChanged"));
       setPendingManagerConfirmation(null);
     } catch (error) {
       const backendMessage =
-        error?.response?.data?.message || "Failed to change Project Manager.";
+        error?.response?.data?.message || t("projectWorkflows.messages.managerChangeFailed");
       notifyUser(
         typeof showToast !== "undefined" ? showToast : null,
         "warning",
@@ -813,7 +851,7 @@ export default function ProjectsPage({
     const d = parseProjectDate(rawDate);
     if (!d) return rawDate || "-";
 
-    return d.toLocaleString("en-GB", {
+    return d.toLocaleString(language === "ar" ? "ar-SA" : "en-GB", {
       year: "numeric",
       month: "2-digit",
       day: "2-digit",
@@ -1112,7 +1150,7 @@ export default function ProjectsPage({
   };
 
   const showProjectRejection = ({
-    title = "Project cannot be created",
+    title = t("projectWorkflows.rejection.projectCannotBeCreated"),
     message,
     hint = "",
   }) => {
@@ -1158,25 +1196,25 @@ export default function ProjectsPage({
       showProjectRejection({
         title: "Company is required",
         message: "Please select a customer company before adding projects.",
-        hint: "Projects must always be linked to a real customer company.",
+        hint: t("projectWorkflows.validation.realCompanyRequired"),
       });
       return;
     }
 
     if (!newProject.id.trim()) {
       showProjectRejection({
-        title: "Project ID is required",
-        message: "Please enter Project ID.",
-        hint: "Project ID will be locked after creation, so make sure it is correct.",
+        title: t("projectWorkflows.rejection.projectIdRequiredTitle"),
+        message: t("projectWorkflows.validation.enterProjectId"),
+        hint: t("projectWorkflows.validation.projectIdLocked"),
       });
       return;
     }
 
     if (!newProject.name.trim()) {
       showProjectRejection({
-        title: "Project Name is required",
-        message: "Please enter Project Name.",
-        hint: "Project Name will be locked after creation, so make sure it is correct.",
+        title: t("projectWorkflows.rejection.projectNameRequiredTitle"),
+        message: t("projectWorkflows.validation.enterProjectName"),
+        hint: t("projectWorkflows.validation.projectNameLocked"),
       });
       return;
     }
@@ -1191,8 +1229,8 @@ export default function ProjectsPage({
       showProjectRejection({
         title: "Valid initial pricing is required",
         message:
-          "Enter a base fuel price above zero, a non-negative delivery cost, and VAT between 0% and 100%.",
-        hint: "Net and VAT-inclusive prices are calculated automatically by the backend.",
+          t("projectWorkflows.validation.validPricing"),
+        hint: t("projectWorkflows.validation.pricingCalculatedAutomatically"),
       });
       return;
     }
@@ -1203,9 +1241,9 @@ export default function ProjectsPage({
     if (duplicatedProject) {
       const duplicateStatus = duplicatedProject.status || "Existing";
       showProjectRejection({
-        title: "Project ID cannot be reused",
-        message: `Project ID ${newProject.id.trim()} already exists as ${duplicateStatus} and cannot be reused.`,
-        hint: "Use a new Project ID. Project IDs remain reserved for audit and historical records.",
+        title: t("projectWorkflows.rejection.projectIdReusedTitle"),
+        message: t("projectWorkflows.validation.projectIdAlreadyExists", { id: newProject.id.trim(), status: getProjectStatusLabel(duplicateStatus) }),
+        hint: t("projectWorkflows.validation.useNewProjectIdAudit"),
       });
       return;
     }
@@ -1254,8 +1292,8 @@ export default function ProjectsPage({
         showToast?.(
           "success",
           bootstrapFirstProject
-            ? "First project created and Admin employee assigned successfully."
-            : "Project saved successfully.",
+            ? t("projectWorkflows.messages.firstProjectCreated")
+            : t("projectWorkflows.messages.projectSaved"),
         );
 
         if (bootstrapFirstProject) {
@@ -1279,16 +1317,16 @@ export default function ProjectsPage({
 
       showToast?.(
         "success",
-        "Project saved locally and ready for backend submission.",
+        t("projectWorkflows.messages.projectSavedLocally"),
       );
       closeForm();
     } catch (error) {
       const rawBackendMessage =
-        error?.response?.data?.message || "Failed to save project.";
+        error?.response?.data?.message || t("projectWorkflows.messages.projectSaveFailed");
 
       const normalizedBackendMessage = Array.isArray(rawBackendMessage)
         ? rawBackendMessage.join(", ")
-        : String(rawBackendMessage || "Failed to save project.");
+        : String(rawBackendMessage || t("projectWorkflows.messages.projectSaveFailed"));
 
       const friendlyMessage =
         normalizedBackendMessage.toLowerCase().includes("previously used") ||
@@ -1296,13 +1334,13 @@ export default function ProjectsPage({
         normalizedBackendMessage.toLowerCase().includes("unique") ||
         normalizedBackendMessage.toLowerCase().includes("duplicate") ||
         normalizedBackendMessage.toLowerCase().includes("already")
-          ? "Project ID already exists in system history and cannot be reused."
+          ? t("projectWorkflows.validation.projectIdExistsHistory")
           : normalizedBackendMessage;
 
       showProjectRejection({
-        title: "Project cannot be created",
+        title: t("projectWorkflows.rejection.projectCannotBeCreated"),
         message: friendlyMessage,
-        hint: "Use a new Project ID. Project IDs remain reserved even after soft delete.",
+        hint: t("projectWorkflows.validation.useNewProjectIdSoftDelete"),
       });
     }
   };
@@ -1311,7 +1349,7 @@ export default function ProjectsPage({
     if (!hasPermission("projects", "edit")) {
       showToast?.(
         "warning",
-        "Read-only access: you cannot change project status.",
+        t("projectWorkflows.messages.readOnlyStatus"),
       );
       return;
     }
@@ -1329,7 +1367,7 @@ export default function ProjectsPage({
     if (!hasPermission("projects", "edit")) {
       showToast?.(
         "warning",
-        "Read-only access: you cannot save project status changes.",
+        t("projectWorkflows.messages.readOnlyStatusSave"),
       );
       setStatusEdit(null);
       return;
@@ -1385,11 +1423,11 @@ export default function ProjectsPage({
         "projects",
         `${statusEdit.id} status changed to ${statusEdit.newStatus}.`,
       );
-      showToast?.("success", "Project status changed successfully.");
+      showToast?.("success", t("projectWorkflows.messages.statusChanged"));
       setStatusEdit(null);
     } catch (error) {
       const backendMessage =
-        error?.response?.data?.message || "Failed to change project status.";
+        error?.response?.data?.message || t("projectWorkflows.messages.statusChangeFailed");
       notifyUser(
         typeof showToast !== "undefined" ? showToast : null,
         "warning",
@@ -1402,7 +1440,7 @@ export default function ProjectsPage({
 
   const deleteProject = async (project) => {
     if (!hasPermission("projects", "delete")) {
-      showToast?.("warning", "Read-only access: you cannot delete projects.");
+      showToast?.("warning", t("projectWorkflows.messages.readOnlyDelete"));
       return;
     }
 
@@ -1436,11 +1474,11 @@ export default function ProjectsPage({
         "projects",
         `${projectDeleteTarget.id} was soft deleted.`,
       );
-      showToast?.("success", "Project deleted successfully.");
+      showToast?.("success", t("projectWorkflows.messages.projectDeleted"));
       setProjectDeleteTarget(null);
     } catch (error) {
       const backendMessage =
-        error?.response?.data?.message || "Failed to delete project.";
+        error?.response?.data?.message || t("projectWorkflows.messages.projectDeleteFailed");
       notifyUser(
         typeof showToast !== "undefined" ? showToast : null,
         "warning",
@@ -1476,24 +1514,24 @@ export default function ProjectsPage({
       "projects_cards_summary",
       [
         "#",
-        "Project ID",
-        "Project Name",
-        "Status",
-        "Approval Status",
-        "Project Manager",
-        "Assigned Assets",
-        "Assigned Stations",
-        "Assigned Fuelers",
-        "Equipment Refuel Operations",
-        "Equipment Fuel Consumption (L)",
-        "Base Fuel Price / L",
-        "Delivery Cost / L",
-        "Operational Price Excl. VAT / L",
-        "VAT Rate %",
-        "Price Incl. VAT / L",
-        "Fuel Price Currency",
-        "Fuel Price Effective From",
-        "Equipment Fuel Cost",
+        t("projects.fields.projectId"),
+        t("projects.fields.projectName"),
+        t("projects.fields.status"),
+        t("projects.approval.status"),
+        t("projects.fields.projectManager"),
+        t("projects.csv.assignedAssets"),
+        t("projects.csv.assignedStations"),
+        t("projects.csv.assignedTeam"),
+        t("projects.metrics.refuelOperations"),
+        t("projects.cards.fuelConsumption"),
+        t("projects.pricing.basePricePerLiter"),
+        t("projects.pricing.deliveryCostPerLiter"),
+        t("projects.pricing.operationalExclVatPerLiter"),
+        t("projects.pricing.vatRate"),
+        t("projects.pricing.priceInclVatPerLiter"),
+        t("projects.csv.currency"),
+        t("projects.pricing.effectiveFrom"),
+        t("projects.csv.fuelCost"),
       ],
       filteredProjects.map((project, i) => [
         i + 1,
@@ -1501,7 +1539,7 @@ export default function ProjectsPage({
         project.name,
         project.status,
         project.approvalStatus,
-        project.projectManagerName || "Unassigned",
+        project.projectManagerName || t("projects.defaults.unassigned"),
         project.assignedAssetsCount,
         project.assignedStationsCount,
         project.assignedFuelersCount,
@@ -1528,9 +1566,9 @@ export default function ProjectsPage({
     const printWindow = window.open("", "", "width=1400,height=900");
 
     printWindow.document.write(`
-      <html>
+      <html dir="${language === "ar" ? "rtl" : "ltr"}">
         <head>
-          <title>Projects / Sites Cards</title>
+          <title>${t("projects.print.title")}</title>
           <style>
             body { font-family: Arial, sans-serif; padding: 25px; color: #111; }
             h2 { margin-bottom: 8px; font-size: 22px; }
@@ -1546,8 +1584,8 @@ export default function ProjectsPage({
           </style>
         </head>
         <body>
-          <h2>Projects / Sites Cards</h2>
-          <div class="report-meta">Generated at: ${new Date().toLocaleString()}</div>
+          <h2>${t("projects.print.title")}</h2>
+          <div class="report-meta">${t("projects.print.generatedAt")}: ${new Date().toLocaleString(language === "ar" ? "ar-SA" : "en-GB")}</div>
           ${cardsElement.outerHTML}
         </body>
       </html>
@@ -1561,13 +1599,12 @@ export default function ProjectsPage({
 
   return (
     <div className="bg-gray-900 min-h-screen text-white overflow-y-auto h-screen">
-      <div className="fleet-page-shell w-full max-w-[1920px] mx-auto px-2 sm:px-3 lg:px-4 xl:px-5 2xl:px-8 py-3 sm:py-4 lg:py-5 text-[12px] lg:text-[13px]">
+      <div className={`fleet-page-shell w-full max-w-[1920px] mx-auto px-2 sm:px-3 lg:px-4 xl:px-5 2xl:px-8 py-3 sm:py-4 lg:py-5 text-[12px] lg:text-[13px] ${isRtl ? "text-right" : "text-left"}`} dir={isRtl ? "rtl" : "ltr"}>
         <div className="flex flex-col lg:flex-row lg:justify-between lg:items-start gap-4 mb-4">
           <div>
-            <h1 className="text-xl sm:text-2xl font-bold">Projects / Sites</h1>
+            <h1 className="text-xl sm:text-2xl font-bold">{t("projects.title")}</h1>
             <p className="text-gray-400">
-              Project cards, direct refuel tracking, and site assignment
-              overview
+              {t("projects.subtitle")}
             </p>
           </div>
 
@@ -1575,8 +1612,8 @@ export default function ProjectsPage({
             <input
               value={searchTerm}
               onChange={(e) => setSearchTerm(e.target.value)}
-              placeholder="Search projects..."
-              className="h-[48px] flex-1 min-w-0 bg-gray-800 border border-gray-700 focus:border-yellow-400 focus:ring-2 focus:ring-yellow-400/20 outline-none text-white placeholder:text-slate-400 px-3 lg:px-4 rounded-xl w-full sm:max-w-[320px] text-[12px] lg:text-sm transition-all"
+              placeholder={t("projects.searchPlaceholder")}
+              dir={isRtl ? "rtl" : "ltr"} className={`h-[48px] flex-1 min-w-0 bg-gray-800 border border-gray-700 focus:border-yellow-400 focus:ring-2 focus:ring-yellow-400/20 outline-none text-white placeholder:text-slate-400 px-3 lg:px-4 rounded-xl w-full sm:max-w-[320px] text-[12px] lg:text-sm transition-all ${isRtl ? "text-right" : "text-left"}`}
             />
 
             {searchTerm && (
@@ -1584,7 +1621,7 @@ export default function ProjectsPage({
                 onClick={() => setSearchTerm("")}
                 className="h-[48px] shrink-0 bg-red-500/20 hover:bg-red-500/30 text-red-300 border border-red-500/40 px-3 lg:px-4 rounded-xl transition"
               >
-                Clear
+                {t("common.clear")}
               </button>
             )}
 
@@ -1595,7 +1632,7 @@ export default function ProjectsPage({
               <button
                 onClick={() => setShowSettings(!showSettings)}
                 className="h-[48px] w-[48px] cursor-pointer flex items-center justify-center bg-gray-800 hover:bg-gray-700 border border-gray-700 hover:border-yellow-400 text-yellow-400 rounded-xl transition"
-                title="Projects settings"
+                title={t("projects.actions.settings")}
               >
                 ☰
               </button>
@@ -1610,24 +1647,24 @@ export default function ProjectsPage({
                         setShowForm(true);
                         setShowSettings(false);
                       }}
-                      className="block w-full cursor-pointer text-left px-4 py-3 hover:bg-slate-800 transition text-white"
+                      className={`block w-full cursor-pointer px-4 py-3 hover:bg-slate-800 transition text-white ${isRtl ? "text-right" : "text-left"}`}
                     >
-                      + Add Project
+                      {t("projects.actions.addProject")}
                     </button>
                   )}
 
                   <button
                     onClick={exportProjectsCSV}
-                    className="block w-full cursor-pointer text-left px-4 py-3 hover:bg-slate-800 transition text-white border-t border-gray-700"
+                    className={`block w-full cursor-pointer px-4 py-3 hover:bg-slate-800 transition text-white border-t border-gray-700 ${isRtl ? "text-right" : "text-left"}`}
                   >
-                    Export CSV
+                    {t("common.exportCsv")}
                   </button>
 
                   <button
                     onClick={printProjectsCards}
-                    className="block w-full cursor-pointer text-left px-4 py-3 hover:bg-slate-800 transition text-white border-t border-gray-700"
+                    className={`block w-full cursor-pointer px-4 py-3 hover:bg-slate-800 transition text-white border-t border-gray-700 ${isRtl ? "text-right" : "text-left"}`}
                   >
-                    Print Cards
+                    {t("projects.actions.printCards")}
                   </button>
                 </div>
               )}
@@ -1637,20 +1674,20 @@ export default function ProjectsPage({
 
         <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 2xl:grid-cols-5 gap-3 mb-4 min-w-0">
           <Card
-            title="Total Projects"
+            title={t("projects.cards.total")}
             value={formatNumber(projectSummary.length)}
           />
-          <Card title="Active Projects" value={formatNumber(activeProjects)} />
+          <Card title={t("projects.cards.active")} value={formatNumber(activeProjects)} />
           <Card
-            title="Inactive Projects"
+            title={t("projects.cards.inactive")}
             value={formatNumber(inactiveProjects)}
           />
           <Card
-            title="Equipment Fuel Consumption (L)"
+            title={t("projects.cards.fuelConsumption")}
             value={formatNumber(totalDiesel)}
           />
           <Card
-            title={`Equipment Fuel Cost (${currency})`}
+            title={t("projects.cards.fuelCost", { currency })}
             value={formatNumber(totalCost)}
           />
         </div>
@@ -1659,11 +1696,13 @@ export default function ProjectsPage({
           <div className="p-4 border-b border-gray-700 flex justify-between items-center">
             <div>
               <h2 className="text-base sm:text-lg font-extrabold text-amber-300">
-                Projects Cards
+                {t("projects.list.title")}
               </h2>
               <p className="text-xs text-gray-400 mt-1">
-                {filteredProjects.length} cards shown from{" "}
-                {projectSummary.length} projects
+                {t("projects.list.shownCount", {
+                  shown: filteredProjects.length,
+                  total: projectSummary.length,
+                })}
               </p>
             </div>
           </div>
@@ -1678,11 +1717,10 @@ export default function ProjectsPage({
                   🏗️
                 </div>
                 <h3 className="text-lg font-extrabold text-slate-100">
-                  No projects found
+                  {t("projects.list.noneFound")}
                 </h3>
                 <p className="mt-2 text-sm text-slate-400">
-                  Add your first project for this company, or adjust the search
-                  filter to show existing projects.
+                  {t("projects.list.noneDescription")}
                 </p>
               </div>
             )}
@@ -1726,7 +1764,7 @@ export default function ProjectsPage({
                             : "text-slate-500"
                         }
                       >
-                        Project ID:
+                        {t("projects.fields.projectId")}:
                       </span>{" "}
                       <span
                         className={`font-semibold ${
@@ -1753,7 +1791,7 @@ export default function ProjectsPage({
                             : "text-slate-400"
                         }`}
                       >
-                        Project Manager
+                        {t("projects.fields.projectManager")}
                       </p>
 
                       {isAdminProjectManagerEditor ? (
@@ -1771,7 +1809,7 @@ export default function ProjectsPage({
                               : "border-slate-700 bg-slate-900 text-slate-100 focus:border-amber-400"
                           }`}
                         >
-                          <option value="">Assign manager</option>
+                          <option value="">{t("projects.placeholders.assignManager")}</option>
                           {projectManagerOptions.map((manager) => (
                             <option key={manager.id} value={manager.id}>
                               {manager.fullName || manager.email}
@@ -1786,7 +1824,7 @@ export default function ProjectsPage({
                               : "text-slate-100"
                           }`}
                         >
-                          {project.projectManagerName || "Unassigned"}
+                          {project.projectManagerName || t("projects.defaults.unassigned")}
                         </p>
                       )}
                     </div>
@@ -1799,7 +1837,7 @@ export default function ProjectsPage({
                           ? "border-emerald-200 bg-emerald-50 text-slate-900 hover:border-emerald-400 hover:bg-emerald-100"
                           : "border-emerald-500/30 bg-emerald-500/10 text-slate-100 hover:border-emerald-300/70 hover:bg-emerald-500/15"
                       }`}
-                      title="Update project fuel price"
+                      title={t("projectWorkflows.price.updateTitle")}
                     >
                       <div className="flex items-center justify-between gap-3">
                         <div>
@@ -1810,7 +1848,7 @@ export default function ProjectsPage({
                                 : "text-emerald-300"
                             }`}
                           >
-                            Operational Price (Excl. VAT)
+                            {t("projects.pricing.operationalExclVat")}
                           </p>
                           <p className="mt-1 text-lg font-extrabold">
                             {formatNumber(project.currentFuelPrice || 0)}{" "}
@@ -1824,15 +1862,16 @@ export default function ProjectsPage({
                               : "bg-slate-950/70 text-emerald-300 border border-emerald-500/30"
                           }`}
                         >
-                          Edit
+                          {t("common.edit")}
                         </span>
                       </div>
                       <p
                         className={`mt-1 text-[11px] ${theme === "light" ? "text-slate-500" : "text-slate-400"}`}
                       >
-                        Effective:{" "}
+                        {t("projects.pricing.effective")}:{" "}
                         {formatProjectFuelPriceDate(
                           project.fuelPriceEffectiveFrom,
+                          language === "ar" ? "ar-SA" : "en-GB",
                         )}
                       </p>
                       {hasProjectPricingComponents(project) ? (
@@ -1844,15 +1883,15 @@ export default function ProjectsPage({
                           }`}
                         >
                           <span>
-                            Base:{" "}
+                            {t("projects.pricing.base")}:{" "}
                             {formatNumber(project.currentBaseFuelPrice || 0)} +
-                            Delivery:{" "}
+                            {t("projects.pricing.delivery")}:{" "}
                             {formatNumber(
                               project.currentTransportCostPerLiter || 0,
                             )}
                           </span>
                           <span className="text-right font-bold">
-                            Incl. VAT:{" "}
+                            {t("projects.pricing.inclVat")}:{" "}
                             {formatNumber(project.currentGrossFuelPrice || 0)}{" "}
                             {project.fuelPriceCurrency || currency}/L
                           </span>
@@ -1865,8 +1904,7 @@ export default function ProjectsPage({
                               : "border-amber-500/20 text-amber-300"
                           }`}
                         >
-                          Legacy combined price · component and VAT breakdown
-                          unavailable
+                          {t("projects.pricing.legacyUnavailable")}
                         </p>
                       )}
                     </button>
@@ -1876,19 +1914,19 @@ export default function ProjectsPage({
                     {hasPermission("projects", "edit") ? (
                       <button
                         onClick={() => openStatusEdit(project)}
-                        title="Click to change status"
+                        title={t("projectWorkflows.status.clickToChange")}
                         className="cursor-pointer rounded-full transition hover:scale-105"
                       >
-                        <StatusBadge status={project.status || "Inactive"} />
+                        {renderProjectStatusBadge(project.status || "Inactive")}
                       </button>
                     ) : (
-                      <StatusBadge status={project.status || "Inactive"} />
+                      renderProjectStatusBadge(project.status || "Inactive")
                     )}
 
                     {hasPermission("projects", "delete") && (
                       <button
                         onClick={() => deleteProject(project)}
-                        title="Delete project"
+                        title={t("projectWorkflows.delete.title")}
                         className={`h-8 w-8 cursor-pointer flex items-center justify-center rounded-full border transition hover:scale-105 ${
                           theme === "light"
                             ? "border-red-300 bg-red-50 text-red-600 hover:bg-red-100"
@@ -1912,7 +1950,7 @@ export default function ProjectsPage({
                     <p
                       className={`label text-[11px] ${theme === "light" ? "text-slate-500" : "text-gray-400"}`}
                     >
-                      Assets
+                      {t("projects.metrics.assets")}
                     </p>
 
                     <p
@@ -1934,7 +1972,7 @@ export default function ProjectsPage({
                     <p
                       className={`label text-[11px] ${theme === "light" ? "text-slate-500" : "text-gray-400"}`}
                     >
-                      Stations
+                      {t("projects.metrics.stations")}
                     </p>
 
                     <p
@@ -1956,7 +1994,7 @@ export default function ProjectsPage({
                     <p
                       className={`label text-[11px] ${theme === "light" ? "text-slate-500" : "text-gray-400"}`}
                     >
-                      Team
+                      {t("projects.metrics.team")}
                     </p>
 
                     <p
@@ -1980,7 +2018,7 @@ export default function ProjectsPage({
                     <p
                       className={`label text-[11px] ${theme === "light" ? "text-slate-500" : "text-gray-400"}`}
                     >
-                      Refuel Operations
+                      {t("projects.metrics.refuelOperations")}
                     </p>
 
                     <p className="value text-xl font-bold text-yellow-500 mt-1">
@@ -1998,7 +2036,7 @@ export default function ProjectsPage({
                     <p
                       className={`label text-[11px] ${theme === "light" ? "text-slate-500" : "text-gray-400"}`}
                     >
-                      Fuel Consumed (L)
+                      {t("projects.metrics.fuelConsumed")}
                     </p>
 
                     <p className="value text-xl font-bold text-emerald-500 mt-1">
@@ -2016,7 +2054,7 @@ export default function ProjectsPage({
                     <p
                       className={`label text-[11px] ${theme === "light" ? "text-slate-500" : "text-gray-400"}`}
                     >
-                      Cost
+                      {t("projects.metrics.cost")}
                     </p>
 
                     <p className="value text-base sm:text-lg font-bold text-blue-600 mt-1">
@@ -2032,7 +2070,10 @@ export default function ProjectsPage({
                       : "text-gray-400 border-gray-700"
                   }`}
                 >
-                  <span>Approval: {project.approvalStatus || "Approved"}</span>
+                  <span>
+                    {t("projects.approval.label")}:{" "}
+                    {getApprovalStatusLabel(project.approvalStatus || "Approved")}
+                  </span>
                   <span>{currency}</span>
                 </div>
               </div>
@@ -2042,7 +2083,7 @@ export default function ProjectsPage({
 
         {fuelPriceModalOpen && selectedProjectForFuelPrice && (
           <ModalPortal>
-            <div className="fixed inset-0 z-[10020] flex items-center justify-center bg-black/75 p-2 backdrop-blur-sm sm:p-3">
+            <div dir={isRtl ? "rtl" : "ltr"} className="fixed inset-0 z-[10020] flex items-center justify-center bg-black/75 p-2 backdrop-blur-sm sm:p-3">
               <div
                 className={`flex max-h-[calc(100dvh-1rem)] w-full max-w-xl flex-col overflow-hidden rounded-3xl border shadow-2xl sm:max-h-[calc(100dvh-1.5rem)] ${
                   theme === "light"
@@ -2059,10 +2100,10 @@ export default function ProjectsPage({
                 >
                   <div>
                     <p className="text-xs font-bold uppercase tracking-[0.22em] text-emerald-400">
-                      Project fuel pricing
+                      {t("projectWorkflows.price.sectionLabel")}
                     </p>
                     <h2 className="mt-1 text-xl font-extrabold">
-                      Update Fuel Price
+                      {t("projectWorkflows.price.updateTitle")}
                     </h2>
                     <p
                       className={`mt-1 text-sm ${theme === "light" ? "text-slate-500" : "text-slate-400"}`}
@@ -2096,7 +2137,7 @@ export default function ProjectsPage({
                     <p
                       className={`text-xs ${theme === "light" ? "text-slate-500" : "text-slate-400"}`}
                     >
-                      Current active operational price (read-only)
+                      {t("projectWorkflows.price.currentReadOnly")}
                     </p>
                     <p className="mt-1 text-2xl font-extrabold text-emerald-400">
                       {formatNumber(
@@ -2110,28 +2151,28 @@ export default function ProjectsPage({
                       selectedProjectForFuelPrice,
                     ) && (
                       <p className="mt-2 text-xs font-semibold text-amber-500">
-                        Legacy combined price — its base, delivery and VAT
-                        components are unavailable.
+                        {t("projects.pricing.legacyComponentsUnavailable")}
                       </p>
                     )}
                     <p
                       className={`mt-2 text-xs ${theme === "light" ? "text-slate-500" : "text-slate-400"}`}
                     >
-                      Effective:{" "}
+                      {t("projects.pricing.effective")}:{" "}
                       {formatProjectFuelPriceDate(
                         selectedProjectForFuelPrice.fuelPriceEffectiveFrom,
+                        language === "ar" ? "ar-SA" : "en-GB",
                       )}
                     </p>
                   </div>
 
                   <div>
                     <p className="mb-2 text-sm font-extrabold">
-                      New pricing components
+                      {t("projectWorkflows.price.newComponents")}
                     </p>
                     <div className="grid grid-cols-1 gap-3 sm:grid-cols-3">
                       <div>
                         <label className="text-sm font-bold">
-                          Base Fuel Price / L
+                          {t("projects.pricing.basePricePerLiter")}
                         </label>
                         <input
                           type="number"
@@ -2149,12 +2190,12 @@ export default function ProjectsPage({
                               ? "border-slate-300 bg-white text-slate-900 focus:border-emerald-500"
                               : "border-slate-700 bg-slate-900 text-white focus:border-emerald-400"
                           }`}
-                          placeholder="Enter base price"
+                          placeholder={t("projects.placeholders.enterBasePrice")}
                         />
                       </div>
                       <div>
                         <label className="text-sm font-bold">
-                          Delivery Cost / L
+                          {t("projects.pricing.deliveryCostPerLiter")}
                         </label>
                         <input
                           type="number"
@@ -2172,7 +2213,9 @@ export default function ProjectsPage({
                         />
                       </div>
                       <div>
-                        <label className="text-sm font-bold">VAT Rate %</label>
+                        <label className="text-sm font-bold">
+                          {t("projects.pricing.vatRate")}
+                        </label>
                         <input
                           type="number"
                           step="0.01"
@@ -2197,7 +2240,7 @@ export default function ProjectsPage({
                   >
                     <div>
                       <p className="text-xs opacity-70">
-                        Operational price excl. VAT
+                        {t("projects.pricing.operationalExclVat")}
                       </p>
                       <p className="mt-1 font-extrabold">
                         {fuelPricePreview?.isValid
@@ -2207,7 +2250,9 @@ export default function ProjectsPage({
                       </p>
                     </div>
                     <div>
-                      <p className="text-xs opacity-70">VAT per liter</p>
+                      <p className="text-xs opacity-70">
+                        {t("projects.pricing.vatPerLiter")}
+                      </p>
                       <p className="mt-1 font-extrabold">
                         {fuelPricePreview?.isValid
                           ? formatNumber(fuelPricePreview.vatAmountPerLiter)
@@ -2216,7 +2261,9 @@ export default function ProjectsPage({
                       </p>
                     </div>
                     <div>
-                      <p className="text-xs opacity-70">Price incl. VAT</p>
+                      <p className="text-xs opacity-70">
+                        {t("projects.pricing.priceInclVat")}
+                      </p>
                       <p className="mt-1 font-extrabold text-emerald-500">
                         {fuelPricePreview?.isValid
                           ? formatNumber(fuelPricePreview.grossPricePerLiter)
@@ -2227,7 +2274,9 @@ export default function ProjectsPage({
                   </div>
 
                   <div>
-                    <label className="text-sm font-bold">Effective From</label>
+                    <label className="text-sm font-bold">
+                      {t("projects.pricing.effectiveFrom")}
+                    </label>
                     <input
                       type="datetime-local"
                       value={fuelPriceForm.effectiveFrom}
@@ -2246,7 +2295,9 @@ export default function ProjectsPage({
                   </div>
 
                   <div>
-                    <label className="text-sm font-bold">Reason</label>
+                    <label className="text-sm font-bold">
+                      {t("projects.fields.reason")}
+                    </label>
                     <textarea
                       rows={2}
                       value={fuelPriceForm.reason}
@@ -2261,7 +2312,7 @@ export default function ProjectsPage({
                           ? "border-slate-300 bg-white text-slate-900 focus:border-emerald-500"
                           : "border-slate-700 bg-slate-900 text-white focus:border-emerald-400"
                       }`}
-                      placeholder="Example: Fuel price with transport cost for this project"
+                      placeholder={t("projects.placeholders.priceReason")}
                     />
                   </div>
                 </div>
@@ -2282,7 +2333,7 @@ export default function ProjectsPage({
                         : "bg-slate-800 text-slate-200 hover:bg-slate-700"
                     }`}
                   >
-                    Cancel
+                    {t("common.cancel")}
                   </button>
 
                   <button
@@ -2290,7 +2341,9 @@ export default function ProjectsPage({
                     disabled={fuelPriceSaving}
                     className="rounded-xl bg-emerald-500 px-4 py-2 font-extrabold text-white transition hover:bg-emerald-400 disabled:cursor-not-allowed disabled:opacity-60"
                   >
-                    {fuelPriceSaving ? "Saving..." : "Save Fuel Price"}
+                    {fuelPriceSaving
+                      ? t("common.saving")
+                      : t("projectWorkflows.price.save")}
                   </button>
                 </div>
               </div>
@@ -2299,21 +2352,21 @@ export default function ProjectsPage({
         )}
 
         {selectedProject && (
-          <div className="fixed inset-0 bg-black/75 backdrop-blur-sm flex items-center justify-center z-[10000] p-3">
+          <div dir={isRtl ? "rtl" : "ltr"} className="fixed inset-0 bg-black/75 backdrop-blur-sm flex items-center justify-center z-[10000] p-3">
             <div className="bg-gray-900 text-white w-[1200px] max-h-[90vh] rounded-3xl shadow-2xl border border-gray-700 overflow-hidden">
               <div className="p-3 sm:p-5 border-b border-gray-700 flex justify-between items-start gap-3">
                 <div>
                   <h2 className="text-xl sm:text-2xl font-bold text-yellow-400 italic underline">
-                    Project Equipment Fuel Consumption
+                    {t("projectDetails.title")}
                   </h2>
                   <p className="text-gray-400 mt-1">
-                    Project:{" "}
+                    {t("projects.fields.project")}:{" "}
                     <span className="text-blue-300 font-semibold">
                       {selectedProject.name || selectedProject.id}
                     </span>
                   </p>
                   <p className="text-gray-400 mt-1 text-sm">
-                    Project Manager:{" "}
+                    {t("projects.fields.projectManager")}:{" "}
                     <span className="text-emerald-300 font-semibold">
                       {selectedProject.projectManagerName || "Unassigned"}
                     </span>
@@ -2333,23 +2386,23 @@ export default function ProjectsPage({
 
               <div className="grid grid-cols-1 sm:grid-cols-2 xl:grid-cols-5 gap-3 p-3 sm:p-4 lg:p-5 border-b border-gray-800">
                 <Card
-                  title="Assets"
+                  title={t("projects.metrics.assets")}
                   value={formatNumber(selectedProject.assignedAssetsCount)}
                 />
                 <Card
-                  title="Stations"
+                  title={t("projects.metrics.stations")}
                   value={formatNumber(selectedProject.assignedStationsCount)}
                 />
                 <Card
-                  title="Fuelers"
+                  title={t("projects.metrics.team")}
                   value={formatNumber(selectedProject.assignedFuelersCount)}
                 />
                 <Card
-                  title="Refuel Operations"
+                  title={t("projects.metrics.refuelOperations")}
                   value={formatNumber(selectedProject.operationsCount)}
                 />
                 <Card
-                  title="Fuel Consumed (L)"
+                  title={t("projects.metrics.fuelConsumed")}
                   value={formatNumber(selectedProject.dieselQty)}
                 />
               </div>
@@ -2358,7 +2411,7 @@ export default function ProjectsPage({
                 <div className="bg-gray-800 rounded-xl border border-gray-700 p-4 mb-5 flex flex-wrap justify-between items-center gap-3">
                   <div>
                     <h3 className="text-base sm:text-lg font-extrabold text-amber-300">
-                      Equipment Refuel Operations Table
+                      {t("projectDetails.operationsTable")}
                     </h3>
                     <p className="text-xs text-gray-400 mt-1">
                       {getFilteredProjectOperations(selectedProject).length}{" "}
@@ -2371,7 +2424,7 @@ export default function ProjectsPage({
                   <input
                     value={projectOperationSearch}
                     onChange={(e) => setProjectOperationSearch(e.target.value)}
-                    placeholder="Search by operation, equipment, station, fueler..."
+                    placeholder={t("projectDetails.searchPlaceholder")}
                     className="bg-gray-900 border border-gray-700 focus:border-yellow-400 outline-none rounded-xl px-3 lg:px-4 py-2 lg:py-3 text-white w-full sm:min-w-[280px] lg:min-w-[360px] text-[12px] lg:text-sm"
                   />
                 </div>
@@ -2380,14 +2433,14 @@ export default function ProjectsPage({
                   <thead className="bg-slate-800 sticky top-0 z-[1] shadow-sm">
                     <tr>
                       <Th>#</Th>
-                      <Th>Date</Th>
-                      <Th>Operation ID</Th>
-                      <Th>Source / External</Th>
-                      <Th>Fueler</Th>
-                      <Th>Equipment</Th>
-                      <Th>Liters</Th>
-                      <Th>Odometer</Th>
-                      <Th>Cost</Th>
+                      <Th className={isRtl ? "text-right" : "text-left"}>{t("projectDetails.table.date")}</Th>
+                      <Th className={isRtl ? "text-right" : "text-left"}>{t("projectDetails.table.operationId")}</Th>
+                      <Th className={isRtl ? "text-right" : "text-left"}>{t("projectDetails.table.sourceExternal")}</Th>
+                      <Th className={isRtl ? "text-right" : "text-left"}>{t("projectDetails.table.fueler")}</Th>
+                      <Th className={isRtl ? "text-right" : "text-left"}>{t("projectDetails.table.equipment")}</Th>
+                      <Th className={isRtl ? "text-right" : "text-left"}>{t("projectDetails.table.liters")}</Th>
+                      <Th className={isRtl ? "text-right" : "text-left"}>{t("projectDetails.table.odometer")}</Th>
+                      <Th className={isRtl ? "text-right" : "text-left"}>{t("projectDetails.table.cost")}</Th>
                     </tr>
                   </thead>
 
@@ -2470,11 +2523,11 @@ export default function ProjectsPage({
         )}
 
         {statusEdit && (
-          <div className="fixed inset-0 bg-black/75 backdrop-blur-sm flex items-center justify-center z-[10010] p-3">
+          <div dir={isRtl ? "rtl" : "ltr"} className="fixed inset-0 bg-black/75 backdrop-blur-sm flex items-center justify-center z-[10010] p-3">
             <div className="bg-white text-black w-[520px] rounded-2xl shadow-2xl p-6">
               <div className="flex justify-between items-center mb-5 border-b pb-3">
                 <h2 className="text-xl sm:text-2xl font-bold">
-                  Change Project Status
+                  {t("projectWorkflows.status.title")}
                 </h2>
                 <button
                   onClick={() => setStatusEdit(null)}
@@ -2485,13 +2538,15 @@ export default function ProjectsPage({
               </div>
 
               <div className="bg-gray-100 rounded-xl p-4 mb-4">
-                <p className="text-sm text-gray-600">Project</p>
+                <p className="text-sm text-gray-600">
+                  {t("projects.fields.project")}
+                </p>
                 <p className="text-base sm:text-lg font-bold">
                   {statusEdit.name || statusEdit.id}
                 </p>
                 <p className="text-sm text-gray-600 mt-2">
-                  {statusEdit.oldStatus} →{" "}
-                  <span className="font-bold">{statusEdit.newStatus}</span>
+                  {getProjectStatusLabel(statusEdit.oldStatus)} →{" "}
+                  <span className="font-bold">{getProjectStatusLabel(statusEdit.newStatus)}</span>
                 </p>
               </div>
 
@@ -2505,14 +2560,14 @@ export default function ProjectsPage({
                   onClick={() => setStatusEdit(null)}
                   className="bg-gray-200 px-3 lg:px-4 py-2 rounded-lg"
                 >
-                  Cancel
+                  {t("common.cancel")}
                 </button>
 
                 <button
                   onClick={saveStatusEdit}
                   className="bg-amber-500 hover:bg-amber-400 text-black px-3 lg:px-4 py-2 rounded-lg font-bold"
                 >
-                  Save Status Change
+                  {t("projectWorkflows.status.save")}
                 </button>
               </div>
             </div>
@@ -2521,35 +2576,35 @@ export default function ProjectsPage({
 
         {pendingManagerConfirmation && (
           <ModalPortal>
-            <div className="fixed inset-0 z-[10000] flex items-center justify-center bg-black/75 p-3 backdrop-blur-sm">
+            <div dir={isRtl ? "rtl" : "ltr"} className="fixed inset-0 z-[10000] flex items-center justify-center bg-black/75 p-3 backdrop-blur-sm">
               <div className="w-full max-w-xl overflow-hidden rounded-3xl border border-amber-400/40 bg-slate-950 text-white shadow-2xl shadow-black/40">
                 <div className="border-b border-slate-700 bg-gradient-to-r from-slate-900 to-slate-800 p-5">
                   <p className="text-xs font-bold uppercase tracking-[0.22em] text-amber-300">
                     Admin confirmation
                   </p>
                   <h2 className="mt-1 text-xl font-extrabold">
-                    Change Project Manager
+                    {t("projectWorkflows.manager.title")}
                   </h2>
                 </div>
 
                 <div className="space-y-4 p-5">
                   <div className="rounded-2xl border border-slate-700 bg-slate-900/80 p-4 text-sm leading-6 text-slate-300">
                     <p>
-                      Project:{" "}
+                      {t("projects.fields.project")}:{" "}
                       <span className="font-extrabold text-blue-200">
                         {pendingManagerConfirmation.project?.name ||
                           pendingManagerConfirmation.project?.id}
                       </span>
                     </p>
                     <p>
-                      Current Manager:{" "}
+                      {t("projectWorkflows.manager.current")}:{" "}
                       <span className="font-bold text-slate-100">
                         {pendingManagerConfirmation.oldManagerName ||
-                          "Unassigned"}
+                          t("projects.defaults.unassigned")}
                       </span>
                     </p>
                     <p>
-                      New Manager:{" "}
+                      {t("projectWorkflows.manager.new")}:{" "}
                       <span className="font-bold text-emerald-300">
                         {pendingManagerConfirmation.managerName}
                       </span>
@@ -2569,7 +2624,7 @@ export default function ProjectsPage({
                     disabled={managerSaving}
                     className="rounded-xl border border-slate-600 bg-slate-900 px-5 py-2.5 font-bold text-slate-200 transition hover:bg-slate-800 disabled:opacity-60"
                   >
-                    Cancel
+                    {t("common.cancel")}
                   </button>
 
                   <button
@@ -2577,7 +2632,9 @@ export default function ProjectsPage({
                     disabled={managerSaving}
                     className="rounded-xl bg-amber-500 px-5 py-2.5 font-extrabold text-slate-950 shadow-lg shadow-amber-950/30 transition hover:bg-amber-400 disabled:opacity-60"
                   >
-                    {managerSaving ? "Saving..." : "Confirm Change"}
+                    {managerSaving
+                      ? t("common.saving")
+                      : t("projectWorkflows.manager.confirm")}
                   </button>
                 </div>
               </div>
@@ -2586,7 +2643,7 @@ export default function ProjectsPage({
         )}
 
         {projectRejection && (
-          <div className="fixed inset-0 bg-black/75 backdrop-blur-sm flex items-center justify-center z-[10090] p-3">
+          <div dir={isRtl ? "rtl" : "ltr"} className="fixed inset-0 bg-black/75 backdrop-blur-sm flex items-center justify-center z-[10090] p-3">
             <div className="bg-slate-950 text-white w-full max-w-[540px] rounded-3xl shadow-2xl border border-red-400/30 overflow-hidden">
               <div className="p-5 border-b border-slate-700 bg-gradient-to-r from-red-950/70 to-slate-900 flex items-start justify-between gap-4">
                 <div>
@@ -2630,14 +2687,14 @@ export default function ProjectsPage({
                   onClick={cancelProjectCreation}
                   className="px-4 py-2 rounded-xl border border-slate-600 text-slate-200 hover:bg-slate-800 transition cursor-pointer"
                 >
-                  Cancel
+                  {t("common.cancel")}
                 </button>
 
                 <button
                   onClick={goBackToProjectForm}
                   className="px-5 py-2 rounded-xl bg-amber-400 hover:bg-amber-300 text-black font-extrabold shadow-lg shadow-amber-500/10 transition cursor-pointer"
                 >
-                  Back to Add Project
+                  {t("projectWorkflows.actions.backToAdd")}
                 </button>
               </div>
             </div>
@@ -2645,7 +2702,7 @@ export default function ProjectsPage({
         )}
 
         {pendingProjectConfirmation && (
-          <div className="fixed inset-0 bg-black/75 backdrop-blur-sm flex items-center justify-center z-[10080] p-3">
+          <div dir={isRtl ? "rtl" : "ltr"} className="fixed inset-0 bg-black/75 backdrop-blur-sm flex items-center justify-center z-[10080] p-3">
             <div className="bg-slate-950 text-white w-full max-w-[560px] rounded-3xl shadow-2xl border border-amber-400/30 overflow-hidden">
               <div className="p-5 border-b border-slate-700 bg-gradient-to-r from-slate-900 to-slate-800 flex items-start justify-between gap-4">
                 <div>
@@ -2654,8 +2711,8 @@ export default function ProjectsPage({
                   </p>
                   <h2 className="text-xl sm:text-2xl font-extrabold mt-1">
                     {bootstrapFirstProject
-                      ? "Create First Project"
-                      : "Create Project"}
+                      ? t("projectWorkflows.create.firstProject")
+                      : t("projectWorkflows.create.project")}
                   </h2>
                 </div>
                 <button
@@ -2677,31 +2734,41 @@ export default function ProjectsPage({
                 <div className="rounded-2xl border border-slate-700 bg-slate-900/80 p-4">
                   <div className="grid grid-cols-1 sm:grid-cols-2 gap-3 text-sm">
                     <div>
-                      <p className="text-slate-400 text-xs">Project ID</p>
+                      <p className="text-slate-400 text-xs">
+                        {t("projects.fields.projectId")}
+                      </p>
                       <p className="font-bold text-blue-200 mt-1">
                         {pendingProjectConfirmation.id}
                       </p>
                     </div>
                     <div>
-                      <p className="text-slate-400 text-xs">Status</p>
+                      <p className="text-slate-400 text-xs">
+                        {t("projects.fields.status")}
+                      </p>
                       <p className="font-bold text-emerald-200 mt-1">
                         {pendingProjectConfirmation.status}
                       </p>
                     </div>
                     <div className="sm:col-span-2">
-                      <p className="text-slate-400 text-xs">Project Name</p>
+                      <p className="text-slate-400 text-xs">
+                        {t("projects.fields.projectName")}
+                      </p>
                       <p className="font-bold text-white mt-1">
                         {pendingProjectConfirmation.name}
                       </p>
                     </div>
                     <div className="sm:col-span-2">
-                      <p className="text-slate-400 text-xs">Location</p>
+                      <p className="text-slate-400 text-xs">
+                        {t("projects.fields.location")}
+                      </p>
                       <p className="font-bold text-slate-200 mt-1">
                         {pendingProjectConfirmation.location || "-"}
                       </p>
                     </div>
                     <div>
-                      <p className="text-slate-400 text-xs">Base / L</p>
+                      <p className="text-slate-400 text-xs">
+                        {t("projects.pricing.basePerLiter")}
+                      </p>
                       <p className="mt-1 font-bold">
                         {formatNumber(
                           pendingProjectConfirmation.initialBasePricePerLiter,
@@ -2710,7 +2777,9 @@ export default function ProjectsPage({
                       </p>
                     </div>
                     <div>
-                      <p className="text-slate-400 text-xs">Delivery / L</p>
+                      <p className="text-slate-400 text-xs">
+                        {t("projects.pricing.deliveryPerLiter")}
+                      </p>
                       <p className="mt-1 font-bold">
                         {formatNumber(
                           pendingProjectConfirmation.initialTransportCostPerLiter,
@@ -2720,7 +2789,7 @@ export default function ProjectsPage({
                     </div>
                     <div>
                       <p className="text-slate-400 text-xs">
-                        Operational excl. VAT
+                        {t("projects.pricing.operationalExclVat")}
                       </p>
                       <p className="mt-1 font-bold">
                         {formatNumber(
@@ -2730,7 +2799,9 @@ export default function ProjectsPage({
                       </p>
                     </div>
                     <div>
-                      <p className="text-slate-400 text-xs">VAT</p>
+                      <p className="text-slate-400 text-xs">
+                        {t("projects.pricing.vat")}
+                      </p>
                       <p className="mt-1 font-bold">
                         {formatNumber(
                           pendingProjectConfirmation.initialVatRate,
@@ -2740,7 +2811,7 @@ export default function ProjectsPage({
                     </div>
                     <div className="sm:col-span-2">
                       <p className="text-slate-400 text-xs">
-                        Price incl. VAT / L
+                        {t("projects.pricing.priceInclVatPerLiter")}
                       </p>
                       <p className="mt-1 font-extrabold text-emerald-300">
                         {formatNumber(
@@ -2777,7 +2848,7 @@ export default function ProjectsPage({
                   onClick={confirmCreateProject}
                   className="px-5 py-2 rounded-xl bg-amber-400 hover:bg-amber-300 text-black font-extrabold shadow-lg shadow-amber-500/10 transition"
                 >
-                  Confirm & Create
+                  {t("projectWorkflows.create.confirmCreate")}
                 </button>
               </div>
             </div>
@@ -2785,7 +2856,7 @@ export default function ProjectsPage({
         )}
 
         {projectDeleteTarget && (
-          <div className="fixed inset-0 bg-black/75 backdrop-blur-sm flex items-center justify-center z-[10030] p-3">
+          <div dir={isRtl ? "rtl" : "ltr"} className="fixed inset-0 bg-black/75 backdrop-blur-sm flex items-center justify-center z-[10030] p-3">
             <div className="bg-slate-950 text-white w-full max-w-[520px] rounded-3xl shadow-2xl border border-red-400/30 overflow-hidden">
               <div className="p-5 border-b border-slate-700 bg-gradient-to-r from-red-950/70 to-slate-900 flex items-start justify-between gap-4">
                 <div>
@@ -2793,7 +2864,7 @@ export default function ProjectsPage({
                     Soft delete
                   </p>
                   <h2 className="text-xl sm:text-2xl font-extrabold mt-1">
-                    Delete Project?
+                    {t("projectWorkflows.delete.confirmTitle")}
                   </h2>
                 </div>
                 <button
@@ -2806,12 +2877,14 @@ export default function ProjectsPage({
 
               <div className="p-5 space-y-4">
                 <div className="rounded-2xl border border-slate-700 bg-slate-900/80 p-4">
-                  <p className="text-xs text-slate-400">Project</p>
+                  <p className="text-xs text-slate-400">
+                    {t("projects.fields.project")}
+                  </p>
                   <p className="font-extrabold text-white mt-1">
                     {projectDeleteTarget.name || projectDeleteTarget.id}
                   </p>
                   <p className="text-xs text-slate-400 mt-2">
-                    Project ID: {projectDeleteTarget.id}
+                    {t("projects.fields.projectId")}: {projectDeleteTarget.id}
                   </p>
                 </div>
 
@@ -2831,13 +2904,13 @@ export default function ProjectsPage({
                   onClick={() => setProjectDeleteTarget(null)}
                   className="px-4 py-2 rounded-xl border border-slate-600 text-slate-200 hover:bg-slate-800 transition"
                 >
-                  Cancel
+                  {t("common.cancel")}
                 </button>
                 <button
                   onClick={confirmDeleteProject}
                   className="px-5 py-2 rounded-xl bg-red-500 hover:bg-red-400 text-white font-extrabold shadow-lg shadow-red-500/10 transition"
                 >
-                  Delete Project
+                  {t("projectWorkflows.delete.confirmButton")}
                 </button>
               </div>
             </div>
@@ -2846,17 +2919,17 @@ export default function ProjectsPage({
 
         {showForm && (
           <ModalPortal>
-            <div className="fixed inset-0 z-[10030] flex items-center justify-center bg-black/75 p-3 backdrop-blur-sm">
+            <div dir={isRtl ? "rtl" : "ltr"} className="fixed inset-0 z-[10030] flex items-center justify-center bg-black/75 p-3 backdrop-blur-sm">
               <div className="w-[95%] max-w-2xl max-h-[92vh] overflow-y-auto rounded-3xl border border-amber-400/25 bg-slate-950 text-slate-100 shadow-2xl shadow-black/50">
                 <div className="flex items-start justify-between gap-4 border-b border-slate-700 bg-gradient-to-r from-slate-950 via-slate-900 to-slate-950 px-6 py-5">
                   <div>
                     <p className="text-xs font-bold uppercase tracking-[0.22em] text-amber-300">
-                      Projects / Sites
+                      {t("projects.title")}
                     </p>
                     <h2 className="mt-1 text-2xl font-extrabold text-white">
                       {bootstrapFirstProject
-                        ? "Create First Project"
-                        : "Add Project"}
+                        ? t("projectWorkflows.create.firstProject")
+                        : t("projects.actions.addProject")}
                     </h2>
                   </div>
 
@@ -2883,9 +2956,7 @@ export default function ProjectsPage({
                           Please verify project details before saving
                         </p>
                         <p className="mt-1 text-sm leading-6 text-slate-300">
-                          Project ID, name, location, and description will be
-                          locked after creation. You can only change the project
-                          status later from the Active / Inactive badge.
+                          {t("projectWorkflows.create.lockedFieldsNotice")}
                         </p>
                       </div>
                     </div>
@@ -2894,35 +2965,35 @@ export default function ProjectsPage({
                   <div className="grid grid-cols-1 gap-4">
                     <div className="grid grid-cols-1 gap-2 sm:grid-cols-3 sm:items-center sm:gap-4">
                       <label className="font-semibold text-slate-300">
-                        Project ID
+                        {t("projects.fields.projectId")}
                       </label>
                       <input
                         value={newProject.id}
                         onChange={(e) =>
                           setNewProject({ ...newProject, id: e.target.value })
                         }
-                        placeholder="Example: PRJ-001"
+                        placeholder={t("projects.placeholders.projectIdExample")}
                         className="col-span-2 w-full rounded-xl border border-slate-600 bg-slate-900 px-3 py-2.5 text-slate-100 outline-none transition placeholder:text-slate-500 focus:border-amber-400 focus:ring-2 focus:ring-amber-400/20"
                       />
                     </div>
 
                     <div className="grid grid-cols-1 gap-2 sm:grid-cols-3 sm:items-center sm:gap-4">
                       <label className="font-semibold text-slate-300">
-                        Project Name
+                        {t("projects.fields.projectName")}
                       </label>
                       <input
                         value={newProject.name}
                         onChange={(e) =>
                           setNewProject({ ...newProject, name: e.target.value })
                         }
-                        placeholder="Example: NEOM Site A"
+                        placeholder={t("projects.placeholders.projectNameExample")}
                         className="col-span-2 w-full rounded-xl border border-slate-600 bg-slate-900 px-3 py-2.5 text-slate-100 outline-none transition placeholder:text-slate-500 focus:border-amber-400 focus:ring-2 focus:ring-amber-400/20"
                       />
                     </div>
 
                     <div className="grid grid-cols-1 gap-2 sm:grid-cols-3 sm:items-center sm:gap-4">
                       <label className="font-semibold text-slate-300">
-                        Status
+                        {t("projects.fields.status")}
                       </label>
                       <select
                         value={newProject.status}
@@ -2934,10 +3005,10 @@ export default function ProjectsPage({
                         }
                         className="col-span-2 w-full rounded-xl border border-slate-600 bg-slate-900 px-3 py-2.5 text-slate-100 outline-none transition focus:border-amber-400 focus:ring-2 focus:ring-amber-400/20"
                       >
-                        <option value="">Select status</option>
+                        <option value="">{t("projects.placeholders.selectStatus")}</option>
                         {["Active", "Inactive"].map((item) => (
                           <option key={item} value={item}>
-                            {item}
+                            {getProjectStatusLabel(item)}
                           </option>
                         ))}
                       </select>
@@ -2945,7 +3016,7 @@ export default function ProjectsPage({
 
                     <div className="grid grid-cols-1 gap-2 sm:grid-cols-3 sm:items-center sm:gap-4">
                       <label className="font-semibold text-slate-300">
-                        Location
+                        {t("projects.fields.location")}
                       </label>
 
                       {shouldUseLocationDropdown ? (
@@ -2960,12 +3031,15 @@ export default function ProjectsPage({
                           className="col-span-2 w-full rounded-xl border border-slate-600 bg-slate-900 px-3 py-2.5 text-slate-100 outline-none transition focus:border-amber-400 focus:ring-2 focus:ring-amber-400/20"
                         >
                           <option value="">
-                            Select location for{" "}
-                            {currentCompanyCountry || "company country"}
+                            {t("projects.placeholders.selectLocationFor", {
+                              country:
+                                currentCompanyCountry ||
+                                t("projects.defaults.companyCountry"),
+                            })}
                           </option>
                           {projectLocationOptions.map((item) => (
                             <option key={item} value={item}>
-                              {item}
+                              {getProjectStatusLabel(item)}
                             </option>
                           ))}
                         </select>
@@ -2980,8 +3054,10 @@ export default function ProjectsPage({
                           }
                           placeholder={
                             currentCompanyCountry
-                              ? `Enter location in ${currentCompanyCountry}`
-                              : "Enter location manually"
+                              ? t("projects.placeholders.enterLocationIn", {
+                                  country: currentCompanyCountry,
+                                })
+                              : t("projects.placeholders.enterLocationManually")
                           }
                           className="col-span-2 w-full rounded-xl border border-slate-600 bg-slate-900 px-3 py-2.5 text-slate-100 outline-none transition placeholder:text-slate-500 focus:border-amber-400 focus:ring-2 focus:ring-amber-400/20"
                         />
@@ -2990,12 +3066,12 @@ export default function ProjectsPage({
 
                     <div className="rounded-2xl border border-slate-700 bg-slate-900/60 p-4">
                       <p className="mb-3 font-bold text-amber-300">
-                        Initial Fuel Pricing
+                        {t("projectWorkflows.create.initialPricing")}
                       </p>
                       <div className="grid grid-cols-1 gap-3 sm:grid-cols-3">
                         <div>
                           <label className="text-xs font-semibold text-slate-300">
-                            Base Price / L
+                            {t("projects.pricing.basePricePerLiter")}
                           </label>
                           <input
                             type="number"
@@ -3008,13 +3084,13 @@ export default function ProjectsPage({
                                 initialBasePricePerLiter: e.target.value,
                               })
                             }
-                            placeholder="Enter price"
+                            placeholder={t("projects.placeholders.enterPrice")}
                             className="mt-1 w-full rounded-xl border border-slate-600 bg-slate-900 px-3 py-2.5 text-slate-100 outline-none focus:border-amber-400"
                           />
                         </div>
                         <div>
                           <label className="text-xs font-semibold text-slate-300">
-                            Delivery / L
+                            {t("projects.pricing.deliveryPerLiter")}
                           </label>
                           <input
                             type="number"
@@ -3033,7 +3109,7 @@ export default function ProjectsPage({
                         </div>
                         <div>
                           <label className="text-xs font-semibold text-slate-300">
-                            VAT %
+                            {t("projects.pricing.vat")}
                           </label>
                           <input
                             type="number"
@@ -3054,7 +3130,7 @@ export default function ProjectsPage({
                       </div>
                       <div className="mt-3 grid grid-cols-1 gap-2 text-xs sm:grid-cols-3">
                         <span>
-                          Operational:{" "}
+                          {t("projects.pricing.operational")}:{" "}
                           <b>
                             {newProjectPricingPreview?.isValid
                               ? formatNumber(
@@ -3065,7 +3141,7 @@ export default function ProjectsPage({
                           </b>
                         </span>
                         <span>
-                          VAT/L:{" "}
+                          {t("projects.pricing.vatPerLiterShort")}:{" "}
                           <b>
                             {newProjectPricingPreview?.isValid
                               ? formatNumber(
@@ -3076,7 +3152,7 @@ export default function ProjectsPage({
                           </b>
                         </span>
                         <span className="text-emerald-300">
-                          Incl. VAT:{" "}
+                          {t("projects.pricing.inclVat")}:{" "}
                           <b>
                             {newProjectPricingPreview?.isValid
                               ? formatNumber(
@@ -3096,14 +3172,14 @@ export default function ProjectsPage({
                     onClick={handleProjectFormCancel}
                     className="rounded-xl border border-slate-600 bg-slate-900 px-5 py-2.5 font-bold text-slate-200 transition hover:bg-slate-800"
                   >
-                    Cancel
+                    {t("common.cancel")}
                   </button>
 
                   <button
                     onClick={saveProject}
                     className="rounded-xl bg-emerald-500 px-5 py-2.5 font-extrabold text-white shadow-lg shadow-emerald-950/30 transition hover:bg-emerald-400"
                   >
-                    Save Project
+                    {t("projectWorkflows.create.save")}
                   </button>
                 </div>
               </div>

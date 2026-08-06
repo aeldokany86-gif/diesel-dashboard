@@ -17,6 +17,7 @@ import ModalPortal from "../../components/ui/ModalPortal";
 import Th from "../../components/ui/Th";
 import Td from "../../components/ui/Td";
 import Card from "../../components/ui/Card";
+import { useLanguage } from "../../context/LanguageContext";
 
 import {
   normalizeScopeValue,
@@ -249,6 +250,45 @@ export default function StationsPage({
 
   stationCounterResetHistory,
   setStationCounterResetHistory,}) {
+  const { language, t } = useLanguage();
+  const isRtl = language === "ar";
+
+  const getStationStatusLabel = (status) => {
+    const normalized = String(status || "").trim().toLowerCase();
+    if (normalized === "active") return t("stations.status.active");
+    if (normalized === "inactive") return t("stations.status.inactive");
+    if (normalized === "retired") return t("stations.status.retired");
+    return status || "-";
+  };
+
+  const renderStationStatusBadge = (status) => {
+    const normalized = String(status || "").trim().toLowerCase();
+    const statusClass =
+      normalized === "active"
+        ? "border-emerald-500/50 bg-emerald-500/15 text-emerald-300"
+        : normalized === "inactive"
+        ? "border-red-500/50 bg-red-500/15 text-red-300"
+        : "border-slate-500/50 bg-slate-500/15 text-slate-300";
+
+    return (
+      <span className={`inline-flex items-center justify-center rounded-full border px-3 py-1 text-xs font-bold ${statusClass}`}>
+        {getStationStatusLabel(status)}
+      </span>
+    );
+  };
+
+  const getStationTypeLabel = (type) => {
+    const normalized = String(type || "").trim().toLowerCase();
+    if (normalized === "main") return t("stations.types.main");
+    if (normalized === "sub") return t("stations.types.sub");
+    return type || "-";
+  };
+
+  const getDirectionLabel = (direction) => {
+    if (direction === "In") return t("stations.history.in");
+    if (direction === "Out") return t("stations.history.out");
+    return direction || "-";
+  };
   const FlowmeterCounterDisplay = ({ value }) => {
     const safeValue = Math.max(0, Math.floor(Number(value) || 0));
     const digits = String(safeValue).padStart(7, "0").slice(-7).split("");
@@ -391,7 +431,7 @@ export default function StationsPage({
       notifyUser(
         showToast,
         "warning",
-        "This station is not linked to backend yet. Refresh and try again."
+        t("stationWorkflows.validation.stationNotLinked")
       );
       return false;
     }
@@ -401,14 +441,14 @@ export default function StationsPage({
       notifyUser(
         showToast,
         "warning",
-        "New counter reading must be a valid zero or positive number."
+        t("stationWorkflows.validation.validCounter")
       );
       return false;
     }
 
     const cleanReason = String(reason || "").trim();
     if (!cleanReason) {
-      notifyUser(showToast, "warning", "Please enter reset reason.");
+      notifyUser(showToast, "warning", t("stationWorkflows.validation.enterResetReason"));
       return false;
     }
 
@@ -481,7 +521,7 @@ export default function StationsPage({
       }
 
       trackActivity?.(
-        "Reset Station Counter",
+        t("stationWorkflows.counter.title"),
         "stations",
         `${station.id} counter reset from ${formatNumber(oldReading)} to ${formatNumber(parsedNewReading)}.`
       );
@@ -489,7 +529,7 @@ export default function StationsPage({
       notifyUser(
         showToast,
         "success",
-        "Station counter reset completed successfully."
+        t("stationWorkflows.messages.counterResetCompleted")
       );
 
       return true;
@@ -499,7 +539,7 @@ export default function StationsPage({
         "warning",
         getFriendlyApiErrorMessage(
           error,
-          "Failed to reset station counter."
+          t("stationWorkflows.messages.counterResetFailed")
         )
       );
       return false;
@@ -521,7 +561,7 @@ export default function StationsPage({
   });
 
   const [selectedStation, setSelectedStation] = useState(null);
-  const [zeroBalanceReason, setZeroBalanceReason] = useState("Daily reconciliation after station emptying");
+  const [zeroBalanceReason, setZeroBalanceReason] = useState(t("stationWorkflows.zero.defaultReason"));
   const [selectedStationHistory, setSelectedStationHistory] = useState(null);
   const [editingProjectStation, setEditingProjectStation] = useState(null);
   const [stationTransferStockConfirmation, setStationTransferStockConfirmation] = useState(null);
@@ -586,7 +626,7 @@ export default function StationsPage({
 
   const saveNewStation = async () => {
     if (currentUser?.role !== "Admin") {
-      showToast?.("warning", "Only Admin can add stations.");
+      showToast?.("warning", t("stationWorkflows.messages.adminOnlyAdd"));
       return;
     }
 
@@ -595,7 +635,7 @@ export default function StationsPage({
     const stationId = newStation.id.trim();
 
     if (!stationId) {
-      showToast?.("warning", "Please enter Station ID.");
+      showToast?.("warning", t("stationWorkflows.validation.enterStationId"));
       return;
     }
 
@@ -619,7 +659,7 @@ export default function StationsPage({
     );
 
     if (selectedProjectValue && !matchedProject) {
-      showToast?.("warning", "Selected project was not found in backend projects list.");
+      showToast?.("warning", t("stationWorkflows.validation.projectNotFound"));
       return;
     }
 
@@ -640,7 +680,7 @@ export default function StationsPage({
       "";
 
     if (!stationCompanyId || isPlatformContextValue(stationCompanyId)) {
-      showToast?.("warning", "Please select a company before adding a station.");
+      showToast?.("warning", t("stationWorkflows.validation.selectCompany"));
       return;
     }
 
@@ -649,17 +689,17 @@ export default function StationsPage({
     const openingCounter = Number(newStationOpeningCounter || 0);
 
     if (!Number.isFinite(capacity) || capacity < 0) {
-      showToast?.("warning", "Capacity must be a valid zero or positive number.");
+      showToast?.("warning", t("stationWorkflows.validation.validCapacity"));
       return;
     }
 
     if (!Number.isFinite(openingBalance) || openingBalance < 0) {
-      showToast?.("warning", "Opening balance must be a valid zero or positive number.");
+      showToast?.("warning", t("stationWorkflows.validation.validOpeningBalance"));
       return;
     }
 
     if (!Number.isFinite(openingCounter) || openingCounter < 0) {
-      showToast?.("warning", "Opening counter must be a valid zero or positive number.");
+      showToast?.("warning", t("stationWorkflows.validation.validOpeningCounter"));
       return;
     }
 
@@ -716,14 +756,14 @@ export default function StationsPage({
 
       createdStation = mapBackendStationForState(createdStationData);
     } catch (error) {
-      const backendMessage = getFriendlyApiErrorMessage(error, "Failed to add station.");
+      const backendMessage = getFriendlyApiErrorMessage(error, t("stationWorkflows.messages.addFailed"));
 
       showToast?.("warning", backendMessage);
       setStationSaveLoading(false);
       return;
     }
 
-    showToast?.("success", "Station added successfully.");
+    showToast?.("success", t("stationWorkflows.messages.added"));
     closeAddStation();
 
     try {
@@ -759,7 +799,7 @@ export default function StationsPage({
 
     try {
       trackActivity?.(
-        "Add Station",
+        t("stations.actions.addStation"),
         "stations",
         `${createdStation?.id || cleanStation.id} added from backend.`
       );
@@ -850,7 +890,7 @@ export default function StationsPage({
 
     if (Number.isNaN(d.getTime())) return rawDate || "-";
 
-    return d.toLocaleString("en-GB", {
+    return d.toLocaleString(language === "ar" ? "ar-SA" : "en-GB", {
       year: "numeric",
       month: "2-digit",
       day: "2-digit",
@@ -1019,7 +1059,7 @@ export default function StationsPage({
       } else {
         showToast?.(
           "warning",
-          "Station transfer request submitted for project manager approval."
+          t("stationWorkflows.messages.transferPendingApproval")
         );
       }
       closeStationProjectTransferModal();
@@ -1029,7 +1069,7 @@ export default function StationsPage({
         error?.response?.data?.message ||
         error?.response?.data?.error ||
         error?.message ||
-        "Failed to submit station transfer request.";
+        t("stationWorkflows.messages.transferFailed");
 
       showToast?.(
         "warning",
@@ -1050,7 +1090,7 @@ export default function StationsPage({
     }
 
     if (!newStationProject) {
-      showToast?.("warning", "Please select a new project.");
+      showToast?.("warning", t("stationWorkflows.validation.selectNewProject"));
       return;
     }
 
@@ -1058,7 +1098,7 @@ export default function StationsPage({
       normalizeScopeValue(newStationProject) ===
       normalizeScopeValue(editingProjectStation.project)
     ) {
-      showToast?.("warning", "Please select a project different from the current project.");
+      showToast?.("warning", t("stationWorkflows.validation.differentProject"));
       return;
     }
 
@@ -1069,14 +1109,14 @@ export default function StationsPage({
     if (!backendId) {
       showToast?.(
         "warning",
-        "This station is not linked to backend yet. Refresh and try again."
+        t("stationWorkflows.validation.stationNotLinked")
       );
       closeStationProjectTransferModal();
       return;
     }
 
     if (!toProjectId) {
-      showToast?.("warning", "Please select a valid project.");
+      showToast?.("warning", t("stationWorkflows.validation.selectValidProject"));
       return;
     }
 
@@ -1087,7 +1127,7 @@ export default function StationsPage({
     if (!Number.isFinite(currentStock)) {
       showToast?.(
         "warning",
-        "Station stock could not be verified. Refresh the page and try again."
+        t("stationWorkflows.validation.stockVerificationFailed")
       );
       return;
     }
@@ -1141,7 +1181,7 @@ export default function StationsPage({
 
   const openStatusChange = (station) => {
     if (!hasPermission("stations", "edit")) {
-      showToast?.("warning", "Read-only access: you cannot change station status.");
+      showToast?.("warning", t("stationWorkflows.messages.readOnlyStatus"));
       return;
     }
 
@@ -1156,13 +1196,13 @@ export default function StationsPage({
     if (!statusEditStation) return;
 
     if (!newStationStatus) {
-      showToast?.("warning", "Please select station status.");
+      showToast?.("warning", t("stationWorkflows.validation.selectStatus"));
       return;
     }
 
     const backendId = getStationBackendId(statusEditStation);
     if (!backendId) {
-      showToast?.("warning", "This station is not linked to backend yet. Refresh and try again.");
+      showToast?.("warning", t("stationWorkflows.validation.stationNotLinked"));
       return;
     }
 
@@ -1199,12 +1239,12 @@ export default function StationsPage({
       setStatusEditStation(null);
       setNewStationStatus("");
 
-      showToast?.("success", "Station status updated successfully.");
+      showToast?.("success", t("stationWorkflows.messages.statusUpdated"));
     } catch (error) {
       const backendMessage =
         error?.response?.data?.message ||
         error?.response?.data?.error ||
-        "Failed to update station status.";
+        t("stationWorkflows.messages.statusUpdateFailed");
 
       showToast?.(
         "warning",
@@ -1215,7 +1255,7 @@ export default function StationsPage({
 
   const startCapacityInlineEdit = (station) => {
     if (!hasPermission("stations", "edit")) {
-      showToast?.("warning", "Read-only access: you cannot edit station capacity.");
+      showToast?.("warning", t("stationWorkflows.messages.readOnlyCapacity"));
       return;
     }
 
@@ -1236,7 +1276,7 @@ export default function StationsPage({
     const oldCapacity = Number(capacityEditStation.capacity || 0);
 
     if (capacityDraftValue === "" || !Number.isFinite(nextCapacity) || nextCapacity < 0) {
-      showToast?.("warning", "Capacity must be a valid zero or positive number.");
+      showToast?.("warning", t("stationWorkflows.validation.validCapacity"));
       return;
     }
 
@@ -1273,7 +1313,7 @@ export default function StationsPage({
 
       setCapacityEditStation(null);
       setCapacityDraftValue("");
-      showToast?.("warning", "Station capacity change sent for manager approval.");
+      showToast?.("warning", t("stationWorkflows.messages.capacityPendingApproval"));
       return;
     }
 
@@ -1285,7 +1325,7 @@ export default function StationsPage({
 
     const backendId = getStationBackendId(capacityEditStation);
     if (!backendId) {
-      showToast?.("warning", "This station is not linked to backend yet. Refresh and try again.");
+      showToast?.("warning", t("stationWorkflows.validation.stationNotLinked"));
       return;
     }
 
@@ -1315,12 +1355,12 @@ export default function StationsPage({
 
       setCapacityEditStation(null);
       setCapacityDraftValue("");
-      showToast?.("success", "Station capacity updated successfully.");
+      showToast?.("success", t("stationWorkflows.messages.capacityUpdated"));
     } catch (error) {
       const backendMessage =
         error?.response?.data?.message ||
         error?.response?.data?.error ||
-        "Failed to update station capacity.";
+        t("stationWorkflows.messages.capacityUpdateFailed");
 
       showToast?.(
         "warning",
@@ -1340,7 +1380,7 @@ export default function StationsPage({
     if (!Number.isFinite(currentStock)) {
       showToast?.(
         "warning",
-        "Station stock could not be verified. Refresh the page and try again."
+        t("stationWorkflows.validation.stockVerificationFailed")
       );
       return;
     }
@@ -1355,11 +1395,11 @@ export default function StationsPage({
 
     if (!stationDeleteReason) {
       showToast
-        ? showToast("warning", "Please enter deletion reason.")
+        ? showToast("warning", t("stationWorkflows.validation.enterDeletionReason"))
         : notifyUser(
             typeof showToast !== "undefined" ? showToast : null,
-            inferToastTypeFromMessage("Please enter deletion reason."),
-            "Please enter deletion reason."
+            inferToastTypeFromMessage(t("stationWorkflows.validation.enterDeletionReason")),
+            t("stationWorkflows.validation.enterDeletionReason")
           );
       return;
     }
@@ -1376,7 +1416,7 @@ export default function StationsPage({
     if (!deleteTargetStation || stationDeleteLoading) return;
 
     if (!hasPermission("stations", "delete")) {
-      showToast?.("warning", "Read-only access: you cannot delete stations.");
+      showToast?.("warning", t("stationWorkflows.messages.readOnlyDelete"));
       return;
     }
 
@@ -1385,7 +1425,7 @@ export default function StationsPage({
     if (!Number.isFinite(currentStock)) {
       showToast?.(
         "warning",
-        "Station stock could not be verified. Refresh the page and try again."
+        t("stationWorkflows.validation.stockVerificationFailed")
       );
       return;
     }
@@ -1400,7 +1440,7 @@ export default function StationsPage({
 
     const backendId = getStationBackendId(deleteTargetStation);
     if (!backendId) {
-      showToast?.("warning", "This station is not linked to backend yet. Refresh and try again.");
+      showToast?.("warning", t("stationWorkflows.validation.stationNotLinked"));
       return;
     }
 
@@ -1419,7 +1459,7 @@ export default function StationsPage({
       );
 
       trackActivity?.(
-        "Delete Station",
+        t("stationWorkflows.delete.title"),
         "stations",
         `${deleteTargetStation.id} was soft deleted.${stationDeleteReason ? ` Reason: ${stationDeleteReason}` : ""}`
       );
@@ -1428,12 +1468,12 @@ export default function StationsPage({
       setStationDeleteReason("");
       setShowStationDeleteConfirm(false);
 
-      showToast?.("success", "Station soft deleted successfully.");
+      showToast?.("success", t("stationWorkflows.messages.deleted"));
     } catch (error) {
       const backendMessage =
         error?.response?.data?.message ||
         error?.response?.data?.error ||
-        "Failed to delete station.";
+        t("stationWorkflows.messages.deleteFailed");
 
       showToast?.(
         "warning",
@@ -1630,13 +1670,13 @@ export default function StationsPage({
     setShowSettings(false);
     setShowExportMenu(false);
     setSelectedStation(null);
-    setZeroBalanceReason("Daily reconciliation after station emptying");
+    setZeroBalanceReason(t("stationWorkflows.zero.defaultReason"));
     setShowConfirm(true);
   };
 
   const openStockCountAdjustment = () => {
     if (currentUser?.role !== "Manager") {
-      showToast?.("warning", "Inventory adjustment can only be requested by Project Manager.");
+      showToast?.("warning", t("stationWorkflows.messages.managerOnlyAdjustment"));
       return;
     }
 
@@ -1650,26 +1690,26 @@ export default function StationsPage({
 
   const confirmStockCountAdjustment = () => {
     if (currentUser?.role !== "Manager") {
-      showToast?.("warning", "Inventory adjustment can only be requested by Project Manager.");
+      showToast?.("warning", t("stationWorkflows.messages.managerOnlyAdjustment"));
       return;
     }
 
     if (!stockCountStation) {
-      showToast?.("warning", "Please select a station first.");
+      showToast?.("warning", t("stationWorkflows.validation.selectStation"));
       return;
     }
 
     const actualQty = Number(actualStockQty);
 
     if (actualStockQty === "" || Number.isNaN(actualQty) || actualQty < 0) {
-      showToast?.("warning", "Please enter a valid actual stock quantity.");
+      showToast?.("warning", t("stationWorkflows.validation.validActualStock"));
       return;
     }
 
     const reason = String(stockCountReason || "").trim();
 
     if (!reason) {
-      showToast?.("warning", "Please enter the inventory adjustment reason.");
+      showToast?.("warning", t("stationWorkflows.validation.enterAdjustmentReason"));
       return;
     }
 
@@ -1681,7 +1721,7 @@ export default function StationsPage({
       type: "station_stock_count_adjustment",
       module: "stations",
       title: `Inventory Adjustment - ${stockCountStation.id}`,
-      details: `${currentUser?.fullName || currentUser?.name || "Manager"} requested inventory adjustment for station ${stockCountStation.id}.`,
+      details: `${currentUser?.fullName || currentUser?.name || t("stationWorkflows.defaults.manager")} requested inventory adjustment for station ${stockCountStation.id}.`,
       payload: {
         entity: "station",
         id: stockCountStation.id,
@@ -1732,14 +1772,14 @@ export default function StationsPage({
     setStockCountStation(null);
     setActualStockQty("");
     setStockCountReason("");
-    showToast?.("warning", "Inventory adjustment request sent for Admin approval.");
+    showToast?.("warning", t("stationWorkflows.messages.adjustmentPendingApproval"));
   };
 
   const proceedToPassword = () => {
     if (!selectedStation) {
       showToast
-        ? showToast("warning", "Please select a station first.")
-        : notifyUser(typeof showToast !== "undefined" ? showToast : null, inferToastTypeFromMessage("Please select a station first."), "Please select a station first.");
+        ? showToast("warning", t("stationWorkflows.validation.selectStation"))
+        : notifyUser(typeof showToast !== "undefined" ? showToast : null, inferToastTypeFromMessage(t("stationWorkflows.validation.selectStation")), t("stationWorkflows.validation.selectStation"));
       return;
     }
 
@@ -1749,27 +1789,27 @@ export default function StationsPage({
 
   const confirmZeroBalance = async () => {
     if (!selectedStation) {
-      showToast?.("warning", "Please select a station first.");
+      showToast?.("warning", t("stationWorkflows.validation.selectStation"));
       return;
     }
 
     if (!canCurrentUserRequestZeroBalance()) {
       setShowConfirm(false);
       setSelectedStation(null);
-      setZeroBalanceReason("Daily reconciliation after station emptying");
+      setZeroBalanceReason(t("stationWorkflows.zero.defaultReason"));
       return;
     }
 
     const currentStock = Number(selectedStation.currentStock) || 0;
 
     if (currentStock <= 0) {
-      showToast?.("warning", "Current station stock is already zero.");
+      showToast?.("warning", t("stationWorkflows.validation.stockAlreadyZero"));
       return;
     }
 
     const adjustmentQty = -currentStock;
     const reason =
-      zeroBalanceReason?.trim() || "Daily reconciliation after station emptying";
+      zeroBalanceReason?.trim() || t("stationWorkflows.zero.defaultReason");
     const backendId = getStationBackendId(selectedStation);
 
     if (currentUser?.role === "Officer") {
@@ -1777,7 +1817,7 @@ export default function StationsPage({
         type: "station_zero_balance_adjustment",
         module: "stations",
         title: `Zero Balance Adjustment - ${selectedStation.id}`,
-        details: `${currentUser?.fullName || currentUser?.name || "Officer"} requested zero balance adjustment for station ${selectedStation.id}.`,
+        details: `${currentUser?.fullName || currentUser?.name || t("stationWorkflows.defaults.officer")} requested zero balance adjustment for station ${selectedStation.id}.`,
         payload: {
           entity: "station",
           id: selectedStation.id,
@@ -1811,13 +1851,13 @@ export default function StationsPage({
 
       setShowConfirm(false);
       setSelectedStation(null);
-      setZeroBalanceReason("Daily reconciliation after station emptying");
-      showToast?.("warning", "Zero balance adjustment sent for project manager approval.");
+      setZeroBalanceReason(t("stationWorkflows.zero.defaultReason"));
+      showToast?.("warning", t("stationWorkflows.messages.zeroPendingApproval"));
       return;
     }
 
     if (!backendId) {
-      showToast?.("warning", "This station is not linked to backend yet. Refresh and try again.");
+      showToast?.("warning", t("stationWorkflows.validation.stationNotLinked"));
       return;
     }
 
@@ -1850,7 +1890,7 @@ export default function StationsPage({
           actualQty: 0,
           reason,
           adjustmentType: "ZERO_BALANCE_ADJUSTMENT",
-          createdBy: currentUser?.fullName || currentUser?.name || "Manager",
+          createdBy: currentUser?.fullName || currentUser?.name || t("stationWorkflows.defaults.manager"),
           createdAt: new Date().toISOString(),
           source: "manager_zero_balance",
         },
@@ -1864,14 +1904,14 @@ export default function StationsPage({
 
       setShowConfirm(false);
       setSelectedStation(null);
-      setZeroBalanceReason("Daily reconciliation after station emptying");
-      showToast?.("success", "Zero balance adjustment completed successfully.");
+      setZeroBalanceReason(t("stationWorkflows.zero.defaultReason"));
+      showToast?.("success", t("stationWorkflows.messages.zeroCompleted"));
     } catch (error) {
       const message =
         error?.response?.data?.message ||
         error?.response?.data?.error ||
         error?.message ||
-        "Failed to apply zero balance adjustment.";
+        t("stationWorkflows.messages.zeroFailed");
       showToast?.("warning", message);
     }
   };
@@ -1919,8 +1959,8 @@ export default function StationsPage({
     URL.revokeObjectURL(url);
 
     showToast
-      ? showToast("success", "Stations data exported successfully.")
-      : notifyUser(typeof showToast !== "undefined" ? showToast : null, inferToastTypeFromMessage("Stations data exported successfully."), "Stations data exported successfully.");
+      ? showToast("success", t("stationWorkflows.messages.csvExported"))
+      : notifyUser(typeof showToast !== "undefined" ? showToast : null, inferToastTypeFromMessage(t("stationWorkflows.messages.csvExported")), t("stationWorkflows.messages.csvExported"));
   };
 
   const exportStationsToPDF = () => {
@@ -1932,7 +1972,7 @@ export default function StationsPage({
         .replace(/"/g, "&quot;")
         .replace(/'/g, "&#039;");
 
-    const reportDate = new Date().toLocaleString();
+    const reportDate = new Date().toLocaleString(language === "ar" ? "ar-SA" : "en-GB");
 
     const getStationTankLevel = (station) => {
       const capacity = Number(station?.capacity || 0);
@@ -1965,9 +2005,9 @@ export default function StationsPage({
     if (!printWindow) return;
 
     printWindow.document.write(`
-      <html>
+      <html dir="${language === "ar" ? "rtl" : "ltr"}">
         <head>
-          <title>Stations Report</title>
+          <title>${t("stationWorkflows.print.reportTitle")}</title>
           <style>
             @page {
               size: A4 landscape;
@@ -2026,25 +2066,25 @@ export default function StationsPage({
         </head>
 
         <body>
-          <h1>Stations Report</h1>
+          <h1>${t("stationWorkflows.print.reportTitle")}</h1>
           <div class="meta">
             Generated at: ${reportDate} | Total Stations: ${filteredStations.length}
           </div>
 
-          <h2>Stations List</h2>
+          <h2>${t("stations.list.title")}</h2>
           <table>
             <thead>
               <tr>
                 <th>#</th>
-                <th>Station ID</th>
-                <th>Project</th>
-                <th>Type</th>
-                <th>Capacity</th>
-                <th>Current Counter</th>
-                <th>Opening Balance</th>
-                <th>Current Stock</th>
-                <th>Tank Level</th>
-                <th>Status</th>
+                <th>${t("stations.table.stationId")}</th>
+                <th>${t("stations.table.project")}</th>
+                <th>${t("stations.table.type")}</th>
+                <th>${t("stations.table.capacity")}</th>
+                <th>${t("stations.table.currentCounter")}</th>
+                <th>${t("stations.table.openingBalance")}</th>
+                <th>${t("stations.table.currentStock")}</th>
+                <th>${t("stations.table.tankLevel")}</th>
+                <th>${t("stations.table.status")}</th>
               </tr>
             </thead>
             <tbody>
@@ -2065,14 +2105,14 @@ export default function StationsPage({
       <div className="fleet-page-shell w-full max-w-full min-w-0 mx-auto px-2 sm:px-3 lg:px-4 xl:px-5 2xl:px-8 py-3 sm:py-4 lg:py-5 text-[12px] lg:text-[13px]">
       <div className="flex flex-col sm:flex-row justify-between sm:items-start xl:items-center gap-3 mb-4">
         <div>
-          <h1 className="text-xl sm:text-2xl font-bold">Fuel Stations</h1>
-          <p className="text-gray-400">Fuel stock management</p>
+          <h1 className="text-xl sm:text-2xl font-bold">{t("stations.title")}</h1>
+          <p className="text-gray-400">{t("stations.subtitle")}</p>
         </div>
 
         <div className="flex flex-wrap items-center justify-end gap-3">
           <input
             type="text"
-            placeholder="Search by station ID, name, project, type, status..."
+            placeholder={t("stations.searchPlaceholder")}
             value={searchTerm}
             onChange={(e) => setSearchTerm(e.target.value)}
             className="bg-gray-800 border border-gray-700 rounded-xl px-4 py-3 text-white w-full sm:w-[380px] focus:outline-none focus:border-yellow-400"
@@ -2108,7 +2148,7 @@ export default function StationsPage({
                   className="flex items-center gap-3 w-full cursor-pointer text-left px-5 py-4 hover:bg-slate-800 transition text-white"
                 >
                   <span className="text-green-400 text-lg">＋</span>
-                  Add Station
+                  {t("stations.actions.addStation")}
                 </button>
               )}
 
@@ -2118,7 +2158,7 @@ export default function StationsPage({
                   className="flex items-center gap-3 w-full cursor-pointer text-left px-5 py-4 hover:bg-red-900/30 transition text-red-400"
                 >
                   <span className="text-lg">⚠</span>
-                  Zero Balance
+                  {t("stationWorkflows.zero.menu")}
                 </button>
               )}
 
@@ -2128,7 +2168,7 @@ export default function StationsPage({
                   className="flex items-center gap-3 w-full cursor-pointer text-left px-5 py-4 hover:bg-amber-500/10 transition text-amber-300 border-t border-gray-700"
                 >
                   <span className="text-lg">≋</span>
-                  Inventory Adjustment
+                  {t("stationWorkflows.stock.menu")}
                 </button>
               )}
 
@@ -2142,7 +2182,7 @@ export default function StationsPage({
                 >
                   <span className="flex flex-wrap items-center gap-3">
                     <span className="text-blue-400 text-lg">⇩</span>
-                    Export
+                    {t("stations.actions.export")}
                   </span>
 
                   <span className="text-gray-400">›</span>
@@ -2162,7 +2202,7 @@ export default function StationsPage({
                       }}
                       className="block w-full text-left px-10 py-3 hover:bg-gray-800 transition text-gray-200"
                     >
-                      Export CSV
+                      {t("common.exportCsv")}
                     </button>
 
                     <button
@@ -2174,7 +2214,7 @@ export default function StationsPage({
                       }}
                       className="block w-full text-left px-10 py-3 hover:bg-gray-800 transition text-gray-200"
                     >
-                      Print Stations Report
+                      {t("stations.actions.printReport")}
                     </button>
                   </div>
                 )}
@@ -2186,17 +2226,17 @@ export default function StationsPage({
       </div>
 
       <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-3 mb-4">
-        <Card title="Total Stations" value={filteredStations.length} />
+        <Card title={t("stations.cards.totalStations")} value={filteredStations.length} />
 
         <Card
-          title="Total Capacity"
+          title={t("stations.cards.totalCapacity")}
           value={formatNumber(
             filteredStations.reduce((sum, s) => sum + (s.capacity || 0), 0)
           )}
         />
 
         <Card
-          title="Current Stock"
+          title={t("stations.cards.currentStock")}
           value={formatNumber(
             filteredStations.reduce(
               (sum, s) => sum + (s.currentStock || 0),
@@ -2210,15 +2250,15 @@ export default function StationsPage({
         <div className="flex flex-col sm:flex-row justify-between sm:items-start xl:items-center gap-3 mb-4">
           <div>
             <h2 className="text-base sm:text-lg font-extrabold text-amber-300">
-              Stations Stock
+              {t("stations.list.title")}
             </h2>
             <p className="text-sm text-slate-400">
-              Live stock overview by station
+              {t("stations.list.subtitle")}
             </p>
           </div>
 
           <span className="text-sm text-slate-400">
-            {filteredStations.length} stations
+            {t("stations.list.stationCount", { count: filteredStations.length })}
           </span>
         </div>
 
@@ -2247,7 +2287,7 @@ export default function StationsPage({
                           setStationDeleteReason("");
                         }}
                         className="text-gray-400 hover:text-red-400 transition text-lg cursor-pointer"
-                        title="Delete Station"
+                        title={t("stationWorkflows.delete.title")}
                       >
                         🗑️
                       </button>
@@ -2271,8 +2311,12 @@ export default function StationsPage({
                         : "cursor-default"
                     }`}
                   >
-                    <p className="text-[9px] uppercase tracking-[0.22em] text-slate-500">
-                      Project
+                    <p
+                      className={`text-[9px] uppercase tracking-[0.22em] text-slate-500 ${
+                        isRtl ? "text-right" : "text-left"
+                      }`}
+                    >
+                      {t("stations.fields.project")}
                     </p>
 
                     <p className="text-sm font-semibold text-slate-100 mt-1">
@@ -2289,16 +2333,16 @@ export default function StationsPage({
                         setStationCounterResetReason("");
                       }}
                       className="block text-[10px] uppercase tracking-[0.24em] text-slate-400 hover:text-yellow-400 transition cursor-pointer mb-2"
-                      title="Reset Station Counter"
+                      title={t("stationWorkflows.counter.title")}
                     >
-                      Station Counter
+                      {t("stations.table.currentCounter")}
                     </button>
 
                     <FlowmeterCounterDisplay value={station.currentCounter} />
 
                     <div className="mt-3 flex items-center justify-between gap-3 rounded-lg border border-slate-700/80 bg-slate-950/60 px-3 py-2">
                       <span className="text-[10px] uppercase tracking-[0.16em] text-slate-400">
-                        Lifetime Counter
+                        {t("stations.table.lifetimeCounter")}
                       </span>
                       <span className="text-sm font-bold text-amber-300 tabular-nums">
                         {formatNumber(station.lifetimeCounter)}
@@ -2312,13 +2356,13 @@ export default function StationsPage({
                   onClick={() => openStatusChange(station)}
                   className="cursor-pointer"
                 >
-                  <StatusBadge status={station.status} />
+                  {renderStationStatusBadge(station.status)}
                 </button>
               </div>
 
               <div className="grid grid-cols-1 sm:grid-cols-3 gap-3 mb-5">
                 <div>
-                  <p className="text-[11px] text-slate-400 whitespace-nowrap">Capacity</p>
+                  <p className="text-[11px] text-slate-400 whitespace-nowrap">{t("stations.table.capacity")}</p>
                   {capacityEditStation && tenantEntityMatches(capacityEditStation, station.id, station.companyId) ? (
                     <input
                       type="number"
@@ -2337,7 +2381,7 @@ export default function StationsPage({
                   ) : (
                     <p
                       onDoubleClick={() => startCapacityInlineEdit(station)}
-                      title="Double click to edit capacity"
+                      title={t("stationWorkflows.capacity.doubleClickHint")}
                       className="text-lg font-semibold cursor-pointer hover:text-yellow-300 transition"
                     >
                       {formatNumber(station.capacity)} L
@@ -2346,14 +2390,14 @@ export default function StationsPage({
                 </div>
 
                 <div>
-                  <p className="text-[11px] text-gray-400 whitespace-nowrap">Total Pumped</p>
+                  <p className="text-[11px] text-gray-400 whitespace-nowrap">{t("stations.table.totalPumped")}</p>
                   <p className="text-base lg:text-lg font-semibold text-slate-100 whitespace-nowrap">
                     {formatNumber(station.totalPumpedFromOperations)} L
                   </p>
                 </div>
 
                 <div className="sm:text-right">
-                  <p className="text-[11px] text-slate-400 whitespace-nowrap">Current Stock</p>
+                  <p className="text-[11px] text-slate-400 whitespace-nowrap">{t("stations.table.currentStock")}</p>
                   <p className="text-base lg:text-lg font-semibold text-slate-100 whitespace-nowrap">
                     {formatNumber(station.currentStock)} L
                   </p>
@@ -2361,8 +2405,13 @@ export default function StationsPage({
               </div>
 
               <div className="bg-gray-800 rounded-xl p-4">
-                <p className="text-xs text-gray-400 mb-3">Tank Level</p>
-                <FuelLevelIcon percentage={station.percentage} />
+                <p className="text-xs text-gray-400 mb-3">{t("stations.table.tankLevel")}</p>
+                <FuelLevelIcon
+                  percentage={station.percentage}
+                  lowLabel={t("stations.level.low")}
+                  mediumLabel={t("stations.level.medium")}
+                  goodLabel={t("stations.level.good")}
+                />
               </div>
             </div>
           ))}
@@ -2373,17 +2422,19 @@ export default function StationsPage({
         <div className="flex justify-between items-center mb-3">
           <div>
             <h2 className="text-base sm:text-lg font-extrabold text-amber-300">
-              Total Consumption per Station
+              {t("stations.chart.totalConsumption")}
             </h2>
             <p className="text-xs text-gray-400 mt-1">
-              Direct refuel quantity grouped by source station
+              {t("stations.chart.description")}
             </p>
           </div>
 
           <span className="text-sm text-slate-400">
             {searchTerm.trim()
-              ? `${filteredStations.length} matching station${filteredStations.length === 1 ? "" : "s"}`
-              : "All Stations"}
+              ? t("stations.chart.matchingStations", {
+                  count: filteredStations.length,
+                })
+              : t("stations.chart.allStations")}
           </span>
         </div>
 
@@ -2403,12 +2454,12 @@ export default function StationsPage({
               tick={{ fontSize: 11 }}
             />
 
-            <Tooltip />
+            <Tooltip wrapperStyle={{ direction: isRtl ? "rtl" : "ltr", textAlign: isRtl ? "right" : "left" }} />
 
             <Bar
               dataKey="qtyLiters"
               fill="#facc15"
-              name="Qty Liters"
+              name={t("stations.chart.qtyLiters")}
               radius={[6, 6, 0, 0]}
               maxBarSize={45}
             />
@@ -2417,23 +2468,23 @@ export default function StationsPage({
       </div>
 
       {selectedStationHistory && (
-        <div className="fixed inset-0 z-[12000] bg-black/75 backdrop-blur-sm flex items-center justify-center p-3">
+        <div dir={isRtl ? "rtl" : "ltr"} className="fixed inset-0 z-[12000] bg-black/75 backdrop-blur-sm flex items-center justify-center p-3">
           <div className="bg-slate-950 text-white w-full max-w-[min(1150px,calc(100vw-2rem))] max-h-[92vh] rounded-3xl shadow-2xl border border-slate-700 overflow-hidden min-w-0">
             <div className="p-3 sm:p-5 border-b border-gray-700 flex justify-between items-start gap-3">
               <div>
                 <h2 className="text-xl sm:text-2xl font-bold text-yellow-400 italic underline">
-                  Station Operations History
+                  {t("stations.history.title")}
                 </h2>
 
                 <p className="text-gray-400 mt-1">
-                  Station:{" "}
+                  {t("stationWorkflows.labels.station")}:{" "}
                   <span className="text-blue-300 font-semibold">
                     {selectedStationHistory.id}
                   </span>
                 </p>
 
                 <p className="text-xs text-gray-500 mt-1">
-                  Direct refuel, internal transfers, and external supply related to this station
+                  {t("stations.history.description")}
                 </p>
               </div>
 
@@ -2450,14 +2501,14 @@ export default function StationsPage({
                 <thead className="bg-slate-800 sticky top-0 z-[1] shadow-sm">
                   <tr>
                     <Th>#</Th>
-                    <Th>Date</Th>
-                    <Th>Operation ID</Th>
-                    <Th>Type</Th>
-                    <Th>Direction</Th>
-                    <Th>Source</Th>
-                    <Th>Destination</Th>
-                    <Th>Fueler</Th>
-                    <Th>Qty Liters</Th>
+                    <Th className={isRtl ? "text-right" : "text-left"}>{t("stations.history.date")}</Th>
+                    <Th className={isRtl ? "text-right" : "text-left"}>{t("stations.history.operationId")}</Th>
+                    <Th className={isRtl ? "text-right" : "text-left"}>{t("stations.table.type")}</Th>
+                    <Th className={isRtl ? "text-right" : "text-left"}>{t("stations.history.direction")}</Th>
+                    <Th className={isRtl ? "text-right" : "text-left"}>{t("stations.history.source")}</Th>
+                    <Th className={isRtl ? "text-right" : "text-left"}>{t("stations.history.destination")}</Th>
+                    <Th className={isRtl ? "text-right" : "text-left"}>{t("stations.history.fueler")}</Th>
+                    <Th className={isRtl ? "text-right" : "text-left"}>{t("stations.history.qtyLiters")}</Th>
                   </tr>
                 </thead>
 
@@ -2466,7 +2517,7 @@ export default function StationsPage({
                     <tr>
                       <Td colSpan={9}>
                         <span className="text-gray-400">
-                          No operations found for this station.
+                          {t("stations.history.noOperations")}
                         </span>
                       </Td>
                     </tr>
@@ -2504,7 +2555,7 @@ export default function StationsPage({
                                   : "bg-gray-500/15 text-gray-300 border border-gray-500/30"
                               }`}
                             >
-                              {direction}
+                              {getDirectionLabel(direction)}
                             </span>
                           </Td>
 
@@ -2525,13 +2576,13 @@ export default function StationsPage({
 
 
       {editingProjectStation && (
-        <div className="fixed inset-0 z-[12000] bg-black/70 flex items-center justify-center">
-          <div className="bg-white text-black w-[560px] rounded-2xl shadow-2xl p-6">
+        <div dir={isRtl ? "rtl" : "ltr"} className="fixed inset-0 z-[12000] bg-black/70 flex items-center justify-center">
+          <div className={`bg-white text-black w-[560px] rounded-2xl shadow-2xl p-6 ${isRtl ? "text-right" : "text-left"}`}>
             <div className="flex justify-between items-center mb-5 border-b pb-3">
               <div>
-                <h2 className="text-2xl font-extrabold text-white">Change Station Project</h2>
+                <h2 className="text-2xl font-extrabold text-white">{t("stationWorkflows.transfer.title")}</h2>
                 <p className="text-sm text-gray-500 mt-1">
-                  Station: {editingProjectStation.id}
+                  {t("stationWorkflows.labels.station")}: {editingProjectStation.id}
                 </p>
               </div>
 
@@ -2545,21 +2596,21 @@ export default function StationsPage({
             </div>
 
             <div className="bg-gray-100 rounded-xl p-4 mb-4">
-              <p className="text-sm text-gray-600">Current Project</p>
+              <p className="text-sm text-gray-600">{t("stationWorkflows.transfer.currentProject")}</p>
               <p className="text-xl font-bold">
                 {editingProjectStation.project || "-"}
               </p>
             </div>
 
             <div className="mb-4">
-              <label className="font-medium text-gray-700">New Project</label>
+              <label className="font-medium text-gray-700">{t("stationWorkflows.transfer.newProject")}</label>
 
               <select
                 value={newStationProject}
                 onChange={(e) => setNewStationProject(e.target.value)}
                 className="border rounded-lg p-3 w-full mt-2"
               >
-                <option value="">Select Project</option>
+                <option value="">{t("stations.placeholders.selectProject")}</option>
 
                 {filterActiveProjects(transferProjects || projects || [])
                   .filter(
@@ -2585,7 +2636,7 @@ export default function StationsPage({
                 onClick={closeStationProjectTransferModal}
                 className="rounded-xl border border-slate-600 bg-slate-900 px-5 py-2.5 font-bold text-slate-200 hover:bg-slate-800 transition"
               >
-                Cancel
+                {t("common.cancel")}
               </button>
 
               <button
@@ -2593,7 +2644,7 @@ export default function StationsPage({
                 onClick={submitStationProjectTransferRequest}
                 className="bg-yellow-500 text-black px-4 py-2 rounded-lg font-semibold"
               >
-                Submit Transfer Request
+                {t("stationWorkflows.transfer.submit")}
               </button>
             </div>
           </div>
@@ -2601,11 +2652,11 @@ export default function StationsPage({
       )}
 
       {stationTransferStockConfirmation && (
-        <div className="fleet-modal-backdrop fixed inset-0 z-[12000] bg-black/60 flex items-center justify-center p-4">
+        <div dir={isRtl ? "rtl" : "ltr"} className="fleet-modal-backdrop fixed inset-0 z-[12000] bg-black/60 flex items-center justify-center p-4">
           <div className="bg-white text-black w-full max-w-[520px] rounded-xl shadow-xl p-6">
             <div className="flex justify-between items-center mb-6 border-b pb-3">
               <h2 className="text-xl sm:text-2xl font-bold">
-                Confirm Station Transfer
+                {t("stationWorkflows.transfer.confirmTitle")}
               </h2>
               <button
                 type="button"
@@ -2618,18 +2669,18 @@ export default function StationsPage({
 
             <div className="bg-amber-50 border border-amber-300 p-4 rounded-lg space-y-2">
               <p>
-                <strong>Station:</strong>{" "}
+                <strong>{t("stationWorkflows.labels.station")}:</strong>{" "}
                 {stationTransferStockConfirmation.station?.id || "-"}
               </p>
               <p>
-                <strong>Current Project:</strong>{" "}
+                <strong>{t("stationWorkflows.transfer.currentProject")}:</strong>{" "}
                 {stationTransferStockConfirmation.station?.project || "-"}
               </p>
               <p>
-                <strong>New Project:</strong> {newStationProject || "-"}
+                <strong>{t("stationWorkflows.transfer.newProject")}:</strong> {newStationProject || "-"}
               </p>
               <p>
-                <strong>Current Stock:</strong>{" "}
+                <strong>{t("stations.table.currentStock")}:</strong>{" "}
                 {formatNumber(
                   stationTransferStockConfirmation.currentStock
                 )}{" "}
@@ -2638,8 +2689,7 @@ export default function StationsPage({
             </div>
 
             <p className="mt-4 text-sm text-gray-700">
-              This station currently contains fuel stock. Do you want to
-              transfer the station with its current stock balance?
+              {t("stationWorkflows.transfer.stockQuestion")}
             </p>
 
             <div className="flex justify-end gap-3 mt-6 border-t pt-4">
@@ -2647,7 +2697,7 @@ export default function StationsPage({
                 onClick={() => setStationTransferStockConfirmation(null)}
                 className="rounded-xl border border-slate-600 bg-slate-900 px-5 py-2.5 font-bold text-slate-200 hover:bg-slate-800 transition"
               >
-                Cancel
+                {t("common.cancel")}
               </button>
 
               <button
@@ -2655,7 +2705,7 @@ export default function StationsPage({
                 onClick={confirmStationTransferWithStock}
                 className="bg-amber-500 hover:bg-amber-400 text-black px-4 py-2 rounded-lg font-bold"
               >
-                Transfer With Current Stock
+                {t("stationWorkflows.transfer.withStock")}
               </button>
             </div>
           </div>
@@ -2667,15 +2717,15 @@ export default function StationsPage({
 
       {counterResetStation && (
         <ModalPortal>
-          <div className="fixed inset-0 z-[12000] bg-black/70 flex items-center justify-center p-4">
+          <div dir={isRtl ? "rtl" : "ltr"} className="fixed inset-0 z-[12000] bg-black/70 flex items-center justify-center p-4">
             <div className="bg-slate-950 text-white w-full max-w-[560px] rounded-3xl shadow-2xl border border-slate-700 overflow-hidden min-w-0">
               <div className="p-5 border-b border-slate-700 flex items-start justify-between">
                 <div>
                   <h2 className="text-2xl font-bold text-yellow-400">
-                    Reset Station Counter
+                    {t("stationWorkflows.counter.title")}
                   </h2>
                   <p className="text-sm text-slate-400 mt-1">
-                    Station:{" "}
+                    {t("stationWorkflows.labels.station")}:{" "}
                     <span className="text-blue-300 font-semibold">
                       {counterResetStation.id}
                     </span>
@@ -2693,7 +2743,7 @@ export default function StationsPage({
 
               <div className="p-5 space-y-4">
                 <div className="rounded-2xl border border-slate-700 bg-slate-900/70 p-4">
-                  <p className="text-[11px] text-slate-400 whitespace-nowrap">Current Counter</p>
+                  <p className="text-[11px] text-slate-400 whitespace-nowrap">{t("stations.table.currentCounter")}</p>
                   <p className="text-2xl font-bold text-yellow-300 mt-1">
                     {formatNumber(counterResetStation.currentCounter)} L
                   </p>
@@ -2701,20 +2751,20 @@ export default function StationsPage({
 
                 <div>
                   <label className="text-sm font-semibold text-slate-300">
-                    New Counter Reading
+                    {t("stationWorkflows.counter.newReading")}
                   </label>
                   <input
                     type="number"
                     value={stationCounterResetValue}
                     onChange={(e) => setStationCounterResetValue(e.target.value)}
                     className="w-full mt-2 rounded-xl border border-slate-700 bg-slate-900 p-3 text-white"
-                    placeholder="Enter new counter reading"
+                    placeholder={t("stationWorkflows.counter.newReadingPlaceholder")}
                   />
                 </div>
 
                 <div>
                   <label className="text-sm font-semibold text-slate-300">
-                    Effective Date & Time
+                    {t("stationWorkflows.counter.effectiveDate")}
                   </label>
                   <input
                     type="datetime-local"
@@ -2726,13 +2776,13 @@ export default function StationsPage({
 
                 <div>
                   <label className="text-sm font-semibold text-slate-300">
-                    Reason
+                    {t("stationWorkflows.labels.reason")}
                   </label>
                   <textarea
                     value={stationCounterResetReason}
                     onChange={(e) => setStationCounterResetReason(e.target.value)}
                     className="w-full mt-2 rounded-xl border border-slate-700 bg-slate-900 p-3 text-white h-24"
-                    placeholder="Example: station meter changed / counter reset"
+                    placeholder={t("stationWorkflows.counter.reasonPlaceholder")}
                   />
                 </div>
 
@@ -2742,18 +2792,18 @@ export default function StationsPage({
                     disabled={stationCounterResetLoading}
                     className="px-4 py-2 rounded-xl bg-slate-800 hover:bg-slate-700 disabled:cursor-wait disabled:opacity-50"
                   >
-                    Cancel
+                    {t("common.cancel")}
                   </button>
 
                   <button
                     onClick={async () => {
                       if (!stationCounterResetValue) {
-                        notifyUser(showToast, "warning", "Please enter new counter reading.");
+                        notifyUser(showToast, "warning", t("stationWorkflows.validation.enterNewCounter"));
                         return;
                       }
 
                       if (!stationCounterResetReason.trim()) {
-                        notifyUser(showToast, "warning", "Please enter reset reason.");
+                        notifyUser(showToast, "warning", t("stationWorkflows.validation.enterResetReason"));
                         return;
                       }
 
@@ -2775,7 +2825,7 @@ export default function StationsPage({
                     disabled={stationCounterResetLoading}
                     className="px-4 py-2 rounded-xl bg-yellow-500 text-black font-bold hover:bg-yellow-400 disabled:cursor-wait disabled:opacity-60"
                   >
-                    {stationCounterResetLoading ? "Saving..." : "Save Reset"}
+                    {stationCounterResetLoading ? t("common.saving") : t("stationWorkflows.counter.save")}
                   </button>
                 </div>
               </div>
@@ -2786,16 +2836,16 @@ export default function StationsPage({
 
       {showForm && (
         <ModalPortal>
-          <div className="fleet-portal-modal-backdrop fixed inset-0 z-[12000] bg-black/60 flex items-center justify-center p-4">
+          <div dir={isRtl ? "rtl" : "ltr"} className="fleet-portal-modal-backdrop fixed inset-0 z-[12000] bg-black/60 flex items-center justify-center p-4">
             <div className="fleet-portal-modal-panel w-[min(650px,calc(100vw-2rem))] max-h-[92vh] overflow-y-auto rounded-xl border border-slate-700 bg-slate-950 p-6 text-slate-100 shadow-2xl">
             <div className="flex justify-between items-center mb-6 border-b border-slate-700 pb-3">
-              <h2 className="text-xl sm:text-2xl font-bold">Add Station</h2>
+              <h2 className="text-xl sm:text-2xl font-bold">{t("stations.actions.addStation")}</h2>
               <button onClick={closeAddStation} className="text-xl text-slate-400 hover:text-white">×</button>
             </div>
 
             <div className="grid grid-cols-1 gap-4">
               <Field
-                label="Station ID"
+                label={t("stations.fields.stationId")}
                 placeholder="Main_Station"
                 value={newStation.id}
                 onChange={(e) => setNewStation({ ...newStation, id: e.target.value })}
@@ -2803,25 +2853,25 @@ export default function StationsPage({
               />
 
               <div className="grid grid-cols-1 sm:grid-cols-3 items-start sm:items-center gap-2 sm:gap-4">
-                <label className="font-medium text-slate-300">Station Type</label>
+                <label className="font-medium text-slate-300">{t("stations.fields.stationType")}</label>
                 <select
                   value={newStation.type}
                   onChange={(e) => setNewStation({ ...newStation, type: e.target.value })}
                   className="col-span-2 rounded-lg border border-slate-700 bg-slate-900 p-2 text-white outline-none focus:border-amber-400"
                 >
-                  <option>Main</option>
-                  <option>Sub</option>
+                  <option value="Main">{t("stations.types.main")}</option>
+                  <option value="Sub">{t("stations.types.sub")}</option>
                 </select>
               </div>
 
               <div className="grid grid-cols-1 sm:grid-cols-3 items-start sm:items-center gap-2 sm:gap-4">
-                <label className="font-medium text-slate-300">Project</label>
+                <label className="font-medium text-slate-300">{t("stations.fields.project")}</label>
                 <select
                   value={newStation.project}
                   onChange={(e) => setNewStation({ ...newStation, project: e.target.value })}
                   className="col-span-2 rounded-lg border border-slate-700 bg-slate-900 p-2 text-white outline-none focus:border-amber-400"
                 >
-                  <option value="">Select Project</option>
+                  <option value="">{t("stations.placeholders.selectProject")}</option>
                   {transferProjectOptions.map((project) => (
                     <option key={project} value={project}>
                       {project}
@@ -2830,36 +2880,36 @@ export default function StationsPage({
                 </select>
               </div>
               <Field
-                label="Capacity"
-                placeholder="Liters"
+                label={t("stations.fields.capacity")}
+                placeholder={t("stations.placeholders.liters")}
                 type="number"
                 value={newStation.capacity}
                 onChange={(e) => setNewStation({ ...newStation, capacity: e.target.value })}
               />
               <Field
-                label="Opening Balance"
-                placeholder="Liters"
+                label={t("stations.fields.openingBalance")}
+                placeholder={t("stations.placeholders.liters")}
                 type="number"
                 value={newStation.openingBalance}
                 onChange={(e) => setNewStation({ ...newStation, openingBalance: e.target.value })}
               />
               <Field
-                label="Current Station Counter"
-                placeholder="Current station meter reading"
+                label={t("stations.fields.currentCounter")}
+                placeholder={t("stations.placeholders.currentCounter")}
                 type="number"
                 value={newStationOpeningCounter}
                 onChange={(e) => setNewStationOpeningCounter(e.target.value)}
               />
 
               <div className="grid grid-cols-1 sm:grid-cols-3 items-start sm:items-center gap-2 sm:gap-4">
-                <label className="font-medium text-slate-300">Status</label>
+                <label className="font-medium text-slate-300">{t("stations.fields.status")}</label>
                 <select
                   value={newStation.status}
                   onChange={(e) => setNewStation({ ...newStation, status: e.target.value })}
                   className="col-span-2 rounded-lg border border-slate-700 bg-slate-900 p-2 text-white outline-none focus:border-amber-400"
                 >
-                  <option>Active</option>
-                  <option>Inactive</option>
+                  <option value="Active">{t("stations.status.active")}</option>
+                  <option value="Inactive">{t("stations.status.inactive")}</option>
                 </select>
               </div>
             </div>
@@ -2869,7 +2919,7 @@ export default function StationsPage({
                 onClick={closeAddStation}
                 className="rounded-lg border border-slate-700 bg-slate-800 px-3 py-2 text-slate-200 hover:bg-slate-800/70 lg:px-4"
               >
-                Cancel
+                {t("common.cancel")}
               </button>
 
               <button
@@ -2881,7 +2931,7 @@ export default function StationsPage({
                     : "bg-green-600 text-white hover:bg-green-700"
                 }`}
               >
-                {stationSaveLoading ? "Saving..." : "Save Station"}
+                {stationSaveLoading ? t("common.saving") : t("stations.add.save")}
               </button>
             </div>
           </div>
@@ -2890,22 +2940,22 @@ export default function StationsPage({
       )}
 
       {statusEditStation && (
-        <div className="fleet-modal-backdrop fixed inset-0 z-[12000] bg-black/60 flex items-center justify-center">
+        <div dir={isRtl ? "rtl" : "ltr"} className="fleet-modal-backdrop fixed inset-0 z-[12000] bg-black/60 flex items-center justify-center">
           <div className="bg-white text-black w-[520px] rounded-xl shadow-xl p-6">
             <div className="flex justify-between items-center mb-6 border-b pb-3">
-              <h2 className="text-xl sm:text-2xl font-bold">Confirm Station Status Change</h2>
+              <h2 className="text-xl sm:text-2xl font-bold">{t("stationWorkflows.status.title")}</h2>
               <button onClick={() => setStatusEditStation(null)}>×</button>
             </div>
 
             <div className="bg-gray-100 p-4 rounded-lg space-y-2">
               <p>
-                <strong>Station:</strong> {statusEditStation.id}
+                <strong>{t("stationWorkflows.labels.station")}:</strong> {statusEditStation.id}
               </p>
               <p>
-                <strong>Current Status:</strong> {getCurrentStationStatus(statusEditStation) || "-"}
+                <strong>{t("stationWorkflows.status.currentStatus")}:</strong> {getStationStatusLabel(getCurrentStationStatus(statusEditStation))}
               </p>
               <p>
-                <strong>New Status:</strong> {newStationStatus || "-"}
+                <strong>{t("stationWorkflows.status.newStatus")}:</strong> {getStationStatusLabel(newStationStatus)}
               </p>
             </div>
 
@@ -2914,14 +2964,14 @@ export default function StationsPage({
                 onClick={() => setStatusEditStation(null)}
                 className="rounded-xl border border-slate-600 bg-slate-900 px-5 py-2.5 font-bold text-slate-200 hover:bg-slate-800 transition"
               >
-                Cancel
+                {t("common.cancel")}
               </button>
 
               <button
                 onClick={confirmStationStatusChange}
                 className="bg-amber-500 hover:bg-amber-400 text-black px-4 py-2 rounded-lg font-bold"
               >
-                Confirm Change
+                {t("stationWorkflows.status.confirmChange")}
               </button>
             </div>
           </div>
@@ -2929,21 +2979,25 @@ export default function StationsPage({
       )}
 
       {deleteTargetStation && (
-        <div className="fixed inset-0 z-[12000] bg-black/75 backdrop-blur-sm flex items-center justify-center p-3">
+        <div dir={isRtl ? "rtl" : "ltr"} className="fixed inset-0 z-[12000] bg-black/75 backdrop-blur-sm flex items-center justify-center p-3">
           <div className="bg-white text-black w-[520px] rounded-2xl p-6 shadow-2xl">
             <h2 className="text-xl sm:text-2xl font-bold mb-2 text-red-600">
-              Delete Station
+              {t("stationWorkflows.delete.title")}
             </h2>
 
             <p className="text-gray-600 mb-5">
-              Station: <strong>{deleteTargetStation.id}</strong>
+              {t("stationWorkflows.labels.station")}:{" "}
+              <strong>{deleteTargetStation.id}</strong>
             </p>
 
             <textarea
               value={stationDeleteReason}
               onChange={(e) => setStationDeleteReason(e.target.value)}
-              placeholder="Enter deletion reason..."
-              className="border rounded-xl p-3 w-full h-28 mb-5"
+              placeholder={t("stationWorkflows.delete.reasonPlaceholder")}
+              dir={isRtl ? "rtl" : "ltr"}
+              className={`border rounded-xl p-3 w-full h-28 mb-5 ${
+                isRtl ? "text-right" : "text-left"
+              }`}
             />
 
             <div className="flex justify-end gap-3">
@@ -2954,14 +3008,14 @@ export default function StationsPage({
                 }}
                 className="bg-gray-200 px-3 lg:px-4 py-2 rounded-lg"
               >
-                Cancel
+                {t("common.cancel")}
               </button>
 
               <button
                 onClick={proceedStationDeleteConfirm}
                 className="bg-red-600 text-white px-3 lg:px-4 py-2 rounded-lg"
               >
-                Continue
+                {t("common.continue")}
               </button>
             </div>
           </div>
@@ -2969,20 +3023,22 @@ export default function StationsPage({
       )}
 
       {showStationDeleteConfirm && (
-        <div className="fixed inset-0 z-[12000] bg-black/75 backdrop-blur-sm flex items-center justify-center p-3">
+        <div dir={isRtl ? "rtl" : "ltr"} className="fixed inset-0 z-[12000] bg-black/75 backdrop-blur-sm flex items-center justify-center p-3">
           <div className="bg-white text-black w-[500px] rounded-2xl p-6 shadow-2xl">
             <h2 className="text-xl sm:text-2xl font-bold mb-4 text-red-600">
-              Confirm Delete Request
+              {t("stationWorkflows.delete.requestTitle")}
             </h2>
 
             <p className="text-gray-700 mb-5">
-              Are you sure you want to submit a deletion request for station{" "}
-              <strong>{deleteTargetStation?.id}</strong>?
+              {t("stationWorkflows.delete.requestQuestion", {
+                id: deleteTargetStation?.id,
+              })}
             </p>
 
             <div className="bg-gray-100 rounded-xl p-4 mb-5 text-sm">
               <p>
-                <strong>Reason:</strong> {stationDeleteReason}
+                <strong>{t("stationWorkflows.labels.reason")}:</strong>{" "}
+                {stationDeleteReason}
               </p>
             </div>
 
@@ -2991,7 +3047,7 @@ export default function StationsPage({
                 onClick={() => setShowStationDeleteConfirm(false)}
                 className="bg-gray-200 px-3 lg:px-4 py-2 rounded-lg"
               >
-                Back
+                {t("stationWorkflows.actions.back")}
               </button>
 
               <button
@@ -2999,7 +3055,7 @@ export default function StationsPage({
                 disabled={stationDeleteLoading}
                 className={`bg-red-600 text-white px-3 lg:px-4 py-2 rounded-lg ${stationDeleteLoading ? "opacity-60 cursor-not-allowed" : ""}`}
               >
-                {stationDeleteLoading ? "Deleting..." : "Yes, Delete"}
+                {stationDeleteLoading ? t("stationWorkflows.delete.deleting") : t("stationWorkflows.delete.confirmButton")}
               </button>
             </div>
           </div>
@@ -3010,15 +3066,15 @@ export default function StationsPage({
 
       {showStockCountAdjustment && (
         <ModalPortal>
-          <div className="fleet-portal-modal-backdrop fixed inset-0 z-[12000] bg-black/60 backdrop-blur-sm flex items-center justify-center p-4">
+          <div dir={isRtl ? "rtl" : "ltr"} className="fleet-portal-modal-backdrop fixed inset-0 z-[12000] bg-black/60 backdrop-blur-sm flex items-center justify-center p-4">
           <div className="bg-white text-black w-[580px] rounded-xl shadow-xl p-6">
             <h2 className="text-xl font-bold mb-4 text-amber-600">
-              Inventory Adjustment Request
+              {t("stationWorkflows.stock.title")}
             </h2>
 
             <div className="grid grid-cols-1 gap-4">
               <div>
-                <label className="font-medium">Select Station</label>
+                <label className="font-medium">{t("stationWorkflows.labels.selectStation")}</label>
                 <select
                   className="border rounded-lg p-2 w-full mt-2"
                   value={stockCountStation?.id || ""}
@@ -3031,7 +3087,7 @@ export default function StationsPage({
                     setStockCountReason("");
                   }}
                 >
-                  <option value="">Select Station</option>
+                  <option value="">{t("stationWorkflows.labels.selectStation")}</option>
                   {stationsWithBalance.map((s) => (
                     <option key={makeTenantEntityKey(s)} value={s.id}>
                       {s.id}
@@ -3043,47 +3099,47 @@ export default function StationsPage({
               {stockCountStation && (
                 <div className="bg-gray-100 p-4 rounded">
                   <p>
-                    <strong>System Balance:</strong>{" "}
+                    <strong>{t("stationWorkflows.stock.systemBalance")}:</strong>{" "}
                     {formatNumber(stockCountStation.currentStock)} L
                   </p>
                 </div>
               )}
 
               <div>
-                <label className="font-medium">Actual Quantity After Count</label>
+                <label className="font-medium">{t("stationWorkflows.stock.actualQuantity")}</label>
                 <input
                   type="number"
                   value={actualStockQty}
                   onChange={(e) => setActualStockQty(e.target.value)}
                   className="border rounded-lg p-2 w-full mt-2"
-                  placeholder="Enter actual quantity in liters"
+                  placeholder={t("stationWorkflows.stock.actualPlaceholder")}
                 />
               </div>
 
               {stockCountStation && actualStockQty !== "" && (
                 <div className="bg-gray-100 p-4 rounded">
                   <p>
-                    <strong>Actual Balance:</strong>{" "}
+                    <strong>{t("stationWorkflows.stock.actualBalance")}:</strong>{" "}
                     {formatNumber(Number(actualStockQty) || 0)} L
                   </p>
                   <p>
-                    <strong>Adjustment Qty:</strong>{" "}
+                    <strong>{t("stationWorkflows.stock.adjustmentQty")}:</strong>{" "}
                     {formatNumber((Number(actualStockQty) || 0) - (Number(stockCountStation.currentStock) || 0))} L
                   </p>
                   <p>
-                    <strong>Final Balance:</strong>{" "}
+                    <strong>{t("stationWorkflows.stock.finalBalance")}:</strong>{" "}
                     {formatNumber(Number(actualStockQty) || 0)} L
                   </p>
                 </div>
               )}
 
               <div>
-                <label className="font-medium">Reason</label>
+                <label className="font-medium">{t("stationWorkflows.labels.reason")}</label>
                 <textarea
                   value={stockCountReason}
                   onChange={(e) => setStockCountReason(e.target.value)}
                   className="border rounded-lg p-2 w-full mt-2 min-h-[80px]"
-                  placeholder="Enter stock count variance reason"
+                  placeholder={t("stationWorkflows.stock.reasonPlaceholder")}
                 />
               </div>
             </div>
@@ -3098,14 +3154,14 @@ export default function StationsPage({
                               }}
                 className="bg-gray-200 px-4 py-2 rounded"
               >
-                Cancel
+                {t("common.cancel")}
               </button>
 
               <button
                 onClick={confirmStockCountAdjustment}
                 className="bg-red-600 text-white px-4 py-2 rounded"
               >
-                Submit for Admin Approval
+                {t("stationWorkflows.stock.submit")}
               </button>
             </div>
           </div>
@@ -3114,14 +3170,14 @@ export default function StationsPage({
       )}
 
       {showConfirm && (
-        <div className="fleet-modal-backdrop fixed inset-0 z-[12000] bg-black/60 flex items-center justify-center">
+        <div dir={isRtl ? "rtl" : "ltr"} className="fleet-modal-backdrop fixed inset-0 z-[12000] bg-black/60 flex items-center justify-center">
           <div className="bg-white text-black w-[560px] rounded-xl shadow-xl p-6">
             <h2 className="text-xl font-bold mb-4 text-red-600">
-              Zero Balance Adjustment
+              {t("stationWorkflows.zero.title")}
             </h2>
 
             <div className="mb-4">
-              <label className="font-medium">Select Station</label>
+              <label className="font-medium">{t("stationWorkflows.labels.selectStation")}</label>
               <select
                 className="border rounded-lg p-2 w-full mt-2"
                 value={selectedStation?.id || ""}
@@ -3132,7 +3188,7 @@ export default function StationsPage({
                   setSelectedStation(station);
                 }}
               >
-                <option value="">Select Station</option>
+                <option value="">{t("stationWorkflows.labels.selectStation")}</option>
                 {stationsWithBalance.map((s) => (
                   <option key={makeTenantEntityKey(s)} value={s.id}>
                     {s.id}
@@ -3144,26 +3200,26 @@ export default function StationsPage({
             {selectedStation && (
               <div className="bg-gray-100 p-4 rounded mb-4">
                 <p>
-                  <strong>Current Balance:</strong>{" "}
+                  <strong>{t("stationWorkflows.zero.currentBalance")}:</strong>{" "}
                   {formatNumber(selectedStation.currentStock)} L
                 </p>
                 <p>
-                  <strong>Adjustment Qty:</strong>{" "}
+                  <strong>{t("stationWorkflows.stock.adjustmentQty")}:</strong>{" "}
                   {formatNumber(-selectedStation.currentStock)} L
                 </p>
                 <p>
-                  <strong>Final Balance:</strong> 0 L
+                  <strong>{t("stationWorkflows.stock.finalBalance")}:</strong> 0 L
                 </p>
               </div>
             )}
 
             <div className="mb-4">
-              <label className="font-medium">Reason</label>
+              <label className="font-medium">{t("stationWorkflows.labels.reason")}</label>
               <textarea
                 value={zeroBalanceReason}
                 onChange={(e) => setZeroBalanceReason(e.target.value)}
                 className="border rounded-lg p-2 w-full mt-2 min-h-[80px]"
-                placeholder="Daily reconciliation after station emptying"
+                placeholder={t("stationWorkflows.zero.defaultReason")}
               />
             </div>
 
@@ -3172,18 +3228,18 @@ export default function StationsPage({
                 onClick={() => {
                   setShowConfirm(false);
                   setSelectedStation(null);
-                  setZeroBalanceReason("Daily reconciliation after station emptying");
+                  setZeroBalanceReason(t("stationWorkflows.zero.defaultReason"));
                 }}
                 className="bg-gray-200 px-4 py-2 rounded"
               >
-                Cancel
+                {t("common.cancel")}
               </button>
 
               <button
                 onClick={proceedToPassword}
                 className="bg-red-600 text-white px-4 py-2 rounded"
               >
-                Yes, Continue
+                {t("common.yesContinue")}
               </button>
             </div>
           </div>
@@ -3196,7 +3252,7 @@ export default function StationsPage({
   );
 }
 
-function FuelLevelIcon({ percentage }) {
+function FuelLevelIcon({ percentage, lowLabel, mediumLabel, goodLabel }) {
   const level = Math.max(0, Math.min(100, Number(percentage) || 0));
 
   const color =
@@ -3243,7 +3299,7 @@ function FuelLevelIcon({ percentage }) {
         </p>
 
         <p className="text-xs text-gray-400">
-          {level < 30 ? "Low" : level < 60 ? "Medium" : "Good"}
+          {level < 30 ? lowLabel : level < 60 ? mediumLabel : goodLabel}
         </p>
       </div>
     </div>

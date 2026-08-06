@@ -16,6 +16,7 @@ import ModalPortal from "../../components/ui/ModalPortal";
 import Th from "../../components/ui/Th";
 import Td from "../../components/ui/Td";
 import Card from "../../components/ui/Card";
+import { useLanguage } from "../../context/LanguageContext";
 
 import {
   cleanCsvCell,
@@ -171,6 +172,36 @@ export default function TeamPage({
   pendingEmployeeTransfers = [],
   companies = [],
 }) {
+  const { language, t } = useLanguage();
+  const isRtl = language === "ar";
+
+  const getTeamStatusLabel = (status) => {
+    const normalized = String(status || "").trim().toLowerCase();
+
+    if (normalized === "on duty" || normalized === "active") {
+      return t("team.status.onDuty");
+    }
+
+    if (normalized === "in vacation" || normalized === "on leave") {
+      return t("team.status.onLeave");
+    }
+
+    if (
+      normalized === "retired / resigned" ||
+      normalized === "retired" ||
+      normalized === "resigned"
+    ) {
+      return t("team.status.retired");
+    }
+
+    return status || "-";
+  };
+
+  const getUserStatusLabel = (status) =>
+    String(status || "").trim().toLowerCase() === "linked"
+      ? t("team.userStatus.linked")
+      : t("team.userStatus.notLinked");
+
   const [localFuelers, setLocalFuelers] = useState([]);
   const [localFuelerUpdates, setLocalFuelerUpdates] = useState({});
   const [inlineFuelerEdit, setInlineFuelerEdit] = useState(null);
@@ -327,7 +358,7 @@ export default function TeamPage({
     const d = new Date(rawDate);
     if (Number.isNaN(d.getTime())) return rawDate || "-";
 
-    return d.toLocaleString("en-GB", {
+    return d.toLocaleString(language === "ar" ? "ar-SA" : "en-GB", {
       year: "numeric",
       month: "2-digit",
       day: "2-digit",
@@ -725,14 +756,14 @@ export default function TeamPage({
       showToast?.(
         "warning",
         currentRole === "Manager" && includesManagerTransfer
-          ? "Manager and Top Management employees can only be transferred by an Officer. Remove them from the selection and try again."
-          : "Your selection includes team members you are not allowed to transfer."
+          ? t("team.validation.managerTransferOfficerOnly")
+          : t("team.validation.selectionNotAllowed")
       );
       return;
     }
 
     if (!selectedTeamFuelers.length) {
-      showToast?.("warning", "Please select at least one team member.");
+      showToast?.("warning", t("team.validation.selectAtLeastOne"));
       return;
     }
 
@@ -750,17 +781,17 @@ export default function TeamPage({
     if (savingBulkTransfer) return;
 
     if (!bulkTransferProjectId) {
-      showToast?.("warning", "Please select destination project.");
+      showToast?.("warning", t("team.validation.selectDestinationProject"));
       return;
     }
 
     if (!selectedTeamFuelers.length) {
-      showToast?.("warning", "Please select at least one team member.");
+      showToast?.("warning", t("team.validation.selectAtLeastOne"));
       return;
     }
 
     if (typeof onCreateBulkEmployeeTransfer !== "function") {
-      showToast?.("warning", "Employee transfer API is not configured.");
+      showToast?.("warning", t("team.validation.transferApiMissing"));
       return;
     }
 
@@ -815,8 +846,14 @@ export default function TeamPage({
       showToast?.(
         "success",
         pendingTransfersCount > 0
-          ? `${appliedTransfersCount} employee transfer(s) completed and ${pendingTransfersCount} sent for approval.`
-          : `${appliedTransfersCount} employee transfer(s) completed successfully to ${targetProjectName}.`
+          ? t("team.messages.bulkTransferMixed", {
+              applied: appliedTransfersCount,
+              pending: pendingTransfersCount,
+            })
+          : t("team.messages.bulkTransferCompleted", {
+              count: appliedTransfersCount,
+              project: targetProjectName,
+            })
       );
 
       setFuelerAuditLog((prev) => [
@@ -1066,12 +1103,12 @@ export default function TeamPage({
       : currentUser?.companyId || selectedProject?.companyId || "";
 
     if (!fuelerId) {
-      notifyUser(typeof showToast !== "undefined" ? showToast : null, inferToastTypeFromMessage("Please enter Team Member ID."), "Please enter Team Member ID.");
+      notifyUser(typeof showToast !== "undefined" ? showToast : null, inferToastTypeFromMessage(t("team.validation.enterMemberId")), t("team.validation.enterMemberId"));
       return;
     }
 
     if (!fuelerName) {
-      notifyUser(typeof showToast !== "undefined" ? showToast : null, inferToastTypeFromMessage("Please enter Team Member Name."), "Please enter Team Member Name.");
+      notifyUser(typeof showToast !== "undefined" ? showToast : null, inferToastTypeFromMessage(t("team.validation.enterMemberName")), t("team.validation.enterMemberName"));
       return;
     }
 
@@ -1084,13 +1121,13 @@ export default function TeamPage({
       notifyUser(
         typeof showToast !== "undefined" ? showToast : null,
         "warning",
-        "Please select Company."
+        t("team.validation.selectCompany")
       );
       return;
     }
 
     if (!platformBootstrapMode && !projectId) {
-      notifyUser(typeof showToast !== "undefined" ? showToast : null, inferToastTypeFromMessage("Please select Project."), "Please select Project.");
+      notifyUser(typeof showToast !== "undefined" ? showToast : null, inferToastTypeFromMessage(t("team.validation.selectProject")), t("team.validation.selectProject"));
       return;
     }
 
@@ -1099,7 +1136,7 @@ export default function TeamPage({
     );
 
     if (idExists) {
-      showToast?.("warning", "Team Member ID already exists. Please use a unique ID.");
+      showToast?.("warning", t("team.validation.duplicateMemberId"));
       return;
     }
 
@@ -1116,7 +1153,7 @@ export default function TeamPage({
           status: mapFrontendEmployeeStatusForBackend(newFueler.status),
         });
 
-        showToast?.("success", "Team member added successfully.");
+        showToast?.("success", t("team.messages.added"));
         closeAddFueler();
         return;
       }
@@ -1148,7 +1185,7 @@ export default function TeamPage({
         },
       ]);
 
-      showToast?.("success", "Team member added locally.");
+      showToast?.("success", t("team.messages.addedLocally"));
       closeAddFueler();
     } catch (error) {
       const message =
@@ -1516,7 +1553,7 @@ export default function TeamPage({
       }
 
       if (!linkedEmployeeId) {
-        showToast?.("warning", "Linked employee record is missing. Please refresh Team data and try again.");
+        showToast?.("warning", t("team.validation.linkedEmployeeMissing"));
         setSavingLinkedUser(false);
         return;
       }
@@ -1830,7 +1867,7 @@ export default function TeamPage({
 
       if (field === "project") {
         if (typeof onCreateEmployeeTransfer !== "function") {
-          throw new Error("Employee transfer API is not configured.");
+          throw new Error(t("team.validation.transferApiMissing"));
         }
 
         const transferResult = await onCreateEmployeeTransfer(fueler, newValue);
@@ -1958,12 +1995,12 @@ export default function TeamPage({
 
   return (
     <div className="bg-gray-900 min-h-screen text-white overflow-y-auto h-screen">
-      <div className="fleet-page-shell w-full max-w-[1920px] mx-auto px-2 sm:px-3 lg:px-4 xl:px-5 2xl:px-8 py-3 sm:py-4 lg:py-5 text-[12px] lg:text-[13px]">
+      <div className={`fleet-page-shell w-full max-w-[1920px] mx-auto px-2 sm:px-3 lg:px-4 xl:px-5 2xl:px-8 py-3 sm:py-4 lg:py-5 text-[12px] lg:text-[13px] ${isRtl ? "text-right" : "text-left"}`} dir={isRtl ? "rtl" : "ltr"}>
         <div className="flex flex-col sm:flex-row justify-between sm:items-start xl:items-center gap-3 mb-5">
           <div>
-            <h1 className="text-xl sm:text-2xl font-bold">Team Management</h1>
+            <h1 className="text-xl sm:text-2xl font-bold">{t("team.title")}</h1>
             <p className="text-gray-400">
-              Team monitoring, equipment refuel KPI and performance tracking
+              {t("team.subtitle")}
             </p>
           </div>
 
@@ -1972,18 +2009,18 @@ export default function TeamPage({
               onClick={() => setShowAddFueler(true)}
               className="bg-yellow-500 hover:bg-yellow-400 text-black px-3 lg:px-4 py-2 rounded-lg font-semibold transition"
             >
-              + Add Team Member
+              {t("team.actions.addMember")}
             </button>
           )}
         </div>
 
         <div className="grid grid-cols-1 sm:grid-cols-2 2xl:grid-cols-4 gap-3 mb-4">
           <Card
-            title={platformBootstrapMode ? "Company Admins" : "Total Team Members"}
+            title={platformBootstrapMode ? t("team.cards.companyAdmins") : t("team.cards.totalMembers")}
             value={formatNumber(platformVisibleTeamFuelers.length)}
           />
           <Card
-            title="On Duty"
+            title={t("team.cards.onDuty")}
             value={formatNumber(
               platformVisibleTeamFuelers.filter(
                 (fueler) =>
@@ -1992,24 +2029,27 @@ export default function TeamPage({
               ).length
             )}
           />
-          <Card title="Equipment Refuel Operations" value={formatNumber(totalOperations)} />
-          <Card title="Assigned Projects" value={formatNumber(assignedProjectsCount)} />
+          <Card title={t("team.cards.refuelOperations")} value={formatNumber(totalOperations)} />
+          <Card title={t("team.cards.assignedProjects")} value={formatNumber(assignedProjectsCount)} />
         </div>
 
         <div className="bg-gray-800 rounded-2xl border border-slate-700/70 shadow-xl overflow-hidden mb-5">
           <div className="p-4 border-b border-slate-700/80 flex justify-between items-center bg-slate-900/70">
             <div>
               <h2 className="text-base sm:text-lg font-extrabold text-amber-300">
-                Team Members List
+                {t("team.list.title")}
               </h2>
               <p className="text-xs text-gray-400 mt-1">
-                Project and status update from dropdowns. Double click Name, Mobile, Email or Job Title to edit inline.
+                {t("team.list.subtitle")}
               </p>
             </div>
 
             <div className="flex flex-wrap items-center gap-3">
               <span className="text-sm text-slate-400">
-                {visibleTeamFuelers.length} shown / {platformVisibleTeamFuelers.length} active team members
+                {t("team.list.shownCount", {
+                  shown: visibleTeamFuelers.length,
+                  total: platformVisibleTeamFuelers.length,
+                })}
               </span>
 
               <div ref={fuelersSettingsRef} className="relative">
@@ -2021,15 +2061,15 @@ export default function TeamPage({
                 </button>
 
                 {showFuelersSettings && (
-                  <div className="absolute right-0 mt-2 w-44 bg-slate-950 border border-slate-700 rounded-xl shadow-2xl z-[9999] overflow-hidden">
+                  <div className={`absolute mt-2 w-44 bg-slate-950 border border-slate-700 rounded-xl shadow-2xl z-[9999] overflow-hidden ${isRtl ? "left-0" : "right-0"}`}>
                     <button
                       onClick={() => {
                         exportFuelersCSV();
                         setShowFuelersSettings(false);
                       }}
-                      className="block w-full cursor-pointer text-left px-4 py-3 hover:bg-slate-800 transition text-white"
+                      className={`block w-full cursor-pointer px-4 py-3 hover:bg-slate-800 transition text-white ${isRtl ? "text-right" : "text-left"}`}
                     >
-                      Export CSV
+                      {t("common.exportCsv")}
                     </button>
 
                     <button
@@ -2037,9 +2077,9 @@ export default function TeamPage({
                         printTable("fuelers-table", "Team Report");
                         setShowFuelersSettings(false);
                       }}
-                      className="block w-full cursor-pointer text-left px-4 py-3 hover:bg-slate-800 transition text-white border-t border-gray-700"
+                      className={`block w-full cursor-pointer px-4 py-3 hover:bg-slate-800 transition text-white border-t border-gray-700 ${isRtl ? "text-right" : "text-left"}`}
                     >
-                      Print
+                      {t("common.print")}
                     </button>
                   </div>
                 )}
@@ -2055,24 +2095,26 @@ export default function TeamPage({
                   onChange={(e) => setTeamSearch(e.target.value)}
                   placeholder={
                     platformBootstrapMode
-                      ? "Search by company, employee ID, name, email..."
-                      : "Search by employee ID, name, mobile, email, job title, project..."
+                      ? t("team.search.platform")
+                      : t("team.search.standard")
                   }
-                  className="w-full sm:w-[420px] rounded-xl border border-slate-700 bg-slate-950 px-3 py-2 text-sm text-white outline-none focus:border-amber-400"
+                  dir={isRtl ? "rtl" : "ltr"} className={`w-full sm:w-[420px] rounded-xl border border-slate-700 bg-slate-950 px-3 py-2 text-sm text-white outline-none focus:border-amber-400 ${isRtl ? "text-right" : "text-left"}`}
                 />
                 {teamSearch && (
                   <button
                     onClick={() => setTeamSearch("")}
                     className="rounded-xl border border-slate-700 px-3 py-2 text-sm text-slate-300 hover:bg-slate-800"
                   >
-                    Clear Search
+                    {t("team.actions.clearSearch")}
                   </button>
                 )}
               </div>
 
               <div className="flex flex-wrap items-center gap-2">
                 <span className="rounded-full border border-slate-700 bg-slate-900 px-3 py-1.5 text-xs font-semibold text-slate-300">
-                  {selectedTeamFuelers.length} selected
+                  {t("team.list.selectedCount", {
+                    count: selectedTeamFuelers.length,
+                  })}
                 </span>
                 {selectedTeamFuelers.length > 0 && (
                   <>
@@ -2080,13 +2122,13 @@ export default function TeamPage({
                       onClick={clearTeamSelection}
                       className="rounded-xl border border-slate-700 px-3 py-2 text-sm text-slate-300 hover:bg-slate-800"
                     >
-                      Clear Selection
+                      {t("team.actions.clearSelection")}
                     </button>
                     <button
                       onClick={openBulkTransferModal}
                       className="rounded-xl bg-amber-500 px-3 py-2 text-sm font-bold text-black hover:bg-amber-400"
                     >
-                      Transfer Selected
+                      {t("team.actions.transferSelected")}
                     </button>
                   </>
                 )}
@@ -2107,19 +2149,19 @@ export default function TeamPage({
                       checked={allVisibleFuelersSelected}
                       onChange={toggleVisibleTeamSelection}
                       className="h-4 w-4 cursor-pointer accent-amber-400"
-                      title="Select all visible team members"
+                      title={t("team.actions.selectAllVisible")}
                     />
                   </Th>
                   <Th>#</Th>
-                  <Th>Team Member ID</Th>
-                  <Th>Name</Th>
-                  {platformBootstrapMode && <Th>Company</Th>}
-                  <Th>Mobile</Th>
-                  <Th>Email</Th>
-                  <Th>Job Title</Th>
-                  <Th>User Status</Th>
-                  <Th>Project Name</Th>
-                  <Th>Work Status</Th>
+                  <Th className={isRtl ? "text-right" : "text-left"}>{t("team.table.memberId")}</Th>
+                  <Th className={isRtl ? "text-right" : "text-left"}>{t("team.table.name")}</Th>
+                  {platformBootstrapMode && <Th className={isRtl ? "text-right" : "text-left"}>{t("team.table.company")}</Th>}
+                  <Th className={isRtl ? "text-right" : "text-left"}>{t("team.table.mobile")}</Th>
+                  <Th className={isRtl ? "text-right" : "text-left"}>{t("team.table.email")}</Th>
+                  <Th className={isRtl ? "text-right" : "text-left"}>{t("team.table.jobTitle")}</Th>
+                  <Th className={isRtl ? "text-right" : "text-left"}>{t("team.table.userStatus")}</Th>
+                  <Th className={isRtl ? "text-right" : "text-left"}>{t("team.table.projectName")}</Th>
+                  <Th className={isRtl ? "text-right" : "text-left"}>{t("team.table.workStatus")}</Th>
                 </tr>
               </thead>
 
@@ -2136,7 +2178,7 @@ export default function TeamPage({
                         checked={isSelected}
                         onChange={() => toggleTeamMemberSelection(fueler)}
                         className="h-4 w-4 cursor-pointer accent-amber-400"
-                        title="Select team member"
+                        title={t("team.actions.selectMember")}
                       />
                     </Td>
                     <Td>{i + 1}</Td>
@@ -2145,7 +2187,7 @@ export default function TeamPage({
                       <button
                         onClick={() => setSelectedFuelerHistory(fueler)}
                         className="text-blue-300 hover:text-yellow-400 font-semibold transition cursor-pointer"
-                        title="Open team member operations history"
+                        title={t("team.history.open")}
                       >
                         {fueler.id}
                       </button>
@@ -2173,7 +2215,7 @@ export default function TeamPage({
                         <span
                           onDoubleClick={() => startInlineFuelerEdit(fueler, "name")}
                           className={hasPermission("team", "edit") ? "cursor-text text-blue-300 hover:text-yellow-400" : ""}
-                          title={hasPermission("team", "edit") ? "Double click to edit" : ""}
+                          title={hasPermission("team", "edit") ? t("team.actions.doubleClickEdit") : ""}
                         >
                           {fueler.name || "-"}
                         </span>
@@ -2215,7 +2257,7 @@ export default function TeamPage({
                         <span
                           onDoubleClick={() => startInlineFuelerEdit(fueler, "mobile")}
                           className={hasPermission("team", "edit") ? "cursor-text text-blue-300 hover:text-yellow-400" : ""}
-                          title={hasPermission("team", "edit") ? "Double click to edit" : ""}
+                          title={hasPermission("team", "edit") ? t("team.actions.doubleClickEdit") : ""}
                         >
                           {fueler.mobile || "-"}
                         </span>
@@ -2244,7 +2286,7 @@ export default function TeamPage({
                         <span
                           onDoubleClick={() => startInlineFuelerEdit(fueler, "email")}
                           className={hasPermission("team", "edit") ? "cursor-text text-blue-300 hover:text-yellow-400" : ""}
-                          title={hasPermission("team", "edit") ? "Double click to edit" : ""}
+                          title={hasPermission("team", "edit") ? t("team.actions.doubleClickEdit") : ""}
                         >
                           {fueler.email || "-"}
                         </span>
@@ -2273,7 +2315,7 @@ export default function TeamPage({
                         <span
                           onDoubleClick={() => startInlineFuelerEdit(fueler, "jobTitle")}
                           className={hasPermission("team", "edit") ? "cursor-text text-blue-300 hover:text-yellow-400" : ""}
-                          title={hasPermission("team", "edit") ? "Double click to edit" : ""}
+                          title={hasPermission("team", "edit") ? t("team.actions.doubleClickEdit") : ""}
                         >
                           {fueler.jobTitle || "Operator"}
                         </span>
@@ -2283,7 +2325,7 @@ export default function TeamPage({
                       {fueler.userStatusUpdating ? (
                         <span className="inline-flex items-center gap-2 rounded-full border border-amber-400/40 bg-amber-500/10 px-2 py-1 text-xs font-semibold text-amber-200">
                           <span className="h-3 w-3 animate-spin rounded-full border-2 border-amber-200 border-t-transparent" />
-                          Updating...
+                          {t("common.saving")}
                         </span>
                       ) : canManageFuelerUserStatus(fueler) ? (
                         <select
@@ -2296,8 +2338,8 @@ export default function TeamPage({
                               : "bg-slate-700/60 text-slate-300 border border-slate-600"
                           }`}
                         >
-                          <option value="Linked">Linked</option>
-                          <option value="Not Linked">Not Linked</option>
+                          <option value="Linked">{t("team.userStatus.linked")}</option>
+                          <option value="Not Linked">{t("team.userStatus.notLinked")}</option>
                         </select>
                       ) : (
                         <span
@@ -2307,13 +2349,13 @@ export default function TeamPage({
                               : "bg-slate-700/60 text-slate-300 border border-slate-600"
                           }`}
                         >
-                          {fueler.userStatus || "Not Linked"}
+                          {getUserStatusLabel(fueler.userStatus)}
                         </span>
                       )}
 
                       {fueler.suggestedUserId && !fueler.linkedUserId && (
                         <div className="mt-1 text-[10px] text-amber-300">
-                          User found by email
+                          {t("team.messages.userFoundByEmail")}
                         </div>
                       )}
                     </Td>
@@ -2326,7 +2368,7 @@ export default function TeamPage({
                             onChange={(e) => requestTeamChange({ fueler, field: "project", newValue: e.target.value })}
                             className="max-w-[220px] rounded-lg border border-slate-700 bg-slate-950 px-2 py-1 text-blue-200 outline-none hover:border-amber-400 cursor-pointer"
                           >
-                            <option value={fueler.projectId || ""}>{fueler.projectName || "Current Project"}</option>
+                            <option value={fueler.projectId || ""}>{fueler.projectName || t("team.project.currentProject")}</option>
                             {filterActiveProjects(transferProjects)
                               .filter((project) => normalizeText(project.backendId || project.id) !== normalizeText(fueler.projectId))
                               .map((project) => (
@@ -2342,8 +2384,11 @@ export default function TeamPage({
                         {fueler.pendingTransfer && (
                           <span className="inline-flex w-fit rounded-full border border-amber-400/40 bg-amber-500/10 px-2 py-0.5 text-[10px] font-semibold text-amber-300">
                             {String(fueler.pendingTransfer.status || "").toUpperCase() === "PARTIALLY_APPROVED"
-                              ? "Transfer in progress"
-                              : `Requested → ${fueler.pendingTransfer.toProjectName || "-"}`}
+                              ? t("team.transfer.inProgress")
+                              : t("team.transfer.requestedTo", {
+                                  project:
+                                    fueler.pendingTransfer.toProjectName || "-",
+                                })}
                           </span>
                         )}
                       </div>
@@ -2352,17 +2397,17 @@ export default function TeamPage({
                     <Td>
                       {hasPermission("team", "edit") ? (
                         <select
-                          value={fueler.status || "On Duty"}
+                          value={getTeamStatusLabel(fueler.status)}
                           onChange={(e) => requestTeamChange({ fueler, field: "status", newValue: e.target.value })}
                           className={`rounded-full px-2 py-1 text-xs font-semibold outline-none cursor-pointer ${getStatusBadgeClass(fueler.status)}`}
                         >
-                          <option value="On Duty">On Duty</option>
-                          <option value="In Vacation">In Vacation</option>
-                          <option value="Retired / Resigned">Retired / Resigned</option>
+                          <option value="On Duty">{t("team.status.onDuty")}</option>
+                          <option value="In Vacation">{t("team.status.onLeave")}</option>
+                          <option value="Retired / Resigned">{t("team.status.retired")}</option>
                         </select>
                       ) : (
                         <span className={`px-2 py-1 rounded-full text-xs font-semibold ${getStatusBadgeClass(fueler.status)}`}>
-                          {fueler.status || "On Duty"}
+                          {getTeamStatusLabel(fueler.status)}
                         </span>
                       )}
                     </Td>
@@ -2375,7 +2420,7 @@ export default function TeamPage({
                 {visibleTeamFuelers.length === 0 && (
                   <tr>
                     <Td colSpan={platformBootstrapMode ? 11 : 10}>
-                      No team members found.
+                      {t("team.list.noneFound")}
                     </Td>
                   </tr>
                 )}
@@ -2388,48 +2433,68 @@ export default function TeamPage({
           <div className="flex justify-between items-start mb-3">
             <div>
               <h2 className="text-base sm:text-lg font-extrabold text-amber-300">
-                Diesel Quantity Per Operator
+                {t("team.chart.title")}
               </h2>
               <p className="text-xs text-gray-400 mt-1">
-                Top 10 operators by equipment fuel consumption from Direct and External Direct Refuel
+                {t("team.chart.subtitle")}
               </p>
             </div>
 
             <div className="text-right text-xs text-gray-400">
-              <div>Total Diesel</div>
+              <div>{t("team.chart.totalDiesel")}</div>
               <div className="text-yellow-300 font-bold text-base">
                 {formatNumber(totalDiesel)} L
               </div>
             </div>
           </div>
 
-          <ChartFrame height={260}>
-            <BarChart data={chartData} margin={{ top: 4, right: 8, left: 0, bottom: 34 }}>
-              <XAxis
-                dataKey="name"
-                stroke="var(--chart-axis-color, #cbd5e1)"
-                interval={0}
-                minTickGap={0}
-                tickMargin={8}
-                height={72}
-                angle={-45}
-                textAnchor="end"
-                tick={{ fontSize: 11, fill: "var(--chart-axis-color, #cbd5e1)" }}
-              />
-              <YAxis
-                stroke="var(--chart-axis-color, #cbd5e1)"
-                tick={{ fontSize: 11, fill: "var(--chart-axis-color, #cbd5e1)" }}
-              />
-              <Tooltip />
-              <Bar dataKey="dieselQty" fill="#60a5fa" name="Diesel Qty" />
-            </BarChart>
-          </ChartFrame>
+          <div dir="ltr">
+            <ChartFrame height={280}>
+              <BarChart
+                data={chartData}
+                margin={{ top: 4, right: 12, left: 0, bottom: 18 }}
+              >
+                <XAxis
+                  dataKey="name"
+                  stroke="var(--chart-axis-color, #cbd5e1)"
+                  interval={0}
+                  minTickGap={0}
+                  tickMargin={10}
+                  height={42}
+                  angle={0}
+                  textAnchor="middle"
+                  tick={{
+                    fontSize: 11,
+                    fill: "var(--chart-axis-color, #cbd5e1)",
+                  }}
+                />
+                <YAxis
+                  stroke="var(--chart-axis-color, #cbd5e1)"
+                  tick={{
+                    fontSize: 11,
+                    fill: "var(--chart-axis-color, #cbd5e1)",
+                  }}
+                />
+                <Tooltip
+                  wrapperStyle={{
+                    direction: isRtl ? "rtl" : "ltr",
+                    textAlign: isRtl ? "right" : "left",
+                  }}
+                />
+                <Bar
+                  dataKey="dieselQty"
+                  fill="#60a5fa"
+                  name={t("team.chart.dieselQty")}
+                />
+              </BarChart>
+            </ChartFrame>
+          </div>
         </div>
 
         {fuelerAuditLog.length > 0 && (
           <div className="bg-gray-950 border border-gray-700 rounded-2xl p-4 mb-5">
             <h3 className="text-yellow-400 font-semibold mb-3">
-              Local Team Audit Log
+              {t("team.audit.title")}
             </h3>
 
             <div className="max-h-44 overflow-auto">
@@ -2447,7 +2512,8 @@ export default function TeamPage({
                     | {log.field}: {" "}
                     <span className="text-red-300">{log.oldValue || "-"}</span>{" "}
                     → <span className="text-green-300">{log.newValue}</span>{" "}
-                    | Reason: {log.reason} | By: {log.editedBy}
+                    | {t("team.audit.reason")}: {log.reason} |{" "}
+                    {t("team.audit.by")}: {log.editedBy}
                   </div>
                 ))}
             </div>
@@ -2456,26 +2522,26 @@ export default function TeamPage({
 
         {linkUserModal && (
           <ModalPortal>
-            <div className="fixed inset-0 bg-black/75 backdrop-blur-sm flex items-center justify-center z-[10000] p-3">
+            <div dir={isRtl ? "rtl" : "ltr"} className="fixed inset-0 bg-black/75 backdrop-blur-sm flex items-center justify-center z-[10000] p-3">
               <div className="bg-gray-900 text-white w-[520px] max-w-[95vw] rounded-3xl shadow-2xl border border-gray-700 overflow-hidden">
                 <div className="p-5 border-b border-gray-700">
                   <h2 className="text-xl font-bold text-yellow-400">
-                    Create Linked System User
+                    {t("team.linkUser.title")}
                   </h2>
                   <p className="text-sm text-gray-400 mt-1">
-                    This will create a user account, activate login access, and link it to this employee.
+                    {t("team.linkUser.subtitle")}
                   </p>
                 </div>
 
                 <div className="p-5 space-y-4">
                   <div className="grid grid-cols-1 sm:grid-cols-2 gap-3 text-sm">
                     <div>
-                      <p className="text-gray-500 text-xs">Employee ID</p>
+                      <p className="text-gray-500 text-xs">{t("team.table.memberId")}</p>
                       <p className="font-semibold text-blue-300">{linkUserModal.fueler.employeeId || linkUserModal.fueler.id}</p>
                     </div>
 
                     <div>
-                      <p className="text-gray-500 text-xs">Employee Name</p>
+                      <p className="text-gray-500 text-xs">{t("team.table.name")}</p>
                       <p className="font-semibold">{linkUserModal.fueler.name || "-"}</p>
                     </div>
 
@@ -2552,7 +2618,7 @@ export default function TeamPage({
                     disabled={savingLinkedUser}
                     className="px-4 py-2 rounded-xl border border-slate-600 text-slate-200 hover:bg-slate-800"
                   >
-                    Cancel
+                    {t("common.cancel")}
                   </button>
 
                   <button
@@ -2576,25 +2642,27 @@ export default function TeamPage({
 
         {bulkTransferModalOpen && (
           <ModalPortal>
-            <div className="fixed inset-0 bg-black/75 backdrop-blur-sm flex items-center justify-center z-[10000] p-3">
-              <div className="w-[min(760px,calc(100vw-2rem))] max-h-[92vh] overflow-hidden rounded-3xl border border-slate-700 bg-slate-950 text-white shadow-2xl">
+            <div dir={isRtl ? "rtl" : "ltr"} className="fixed inset-0 bg-black/75 backdrop-blur-sm flex items-center justify-center z-[10000] p-3">
+              <div className={`w-[min(760px,calc(100vw-2rem))] max-h-[92vh] overflow-hidden rounded-3xl border border-slate-700 bg-slate-950 text-white shadow-2xl ${isRtl ? "text-right" : "text-left"}`}>
                 <div className="border-b border-slate-700 px-6 py-5">
-                  <h2 className="text-xl font-bold text-amber-300">Bulk Team Transfer</h2>
+                  <h2 className="text-xl font-bold text-amber-300">{t("team.bulk.title")}</h2>
                   <p className="mt-1 text-sm text-slate-400">
-                    Submit one transfer action for the selected team members. Current projects will not change until approval is completed.
+                    {t("team.bulk.subtitle")}
                   </p>
                 </div>
 
                 <div className="max-h-[62vh] overflow-auto px-6 py-5 space-y-5">
                   <div>
-                    <label className="mb-2 block text-sm font-semibold text-slate-300">Transfer To Project</label>
+                    <label className="mb-2 block text-sm font-semibold text-slate-300">
+                      {t("team.bulk.transferToProject")}
+                    </label>
                     <select
                       value={bulkTransferProjectId}
                       onChange={(e) => setBulkTransferProjectId(e.target.value)}
                       disabled={savingBulkTransfer}
-                      className="w-full rounded-xl border border-slate-700 bg-slate-900 px-3 py-2 text-white outline-none focus:border-amber-400 disabled:cursor-wait disabled:opacity-60"
+                      className={`w-full rounded-xl border border-slate-700 bg-slate-900 px-3 py-2 text-white outline-none focus:border-amber-400 disabled:cursor-wait disabled:opacity-60 ${isRtl ? "text-right" : "text-left"}`}
                     >
-                      <option value="">Select destination project</option>
+                      <option value="">{t("team.bulk.selectDestinationProject")}</option>
                       {filterActiveProjects(transferProjects).map((project) => (
                         <option key={makeTenantEntityKey(project, project.name)} value={project.backendId || project.id}>
                           {project.name || project.id}
@@ -2605,9 +2673,11 @@ export default function TeamPage({
 
                   <div className="rounded-2xl border border-slate-700 bg-slate-900/70 p-4">
                     <div className="mb-3 flex items-center justify-between gap-3">
-                      <h3 className="font-bold text-slate-100">Selected Team Members</h3>
+                      <h3 className="font-bold text-slate-100">{t("team.bulk.selectedMembers")}</h3>
                       <span className="rounded-full bg-amber-500/15 px-3 py-1 text-xs font-bold text-amber-300">
-                        {selectedTeamFuelers.length} selected
+                        {t("team.list.selectedCount", {
+                    count: selectedTeamFuelers.length,
+                  })}
                       </span>
                     </div>
 
@@ -2616,9 +2686,9 @@ export default function TeamPage({
                         <thead className="sticky top-0 bg-slate-800 text-slate-300">
                           <tr>
                             <Th>#</Th>
-                            <Th>Employee ID</Th>
-                            <Th>Name</Th>
-                            <Th>Current Project</Th>
+                            <Th className={isRtl ? "text-right" : "text-left"}>{t("team.table.memberId")}</Th>
+                            <Th className={isRtl ? "text-right" : "text-left"}>{t("team.table.name")}</Th>
+                            <Th className={isRtl ? "text-right" : "text-left"}>{t("team.bulk.currentProject")}</Th>
                           </tr>
                         </thead>
                         <tbody>
@@ -2636,13 +2706,13 @@ export default function TeamPage({
                   </div>
                 </div>
 
-                <div className="flex justify-end gap-3 border-t border-slate-700 bg-slate-900 px-6 py-4">
+                <div className={`flex gap-3 border-t border-slate-700 bg-slate-900 px-6 py-4 ${isRtl ? "justify-start" : "justify-end"}`}>
                   <button
                     onClick={closeBulkTransferModal}
                     disabled={savingBulkTransfer}
                     className="rounded-xl border border-slate-600 px-4 py-2 text-slate-200 hover:bg-slate-800 disabled:cursor-not-allowed disabled:opacity-50"
                   >
-                    Cancel
+                    {t("common.cancel")}
                   </button>
                   <button
                     onClick={confirmBulkTransfer}
@@ -2652,7 +2722,7 @@ export default function TeamPage({
                     {savingBulkTransfer && (
                       <span className="h-4 w-4 animate-spin rounded-full border-2 border-black/60 border-t-transparent" />
                     )}
-                    {savingBulkTransfer ? "Submitting..." : "Submit Transfer Request"}
+                    {savingBulkTransfer ? t("team.bulk.submitting") : t("team.bulk.submitRequest")}
                   </button>
                 </div>
               </div>
@@ -2661,12 +2731,12 @@ export default function TeamPage({
         )}
 
         {selectedFuelerHistory && (
-          <div className="fixed inset-0 bg-black/75 backdrop-blur-sm flex items-center justify-center z-[10000] p-3">
+          <div dir={isRtl ? "rtl" : "ltr"} className="fixed inset-0 bg-black/75 backdrop-blur-sm flex items-center justify-center z-[10000] p-3">
             <div className="bg-gray-900 text-white w-[1180px] max-h-[92vh] rounded-3xl shadow-2xl border border-gray-700 overflow-hidden">
               <div className="p-3 sm:p-5 border-b border-gray-700 flex justify-between items-start gap-3">
                 <div>
                   <h2 className="text-xl sm:text-2xl font-bold text-yellow-400 italic underline">
-                    Operator Operations History
+                    {t("team.history.title")}
                   </h2>
                   <p className="text-gray-400 mt-1">
                     Team Member: {" "}
@@ -2707,13 +2777,13 @@ export default function TeamPage({
                   <thead className="bg-slate-800 sticky top-0 z-[1] shadow-sm">
                     <tr>
                       <Th>#</Th>
-                      <Th>Date</Th>
-                      <Th>Operation ID</Th>
-                      <Th>Source Station</Th>
-                      <Th>Equipment / Destination</Th>
-                      <Th>Diesel Qty</Th>
-                      <Th>Odometer</Th>
-                      <Th>Type</Th>
+                      <Th className={isRtl ? "text-right" : "text-left"}>{t("team.history.date")}</Th>
+                      <Th className={isRtl ? "text-right" : "text-left"}>{t("team.history.operationId")}</Th>
+                      <Th className={isRtl ? "text-right" : "text-left"}>{t("team.history.source")}</Th>
+                      <Th className={isRtl ? "text-right" : "text-left"}>{t("team.history.destination")}</Th>
+                      <Th className={isRtl ? "text-right" : "text-left"}>{t("team.history.qtyLiters")}</Th>
+                      <Th className={isRtl ? "text-right" : "text-left"}>{t("team.history.odometer")}</Th>
+                      <Th className={isRtl ? "text-right" : "text-left"}>{t("team.history.type")}</Th>
                     </tr>
                   </thead>
 
@@ -2747,7 +2817,7 @@ export default function TeamPage({
 
                     {getFuelerOperations(selectedFuelerHistory).length === 0 && (
                       <tr>
-                        <Td colSpan={8}>No equipment refuel operations found for this fueler.</Td>
+                        <Td colSpan={8}>{t("team.history.none")}</Td>
                       </tr>
                     )}
                   </tbody>
@@ -2758,15 +2828,15 @@ export default function TeamPage({
         )}
 
         {showAddFueler && (
-          <div className="fixed inset-0 bg-black/75 backdrop-blur-sm flex items-center justify-center z-[10000] p-3">
+          <div dir={isRtl ? "rtl" : "ltr"} className="fixed inset-0 bg-black/75 backdrop-blur-sm flex items-center justify-center z-[10000] p-3">
             <div className="w-[620px] max-w-[95vw] rounded-2xl border border-slate-700 bg-slate-950 p-6 text-slate-100 shadow-2xl">
               <div className="flex justify-between items-center mb-5 border-b border-slate-700 pb-3">
                 <div>
-                  <h2 className="text-xl sm:text-2xl font-bold">Add Team Member</h2>
+                  <h2 className="text-xl sm:text-2xl font-bold">{t("team.add.title")}</h2>
                   <p className="text-sm text-slate-400 mt-1">
                     {platformBootstrapMode
-                      ? "Create the first Company Admin employee before the first project"
-                      : "Create an employee record and assign the initial project"}
+                      ? t("team.add.platformSubtitle")
+                      : t("team.add.standardSubtitle")}
                   </p>
                 </div>
 
@@ -2795,9 +2865,9 @@ export default function TeamPage({
                           jobTitle: "Company Admin",
                         })
                       }
-                      className="w-full mt-2 rounded-lg border border-slate-700 bg-slate-900 p-3 text-white outline-none focus:border-amber-400 focus:ring-2 focus:ring-amber-400/20"
+                      dir={isRtl ? "rtl" : "ltr"} className={`w-full mt-2 rounded-lg border border-slate-700 bg-slate-900 p-3 text-white ${isRtl ? "text-right" : "text-left"} outline-none focus:border-amber-400 focus:ring-2 focus:ring-amber-400/20`}
                     >
-                      <option value="">Select Company</option>
+                      <option value="">{t("team.add.selectCompany")}</option>
                       {selectableCompanies.map((company) => (
                         <option key={company.id} value={company.id}>
                           {company.code ? `${company.code} — ` : ""}
@@ -2807,14 +2877,14 @@ export default function TeamPage({
                     </select>
                     {selectedBootstrapCompany && (
                       <p className="mt-2 text-xs text-amber-300">
-                        The first Admin employee will be created without a project.
+                        {t("team.add.firstAdminNotice")}
                       </p>
                     )}
                   </div>
                 )}
 
                 <div>
-                  <label className="font-medium text-slate-300">Team ID</label>
+                  <label className="font-medium text-slate-300">{t("team.table.memberId")}</label>
                   <input
                     type="text"
                     value={newFueler.id}
@@ -2824,7 +2894,7 @@ export default function TeamPage({
                         ? "border-red-500 bg-red-500/10 focus:ring-red-500/30"
                         : "border-slate-700 focus:border-amber-400 focus:ring-amber-400/20"
                     }`}
-                    placeholder="Example: TM-0001"
+                    placeholder={t("team.add.memberIdPlaceholder")}
                   />
                   {teamMemberIdDuplicateError && (
                     <p className="mt-1 text-xs font-semibold text-red-300">
@@ -2834,40 +2904,40 @@ export default function TeamPage({
                 </div>
 
                 <div>
-                  <label className="font-medium text-slate-300">Team Member Name</label>
+                  <label className="font-medium text-slate-300">{t("team.table.name")}</label>
                   <input
                     type="text"
                     value={newFueler.name}
                     onChange={(e) => setNewFueler({ ...newFueler, name: e.target.value })}
-                    className="w-full mt-2 rounded-lg border border-slate-700 bg-slate-900 p-3 text-white placeholder:text-slate-500 outline-none focus:border-amber-400 focus:ring-2 focus:ring-amber-400/20"
-                    placeholder="Enter team member name"
+                    dir={isRtl ? "rtl" : "ltr"} className={`w-full mt-2 rounded-lg border border-slate-700 bg-slate-900 p-3 text-white ${isRtl ? "text-right" : "text-left"} placeholder:text-slate-500 outline-none focus:border-amber-400 focus:ring-2 focus:ring-amber-400/20`}
+                    placeholder={t("team.add.namePlaceholder")}
                   />
                 </div>
 
                 <div>
-                  <label className="font-medium text-slate-300">Mobile Number</label>
+                  <label className="font-medium text-slate-300">{t("team.table.mobile")}</label>
                   <input
                     type="text"
                     value={newFueler.mobile}
                     onChange={(e) => setNewFueler({ ...newFueler, mobile: e.target.value })}
-                    className="w-full mt-2 rounded-lg border border-slate-700 bg-slate-900 p-3 text-white placeholder:text-slate-500 outline-none focus:border-amber-400 focus:ring-2 focus:ring-amber-400/20"
-                    placeholder="Enter mobile number"
+                    dir={isRtl ? "rtl" : "ltr"} className={`w-full mt-2 rounded-lg border border-slate-700 bg-slate-900 p-3 text-white ${isRtl ? "text-right" : "text-left"} placeholder:text-slate-500 outline-none focus:border-amber-400 focus:ring-2 focus:ring-amber-400/20`}
+                    placeholder={t("team.add.mobilePlaceholder")}
                   />
                 </div>
 
                 <div>
-                  <label className="font-medium text-slate-300">Email</label>
+                  <label className="font-medium text-slate-300">{t("team.table.email")}</label>
                   <input
                     type="email"
                     value={newFueler.email}
                     onChange={(e) => setNewFueler({ ...newFueler, email: e.target.value })}
-                    className="w-full mt-2 rounded-lg border border-slate-700 bg-slate-900 p-3 text-white placeholder:text-slate-500 outline-none focus:border-amber-400 focus:ring-2 focus:ring-amber-400/20"
-                    placeholder="Link with Users page email"
+                    dir={isRtl ? "rtl" : "ltr"} className={`w-full mt-2 rounded-lg border border-slate-700 bg-slate-900 p-3 text-white ${isRtl ? "text-right" : "text-left"} placeholder:text-slate-500 outline-none focus:border-amber-400 focus:ring-2 focus:ring-amber-400/20`}
+                    placeholder={t("team.add.emailPlaceholder")}
                   />
                 </div>
 
                 <div>
-                  <label className="font-medium text-slate-300">Job Title</label>
+                  <label className="font-medium text-slate-300">{t("team.table.jobTitle")}</label>
                   <input
                     type="text"
                     value={platformBootstrapMode ? "Company Admin" : newFueler.jobTitle}
@@ -2875,28 +2945,28 @@ export default function TeamPage({
                       setNewFueler({ ...newFueler, jobTitle: e.target.value })
                     }
                     disabled={platformBootstrapMode}
-                    className="w-full mt-2 rounded-lg border border-slate-700 bg-slate-900 p-3 text-white placeholder:text-slate-500 outline-none focus:border-amber-400 focus:ring-2 focus:ring-amber-400/20 disabled:cursor-not-allowed disabled:opacity-70"
-                    placeholder="Example: Operator, Fueler, Mechanic, Manager"
+                    dir={isRtl ? "rtl" : "ltr"} className={`w-full mt-2 rounded-lg border border-slate-700 bg-slate-900 p-3 text-white ${isRtl ? "text-right" : "text-left"} placeholder:text-slate-500 outline-none focus:border-amber-400 focus:ring-2 focus:ring-amber-400/20 disabled:cursor-not-allowed disabled:opacity-70`}
+                    placeholder={t("team.add.jobTitlePlaceholder")}
                   />
                 </div>
 
                 <div>
-                  <label className="font-medium text-slate-300">Status</label>
+                  <label className="font-medium text-slate-300">{t("team.table.workStatus")}</label>
                   <select
                     value={newFueler.status}
                     onChange={(e) => setNewFueler({ ...newFueler, status: e.target.value })}
-                    className="w-full mt-2 rounded-lg border border-slate-700 bg-slate-900 p-3 text-white outline-none focus:border-amber-400 focus:ring-2 focus:ring-amber-400/20"
+                    dir={isRtl ? "rtl" : "ltr"} className={`w-full mt-2 rounded-lg border border-slate-700 bg-slate-900 p-3 text-white ${isRtl ? "text-right" : "text-left"} outline-none focus:border-amber-400 focus:ring-2 focus:ring-amber-400/20`}
                   >
-                    <option value="On Duty">On Duty</option>
-                    <option value="In Vacation">In Vacation</option>
-                    <option value="Retired / Resigned">Retired / Resigned</option>
+                    <option value="On Duty">{t("team.status.onDuty")}</option>
+                    <option value="In Vacation">{t("team.status.onLeave")}</option>
+                    <option value="Retired / Resigned">{t("team.status.retired")}</option>
                   </select>
                 </div>
               </div>
 
               {!platformBootstrapMode && (
                 <div className="mb-5">
-                  <label className="font-medium text-slate-300">Project Name</label>
+                  <label className="font-medium text-slate-300">{t("team.table.projectName")}</label>
                   <select
                     value={newFueler.projectId}
                     onChange={(e) => {
@@ -2911,9 +2981,9 @@ export default function TeamPage({
                         projectName: selectedProject?.name || selectedProject?.id || "",
                       });
                     }}
-                    className="w-full mt-2 rounded-lg border border-slate-700 bg-slate-900 p-3 text-white outline-none focus:border-amber-400 focus:ring-2 focus:ring-amber-400/20"
+                    dir={isRtl ? "rtl" : "ltr"} className={`w-full mt-2 rounded-lg border border-slate-700 bg-slate-900 p-3 text-white ${isRtl ? "text-right" : "text-left"} outline-none focus:border-amber-400 focus:ring-2 focus:ring-amber-400/20`}
                   >
-                    <option value="">Select Project</option>
+                    <option value="">{t("team.project.selectProject")}</option>
                     {filterActiveProjects(transferProjects).map((project) => (
                       <option key={makeTenantEntityKey(project, project.name)} value={project.backendId || project.id}>
                         {project.name || project.id}
@@ -2928,7 +2998,7 @@ export default function TeamPage({
                   onClick={closeAddFueler}
                   className="rounded-lg border border-slate-700 bg-slate-800 px-3 py-2 text-slate-200 hover:bg-slate-800/70 lg:px-4"
                 >
-                  Cancel
+                  {t("common.cancel")}
                 </button>
 
                 <button
@@ -2946,7 +3016,7 @@ export default function TeamPage({
                       : "bg-yellow-500 hover:bg-yellow-400 text-black"
                   }`}
                 >
-                  Save Team Member
+                  {t("team.add.save")}
                 </button>
               </div>
             </div>
@@ -2954,14 +3024,17 @@ export default function TeamPage({
         )}
 
         {pendingTeamChange && (
-          <div className="fixed inset-0 bg-black/75 backdrop-blur-sm flex items-center justify-center z-[10000] p-3">
+          <div dir={isRtl ? "rtl" : "ltr"} className="fixed inset-0 bg-black/75 backdrop-blur-sm flex items-center justify-center z-[10000] p-3">
             <div className="w-[min(520px,calc(100vw-2rem))] rounded-2xl border border-slate-700 bg-slate-950 text-white shadow-2xl overflow-hidden">
               <div className="border-b border-slate-700 px-6 py-5">
                 <h2 className={`text-xl font-bold ${pendingTeamChange.field === "retire" ? "text-red-300" : "text-amber-300"}`}>
-                  {pendingTeamChange.field === "retire" ? "Confirm Employee Retirement" : "Confirm Team Change"}
+                  {pendingTeamChange.field === "retire"
+                    ? t("team.confirm.retirementTitle")
+                    : t("team.confirm.changeTitle")}
                 </h2>
                 <p className="mt-1 text-sm text-slate-400">
-                  {pendingTeamChange.fueler?.id} - {pendingTeamChange.fueler?.name || "Team Member"}
+                  {pendingTeamChange.fueler?.id} -{" "}
+                  {pendingTeamChange.fueler?.name || t("team.member")}
                 </p>
               </div>
 
@@ -2970,18 +3043,18 @@ export default function TeamPage({
 
                 <div className="grid grid-cols-1 sm:grid-cols-2 gap-3 text-sm">
                   <div className="rounded-xl border border-red-400/30 bg-red-500/10 p-3">
-                    <div className="text-xs text-red-200">Current</div>
+                    <div className="text-xs text-red-200">{t("team.confirm.current")}</div>
                     <div className="mt-1 font-bold text-red-100">{pendingTeamChange.oldDisplayValue || "-"}</div>
                   </div>
                   <div className="rounded-xl border border-emerald-400/30 bg-emerald-500/10 p-3">
-                    <div className="text-xs text-emerald-200">New</div>
+                    <div className="text-xs text-emerald-200">{t("team.confirm.new")}</div>
                     <div className="mt-1 font-bold text-emerald-100">{pendingTeamChange.newDisplayValue || "-"}</div>
                   </div>
                 </div>
 
                 {pendingTeamChange.field === "project" && (
                   <p className="rounded-xl border border-amber-400/30 bg-amber-500/10 p-3 text-xs text-amber-100">
-                    The transfer takes effect on the final approval date. Historical operations remain unchanged.
+                    {t("team.confirm.transferNotice")}
                   </p>
                 )}
               </div>
@@ -2992,7 +3065,7 @@ export default function TeamPage({
                   disabled={savingTeamChange}
                   className="rounded-xl border border-slate-600 px-4 py-2 text-slate-200 hover:bg-slate-800 disabled:cursor-not-allowed disabled:opacity-50"
                 >
-                  Cancel
+                  {t("common.cancel")}
                 </button>
                 <button
                   onClick={saveTeamChange}
@@ -3003,10 +3076,10 @@ export default function TeamPage({
                     <span className="h-4 w-4 animate-spin rounded-full border-2 border-black/60 border-t-transparent" />
                   )}
                   {savingTeamChange
-                    ? "Saving..."
+                    ? t("common.saving")
                     : pendingTeamChange.field === "retire"
-                    ? "Retire Employee"
-                    : "Confirm Change"}
+                    ? t("team.confirm.retireEmployee")
+                    : t("team.confirm.confirmChange")}
                 </button>
               </div>
             </div>

@@ -16,6 +16,7 @@ import ModalPortal from "../../components/ui/ModalPortal";
 import Th from "../../components/ui/Th";
 import Td from "../../components/ui/Td";
 import Card from "../../components/ui/Card";
+import { useLanguage } from "../../context/LanguageContext";
 
 import {
   formatNumber,
@@ -186,10 +187,13 @@ function GenericModal({
   saveDisabled = false,
   children,
 }) {
+  const { language, t } = useLanguage();
+  const isRtl = language === "ar";
+
   return (
     <ModalPortal>
-      <div className="fleet-portal-modal-backdrop fixed inset-0 bg-black/60 flex items-center justify-center p-4">
-        <div className="fleet-portal-modal-panel w-[min(650px,calc(100vw-2rem))] max-h-[92vh] overflow-y-auto rounded-xl border border-slate-700 bg-slate-950 p-6 text-slate-100 shadow-2xl">
+      <div className="fleet-portal-modal-backdrop fixed inset-0 bg-black/60 flex items-center justify-center p-4" dir={isRtl ? "rtl" : "ltr"}>
+        <div className={`fleet-portal-modal-panel w-[min(650px,calc(100vw-2rem))] max-h-[92vh] overflow-y-auto rounded-xl border border-slate-700 bg-slate-950 p-6 text-slate-100 shadow-2xl ${isRtl ? "text-right" : "text-left"}`}>
           <div className="flex justify-between items-center mb-6 border-b border-slate-700 pb-3">
             <h2 className="text-xl sm:text-2xl font-bold">{title}</h2>
             <button
@@ -207,7 +211,7 @@ function GenericModal({
               onClick={closeForm}
               className="rounded-lg border border-slate-700 bg-slate-800 px-3 py-2 text-slate-200 hover:bg-slate-800/70 lg:px-4"
             >
-              Cancel
+              {t("common.cancel")}
             </button>
             <button
               onClick={onSave}
@@ -244,6 +248,35 @@ export default function AssetsPage({
   onAssetTransferCreated = () => {},
   runWithActionLoading = async (_label, actionFn) => actionFn(),
 }) {
+  const { language, t } = useLanguage();
+  const isRtl = language === "ar";
+
+  const getAssetStatusLabel = (status) => {
+    const normalized = String(status || "").trim().toLowerCase();
+    if (normalized === "active") return t("assets.status.active");
+    if (normalized === "inactive") return t("assets.status.inactive");
+    if (normalized === "retired") return t("assets.status.retired");
+    return status || "-";
+  };
+
+  const renderAssetStatusBadge = (status) => {
+    const normalized = String(status || "").trim().toLowerCase();
+
+    const statusClass =
+      normalized === "active"
+        ? "border-emerald-500/50 bg-emerald-500/15 text-emerald-300"
+        : normalized === "inactive"
+        ? "border-red-500/50 bg-red-500/15 text-red-300"
+        : "border-slate-500/50 bg-slate-500/15 text-slate-300";
+
+    return (
+      <span
+        className={`inline-flex items-center justify-center rounded-full border px-3 py-1 text-xs font-bold ${statusClass}`}
+      >
+        {getAssetStatusLabel(status)}
+      </span>
+    );
+  };
 
 
   
@@ -511,12 +544,12 @@ export default function AssetsPage({
 
   const saveNewAsset = async () => {
     if (!hasPermission("assets", "add")) {
-      showToast?.("warning", "Read-only access: you cannot add assets.");
+      showToast?.("warning", t("assets.messages.readOnlyAdd"));
       return;
     }
 
     if (!newAsset.id.trim()) {
-      showToast?.("warning", "Please enter Asset ID.");
+      showToast?.("warning", t("assets.validation.enterAssetId"));
       return;
     }
 
@@ -526,17 +559,17 @@ export default function AssetsPage({
     }
 
     if (!newAsset.project) {
-      showToast?.("warning", "Please select project.");
+      showToast?.("warning", t("assets.validation.selectProject"));
       return;
     }
 
     if (!newAsset.type.trim()) {
-      showToast?.("warning", "Please select or add Asset Type.");
+      showToast?.("warning", t("assets.validation.selectAssetType"));
       return;
     }
 
     if (!newAsset.category.trim()) {
-      showToast?.("warning", "Please select or add Category.");
+      showToast?.("warning", t("assets.validation.selectCategory"));
       return;
     }
 
@@ -554,7 +587,7 @@ export default function AssetsPage({
       "";
 
     if (!companyId || isPlatformContextValue(companyId)) {
-      showToast?.("warning", "Cannot create asset without a valid company.");
+      showToast?.("warning", t("assets.validation.validCompanyRequired"));
       return;
     }
 
@@ -575,12 +608,12 @@ export default function AssetsPage({
       const createdAsset = await createAssetRecord(payload);
       replaceAssetInState(createdAsset);
       trackActivity?.("Add Asset", "assets", `${payload.assetId} added from backend.`);
-      showToast?.("success", "Asset added successfully.");
+      showToast?.("success", t("assets.messages.assetAdded"));
       closeAddAsset();
     } catch (error) {
       showToast?.(
         "warning",
-        error?.response?.data?.message || error?.message || "Failed to add asset."
+        error?.response?.data?.message || error?.message || t("assets.messages.assetAddFailed")
       );
     }
   };
@@ -722,12 +755,12 @@ export default function AssetsPage({
 
   const openBulkTransferModal = () => {
     if (!canCurrentUserCreateAssetTransfer()) {
-      showToast?.("warning", "Only Officer or Manager can request asset transfer.");
+      showToast?.("warning", t("assetWorkflows.messages.transferRoleRequired"));
       return;
     }
 
     if (!selectedAssets.length) {
-      showToast?.("warning", "Please select at least one asset.");
+      showToast?.("warning", t("assetWorkflows.validation.selectAtLeastOne"));
       return;
     }
 
@@ -736,7 +769,7 @@ export default function AssetsPage({
     );
 
     if (invalidAsset) {
-      showToast?.("warning", "Only active assets can be transferred.");
+      showToast?.("warning", t("assetWorkflows.validation.activeAssetsOnly"));
       return;
     }
 
@@ -754,7 +787,7 @@ export default function AssetsPage({
     if (savingBulkTransfer) return;
 
     if (!bulkTransferProjectValue) {
-      showToast?.("warning", "Please select destination project.");
+      showToast?.("warning", t("assetWorkflows.validation.selectDestinationProject"));
       return;
     }
 
@@ -764,12 +797,12 @@ export default function AssetsPage({
       .filter(Boolean);
 
     if (!toProjectId) {
-      showToast?.("warning", "Please select a valid project.");
+      showToast?.("warning", t("assetWorkflows.validation.selectValidProject"));
       return;
     }
 
     if (!backendAssetIds.length) {
-      showToast?.("warning", "Selected assets are not linked to backend.");
+      showToast?.("warning", t("assetWorkflows.validation.assetsNotLinked"));
       return;
     }
 
@@ -798,7 +831,9 @@ export default function AssetsPage({
 
       showToast?.(
         "success",
-        `Bulk transfer request submitted for ${backendAssetIds.length} asset(s).`
+        t("assetWorkflows.messages.bulkTransferSubmitted", {
+          count: backendAssetIds.length,
+        })
       );
 
       clearAssetSelection();
@@ -808,7 +843,7 @@ export default function AssetsPage({
         "warning",
         error?.response?.data?.message ||
           error?.message ||
-          "Failed to submit bulk asset transfer request."
+          t("assetWorkflows.messages.bulkTransferFailed")
       );
     } finally {
       setSavingBulkTransfer(false);
@@ -870,7 +905,7 @@ export default function AssetsPage({
 
   const changeAssetStatus = (asset) => {
     if (!hasPermission("assets", "edit")) {
-      showToast?.("warning", "Read-only access: you cannot change asset status.");
+      showToast?.("warning", t("assetWorkflows.messages.readOnlyStatus"));
       return;
     }
 
@@ -898,7 +933,7 @@ export default function AssetsPage({
           status: newStatus,
         },
       }));
-      showToast?.("success", `Asset status changed to ${newStatus}.`);
+      showToast?.("success", t("assetWorkflows.messages.statusChanged", { status: getAssetStatusLabel(newStatus) }));
       setAssetStatusConfirm(null);
       return;
     }
@@ -910,11 +945,11 @@ export default function AssetsPage({
 
       replaceAssetInState(updatedAsset);
       trackActivity?.("Change Asset Status", "assets", `${asset.id} status changed to ${newStatus}.`);
-      showToast?.("success", `Asset status changed to ${newStatus}.`);
+      showToast?.("success", t("assetWorkflows.messages.statusChanged", { status: getAssetStatusLabel(newStatus) }));
     } catch (error) {
       showToast?.(
         "warning",
-        error?.response?.data?.message || error?.message || "Failed to change asset status."
+        error?.response?.data?.message || error?.message || t("assetWorkflows.messages.statusChangeFailed")
       );
     } finally {
       setAssetStatusConfirm(null);
@@ -926,7 +961,7 @@ export default function AssetsPage({
 
   const openProjectChange = (asset) => {
     if (!canCurrentUserCreateAssetTransfer()) {
-      showToast?.("warning", "Only Officer or Manager can request asset transfer.");
+      showToast?.("warning", t("assetWorkflows.messages.transferRoleRequired"));
       return;
     }
 
@@ -943,8 +978,8 @@ export default function AssetsPage({
   const proceedProjectConfirm = () => {
     if (!selectedProjectValue) {
       showToast
-        ? showToast("warning", "Please select a project.")
-        : notifyUser(typeof showToast !== "undefined" ? showToast : null, inferToastTypeFromMessage("Please select a project."), "Please select a project.");
+        ? showToast("warning", t("assetWorkflows.validation.selectProject"))
+        : notifyUser(typeof showToast !== "undefined" ? showToast : null, inferToastTypeFromMessage(t("assetWorkflows.validation.selectProject")), t("assetWorkflows.validation.selectProject"));
       return;
     }
 
@@ -958,7 +993,7 @@ export default function AssetsPage({
 
   const confirmProjectUpdate = async () => {
     if (!canCurrentUserCreateAssetTransfer()) {
-      showToast?.("warning", "Only Officer or Manager can request asset transfer.");
+      showToast?.("warning", t("assetWorkflows.messages.transferRoleRequired"));
       resetProjectWorkflow();
       return;
     }
@@ -967,13 +1002,13 @@ export default function AssetsPage({
     const toProjectId = resolveProjectId(selectedProjectValue);
 
     if (!backendAssetId) {
-      showToast?.("warning", "This asset is not linked to backend yet.");
+      showToast?.("warning", t("assetWorkflows.validation.assetNotLinked"));
       resetProjectWorkflow();
       return;
     }
 
     if (!toProjectId) {
-      showToast?.("warning", "Please select a valid project.");
+      showToast?.("warning", t("assetWorkflows.validation.selectValidProject"));
       return;
     }
 
@@ -996,12 +1031,14 @@ export default function AssetsPage({
         );
         showToast?.(
           "success",
-          `Asset transferred successfully to ${selectedProjectValue}.`
+          t("assetWorkflows.messages.assetTransferred", {
+            project: selectedProjectValue,
+          })
         );
       } else {
         showToast?.(
           "warning",
-          "Asset transfer request submitted for project manager approval."
+          t("assetWorkflows.messages.transferPendingApproval")
         );
       }
       trackActivity?.(
@@ -1015,7 +1052,7 @@ export default function AssetsPage({
     } catch (error) {
       showToast?.(
         "warning",
-        error?.response?.data?.message || error?.message || "Failed to submit asset transfer request."
+        error?.response?.data?.message || error?.message || t("assetWorkflows.messages.transferFailed")
       );
     }
   };
@@ -1023,8 +1060,8 @@ export default function AssetsPage({
   const proceedDeleteConfirm = () => {
     if (!deleteReason) {
       showToast
-        ? showToast("warning", "Please enter deletion reason.")
-        : notifyUser(typeof showToast !== "undefined" ? showToast : null, inferToastTypeFromMessage("Please enter deletion reason."), "Please enter deletion reason.");
+        ? showToast("warning", t("assetWorkflows.validation.enterDeletionReason"))
+        : notifyUser(typeof showToast !== "undefined" ? showToast : null, inferToastTypeFromMessage(t("assetWorkflows.validation.enterDeletionReason")), t("assetWorkflows.validation.enterDeletionReason"));
       return;
     }
 
@@ -1042,7 +1079,7 @@ export default function AssetsPage({
     const canDeleteDirectly = ["Admin", "PlatformAdmin"].includes(currentRole);
 
     if (!backendAssetId) {
-      showToast?.("warning", "This asset is not linked to backend yet.");
+      showToast?.("warning", t("assetWorkflows.validation.assetNotLinked"));
       return;
     }
 
@@ -1052,7 +1089,7 @@ export default function AssetsPage({
     if (canDeleteDirectly) {
       try {
         const deletedAsset = await runWithActionLoading(
-          "Deleting asset...",
+          t("assetWorkflows.loading.deletingAsset"),
           async () => deleteAssetRecord(backendAssetId)
         );
 
@@ -1070,23 +1107,23 @@ export default function AssetsPage({
         setSelectedAsset(null);
         setDeleteReason("");
 
-        showToast?.("success", "Asset deleted successfully.");
+        showToast?.("success", t("assetWorkflows.messages.assetDeleted"));
       } catch (error) {
         showToast?.(
           "warning",
-          error?.response?.data?.message || error?.message || "Failed to delete asset."
+          error?.response?.data?.message || error?.message || t("assetWorkflows.messages.assetDeleteFailed")
         );
       }
       return;
     }
 
     if (!isOfficerUser(currentUser)) {
-      showToast?.("warning", "Only Admin can delete directly. Officer can submit a delete request.");
+      showToast?.("warning", t("assetWorkflows.messages.deleteRoleRequired"));
       setShowDeleteConfirm(false);
       return;
     }
 
-    await runWithActionLoading("Submitting delete request...", async () => {
+    await runWithActionLoading(t("assetWorkflows.loading.submittingDelete"), async () => {
       submitApprovalRequest({
         type: "master_data_change",
         module: "assets",
@@ -1121,9 +1158,9 @@ export default function AssetsPage({
     showToast
       ? showToast(
           "success",
-          "Asset deletion request submitted for Admin approval."
+          t("assetWorkflows.messages.deletePendingApproval")
         )
-      : notifyUser(typeof showToast !== "undefined" ? showToast : null, inferToastTypeFromMessage("Asset deletion request submitted for Admin approval."), "Asset deletion request submitted for Admin approval.");
+      : notifyUser(typeof showToast !== "undefined" ? showToast : null, inferToastTypeFromMessage(t("assetWorkflows.messages.deletePendingApproval")), t("assetWorkflows.messages.deletePendingApproval"));
   };
 
   const proceedOdometerConfirm = () => {
@@ -1132,29 +1169,29 @@ export default function AssetsPage({
 
     if (oldOdometerBeforeReset === "" || Number.isNaN(oldReading) || oldReading < 0) {
       showToast
-        ? showToast("warning", "Please enter valid old odometer before reset.")
-        : notifyUser(typeof showToast !== "undefined" ? showToast : null, inferToastTypeFromMessage("Please enter valid old odometer before reset."), "Please enter valid old odometer before reset.");
+        ? showToast("warning", t("assetWorkflows.validation.validOldOdometer"))
+        : notifyUser(typeof showToast !== "undefined" ? showToast : null, inferToastTypeFromMessage(t("assetWorkflows.validation.validOldOdometer")), t("assetWorkflows.validation.validOldOdometer"));
       return;
     }
 
     if (newOdometer === "" || Number.isNaN(newReading) || newReading < 0) {
       showToast
-        ? showToast("warning", "Please enter valid new odometer after reset.")
-        : notifyUser(typeof showToast !== "undefined" ? showToast : null, inferToastTypeFromMessage("Please enter valid new odometer after reset."), "Please enter valid new odometer after reset.");
+        ? showToast("warning", t("assetWorkflows.validation.validNewOdometer"))
+        : notifyUser(typeof showToast !== "undefined" ? showToast : null, inferToastTypeFromMessage(t("assetWorkflows.validation.validNewOdometer")), t("assetWorkflows.validation.validNewOdometer"));
       return;
     }
 
     if (!odometerEffectiveDate) {
       showToast
-        ? showToast("warning", "Please select odometer reset effective date.")
-        : notifyUser(typeof showToast !== "undefined" ? showToast : null, inferToastTypeFromMessage("Please select odometer reset effective date."), "Please select odometer reset effective date.");
+        ? showToast("warning", t("assetWorkflows.validation.selectEffectiveDate"))
+        : notifyUser(typeof showToast !== "undefined" ? showToast : null, inferToastTypeFromMessage(t("assetWorkflows.validation.selectEffectiveDate")), t("assetWorkflows.validation.selectEffectiveDate"));
       return;
     }
 
     if (!odometerReason) {
       showToast
-        ? showToast("warning", "Please enter reset reason.")
-        : notifyUser(typeof showToast !== "undefined" ? showToast : null, inferToastTypeFromMessage("Please enter reset reason."), "Please enter reset reason.");
+        ? showToast("warning", t("assetWorkflows.validation.enterResetReason"))
+        : notifyUser(typeof showToast !== "undefined" ? showToast : null, inferToastTypeFromMessage(t("assetWorkflows.validation.enterResetReason")), t("assetWorkflows.validation.enterResetReason"));
       return;
     }
 
@@ -1166,7 +1203,7 @@ export default function AssetsPage({
     confirmOdometerRequest();
   };
 
-// Odometer Reset Rules:
+// {t("assetWorkflows.odometer.title")} Rules:
 // Officer -> Request to Project Manager
 // Manager/Admin -> Direct execute after confirmation
 
@@ -1176,17 +1213,17 @@ export default function AssetsPage({
     const canResetDirectly = ["Admin", "Manager", "PlatformAdmin"].includes(currentRole);
     const canSubmitOdometerRequest = isOfficerUser(currentUser) || canResetDirectly;
 
-    // Odometer Reset business rule:
+    // {t("assetWorkflows.odometer.title")} business rule:
     // Officer -> approval request to Project Manager.
     // Manager/Admin/PlatformAdmin -> direct execution after confirmation.
     if (!canSubmitOdometerRequest) {
-      showToast?.("warning", "Read-only access: you cannot request odometer reset.");
+      showToast?.("warning", t("assetWorkflows.messages.readOnlyOdometerReset"));
       return;
     }
 
     const backendAssetId = getBackendAssetId(odometerTargetAsset);
     if (!backendAssetId) {
-      showToast?.("warning", "This asset is not linked to backend yet.");
+      showToast?.("warning", t("assetWorkflows.validation.assetNotLinked"));
       return;
     }
 
@@ -1270,7 +1307,7 @@ export default function AssetsPage({
 
     if (canResetDirectly) {
       try {
-        const resetResult = await runWithActionLoading("Resetting odometer...", async () =>
+        const resetResult = await runWithActionLoading(t("assetWorkflows.loading.resettingOdometer"), async () =>
           resetAssetOdometer(backendAssetId, {
             newOdometer: newReading,
             reason: odometerReason,
@@ -1316,11 +1353,11 @@ export default function AssetsPage({
         closeOdometerResetUi();
 
 
-        showToast?.("success", "Odometer reset completed successfully.");
+        showToast?.("success", t("assetWorkflows.messages.odometerResetCompleted"));
       } catch (error) {
         showToast?.(
           "warning",
-          error?.response?.data?.message || error?.message || "Failed to reset odometer."
+          error?.response?.data?.message || error?.message || t("assetWorkflows.messages.odometerResetFailed")
         );
       }
 
@@ -1332,7 +1369,7 @@ export default function AssetsPage({
       setAssetOdometerHistory((prev) => [...(prev || []), odometerHistoryRecord]);
     }
 
-    await runWithActionLoading("Submitting odometer reset request...", async () => {
+    await runWithActionLoading(t("assetWorkflows.loading.submittingOdometerReset"), async () => {
       submitApprovalRequest({
         type: "master_data_change",
         module: "assets",
@@ -1349,7 +1386,7 @@ export default function AssetsPage({
           changedFields: [
             {
               field: "currentOdometer",
-              label: "Odometer Reset",
+              label: t("assetWorkflows.odometer.title"),
               oldValue: oldReading,
               newValue: newReading,
               sensitive: true,
@@ -1364,20 +1401,20 @@ export default function AssetsPage({
     showToast
       ? showToast(
           "success",
-          "Odometer reset request submitted for project manager approval."
+          t("assetWorkflows.messages.odometerResetPendingApproval")
         )
-      : notifyUser(typeof showToast !== "undefined" ? showToast : null, inferToastTypeFromMessage("Odometer reset request submitted for project manager approval."), "Odometer reset request submitted for project manager approval.");
+      : notifyUser(typeof showToast !== "undefined" ? showToast : null, inferToastTypeFromMessage(t("assetWorkflows.messages.odometerResetPendingApproval")), t("assetWorkflows.messages.odometerResetPendingApproval"));
   };
 
   const exportAssetsToCSV = () => {
   const csvHeaders = [
-    "Asset ID",
-    "Project",
-    "Asset Type",
-    "Category",
-    "Current Odometer",
-    "Fuel Tank Capacity",
-    "Status",
+    t("assets.table.assetId"),
+    t("assets.table.project"),
+    t("assets.table.assetType"),
+    t("assets.table.category"),
+    t("assets.table.currentOdometer"),
+    t("assets.table.fuelTankCapacity"),
+    t("assets.table.status"),
   ];
 
   const csvRows = filteredAssets.map((asset) => [
@@ -1410,14 +1447,14 @@ export default function AssetsPage({
   URL.revokeObjectURL(url);
 
   showToast
-    ? showToast("success", "Assets data exported successfully.")
-    : notifyUser(typeof showToast !== "undefined" ? showToast : null, inferToastTypeFromMessage("Assets data exported successfully."), "Assets data exported successfully.");
+    ? showToast("success", t("assetWorkflows.messages.csvExported"))
+    : notifyUser(typeof showToast !== "undefined" ? showToast : null, inferToastTypeFromMessage(t("assetWorkflows.messages.csvExported")), t("assetWorkflows.messages.csvExported"));
 };
 
   const exportAssetsToPDF = () => {
   showToast
-    ? showToast("warning", "PDF export will be added in the next step.")
-    : notifyUser(typeof showToast !== "undefined" ? showToast : null, inferToastTypeFromMessage("PDF export will be added in the next step."), "PDF export will be added in the next step.");
+    ? showToast("warning", t("assetWorkflows.messages.pdfComingSoon"))
+    : notifyUser(typeof showToast !== "undefined" ? showToast : null, inferToastTypeFromMessage(t("assetWorkflows.messages.pdfComingSoon")), t("assetWorkflows.messages.pdfComingSoon"));
 };
 
   const escapePrintValue = (value) => {
@@ -1430,7 +1467,7 @@ export default function AssetsPage({
 };
 
   const printAssetsReport = () => {
-  const reportDate = new Date().toLocaleString();
+  const reportDate = new Date().toLocaleString(language === "ar" ? "ar-SA" : "en-GB");
 
   const tableRowsHtml = filteredAssets
     .map(
@@ -1443,7 +1480,7 @@ export default function AssetsPage({
           <td>${escapePrintValue(asset.category)}</td>
           <td>${escapePrintValue(formatNumber(getEffectiveAssetOdometer(asset)))}</td>
           <td>${escapePrintValue(formatNumber(asset.fuelTank))} L</td>
-          <td>${escapePrintValue(asset.status)}</td>
+          <td>${escapePrintValue(getAssetStatusLabel(asset.status))}</td>
         </tr>
       `
     )
@@ -1454,9 +1491,9 @@ export default function AssetsPage({
   if (!printWindow) return;
 
   printWindow.document.write(`
-    <html>
+    <html dir="${language === "ar" ? "rtl" : "ltr"}">
       <head>
-        <title>Assets Report</title>
+        <title>${escapePrintValue(t("assetWorkflows.print.reportTitle"))}</title>
         <style>
           @page {
             size: A4 landscape;
@@ -1515,23 +1552,23 @@ export default function AssetsPage({
       </head>
 
       <body>
-        <h1>Assets Report</h1>
+        <h1>${escapePrintValue(t("assetWorkflows.print.reportTitle"))}</h1>
         <div class="meta">
           Generated at: ${reportDate} | Total Assets: ${filteredAssets.length}
         </div>
 
-        <h2>Assets List</h2>
+        <h2>${escapePrintValue(t("assets.list.title"))}</h2>
         <table>
           <thead>
             <tr>
               <th>#</th>
-              <th>Asset ID</th>
-              <th>Project</th>
-              <th>Asset Type</th>
-              <th>Category</th>
-              <th>Current Odometer</th>
-              <th>Fuel Tank Capacity</th>
-              <th>Status</th>
+              <th>${escapePrintValue(t("assets.table.assetId"))}</th>
+              <th>${escapePrintValue(t("assets.table.project"))}</th>
+              <th>${escapePrintValue(t("assets.table.assetType"))}</th>
+              <th>${escapePrintValue(t("assets.table.category"))}</th>
+              <th>${escapePrintValue(t("assets.table.currentOdometer"))}</th>
+              <th>${escapePrintValue(t("assets.table.fuelTankCapacity"))}</th>
+              <th>${escapePrintValue(t("assets.table.status"))}</th>
             </tr>
           </thead>
           <tbody>
@@ -1573,20 +1610,21 @@ export default function AssetsPage({
         }
 
       `}</style>
-      <div className="fleet-page-shell w-full max-w-[1920px] mx-auto px-2 sm:px-3 lg:px-4 xl:px-5 2xl:px-8 py-3 sm:py-4 lg:py-5 text-[12px] lg:text-[13px]">
+      <div className={`fleet-page-shell w-full max-w-[1920px] mx-auto px-2 sm:px-3 lg:px-4 xl:px-5 2xl:px-8 py-3 sm:py-4 lg:py-5 text-[12px] lg:text-[13px] ${isRtl ? "text-right" : "text-left"}`} dir={isRtl ? "rtl" : "ltr"}>
       <div className="flex justify-between items-center mb-4 gap-4">
   <div>
-    <h1 className="text-xl sm:text-2xl font-bold">Assets</h1>
-    <p className="text-gray-400">Fleet master data</p>
+    <h1 className="text-xl sm:text-2xl font-bold">{t("assets.title")}</h1>
+    <p className="text-gray-400">{t("assets.subtitle")}</p>
   </div>
 
   <div className="flex flex-wrap items-center gap-3">
     <input
       type="text"
-      placeholder="Search by asset ID, type, project, status..."
+      placeholder={t("assets.searchPlaceholder")}
       value={searchTerm}
       onChange={(e) => setSearchTerm(e.target.value)}
-      className="bg-gray-800 border border-gray-700 rounded-xl px-4 py-3 text-white w-[380px] focus:outline-none focus:border-yellow-400"
+      dir={isRtl ? "rtl" : "ltr"}
+      className={`bg-gray-800 border border-gray-700 rounded-xl px-4 py-3 text-white w-[380px] focus:outline-none focus:border-yellow-400 ${isRtl ? "text-right" : "text-left"}`}
     />
 
     <div ref={assetSettingsRef} className="relative settings-layer-safe">
@@ -1608,7 +1646,7 @@ export default function AssetsPage({
               className="flex items-center gap-3 w-full cursor-pointer text-left px-5 py-4 hover:bg-slate-800 transition text-white"
             >
               <span className="text-green-400 text-lg">＋</span>
-              Add Asset
+              {t("assets.actions.addAsset")}
             </button>
           )}
 
@@ -1621,7 +1659,7 @@ export default function AssetsPage({
             className="flex items-center gap-3 w-full cursor-pointer text-left px-5 py-4 hover:bg-slate-800 transition text-white border-t border-gray-700"
           >
             <span className="text-yellow-400 text-lg">⎙</span>
-            Print Assets Report
+            {t("assets.actions.printReport")}
           </button>
 
           <button
@@ -1630,7 +1668,7 @@ export default function AssetsPage({
           >
             <span className="flex flex-wrap items-center gap-3">
               <span className="text-blue-400 text-lg">⇩</span>
-              Export
+              {t("assets.actions.export")}
             </span>
 
             <span className="text-gray-400">›</span>
@@ -1646,7 +1684,7 @@ export default function AssetsPage({
                 }}
                 className="block w-full text-left px-10 py-3 hover:bg-gray-800 transition text-gray-200"
               >
-                Export CSV
+                {t("common.exportCsv")}
               </button>
 
               <button
@@ -1657,7 +1695,7 @@ export default function AssetsPage({
                 }}
                 className="block w-full text-left px-10 py-3 hover:bg-gray-800 transition text-gray-200"
               >
-                Export PDF
+                {t("assets.actions.exportPdf")}
               </button>
             </div>
           )}
@@ -1668,10 +1706,10 @@ export default function AssetsPage({
 </div>
 
       <div className="grid grid-cols-1 sm:grid-cols-2 2xl:grid-cols-4 gap-3 mb-4">
-        <Card title="Total Assets" value={visibleAssets.length} />
-        <Card title="Active Assets" value={activeAssets.length} />
-        <Card title="Inactive Assets" value={inactiveAssets.length} />
-        <Card title="Retired Assets" value={retiredAssets.length} />
+        <Card title={t("assets.cards.total")} value={visibleAssets.length} />
+        <Card title={t("assets.cards.active")} value={activeAssets.length} />
+        <Card title={t("assets.cards.inactive")} value={inactiveAssets.length} />
+        <Card title={t("assets.cards.retired")} value={retiredAssets.length} />
       </div>
 
 
@@ -1679,16 +1717,16 @@ export default function AssetsPage({
         <div className="p-3 sm:p-4 border-b border-slate-700/80 flex flex-col sm:flex-row gap-2 sm:gap-3 justify-between sm:items-center bg-slate-900/70">
           <div>
             <h2 className="text-base sm:text-lg font-extrabold text-amber-300">
-              Assets List
+              {t("assets.list.title")}
             </h2>
-            <p className="text-sm text-slate-400">Fleet operational assets</p>
+            <p className="text-sm text-slate-400">{t("assets.list.subtitle")}</p>
           </div>
 
           <div className="flex flex-wrap items-center justify-end gap-2">
             {selectedAssetIds.length > 0 && (
               <>
                 <span className="rounded-full border border-amber-500/40 bg-amber-500/10 px-3 py-1.5 text-xs font-bold text-amber-300">
-                  {selectedAssetIds.length} selected
+                  {t("assets.list.selectedCount", { count: selectedAssetIds.length })}
                 </span>
 
                 <button
@@ -1696,7 +1734,7 @@ export default function AssetsPage({
                   onClick={clearAssetSelection}
                   className="rounded-lg border border-slate-600 px-3 py-2 text-xs font-bold text-slate-200 hover:border-slate-400"
                 >
-                  Clear Selection
+                  {t("assets.actions.clearSelection")}
                 </button>
 
                 <button
@@ -1704,13 +1742,13 @@ export default function AssetsPage({
                   onClick={openBulkTransferModal}
                   className="rounded-lg bg-amber-500 px-3 py-2 text-xs font-black text-slate-950 hover:bg-amber-400"
                 >
-                  Transfer Selected
+                  {t("assets.actions.transferSelected")}
                 </button>
               </>
             )}
 
             <span className="text-sm text-slate-400">
-              {filteredAssets.length} assets
+              {t("assets.list.assetCount", { count: filteredAssets.length })}
             </span>
           </div>
         </div>
@@ -1724,18 +1762,18 @@ export default function AssetsPage({
                     type="checkbox"
                     checked={allVisibleAssetsSelected}
                     onChange={toggleVisibleAssetSelection}
-                    aria-label="Select all visible assets"
+                    aria-label={t("assets.table.selectAll")}
                     className="h-4 w-4 accent-amber-500"
                   />
                 </Th>
-                <Th>#</Th>
-                <Th>Asset ID</Th>
-                <Th>Project</Th>
-                <Th>Asset Type</Th>
-                <Th>Category</Th>
-                <Th>Current Odometer</Th>
-                <Th>Fuel Tank Capacity</Th>
-                <Th>Status</Th>
+                <Th className={isRtl ? "text-right" : "text-left"}>#</Th>
+                <Th className={isRtl ? "text-right" : "text-left"}>{t("assets.table.assetId")}</Th>
+                <Th className={isRtl ? "text-right" : "text-left"}>{t("assets.table.project")}</Th>
+                <Th className={isRtl ? "text-right" : "text-left"}>{t("assets.table.assetType")}</Th>
+                <Th className={isRtl ? "text-right" : "text-left"}>{t("assets.table.category")}</Th>
+                <Th className={isRtl ? "text-right" : "text-left"}>{t("assets.table.currentOdometer")}</Th>
+                <Th className={isRtl ? "text-right" : "text-left"}>{t("assets.table.fuelTankCapacity")}</Th>
+                <Th className={isRtl ? "text-right" : "text-left"}>{t("assets.table.status")}</Th>
               </tr>
             </thead>
 
@@ -1754,7 +1792,7 @@ export default function AssetsPage({
                         !getBackendAssetId(asset)
                       }
                       onChange={() => toggleAssetSelection(asset)}
-                      aria-label={`Select asset ${asset.id}`}
+                      aria-label={t("assets.table.selectAsset", { id: asset.id })}
                       className="h-4 w-4 accent-amber-500 disabled:cursor-not-allowed disabled:opacity-40"
                     />
                   </Td>
@@ -1794,10 +1832,10 @@ export default function AssetsPage({
                         onClick={() => changeAssetStatus(asset)}
                         className="cursor-pointer"
                       >
-                        <StatusBadge status={asset.status} />
+                        {renderAssetStatusBadge(asset.status)}
                       </button>
                     ) : (
-                      <StatusBadge status={asset.status} />
+                      renderAssetStatusBadge(asset.status)
                     )}
                   </Td>
                 </tr>
@@ -1809,29 +1847,37 @@ export default function AssetsPage({
 
 
       <div className="bg-gray-800 rounded-xl shadow overflow-hidden border border-gray-700 p-4 mb-4">
-        <h2 className="fleet-chart-title text-base sm:text-lg font-extrabold text-amber-300 mb-3">
-          Consumed Quantity Per Equipment No.
+        <h2 className={`fleet-chart-title text-base sm:text-lg font-extrabold text-amber-300 mb-3 ${isRtl ? "text-right" : "text-left"}`}>
+          {t("assets.chart.consumedQuantityPerAsset")}
         </h2>
 
-        <div className="overflow-x-auto overflow-y-hidden pb-2">
-          <div style={{ width: `${assetConsumptionChartWidth}px`, height: "340px" }}>
-            <ChartFrame height={260}>
-              <BarChart data={assetConsumptionChartData}>
-                <XAxis dataKey="equipmentNo" stroke="#ccc" tick={{ fontSize: 11 }} minTickGap={16} />
-                <YAxis stroke="#ccc" tick={{ fontSize: 11 }} />
-                <Tooltip />
-                <Bar dataKey="qtyLiters" fill="#86efac" name="Qty Liters" />
-              </BarChart>
-            </ChartFrame>
+        <div className="overflow-x-auto overflow-y-hidden pb-2" dir={isRtl ? "rtl" : "ltr"}>
+          <div className="flex min-w-full justify-center">
+            <div
+              className="mx-auto shrink-0"
+              style={{ width: `${assetConsumptionChartWidth}px`, minWidth: "700px", height: "340px" }}
+            >
+              <ChartFrame height={260}>
+                <BarChart
+                  data={assetConsumptionChartData}
+                  margin={{ top: 10, right: isRtl ? 24 : 12, left: isRtl ? 12 : 24, bottom: 5 }}
+                >
+                  <XAxis dataKey="equipmentNo" stroke="#ccc" tick={{ fontSize: 11 }} minTickGap={16} />
+                  <YAxis stroke="#ccc" tick={{ fontSize: 11 }} />
+                  <Tooltip wrapperStyle={{ direction: isRtl ? "rtl" : "ltr", textAlign: isRtl ? "right" : "left" }} />
+                  <Bar dataKey="qtyLiters" fill="#86efac" name={t("assets.chart.qtyLiters")} />
+                </BarChart>
+              </ChartFrame>
+            </div>
           </div>
         </div>
       </div>
 
       {assetStatusConfirm && (
-        <div className="fixed inset-0 bg-black/75 backdrop-blur-sm flex items-center justify-center z-[10020] p-3">
-          <div className="bg-white text-black w-[min(520px,calc(100vw-2rem))] rounded-2xl shadow-2xl p-6">
+        <div className="fixed inset-0 bg-black/75 backdrop-blur-sm flex items-center justify-center z-[10020] p-3" dir={isRtl ? "rtl" : "ltr"}>
+          <div className={`bg-white text-black w-[min(520px,calc(100vw-2rem))] rounded-2xl shadow-2xl p-6 ${isRtl ? "text-right" : "text-left"}`}>
             <div className="flex justify-between items-center mb-5 border-b pb-3">
-              <h2 className="text-xl sm:text-2xl font-bold">Confirm Asset Status Change</h2>
+              <h2 className="text-xl sm:text-2xl font-bold">{t("assetWorkflows.status.title")}</h2>
               <button
                 onClick={() => setAssetStatusConfirm(null)}
                 className="text-gray-500 hover:text-black text-xl"
@@ -1841,15 +1887,15 @@ export default function AssetsPage({
             </div>
 
             <div className="bg-gray-100 rounded-xl p-4 mb-5">
-              <p className="text-sm text-gray-600">Asset ID</p>
+              <p className="text-sm text-gray-600">{t("assets.fields.assetId")}</p>
               <p className="text-base sm:text-lg font-bold">{assetStatusConfirm.asset?.id}</p>
               <p className="text-sm text-gray-600 mt-2">
-                {assetStatusConfirm.oldStatus} → <span className="font-bold">{assetStatusConfirm.newStatus}</span>
+                {getAssetStatusLabel(assetStatusConfirm.oldStatus)} → <span className="font-bold">{getAssetStatusLabel(assetStatusConfirm.newStatus)}</span>
               </p>
             </div>
 
             <p className="text-sm text-gray-600 mb-5">
-              This status change will be saved directly without reason or password.
+              {t("assetWorkflows.status.directSaveNotice")}
             </p>
 
             <div className="flex justify-end gap-3 border-t border-slate-700/80 px-6 py-5 bg-slate-950/90">
@@ -1857,14 +1903,14 @@ export default function AssetsPage({
                 onClick={() => setAssetStatusConfirm(null)}
                 className="rounded-xl border border-slate-600 bg-slate-900 px-5 py-2.5 font-bold text-slate-200 hover:bg-slate-800 transition"
               >
-                Cancel
+                {t("common.cancel")}
               </button>
 
               <button
                 onClick={confirmAssetStatusChange}
                 className="bg-amber-500 hover:bg-amber-400 text-black px-4 py-2 rounded-lg font-bold"
               >
-                Save Status
+                {t("assetWorkflows.status.save")}
               </button>
             </div>
           </div>
@@ -1873,9 +1919,9 @@ export default function AssetsPage({
 
       {showForm && (
         <GenericModal
-          title="Add Asset"
+          title={t("assets.add.title")}
           closeForm={closeAddAsset}
-          saveText="Save Asset"
+          saveText={t("assets.add.save")}
           onSave={saveNewAsset}
           saveDisabled={
             Boolean(assetIdDuplicateError) ||
@@ -1886,20 +1932,20 @@ export default function AssetsPage({
           }
         >
           <Field
-            label="Asset ID"
+            label={t("assets.fields.assetId")}
             placeholder="1-316"
             value={newAsset.id}
             onChange={(e) => setNewAsset({ ...newAsset, id: e.target.value })}
             error={assetIdDuplicateError}
           />
           <div className="grid grid-cols-1 sm:grid-cols-3 items-start sm:items-center gap-2 sm:gap-4">
-            <label className="font-medium text-slate-300">Project</label>
+            <label className="font-medium text-slate-300">{t("assets.fields.project")}</label>
             <select
               value={newAsset.project}
               onChange={(e) => setNewAsset({ ...newAsset, project: e.target.value })}
               className="col-span-2 rounded-lg border border-slate-700 bg-slate-900 p-2 text-white outline-none focus:border-amber-400"
             >
-              <option value="">Select Project</option>
+              <option value="">{t("assets.placeholders.selectProject")}</option>
               {projectOptions.map((project) => (
                 <option key={project} value={project}>
                   {project}
@@ -1909,7 +1955,7 @@ export default function AssetsPage({
           </div>
 
           <div className="grid grid-cols-1 sm:grid-cols-3 items-start sm:items-center gap-2 sm:gap-4">
-            <label className="font-medium text-slate-300">Asset Type</label>
+            <label className="font-medium text-slate-300">{t("assets.fields.assetType")}</label>
             <div className="col-span-2 space-y-2">
               <select
                 value={useCustomAssetType ? "__add_new__" : newAsset.type}
@@ -1929,13 +1975,13 @@ export default function AssetsPage({
                 }}
                 className="w-full rounded-lg border border-slate-700 bg-slate-900 p-2 text-white outline-none focus:border-amber-400"
               >
-                <option value="">Select Asset Type</option>
+                <option value="">{t("assets.placeholders.selectAssetType")}</option>
                 {assetTypeOptions.map((type) => (
                   <option key={type} value={type}>
                     {type}
                   </option>
                 ))}
-                <option value="__add_new__">＋ Add new Asset Type</option>
+                <option value="__add_new__">＋ {t("assets.add.addNewAssetType")}</option>
               </select>
 
               {useCustomAssetType && (
@@ -1946,7 +1992,7 @@ export default function AssetsPage({
                     setCustomAssetType(value);
                     setNewAsset({ ...newAsset, type: value });
                   }}
-                  placeholder="Enter new asset type"
+                  placeholder={t("assets.placeholders.newAssetType")}
                   className="w-full rounded-lg border border-slate-700 bg-slate-900 p-2 text-white placeholder:text-slate-500 outline-none focus:border-amber-400"
                 />
               )}
@@ -1954,7 +2000,7 @@ export default function AssetsPage({
           </div>
 
           <div className="grid grid-cols-1 sm:grid-cols-3 items-start sm:items-center gap-2 sm:gap-4">
-            <label className="font-medium text-slate-300">Category</label>
+            <label className="font-medium text-slate-300">{t("assets.fields.category")}</label>
             <div className="col-span-2 space-y-2">
               <select
                 value={useCustomCategory ? "__add_new__" : newAsset.category}
@@ -1974,13 +2020,13 @@ export default function AssetsPage({
                 }}
                 className="w-full rounded-lg border border-slate-700 bg-slate-900 p-2 text-white outline-none focus:border-amber-400"
               >
-                <option value="">Select Category</option>
+                <option value="">{t("assets.placeholders.selectCategory")}</option>
                 {categoryOptions.map((category) => (
                   <option key={category} value={category}>
                     {category}
                   </option>
                 ))}
-                <option value="__add_new__">＋ Add new Category</option>
+                <option value="__add_new__">＋ {t("assets.add.addNewCategory")}</option>
               </select>
 
               {useCustomCategory && (
@@ -1991,44 +2037,44 @@ export default function AssetsPage({
                     setCustomCategory(value);
                     setNewAsset({ ...newAsset, category: value });
                   }}
-                  placeholder="Enter new category"
+                  placeholder={t("assets.placeholders.newCategory")}
                   className="w-full rounded-lg border border-slate-700 bg-slate-900 p-2 text-white placeholder:text-slate-500 outline-none focus:border-amber-400"
                 />
               )}
             </div>
           </div>
           <Field
-            label="Current Odometer"
-            placeholder="Current reading"
+            label={t("assets.fields.currentOdometer")}
+            placeholder={t("assets.placeholders.currentReading")}
             type="number"
             value={newAsset.odometer}
             onChange={(e) => setNewAsset({ ...newAsset, odometer: e.target.value })}
           />
           <Field
-            label="Fuel Tank Capacity"
-            placeholder="Liters"
+            label={t("assets.fields.fuelTankCapacity")}
+            placeholder={t("assets.placeholders.liters")}
             type="number"
             value={newAsset.fuelTank}
             onChange={(e) => setNewAsset({ ...newAsset, fuelTank: e.target.value })}
           />
 
           <div className="grid grid-cols-1 sm:grid-cols-3 items-start sm:items-center gap-2 sm:gap-4">
-            <label className="font-medium text-slate-300">Status</label>
+            <label className="font-medium text-slate-300">{t("assets.fields.status")}</label>
             <select
               value={newAsset.status}
               onChange={(e) => setNewAsset({ ...newAsset, status: e.target.value })}
               className="col-span-2 rounded-lg border border-slate-700 bg-slate-900 p-2 text-white outline-none focus:border-amber-400"
             >
-              <option>Active</option>
-              <option>Inactive</option>
+              <option value="Active">{t("assets.status.active")}</option>
+              <option value="Inactive">{t("assets.status.inactive")}</option>
             </select>
           </div>
         </GenericModal>
       )}
 
       {selectedAsset && (
-        <div className="fixed inset-0 bg-black/75 backdrop-blur-sm flex items-center justify-center z-[10000] p-3">
-          <div className="bg-gray-800 text-white w-[560px] rounded-3xl shadow-2xl border border-gray-700 p-6">
+        <div className="fixed inset-0 bg-black/75 backdrop-blur-sm flex items-center justify-center z-[10000] p-3" dir={isRtl ? "rtl" : "ltr"}>
+          <div className={`bg-gray-800 text-white w-[560px] rounded-3xl shadow-2xl border border-gray-700 p-6 ${isRtl ? "text-right" : "text-left"}`}>
             <div className="flex justify-between items-start mb-5">
               <div>
                 <div className="flex flex-wrap items-center gap-3">
@@ -2044,7 +2090,7 @@ export default function AssetsPage({
                   </button>
                 </div>
 
-                <p className="text-gray-400 mt-1">Asset Details</p>
+                <p className="text-gray-400 mt-1">{t("assets.details.title")}</p>
               </div>
 
               <button
@@ -2058,25 +2104,25 @@ export default function AssetsPage({
             <div className="bg-gray-900 border border-gray-700 rounded-2xl p-5">
               <div className="flex justify-between items-start mb-5">
                 <div>
-                  <p className="text-xs text-gray-400">Project</p>
+                  <p className="text-xs text-gray-400">{t("assets.fields.project")}</p>
                   <p className="text-lg font-semibold text-white">
                     {selectedAsset.project || "-"}
                   </p>
                 </div>
 
-                <StatusBadge status={selectedAsset.status} />
+                {renderAssetStatusBadge(selectedAsset.status)}
               </div>
 
               <div className="grid grid-cols-1 md:grid-cols-2 gap-4 lg:gap-5">
                 <div>
-                  <p className="text-xs text-gray-400">Asset Type</p>
+                  <p className="text-xs text-gray-400">{t("assets.fields.assetType")}</p>
                   <p className="text-lg font-semibold">
                     {selectedAsset.type || "-"}
                   </p>
                 </div>
 
                 <div className="text-right">
-                  <p className="text-xs text-gray-400">Category</p>
+                  <p className="text-xs text-gray-400">{t("assets.fields.category")}</p>
                   <p className="text-lg font-semibold">
                     {selectedAsset.category || "-"}
                   </p>
@@ -2085,7 +2131,7 @@ export default function AssetsPage({
                 <div className="col-span-1 md:col-span-2 grid grid-cols-1 sm:grid-cols-3 gap-3 pt-1">
                   <div className="rounded-lg border border-slate-700/80 bg-slate-900/35 px-3 py-3 text-center">
                     <div className="flex items-center justify-center gap-2">
-                      <p className="text-xs text-gray-400">Current Odometer</p>
+                      <p className="text-xs text-gray-400">{t("assets.fields.currentOdometer")}</p>
 
                       <button
                         onClick={() => {
@@ -2107,14 +2153,14 @@ export default function AssetsPage({
                   </div>
 
                   <div className="rounded-lg border border-slate-700/80 bg-slate-900/35 px-3 py-3 text-center">
-                    <p className="text-xs text-gray-400">Lifetime Odometer</p>
+                    <p className="text-xs text-gray-400">{t("assets.details.lifetimeOdometer")}</p>
                     <p className="mt-1 text-lg font-semibold text-yellow-300">
                       {formatNumber(selectedAsset.currentLifetimeOdometer ?? 0)}
                     </p>
                   </div>
 
                   <div className="rounded-lg border border-slate-700/80 bg-slate-900/35 px-3 py-3 text-center">
-                    <p className="text-xs text-gray-400">Fuel Tank Capacity</p>
+                    <p className="text-xs text-gray-400">{t("assets.fields.fuelTankCapacity")}</p>
                     <p className="mt-1 text-lg font-semibold text-yellow-300">
                       {formatNumber(selectedAsset.fuelTank)} L
                     </p>
@@ -2128,7 +2174,7 @@ export default function AssetsPage({
                 onClick={() => setSelectedAsset(null)}
                 className="bg-gray-700 hover:bg-gray-600 active:bg-gray-900 text-white px-6 py-2 rounded-xl text-sm shadow-[0_3px_0_#111827] active:shadow-none active:translate-y-[3px] transition"
               >
-                Close
+                {t("assets.actions.close")}
               </button>
             </div>
           </div>
@@ -2137,15 +2183,15 @@ export default function AssetsPage({
 
       {bulkTransferModalOpen && (
         <ModalPortal>
-          <div className="fleet-portal-modal-backdrop fixed inset-0 bg-black/60 flex items-center justify-center p-4">
-            <div className="fleet-portal-modal-panel bg-white text-black w-[min(680px,calc(100vw-2rem))] max-h-[92vh] overflow-y-auto rounded-xl shadow-2xl p-6">
+          <div className="fleet-portal-modal-backdrop fixed inset-0 bg-black/60 flex items-center justify-center p-4" dir={isRtl ? "rtl" : "ltr"}>
+            <div className={`fleet-portal-modal-panel bg-white text-black w-[min(680px,calc(100vw-2rem))] max-h-[92vh] overflow-y-auto rounded-xl shadow-2xl p-6 ${isRtl ? "text-right" : "text-left"}`}>
               <div className="flex items-center justify-between border-b pb-3">
                 <div>
                   <h2 className="text-xl sm:text-2xl font-bold">
-                    Transfer Selected Assets
+                    {t("assetWorkflows.bulk.title")}
                   </h2>
                   <p className="mt-1 text-sm text-gray-500">
-                    {selectedAssets.length} asset(s) selected
+                    {t("assetWorkflows.bulk.selectedCount", { count: selectedAssets.length })}
                   </p>
                 </div>
 
@@ -2161,7 +2207,7 @@ export default function AssetsPage({
 
               <div className="mt-5">
                 <label className="mb-2 block text-sm font-semibold text-gray-700">
-                  Selected Assets
+                  {t("assetWorkflows.bulk.selectedAssets")}
                 </label>
 
                 <div className="max-h-44 overflow-y-auto rounded-lg border bg-gray-50 p-3">
@@ -2173,7 +2219,7 @@ export default function AssetsPage({
                       >
                         <div className="font-bold text-gray-900">{asset.id}</div>
                         <div className="text-xs text-gray-500">
-                          Current project: {asset.project || "-"}
+                          {t("assetWorkflows.bulk.currentProject")}:{" "}{asset.project || "-"}
                         </div>
                       </div>
                     ))}
@@ -2183,15 +2229,15 @@ export default function AssetsPage({
 
               <div className="mt-5">
                 <label className="mb-2 block text-sm font-semibold text-gray-700">
-                  Destination Project
+                  {t("assetWorkflows.bulk.destinationProject")}
                 </label>
                 <select
                   value={bulkTransferProjectValue}
                   onChange={(e) => setBulkTransferProjectValue(e.target.value)}
                   disabled={savingBulkTransfer}
-                  className="w-full rounded-lg border p-2.5"
+                  dir={isRtl ? "rtl" : "ltr"} className={`w-full rounded-lg border p-2.5 ${isRtl ? "text-right" : "text-left"}`}
                 >
-                  <option value="">Select Project</option>
+                  <option value="">{t("assets.placeholders.selectProject")}</option>
                   {projectOptions.map((project) => (
                     <option key={project} value={project}>
                       {project}
@@ -2201,9 +2247,7 @@ export default function AssetsPage({
               </div>
 
               <p className="mt-5 rounded-lg border border-yellow-200 bg-yellow-50 p-3 text-xs text-gray-600">
-                One bulk submission will create the required approval workflow
-                for every selected asset. The transfer takes effect when the
-                final required approval is completed.
+                {t("assetWorkflows.bulk.approvalNotice")}
               </p>
 
               <div className="mt-6 flex justify-end gap-3 border-t pt-4">
@@ -2213,7 +2257,7 @@ export default function AssetsPage({
                   disabled={savingBulkTransfer}
                   className="rounded-lg bg-gray-200 px-4 py-2 font-semibold disabled:opacity-50"
                 >
-                  Cancel
+                  {t("common.cancel")}
                 </button>
 
                 <button
@@ -2222,7 +2266,7 @@ export default function AssetsPage({
                   disabled={savingBulkTransfer}
                   className="rounded-lg bg-amber-500 px-4 py-2 font-black text-slate-950 hover:bg-amber-400 disabled:cursor-not-allowed disabled:opacity-60"
                 >
-                  {savingBulkTransfer ? "Submitting..." : "Submit Bulk Transfer"}
+                  {savingBulkTransfer ? t("assetWorkflows.bulk.submitting") : t("assetWorkflows.bulk.submit")}
                 </button>
               </div>
             </div>
@@ -2231,20 +2275,20 @@ export default function AssetsPage({
       )}
 
       {projectTargetAsset && (
-        <div className="fleet-modal-backdrop fixed inset-0 z-[9998] bg-black/60 flex items-center justify-center z-50">
-          <div className="bg-white text-black w-[520px] rounded-xl shadow-xl p-6">
-            <h2 className="text-xl font-bold mb-4">Change Project</h2>
+        <div className="fleet-modal-backdrop fixed inset-0 z-[9998] bg-black/60 flex items-center justify-center z-50" dir={isRtl ? "rtl" : "ltr"}>
+          <div className={`bg-white text-black w-[520px] rounded-xl shadow-xl p-6 ${isRtl ? "text-right" : "text-left"}`}>
+            <h2 className="text-xl font-bold mb-4">{t("assetWorkflows.transfer.title")}</h2>
 
             <p className="text-sm text-gray-500 mb-4">
-              Asset: <strong>{projectTargetAsset.id}</strong>
+              {t("assetWorkflows.labels.asset")}:{" "}<strong>{projectTargetAsset.id}</strong>
             </p>
 
             <select
               value={selectedProjectValue}
               onChange={(e) => setSelectedProjectValue(e.target.value)}
-              className="border rounded-lg p-2 w-full mb-6"
+              dir={isRtl ? "rtl" : "ltr"} className={`border rounded-lg p-2 w-full mb-6 ${isRtl ? "text-right" : "text-left"}`}
             >
-              <option value="">Select Project</option>
+              <option value="">{t("assets.placeholders.selectProject")}</option>
               {projectOptions.map((project) => (
                 <option key={project} value={project}>
                   {project}
@@ -2253,8 +2297,7 @@ export default function AssetsPage({
             </select>
 
             <p className="mb-5 rounded-lg border border-yellow-200 bg-yellow-50 p-3 text-xs text-gray-600">
-              The asset will move to the destination project when the final
-              required approval is completed.
+              {t("assetWorkflows.transfer.approvalNotice")}
             </p>
 
             <div className="flex justify-end gap-3">
@@ -2265,14 +2308,14 @@ export default function AssetsPage({
                 }}
                 className="bg-gray-200 px-4 py-2 rounded"
               >
-                Cancel
+                {t("common.cancel")}
               </button>
 
               <button
                 onClick={proceedProjectConfirm}
                 className="bg-gray-800 text-white px-4 py-2 rounded"
               >
-                Continue
+                {t("assetWorkflows.actions.continue")}
               </button>
             </div>
           </div>
@@ -2280,21 +2323,21 @@ export default function AssetsPage({
       )}
 
       {showProjectConfirm && (
-        <div className="fleet-modal-backdrop fixed inset-0 z-[9998] bg-black/60 flex items-center justify-center z-50">
-          <div className="bg-white text-black w-[520px] rounded-xl shadow-xl p-6">
+        <div className="fleet-modal-backdrop fixed inset-0 z-[9998] bg-black/60 flex items-center justify-center z-50" dir={isRtl ? "rtl" : "ltr"}>
+          <div className={`bg-white text-black w-[520px] rounded-xl shadow-xl p-6 ${isRtl ? "text-right" : "text-left"}`}>
             <h2 className="text-xl font-bold mb-4 text-red-600">
-              Confirm Project Change
+              {t("assetWorkflows.transfer.confirmTitle")}
             </h2>
 
             <div className="bg-gray-100 p-4 rounded mb-4">
               <p>
-                <strong>Asset:</strong> {projectTargetAsset.id}
+                <strong>{t("assetWorkflows.labels.asset")}:</strong> {projectTargetAsset.id}
               </p>
               <p>
-                <strong>Old Project:</strong> {projectTargetAsset.project || "-"}
+                <strong>{t("assetWorkflows.transfer.oldProject")}:</strong> {projectTargetAsset.project || "-"}
               </p>
               <p>
-                <strong>New Project:</strong> {selectedProjectValue}
+                <strong>{t("assetWorkflows.transfer.newProject")}:</strong> {selectedProjectValue}
               </p>
             </div>
 
@@ -2303,14 +2346,14 @@ export default function AssetsPage({
                 onClick={() => setShowProjectConfirm(false)}
                 className="bg-gray-200 px-4 py-2 rounded"
               >
-                Cancel
+                {t("common.cancel")}
               </button>
 
               <button
                 onClick={proceedProjectPassword}
                 className="bg-red-600 text-white px-4 py-2 rounded"
               >
-                Yes, Continue
+                {t("assetWorkflows.actions.yesContinue")}
               </button>
             </div>
           </div>
@@ -2319,21 +2362,21 @@ export default function AssetsPage({
 
 
       {deleteTargetAsset && (
-        <div className="fixed inset-0 bg-black/75 backdrop-blur-sm flex items-center justify-center z-[10000] p-3">
-          <div className="bg-white text-black w-[520px] rounded-2xl p-6 shadow-2xl">
+        <div className="fixed inset-0 bg-black/75 backdrop-blur-sm flex items-center justify-center z-[10000] p-3" dir={isRtl ? "rtl" : "ltr"}>
+          <div className={`bg-white text-black w-[520px] rounded-2xl p-6 shadow-2xl ${isRtl ? "text-right" : "text-left"}`}>
             <h2 className="text-xl sm:text-2xl font-bold mb-2 text-red-600">
-              Delete Asset
+              {t("assetWorkflows.delete.title")}
             </h2>
 
             <p className="text-gray-600 mb-5">
-              Asset: <strong>{deleteTargetAsset.id}</strong>
+              {t("assetWorkflows.labels.asset")}:{" "}<strong>{deleteTargetAsset.id}</strong>
             </p>
 
             <textarea
               value={deleteReason}
               onChange={(e) => setDeleteReason(e.target.value)}
-              placeholder="Enter deletion reason..."
-              className="border rounded-xl p-3 w-full h-28 mb-5"
+              placeholder={t("assetWorkflows.delete.reasonPlaceholder")}
+              dir={isRtl ? "rtl" : "ltr"} className={`border rounded-xl p-3 w-full h-28 mb-5 ${isRtl ? "text-right" : "text-left"}`}
             />
 
             <div className="flex justify-end gap-3">
@@ -2344,14 +2387,14 @@ export default function AssetsPage({
                 }}
                 className="bg-gray-200 px-3 lg:px-4 py-2 rounded-lg"
               >
-                Cancel
+                {t("common.cancel")}
               </button>
 
               <button
                 onClick={proceedDeleteConfirm}
                 className="bg-red-600 text-white px-3 lg:px-4 py-2 rounded-lg"
               >
-                Continue
+                {t("assetWorkflows.actions.continue")}
               </button>
             </div>
           </div>
@@ -2359,17 +2402,16 @@ export default function AssetsPage({
       )}
 
       {showDeleteConfirm && (
-        <div className="fixed inset-0 bg-black/75 backdrop-blur-sm flex items-center justify-center z-[10000] p-3">
-          <div className="bg-white text-black w-[500px] rounded-2xl p-6">
+        <div className="fixed inset-0 bg-black/75 backdrop-blur-sm flex items-center justify-center z-[10000] p-3" dir={isRtl ? "rtl" : "ltr"}>
+          <div className={`bg-white text-black w-[500px] rounded-2xl p-6 ${isRtl ? "text-right" : "text-left"}`}>
             <h2 className="text-xl font-bold mb-4">
-              Confirm Asset Deletion
+              {t("assetWorkflows.delete.confirmTitle")}
             </h2>
 
             <p className="mb-6">
               {currentUser?.role === "Admin" || currentUser?.role === "PlatformAdmin"
-                ? "Are you sure you want to delete asset:"
-                : "Are you sure you want to submit deletion request for:"}
-              <strong> {deleteTargetAsset?.id}</strong> ?
+                ? t("assetWorkflows.delete.directQuestion", { id: deleteTargetAsset?.id })
+                : t("assetWorkflows.delete.requestQuestion", { id: deleteTargetAsset?.id })}
             </p>
 
             <div className="flex justify-end gap-3">
@@ -2377,14 +2419,14 @@ export default function AssetsPage({
                 onClick={() => setShowDeleteConfirm(false)}
                 className="bg-gray-200 px-3 lg:px-4 py-2 rounded-lg"
               >
-                Cancel
+                {t("common.cancel")}
               </button>
 
               <button
                 onClick={proceedDeletePassword}
                 className="bg-red-600 text-white px-3 lg:px-4 py-2 rounded-lg"
               >
-                Yes, Continue
+                {t("assetWorkflows.actions.yesContinue")}
               </button>
             </div>
           </div>
@@ -2393,42 +2435,42 @@ export default function AssetsPage({
 
 
       {odometerTargetAsset && (
-        <div className="fixed inset-0 bg-black/75 backdrop-blur-sm flex items-center justify-center z-[10000] p-3">
-          <div className="bg-white text-black w-[520px] rounded-2xl p-6 shadow-2xl">
+        <div className="fixed inset-0 bg-black/75 backdrop-blur-sm flex items-center justify-center z-[10000] p-3" dir={isRtl ? "rtl" : "ltr"}>
+          <div className={`bg-white text-black w-[520px] rounded-2xl p-6 shadow-2xl ${isRtl ? "text-right" : "text-left"}`}>
             <h2 className="text-xl sm:text-2xl font-bold mb-2 text-yellow-600">
-              Odometer Reset
+              {t("assetWorkflows.odometer.title")}
             </h2>
 
             <p className="text-gray-600 mb-5">
-              Asset: <strong>{odometerTargetAsset.id}</strong>
+              {t("assetWorkflows.labels.asset")}:{" "}<strong>{odometerTargetAsset.id}</strong>
             </p>
 
             <label className="block text-sm font-medium text-gray-700 mb-2">
-              Old Odometer Before Reset
+              {t("assetWorkflows.odometer.oldReading")}
             </label>
             <input
               type="number"
               value={oldOdometerBeforeReset}
               readOnly
               aria-readonly="true"
-              title="Old odometer is captured from the current asset reading and cannot be edited here."
-              placeholder="Reading before computer / meter replacement"
+              title={t("assetWorkflows.odometer.oldReadingHelp")}
+              placeholder={t("assetWorkflows.odometer.oldReadingPlaceholder")}
               className="border rounded-xl p-3 w-full mb-4 bg-gray-100 text-gray-700 cursor-not-allowed"
             />
 
             <label className="block text-sm font-medium text-gray-700 mb-2">
-              New Odometer After Reset
+              {t("assetWorkflows.odometer.newReading")}
             </label>
             <input
               type="number"
               value={newOdometer}
               onChange={(e) => setNewOdometer(e.target.value)}
-              placeholder="Usually 0 after reset"
+              placeholder={t("assetWorkflows.odometer.newReadingPlaceholder")}
               className="border rounded-xl p-3 w-full mb-4"
             />
 
             <label className="block text-sm font-medium text-gray-700 mb-2">
-              Effective Date
+              {t("assetWorkflows.odometer.effectiveDate")}
             </label>
             <input
               type="date"
@@ -2440,8 +2482,8 @@ export default function AssetsPage({
             <textarea
               value={odometerReason}
               onChange={(e) => setOdometerReason(e.target.value)}
-              placeholder="Enter reset reason, e.g. computer / meter replaced..."
-              className="border rounded-xl p-3 w-full h-28 mb-5"
+              placeholder={t("assetWorkflows.odometer.reasonPlaceholder")}
+              dir={isRtl ? "rtl" : "ltr"} className={`border rounded-xl p-3 w-full h-28 mb-5 ${isRtl ? "text-right" : "text-left"}`}
             />
 
             <div className="flex justify-end gap-3">
@@ -2455,14 +2497,14 @@ export default function AssetsPage({
                 }}
                 className="bg-gray-200 px-3 lg:px-4 py-2 rounded-lg"
               >
-                Cancel
+                {t("common.cancel")}
               </button>
 
               <button
                 onClick={proceedOdometerConfirm}
                 className="bg-yellow-500 text-black px-3 lg:px-4 py-2 rounded-lg"
               >
-                Continue
+                {t("assetWorkflows.actions.continue")}
               </button>
             </div>
           </div>
@@ -2470,27 +2512,27 @@ export default function AssetsPage({
       )}
 
       {showOdometerConfirm && (
-        <div className="fixed inset-0 bg-black/75 backdrop-blur-sm flex items-center justify-center z-[10000] p-3">
-          <div className="bg-white text-black w-[500px] rounded-2xl p-6">
+        <div className="fixed inset-0 bg-black/75 backdrop-blur-sm flex items-center justify-center z-[10000] p-3" dir={isRtl ? "rtl" : "ltr"}>
+          <div className={`bg-white text-black w-[500px] rounded-2xl p-6 ${isRtl ? "text-right" : "text-left"}`}>
             <h2 className="text-xl font-bold mb-4">
-              Confirm Odometer Reset
+              Confirm {t("assetWorkflows.odometer.title")}
             </h2>
 
             <div className="bg-gray-100 p-4 rounded mb-6 space-y-1">
               <p>
-                <strong>Asset:</strong> {odometerTargetAsset?.id}
+                <strong>{t("assetWorkflows.labels.asset")}:</strong> {odometerTargetAsset?.id}
               </p>
               <p>
-                <strong>Old Odometer Before Reset:</strong> {formatNumber(oldOdometerBeforeReset)}
+                <strong>{t("assetWorkflows.odometer.oldReading")}:</strong> {formatNumber(oldOdometerBeforeReset)}
               </p>
               <p>
-                <strong>New Odometer After Reset:</strong> {formatNumber(newOdometer)}
+                <strong>{t("assetWorkflows.odometer.newReading")}:</strong> {formatNumber(newOdometer)}
               </p>
               <p>
-                <strong>Effective Date:</strong> {odometerEffectiveDate}
+                <strong>{t("assetWorkflows.odometer.effectiveDate")}:</strong> {odometerEffectiveDate}
               </p>
               <p>
-                <strong>Actual Odometer After Reset:</strong> {formatNumber(Number(newOdometer) || 0)}
+                <strong>{t("assetWorkflows.odometer.actualReading")}:</strong> {formatNumber(Number(newOdometer) || 0)}
               </p>
             </div>
 
@@ -2499,14 +2541,14 @@ export default function AssetsPage({
                 onClick={() => setShowOdometerConfirm(false)}
                 className="bg-gray-200 px-3 lg:px-4 py-2 rounded-lg"
               >
-                Cancel
+                {t("common.cancel")}
               </button>
 
               <button
                 onClick={proceedOdometerPassword}
                 className="bg-yellow-500 text-black px-3 lg:px-4 py-2 rounded-lg"
               >
-                Yes, Continue
+                {t("assetWorkflows.actions.yesContinue")}
               </button>
             </div>
           </div>
