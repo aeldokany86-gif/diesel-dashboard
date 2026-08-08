@@ -2,6 +2,7 @@
 // Create this new file with the following content.
 
 import { getLinkedUserRoleNameFromEmployee } from "./helpers";
+import { createI18nMessage } from "./i18nMessageHelpers";
 
 function normalizeBackendApprovalStatusForState(status) {
   const normalized = String(status || "PENDING")
@@ -135,4 +136,69 @@ export function mapBackendEmployeeTransferForState(transfer = {}) {
     effectiveDate: transfer.effectiveDate || "",
     approvals: mapTransferApprovals(transfer.approvals),
   };
+}
+
+
+export function getTransferApprovalMessageDescriptor(entityType, transfer = {}) {
+  const normalizedEntity = String(entityType || "").trim().toLowerCase();
+  const entityId =
+    transfer.assetId ||
+    transfer.stationId ||
+    transfer.employeeId ||
+    transfer.id ||
+    "-";
+
+  const params = {
+    entityId,
+    fromProject: transfer.fromProjectName || transfer.fromProjectId || "-",
+    toProject: transfer.toProjectName || transfer.toProjectId || "-",
+  };
+
+  if (normalizedEntity === "asset") {
+    return createI18nMessage(
+      "workflowMessages.approvals.transfer.assetPending",
+      params,
+      `Asset ${entityId} transfer pending approval`,
+    );
+  }
+
+  if (normalizedEntity === "station") {
+    return createI18nMessage(
+      "workflowMessages.approvals.transfer.stationPending",
+      params,
+      `Station ${entityId} transfer pending approval`,
+    );
+  }
+
+  if (normalizedEntity === "employee") {
+    return createI18nMessage(
+      "workflowMessages.approvals.transfer.employeePending",
+      params,
+      `Employee ${entityId} transfer pending approval`,
+    );
+  }
+
+  return createI18nMessage(
+    "workflowMessages.approvals.transfer.genericPending",
+    params,
+    `Transfer ${entityId} pending approval`,
+  );
+}
+
+
+export function getAssetTransferWorkflowMessageDescriptor(transfer = {}, state = "pending") {
+  const assetId = transfer.assetId || transfer.assetName || transfer.id || "-";
+  const params = {
+    assetId,
+    fromProject: transfer.fromProjectName || transfer.fromProjectId || "-",
+    toProject: transfer.toProjectName || transfer.toProjectId || "-",
+  };
+  const normalizedState = String(state || "pending").trim().toLowerCase();
+  if (normalizedState === "approved" || normalizedState === "applied") {
+    return createI18nMessage("workflowMessages.assets.transfer.approved", params, `Asset ${assetId} transferred from ${params.fromProject} to ${params.toProject}`);
+  }
+  if (normalizedState === "rejected") {
+    return createI18nMessage("workflowMessages.assets.transfer.rejected", params, `Asset ${assetId} transfer rejected`);
+  }
+  return createI18nMessage("workflowMessages.assets.transfer.pending", params, `Asset ${assetId} transfer pending approval`);
 }

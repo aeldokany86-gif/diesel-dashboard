@@ -7,6 +7,8 @@ import StatusBadge from "../../components/feedback/StatusBadge";
 import Th from "../../components/ui/Th";
 import Td from "../../components/ui/Td";
 import Card from "../../components/ui/Card";
+import { useLanguage } from "../../context/LanguageContext";
+import { resolveRecordMessage, resolveEnumValue } from "../../lib/i18nMessageHelpers";
 
 import {
   normalizeScopeValue,
@@ -144,7 +146,7 @@ function getApprovalGroupStatus(requests) {
   return "Approved";
 }
 
-function buildApprovalGroups(requests) {
+function buildApprovalGroups(requests, t) {
   const groups = new Map();
 
   for (const request of requests) {
@@ -182,11 +184,28 @@ function buildApprovalGroups(requests) {
         ? "Sensitive"
         : primaryRequest?.riskLevel || "Standard",
       title: group.isBatch
-        ? `Bulk ${primaryRequest?.entityType || "Approval"} Request`
-        : primaryRequest?.title || "Approval Request",
+        ? (
+            primaryRequest?.type === "asset_transfer"
+              ? t("approvals.assetTransfer.bulkTitle", { count: group.requests.length })
+              : t("approvals.batch.title", {
+                  entity: primaryRequest?.entityType || t("approvals.entities.request"),
+                })
+          )
+        : resolveRecordMessage(t, primaryRequest, "title", t("approvals.defaults.requestTitle")),
       details: group.isBatch
-        ? `${group.requests.length} related requests grouped under batch ${group.batchId}.`
-        : primaryRequest?.details || "",
+        ? (
+            primaryRequest?.type === "asset_transfer"
+              ? t("approvals.assetTransfer.bulkDetails", {
+                  count: group.requests.length,
+                  fromProject: primaryRequest?.approvalRoute?.sourceProject || "-",
+                  toProject: primaryRequest?.approvalRoute?.destinationProject || "-",
+                })
+              : t("approvals.batch.details", {
+                  count: group.requests.length,
+                  batchId: group.batchId,
+                })
+          )
+        : resolveRecordMessage(t, primaryRequest, "details", ""),
     };
   });
 }
@@ -212,6 +231,59 @@ export default function ApprovalsPage({
   onOperationsWorkspaceRefresh,
   runWithActionLoading = async (_label, actionFn) => actionFn(),
 }) {
+  const { language, t } = useLanguage();
+  const isRtl = language === "ar";
+
+  const getApprovalStatusLabel = (status) =>
+    resolveEnumValue(t, "approvalStatus", status, status || "-");
+
+  const getEntityTypeLabel = (value) => {
+    const normalized = String(value || "").trim().toLowerCase();
+    if (normalized.includes("employee")) return t("approvals.entities.employee");
+    if (normalized.includes("asset")) return t("approvals.entities.asset");
+    if (normalized.includes("station")) return t("approvals.entities.station");
+    if (normalized.includes("operation correction")) return t("approvals.entities.operationCorrection");
+    if (normalized.includes("operation")) return t("approvals.entities.operation");
+    if (normalized.includes("project")) return t("approvals.entities.project");
+    return value || t("approvals.entities.request");
+  };
+
+  const getApprovalTitle = (request, isBatch = false, count = 0) =>
+    isBatch
+      ? t("approvals.batch.title", {
+          entity: getEntityTypeLabel(request?.entityType),
+          count,
+        })
+      : resolveRecordMessage(
+          t,
+          request,
+          "title",
+          request?.title || t("approvals.defaults.requestTitle"),
+        );
+
+  const getApprovalFieldLabel = (field = {}) => {
+    if (field?.labelKey) {
+      const translated = t(field.labelKey, field.labelParams || {});
+      if (translated && translated !== field.labelKey) return translated;
+    }
+
+    const normalized = String(field?.field || "").trim().toLowerCase();
+    const fieldKeyMap = {
+      currentstock: "approvals.fields.inventoryAdjustment",
+      adjustmentqty: "approvals.fields.adjustmentQuantity",
+      reason: "approvals.fields.reason",
+      zerobalance: "approvals.fields.zeroBalance",
+    };
+
+    const key = fieldKeyMap[normalized];
+    if (key) {
+      const translated = t(key);
+      if (translated && translated !== key) return translated;
+    }
+
+    return field?.label || field?.labelFallback || makeFieldLabel(field?.field);
+  };
+
   const [selectedStatus, setSelectedStatus] = useState("Pending");
   const [reviewNotes, setReviewNotes] = useState({});
   const [selectedApprovalGroup, setSelectedApprovalGroup] = useState(null);
@@ -237,23 +309,23 @@ export default function ApprovalsPage({
   });
 
   const approveRequest = async (request) => {
-    return runWithActionLoading("Approving request...", async () => {
+    return runWithActionLoading(t("approvals.loading.approving"), async () => {
     if (!canUserReviewApproval(currentUser, request)) {
-      showToast?.("warning", "You are not allowed to review this request.");
+      showToast?.("warning", t("approvals.messages.notAllowedReview"));
       return;
     }
 
     if (!isPendingApprovalStatus(request.status)) {
-      showToast?.("warning", "This request has already been reviewed.");
+      showToast?.("warning", t("approvals.messages.alreadyReviewed"));
       return;
     }
 
     const reviewedAt = new Date().toISOString();
-    const note = reviewNotes[request.id] || "Approved";
+    const note = reviewNotes[request.id] || t("approvals.defaults.approvedNote");
 
     if (isBackendOperationCorrectionRequest(request)) {
       if (!["Manager", "Admin", "PlatformAdmin"].includes(currentUser?.role)) {
-        showToast?.("warning", "Only managers can approve operation corrections.");
+        showToast?.("warning", t("approvals.messages.onlyManagersApproveCorrection"));
         return;
       }
 
@@ -272,18 +344,27 @@ export default function ApprovalsPage({
           await onOperationApprovalReviewed?.();
         }
         setSelectedApprovalGroup(null);
-        trackActivity("Approve Operation Correction", "operations", request.title);
-        showToast?.("success", "Operation correction approved and applied successfully.");
+        trackActivity(
+          "Approve Operation Correction",
+          "operations",
+          request.title,
+          {
+            actionKey: "notifications.activity.actions.approveOperationCorrection",
+            detailsKey: "notifications.activity.details.operationCorrectionApproved",
+            detailsParams: { operationNo: request.entityId || request.backendOperationId || "-" },
+          },
+        );
+        showToast?.("success", t("approvals.messages.correctionApproved"));
       } catch (error) {
         console.warn("Failed to approve operation correction.", error);
-        showToast?.("warning", error?.message || "Failed to approve operation correction.");
+        showToast?.("warning", error?.message || t("approvals.messages.correctionApproveFailed"));
       }
       return;
     }
 
     if (isBackendOperationRequest(request)) {
       if (currentUser?.role !== "Manager") {
-        showToast?.("warning", "Only the assigned project manager can approve operation requests.");
+        showToast?.("warning", t("approvals.messages.onlyAssignedManagerApproveOperation"));
         return;
       }
 
@@ -301,10 +382,19 @@ export default function ApprovalsPage({
           await onOperationApprovalReviewed?.();
         }
         setSelectedApprovalGroup(null);
-        trackActivity("Approve Operation Request", "operations", request.title);
-        showToast?.("success", "Operation request approved successfully.");
+        trackActivity(
+          "Approve Operation Request",
+          "operations",
+          request.title,
+          {
+            actionKey: "notifications.activity.actions.approveOperationRequest",
+            detailsKey: "notifications.activity.details.operationRequestApproved",
+            detailsParams: { operationNo: request.entityId || request.backendOperationId || "-" },
+          },
+        );
+        showToast?.("success", t("approvals.messages.operationApproved"));
       } catch (error) {
-        showToast?.("warning", getFriendlyApiErrorMessage(error, "Failed to approve operation request."));
+        showToast?.("warning", getFriendlyApiErrorMessage(error, t("approvals.messages.operationApproveFailed")));
       }
       return;
     }
@@ -340,14 +430,14 @@ export default function ApprovalsPage({
     if (request.type === "employee_transfer") {
       try {
         if (["Admin", "PlatformAdmin"].includes(currentUser?.role) && !isManagerEmployeeTransferApproval(request)) {
-          showToast?.("warning", "Admin can approve manager transfers only.");
+          showToast?.("warning", t("approvals.messages.adminManagerTransfersOnly"));
           return;
         }
 
         const reviewerUserId = currentUser?.id || "";
 
         if (!reviewerUserId) {
-          showToast?.("warning", "Approver user ID is required.");
+          showToast?.("warning", t("approvals.validation.approverIdRequired"));
           return;
         }
 
@@ -363,7 +453,7 @@ export default function ApprovalsPage({
         const message =
           error?.response?.data?.message ||
           error?.message ||
-          "Failed to apply employee transfer.";
+          t("approvals.messages.employeeTransferApplyFailed");
         showToast?.("warning", message);
         return;
       }
@@ -393,7 +483,7 @@ export default function ApprovalsPage({
         const message =
           error?.response?.data?.message ||
           error?.message ||
-          "Failed to apply asset transfer.";
+          t("approvals.messages.assetTransferApplyFailed");
         showToast?.("warning", message);
         return;
       }
@@ -423,7 +513,7 @@ export default function ApprovalsPage({
         const message =
           error?.response?.data?.message ||
           error?.message ||
-          "Failed to apply station transfer.";
+          t("approvals.messages.stationTransferApplyFailed");
         showToast?.("warning", message);
         return;
       }
@@ -440,7 +530,7 @@ export default function ApprovalsPage({
         const message =
           error?.response?.data?.message ||
           error?.message ||
-          "Failed to apply asset approval.";
+          t("approvals.messages.assetApprovalApplyFailed");
         showToast?.("warning", message);
         return;
       }
@@ -459,7 +549,7 @@ export default function ApprovalsPage({
         const message =
           error?.response?.data?.message ||
           error?.message ||
-          "Failed to apply station approval.";
+          t("approvals.messages.stationApprovalApplyFailed");
         showToast?.("warning", message);
         return;
       }
@@ -488,31 +578,45 @@ export default function ApprovalsPage({
     trackActivity(
       fullyApproved ? "Approve Request" : "Approve Request Stage",
       request.module,
-      `${request.title} (${currentStage?.approvalStage || "Approval Stage"})`
+      `${request.title} (${currentStage?.approvalStage || "Approval Stage"})`,
+      {
+        actionKey: fullyApproved
+          ? "notifications.activity.actions.approveRequest"
+          : "notifications.activity.actions.approveRequestStage",
+        detailsKey: fullyApproved
+          ? "notifications.activity.details.requestApproved"
+          : "notifications.activity.details.requestStageApproved",
+        detailsParams: {
+          requestTitle: request.title || t("approvals.defaults.requestTitle"),
+          entityType: request.entityType || "Request",
+          entityId: request.entityId || "-",
+          stage: getApprovalStageLabel(currentStage || {}),
+        },
+      },
     );
-    showToast?.("success", fullyApproved ? "Approval request fully approved." : "Approval stage approved. Waiting for remaining manager approval.");
+    showToast?.("success", fullyApproved ? t("approvals.messages.fullyApproved") : t("approvals.messages.stageApprovedPending"));
   
     });
   };
 
   const rejectRequest = async (request) => {
-    return runWithActionLoading("Rejecting request...", async () => {
+    return runWithActionLoading(t("approvals.loading.rejecting"), async () => {
     if (!isBackendTransferRequest(request) && !canUserReviewApproval(currentUser, request) && currentUser?.role !== "Admin") {
-      showToast?.("warning", "You are not allowed to review this request.");
+      showToast?.("warning", t("approvals.messages.notAllowedReview"));
       return;
     }
 
     if (request.status !== "Pending") {
-      showToast?.("warning", "This request has already been reviewed.");
+      showToast?.("warning", t("approvals.messages.alreadyReviewed"));
       return;
     }
 
     const reviewedAt = new Date().toISOString();
-    const note = reviewNotes[request.id] || "Rejected";
+    const note = reviewNotes[request.id] || t("approvals.defaults.rejectedNote");
 
     if (isBackendOperationCorrectionRequest(request)) {
       if (!["Manager", "Admin", "PlatformAdmin"].includes(currentUser?.role)) {
-        showToast?.("warning", "Only managers can reject operation corrections.");
+        showToast?.("warning", t("approvals.messages.onlyManagersRejectCorrection"));
         return;
       }
 
@@ -530,18 +634,27 @@ export default function ApprovalsPage({
           await onOperationCorrectionReviewed?.();
         }
         setSelectedApprovalGroup(null);
-        trackActivity("Reject Operation Correction", "operations", request.title);
-        showToast?.("success", "Operation correction rejected.");
+        trackActivity(
+          "Reject Operation Correction",
+          "operations",
+          request.title,
+          {
+            actionKey: "notifications.activity.actions.rejectOperationCorrection",
+            detailsKey: "notifications.activity.details.operationCorrectionRejected",
+            detailsParams: { operationNo: request.entityId || request.backendOperationId || "-" },
+          },
+        );
+        showToast?.("success", t("approvals.messages.correctionRejected"));
       } catch (error) {
         console.warn("Failed to reject operation correction.", error);
-        showToast?.("warning", error?.message || "Failed to reject operation correction.");
+        showToast?.("warning", error?.message || t("approvals.messages.correctionRejectFailed"));
       }
       return;
     }
 
     if (isBackendOperationRequest(request)) {
       if (currentUser?.role !== "Manager") {
-        showToast?.("warning", "Only the assigned project manager can reject operation requests.");
+        showToast?.("warning", t("approvals.messages.onlyAssignedManagerRejectOperation"));
         return;
       }
 
@@ -559,10 +672,19 @@ export default function ApprovalsPage({
           await onOperationApprovalReviewed?.();
         }
         setSelectedApprovalGroup(null);
-        trackActivity("Reject Operation Request", "operations", request.title);
-        showToast?.("success", "Operation request rejected.");
+        trackActivity(
+          "Reject Operation Request",
+          "operations",
+          request.title,
+          {
+            actionKey: "notifications.activity.actions.rejectOperationRequest",
+            detailsKey: "notifications.activity.details.operationRequestRejected",
+            detailsParams: { operationNo: request.entityId || request.backendOperationId || "-" },
+          },
+        );
+        showToast?.("success", t("approvals.messages.operationRejected"));
       } catch (error) {
-        showToast?.("warning", getFriendlyApiErrorMessage(error, "Failed to reject operation request."));
+        showToast?.("warning", getFriendlyApiErrorMessage(error, t("approvals.messages.operationRejectFailed")));
       }
       return;
     }
@@ -585,7 +707,7 @@ export default function ApprovalsPage({
         const message =
           error?.response?.data?.message ||
           error?.message ||
-          "Failed to reject employee transfer.";
+          t("approvals.messages.employeeTransferRejectFailed");
         showToast?.("warning", message);
         return;
       }
@@ -609,7 +731,7 @@ export default function ApprovalsPage({
         const message =
           error?.response?.data?.message ||
           error?.message ||
-          "Failed to reject asset transfer.";
+          t("approvals.messages.assetTransferRejectFailed");
         showToast?.("warning", message);
         return;
       }
@@ -633,7 +755,7 @@ export default function ApprovalsPage({
         const message =
           error?.response?.data?.message ||
           error?.message ||
-          "Failed to reject station transfer.";
+          t("approvals.messages.stationTransferRejectFailed");
         showToast?.("warning", message);
         return;
       }
@@ -675,15 +797,28 @@ export default function ApprovalsPage({
     );
 
     setSelectedApprovalGroup(null);
-    trackActivity("Reject Request", request.module, `${request.title} (${request.entityType || "Request"}: ${request.entityId || "-"})`);
-    showToast?.("error", "Approval request rejected.");
+    trackActivity(
+      "Reject Request",
+      request.module,
+      `${request.title} (${request.entityType || "Request"}: ${request.entityId || "-"})`,
+      {
+        actionKey: "notifications.activity.actions.rejectRequest",
+        detailsKey: "notifications.activity.details.requestRejected",
+        detailsParams: {
+          requestTitle: request.title || t("approvals.defaults.requestTitle"),
+          entityType: request.entityType || "Request",
+          entityId: request.entityId || "-",
+        },
+      },
+    );
+    showToast?.("error", t("approvals.messages.requestRejected"));
   
     });
   };
 
   const approvalGroups = useMemo(
-    () => buildApprovalGroups(visibleApprovals),
-    [visibleApprovals]
+    () => buildApprovalGroups(visibleApprovals, t),
+    [visibleApprovals, t]
   );
 
   const pendingCount = visibleApprovals.filter((item) =>
@@ -766,10 +901,33 @@ export default function ApprovalsPage({
     }
   };
 
+  const getApprovalStageLabel = (approver = {}) => {
+    const key = approver?.approvalStageKey;
+    if (key) {
+      const translated = t(key);
+      if (translated && translated !== key) return translated;
+    }
+
+    const rawStage = String(approver?.approvalStage || "").trim();
+    const normalized = rawStage.toLowerCase();
+
+    if (normalized.includes("source")) {
+      return t("approvals.stages.sourceProjectManager");
+    }
+    if (normalized.includes("destination")) {
+      return t("approvals.stages.destinationProjectManager");
+    }
+    if (normalized.includes("project manager")) {
+      return t("approvals.stages.projectManager");
+    }
+
+    return rawStage || t("approvals.defaults.approvalStage");
+  };
+
   const getReadableApproverName = (approver) => {
     const rawName = String(approver?.userName || "").trim();
     if (rawName && !/^cm[a-z0-9]{10,}$/i.test(rawName)) return rawName;
-    return approver?.approvalStage || "Approver";
+    return getApprovalStageLabel(approver) || t("approvals.defaults.approver");
   };
 
   const getRequestItemLabel = (request) =>
@@ -778,7 +936,7 @@ export default function ApprovalsPage({
     request?.payload?.station?.stationName ||
     request?.payload?.employee?.fullName ||
     request?.title ||
-    "Request";
+    t("approvals.defaults.requestTitle");
 
   const getTransferDirection = (request) => {
     const fields = Array.isArray(request?.changedFields) ? request.changedFields : [];
@@ -796,18 +954,18 @@ export default function ApprovalsPage({
   const renderCompactChanges = (request) => {
     const fields = Array.isArray(request?.changedFields) ? request.changedFields : [];
     if (!fields.length) {
-      return <p className="text-sm text-slate-500">No additional changes to display.</p>;
+      return <p className="text-sm text-slate-500">{t("approvals.empty.noChanges")}</p>;
     }
 
     return (
-      <div className="divide-y divide-slate-800 rounded-2xl border border-slate-800 overflow-hidden">
+      <div className="rounded-2xl border border-slate-700 overflow-hidden">
         {fields.map((field, index) => (
           <div
             key={`${request.id}-${field.field}-${index}`}
-            className="grid grid-cols-[minmax(110px,0.8fr)_1fr_auto_1fr] items-center gap-3 bg-slate-950/40 px-4 py-3"
+            className="grid grid-cols-[minmax(110px,0.8fr)_1fr_auto_1fr] items-center gap-3 bg-slate-950 px-4 py-3 border-b border-slate-700 last:border-b-0"
           >
             <p className="text-xs font-bold text-slate-300">
-              {field.label || makeFieldLabel(field.field)}
+              {getApprovalFieldLabel(field)}
             </p>
             <p className="text-sm text-slate-400 break-words">
               {normalizeApprovalValue(field.oldValue)}
@@ -825,7 +983,7 @@ export default function ApprovalsPage({
   const renderCompactRoute = (request) => {
     const approvers = request?.approvalRoute?.requiredApprovers || [];
     if (!approvers.length) {
-      return <p className="text-sm text-slate-500">No approval route assigned.</p>;
+      return <p className="text-sm text-slate-500">{t("approvals.empty.noRoute")}</p>;
     }
 
     return (
@@ -851,7 +1009,7 @@ export default function ApprovalsPage({
               </span>
               <div className="leading-tight">
                 <p className="text-xs font-bold text-slate-100">{getReadableApproverName(approver)}</p>
-                <p className="text-[10px] text-slate-500">{approver.approvalStage || "Approval"}</p>
+                <p className="text-[10px] text-slate-500">{getApprovalStageLabel(approver)}</p>
               </div>
             </div>
           );
@@ -861,20 +1019,20 @@ export default function ApprovalsPage({
   };
 
   return (
-    <div className="bg-transparent min-h-screen text-slate-100 overflow-y-auto h-screen p-4 sm:p-6">
+    <div className={`bg-transparent min-h-screen text-slate-100 overflow-y-auto h-screen p-4 sm:p-6 ${isRtl ? "text-right" : "text-left"}`} dir={isRtl ? "rtl" : "ltr"}>
       <div className="max-w-[1400px] mx-auto">
         <div className="flex flex-col sm:flex-row justify-between gap-3 mb-5">
           <div>
-            <h1 className="text-2xl font-black">Approvals Center</h1>
-            <p className="text-slate-400 text-sm">Review and decide on pending requests</p>
+            <h1 className="text-2xl font-black">{t("approvals.title")}</h1>
+            <p className="text-slate-400 text-sm">{t("approvals.subtitle")}</p>
           </div>
           <div className="grid grid-cols-2 gap-3">
             <div className="bg-slate-900/80 border border-slate-700 rounded-2xl px-4 py-3">
-              <p className="text-xs text-slate-400">Pending</p>
+              <p className="text-xs text-slate-400">{t("approvals.cards.pending")}</p>
               <p className="text-2xl font-black text-amber-300">{pendingCount}</p>
             </div>
             <div className="bg-slate-900/80 border border-red-500/30 rounded-2xl px-4 py-3">
-              <p className="text-xs text-slate-400">Sensitive</p>
+              <p className="text-xs text-slate-400">{t("approvals.cards.sensitive")}</p>
               <p className="text-2xl font-black text-red-300">{sensitiveCount}</p>
             </div>
           </div>
@@ -884,22 +1042,22 @@ export default function ApprovalsPage({
           <select
             value={selectedStatus}
             onChange={(event) => setSelectedStatus(event.target.value)}
-            className="bg-slate-950 border border-slate-700 rounded-xl p-2 text-slate-100"
+            className={`bg-slate-950 border border-slate-700 rounded-xl p-2 text-slate-100 ${isRtl ? "text-right" : "text-left"}`}
           >
-            <option value="Pending">Pending</option>
-            <option value="Approved">Approved</option>
-            <option value="Rejected">Rejected</option>
-            <option value="All">All</option>
+            <option value="Pending">{t("approvals.status.pending")}</option>
+            <option value="Approved">{t("approvals.status.approved")}</option>
+            <option value="Rejected">{t("approvals.status.rejected")}</option>
+            <option value="All">{t("approvals.status.all")}</option>
           </select>
           <p className="text-xs text-slate-500">
-            {approvalGroups.length} approval{approvalGroups.length === 1 ? "" : "s"}
+            {t("approvals.count", { count: approvalGroups.length })}
           </p>
         </div>
 
         <div className="space-y-3">
           {approvalGroups.length === 0 ? (
             <div className="bg-slate-900/70 border border-slate-700 rounded-2xl p-6 text-slate-400">
-              No approval requests found.
+              {t("approvals.empty.noRequests")}
             </div>
           ) : (
             approvalGroups.map((group) => {
@@ -910,7 +1068,7 @@ export default function ApprovalsPage({
                   type="button"
                   key={group.id}
                   onClick={() => openApprovalGroup(group)}
-                  className="w-full text-left bg-slate-900/80 hover:bg-slate-900 border border-slate-700 hover:border-amber-500/40 rounded-2xl p-4 shadow-xl transition"
+                  className={`w-full bg-slate-900/80 hover:bg-slate-900 border border-slate-700 hover:border-amber-500/40 rounded-2xl p-4 shadow-xl transition ${isRtl ? "text-right" : "text-left"}`}
                 >
                   <div className="flex flex-col lg:flex-row lg:items-center justify-between gap-4">
                     <div className="min-w-0">
@@ -922,21 +1080,24 @@ export default function ApprovalsPage({
                               ? "bg-emerald-500/15 text-emerald-300 border-emerald-500/30"
                               : "bg-red-500/15 text-red-300 border-red-500/30"
                         }`}>
-                          {group.status}
+                          {getApprovalStatusLabel(group.status)}
                         </span>
                         {group.isBatch && (
                           <span className="px-2 py-1 rounded-full text-[10px] font-bold border bg-slate-800 text-slate-300 border-slate-700">
-                            {group.requests.length} items
+                            {t("approvals.itemsCount", { count: group.requests.length })}
                           </span>
                         )}
                       </div>
 
                       <h2 className="text-base sm:text-lg font-black text-slate-100">
-                        {group.isBatch ? `Bulk ${request.entityType || "Approval"}` : request.title}
+                        {getApprovalTitle(request, group.isBatch, group.requests.length)}
                       </h2>
 
                       {direction ? (
-                        <div className="mt-2 flex flex-wrap items-center gap-2 text-sm">
+                        <div
+                          dir="ltr"
+                          className="mt-2 flex flex-wrap items-center gap-2 text-sm"
+                        >
                           <span className="font-bold text-slate-200">{direction.from}</span>
                           <span className="text-amber-400">→</span>
                           <span className="font-bold text-amber-300">{direction.to}</span>
@@ -948,8 +1109,8 @@ export default function ApprovalsPage({
 
                     <div className="flex items-center justify-between lg:justify-end gap-5 text-xs text-slate-500 shrink-0">
                       <div>
-                        <p className="text-slate-300 font-bold">{request.requestedByName || "Unknown user"}</p>
-                        <p>{formatApprovalDate(request.requestedAt)}</p>
+                        <p className="text-slate-300 font-bold">{request.requestedByName || t("approvals.defaults.unknownUser")}</p>
+                        <p>{formatApprovalDate(request.requestedAt, language === "ar" ? "ar-SA" : "en-GB")}</p>
                       </div>
                       <span className="text-xl text-slate-500">›</span>
                     </div>
@@ -970,9 +1131,9 @@ export default function ApprovalsPage({
         ).length;
 
         return (
-          <div className="fleet-modal-backdrop fixed inset-0 z-[9999] bg-black/70 backdrop-blur-sm flex items-center justify-center p-3 sm:p-4">
+          <div className="fleet-modal-backdrop fixed inset-0 z-[9999] bg-black/70 backdrop-blur-sm flex items-center justify-center p-3 sm:p-4" dir={isRtl ? "rtl" : "ltr"}>
             <div className="bg-slate-950 border border-slate-700 rounded-3xl shadow-2xl w-full max-w-3xl max-h-[90vh] overflow-hidden flex flex-col">
-              <div className="p-4 sm:p-5 border-b border-slate-800 flex items-start justify-between gap-3">
+              <div className="p-4 sm:p-5 border-b border-slate-700 flex items-start justify-between gap-3">
                 <div className="min-w-0">
                   <div className="flex flex-wrap items-center gap-2 mb-2">
                     <span className={`px-2 py-1 rounded-full text-xs font-bold border ${
@@ -982,16 +1143,16 @@ export default function ApprovalsPage({
                           ? "bg-emerald-500/15 text-emerald-300 border-emerald-500/30"
                           : "bg-red-500/15 text-red-300 border-red-500/30"
                     }`}>
-                      {group.status}
+                      {getApprovalStatusLabel(group.status)}
                     </span>
                     {group.isBatch && (
                       <span className="px-2 py-1 rounded-full text-xs font-bold bg-slate-800 text-slate-300 border border-slate-700">
-                        {group.requests.length} items
+                        {t("approvals.itemsCount", { count: group.requests.length })}
                       </span>
                     )}
                   </div>
                   <h2 className="text-xl font-black text-slate-100">
-                    {group.isBatch ? `Review ${group.requests.length} ${primary.entityType || "items"}` : primary.title}
+                    {group.isBatch ? t("approvals.batch.reviewTitle", { count: group.requests.length, entity: getEntityTypeLabel(primary.entityType) }) : getApprovalTitle(primary)}
                   </h2>
                   {direction && (
                     <p className="text-sm mt-1">
@@ -1005,7 +1166,7 @@ export default function ApprovalsPage({
                   onClick={() => setSelectedApprovalGroup(null)}
                   className="bg-slate-800 hover:bg-slate-700 border border-slate-700 text-white rounded-xl px-3 py-2 font-bold"
                 >
-                  Close
+                  {t("common.close")}
                 </button>
               </div>
 
@@ -1013,11 +1174,11 @@ export default function ApprovalsPage({
                 {group.isBatch ? (
                   <section>
                     <div className="flex flex-wrap items-center justify-between gap-2 mb-2">
-                      <h3 className="text-xs font-black uppercase tracking-[0.14em] text-slate-300">Affected Items</h3>
+                      <h3 className="text-xs font-black uppercase tracking-[0.14em] text-slate-300">{t("approvals.sections.affectedItems")}</h3>
                       {group.status === "Pending" && (
                         <div className="flex gap-2">
-                          <button onClick={selectAllPendingInGroup} className="text-xs font-bold text-amber-300">Select all</button>
-                          <button onClick={clearGroupSelection} className="text-xs font-bold text-slate-500">Clear</button>
+                          <button onClick={selectAllPendingInGroup} className="text-xs font-bold text-amber-300">{t("approvals.actions.selectAll")}</button>
+                          <button onClick={clearGroupSelection} className="text-xs font-bold text-slate-500">{t("common.clear")}</button>
                         </div>
                       )}
                     </div>
@@ -1029,7 +1190,7 @@ export default function ApprovalsPage({
                           <label
                             key={request.id}
                             className={`flex items-center gap-3 rounded-xl border px-3 py-2 ${
-                              checked ? "border-amber-500/40 bg-amber-500/5" : "border-slate-800 bg-slate-900/60"
+                              checked ? "border-amber-500/40 bg-amber-500/5" : "border-slate-700 bg-slate-900/60"
                             } ${selectable ? "cursor-pointer" : "opacity-60"}`}
                           >
                             {selectable && (
@@ -1047,41 +1208,41 @@ export default function ApprovalsPage({
                     </div>
                   </section>
                 ) : (
-                  <section className="rounded-2xl border border-slate-800 bg-slate-900/60 px-4 py-3">
-                    <p className="text-xs text-slate-500">Requested by</p>
+                  <section className="rounded-2xl border border-slate-700 bg-slate-900/60 px-4 py-3">
+                    <p className="text-xs text-slate-500">{t("approvals.sections.requestedBy")}</p>
                     <p className="text-sm font-bold text-slate-100">
-                      {primary.requestedByName || "Unknown user"} • {formatApprovalDate(primary.requestedAt)}
+                      {primary.requestedByName || t("approvals.defaults.unknownUser")} • {formatApprovalDate(primary.requestedAt, language === "ar" ? "ar-SA" : "en-GB")}
                     </p>
                   </section>
                 )}
 
                 <section>
-                  <h3 className="text-xs font-black uppercase tracking-[0.14em] text-slate-300 mb-2">Changes</h3>
+                  <h3 className="text-xs font-black uppercase tracking-[0.14em] text-slate-300 mb-2">{t("approvals.sections.changes")}</h3>
                   {renderCompactChanges(primary)}
                 </section>
 
                 <section>
-                  <h3 className="text-xs font-black uppercase tracking-[0.14em] text-slate-300 mb-2">Approval Progress</h3>
+                  <h3 className="text-xs font-black uppercase tracking-[0.14em] text-slate-300 mb-2">{t("approvals.sections.progress")}</h3>
                   {renderCompactRoute(primary)}
                 </section>
 
                 {group.status === "Pending" && (
                   <section>
-                    <h3 className="text-xs font-black uppercase tracking-[0.14em] text-slate-300 mb-2">Review Note</h3>
+                    <h3 className="text-xs font-black uppercase tracking-[0.14em] text-slate-300 mb-2">{t("approvals.sections.reviewNote")}</h3>
                     <textarea
                       value={getGroupReviewNote()}
                       onChange={(event) => applyGroupReviewNote(event.target.value)}
-                      placeholder="Optional note..."
-                      className="w-full bg-slate-900 border border-slate-700 rounded-xl p-3 text-sm text-slate-100 min-h-[72px]"
+                      placeholder={t("approvals.placeholders.optionalNote")}
+                      className={`w-full bg-slate-900 border border-slate-700 rounded-xl p-3 text-sm text-slate-100 min-h-[72px] ${isRtl ? "text-right" : "text-left"}`}
                     />
                   </section>
                 )}
               </div>
 
               {group.status === "Pending" && (
-                <div className="p-4 border-t border-slate-800 bg-slate-950 flex items-center justify-between gap-3">
+                <div className="p-4 border-t border-slate-700 bg-slate-950 flex items-center justify-between gap-3">
                   <p className="text-xs text-slate-500">
-                    {group.isBatch ? `${pendingSelectedCount} selected` : "Ready for review"}
+                    {group.isBatch ? t("approvals.selectedCount", { count: pendingSelectedCount }) : t("approvals.actions.readyForReview")}
                   </p>
                   <div className="flex gap-2">
                     <button
@@ -1089,14 +1250,14 @@ export default function ApprovalsPage({
                       onClick={() => reviewSelectedRequests("reject")}
                       className="bg-red-600 hover:bg-red-500 disabled:opacity-40 text-white px-4 py-2.5 rounded-xl font-bold"
                     >
-                      {group.isBatch ? "Reject Selected" : "Reject"}
+                      {group.isBatch ? t("approvals.actions.rejectSelected") : t("approvals.actions.reject")}
                     </button>
                     <button
                       disabled={isGroupActionRunning || pendingSelectedCount === 0}
                       onClick={() => reviewSelectedRequests("approve")}
                       className="bg-emerald-600 hover:bg-emerald-500 disabled:opacity-40 text-white px-4 py-2.5 rounded-xl font-bold"
                     >
-                      {group.isBatch ? "Approve Selected" : "Approve"}
+                      {group.isBatch ? t("approvals.actions.approveSelected") : t("approvals.actions.approve")}
                     </button>
                   </div>
                 </div>
@@ -1109,11 +1270,11 @@ export default function ApprovalsPage({
   );
 }
 
-function formatApprovalDate(rawDate) {
+function formatApprovalDate(rawDate, locale = "en-GB") {
   if (!rawDate) return "-";
   const d = new Date(rawDate);
   if (Number.isNaN(d.getTime())) return rawDate;
-  return d.toLocaleString("en-GB", {
+  return d.toLocaleString(locale || "en-GB", {
     year: "numeric",
     month: "2-digit",
     day: "2-digit",

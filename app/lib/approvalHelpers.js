@@ -7,7 +7,9 @@ import {
 import {
   getOperationApprovalType,
   getOperationApprovalTitle,
+  getOperationApprovalMessage,
 } from "./operationHelpers";
+import { resolveI18nMessage } from "./i18nMessageHelpers";
 
 export function normalizeOperationCorrectionFieldName(value) {
   const normalized = String(value || "")
@@ -38,18 +40,24 @@ export function normalizeOperationCorrectionFieldName(value) {
   return map[normalized] || normalized;
 }
 
-export function getOperationCorrectionFieldLabel(fieldName) {
+export function getOperationCorrectionFieldLabel(fieldName, t) {
   const normalized = normalizeOperationCorrectionFieldName(fieldName);
   const labels = {
-    ASSET_ID: "Equipment",
-    SOURCE_STATION_ID: "Source Station",
-    QUANTITY: "Diesel Quantity",
-    ODOMETER: "Odometer / Hour Meter",
-    NOTES: "Notes",
-    INVOICE_NUMBER: "Invoice / Receipt Number",
+    ASSET_ID: "workflowMessages.fields.equipment",
+    SOURCE_STATION_ID: "workflowMessages.fields.sourceStation",
+    QUANTITY: "workflowMessages.fields.dieselQuantity",
+    ODOMETER: "workflowMessages.fields.odometer",
+    NOTES: "workflowMessages.fields.notes",
+    INVOICE_NUMBER: "workflowMessages.fields.invoiceNumber",
   };
 
-  return labels[normalized] || makeFieldLabel(normalized);
+  const key = labels[normalized];
+  if (key && typeof t === "function") {
+    const translated = t(key);
+    if (translated && translated !== key) return translated;
+  }
+
+  return makeFieldLabel(normalized);
 }
 
 export function findApprovalEntityByAnyId(items = [], value) {
@@ -89,6 +97,28 @@ export function getAssetApprovalDisplayValue(value, assets = []) {
 export function getStationApprovalDisplayValue(value, stations = []) {
   const station = findApprovalEntityByAnyId(stations, value);
   return station?.stationId || station?.code || station?.name || value || "-";
+}
+
+
+export function getApprovalEntityDisplayValue(
+  entityType,
+  value,
+  { assets = [], stations = [] } = {},
+) {
+  const normalizedType = String(entityType || "")
+    .trim()
+    .toLowerCase()
+    .replace(/[\s_-]+/g, "");
+
+  if (["asset", "equipment"].includes(normalizedType)) {
+    return getAssetApprovalDisplayValue(value, assets);
+  }
+
+  if (["station", "sourcestation", "destinationstation"].includes(normalizedType)) {
+    return getStationApprovalDisplayValue(value, stations);
+  }
+
+  return value === undefined || value === null || value === "" ? "-" : String(value);
 }
 
 export function getOperationCorrectionApprovalDisplayValue(fieldName, value, assets = [], stations = []) {
@@ -147,8 +177,25 @@ export function isManagerEmployeeTransferApproval(request) {
 }
 
 
-export function mapBackendOperationApprovalForFrontend(item = {}, currentUser = {}) {
+export function mapBackendOperationApprovalForFrontend(
+  item = {},
+  currentUser = {},
+  assets = [],
+  stations = [],
+  t,
+) {
   const operation = item.operation || item;
+  const tr = (key, params = {}, fallback = "") =>
+    resolveI18nMessage(t, { key, params, fallback }, fallback);
+  const approvalTitleMessage = getOperationApprovalMessage(
+    toFrontendOperationType(
+      String(operation.type || item.type || "")
+        .trim()
+        .toUpperCase()
+        .replace(/[\s-]+/g, "_"),
+    ),
+    operation.operationNo || item.operationNo || operation.id || item.operationId || item.id || "",
+  );
   const operationId = operation.id || item.operationId || item.id || "";
 
   if (!operationId) return null;
@@ -165,7 +212,22 @@ export function mapBackendOperationApprovalForFrontend(item = {}, currentUser = 
   const sourceStationId = operation.sourceStationId || item.sourceStationId || "";
   const destinationStationId = operation.destinationStationId || item.destinationStationId || "";
   const assetId = operation.assetId || item.assetId || "";
-  const destinationId = assetId || destinationStationId || "-";
+
+  const sourceStationDisplay = sourceStationId
+    ? getApprovalEntityDisplayValue("sourceStation", sourceStationId, { assets, stations })
+    : operation.externalStationName || "-";
+
+  const destinationStationDisplay = destinationStationId
+    ? getApprovalEntityDisplayValue("destinationStation", destinationStationId, { assets, stations })
+    : "-";
+
+  const assetDisplay = assetId
+    ? getApprovalEntityDisplayValue("asset", assetId, { assets, stations })
+    : "-";
+
+  const destinationDisplay = assetId
+    ? assetDisplay
+    : destinationStationDisplay;
   const requestedBy = operation.requestedBy || item.requestedBy || {};
   const rawApprovals = Array.isArray(operation.approvals)
     ? operation.approvals
@@ -191,10 +253,10 @@ export function mapBackendOperationApprovalForFrontend(item = {}, currentUser = 
         approval.approver?.name ||
         (approverId === currentUser?.id ? currentUser?.fullName : "") ||
         approval.approverName ||
-        "Project Manager",
+        tr("workflowMessages.roles.projectManager", {}, "Project Manager"),
       role: "Manager",
       projectId: approval.projectId || operation.projectId || item.projectId || "-",
-      approvalStage: approval.approvalStage || "Project Manager",
+      approvalStage: approval.approvalStage || tr("workflowMessages.roles.projectManager", {}, "Project Manager"),
       status: approvalStatusToFrontend(approval.status),
       reviewedAt: approval.reviewedAt || "",
       reviewNote: approval.note || approval.reviewNote || "",
@@ -205,10 +267,10 @@ export function mapBackendOperationApprovalForFrontend(item = {}, currentUser = 
     requiredApprovers = [
       {
         userId: currentUser.id,
-        userName: currentUser.fullName || currentUser.email || "Project Manager",
+        userName: currentUser.fullName || currentUser.email || tr("workflowMessages.roles.projectManager", {}, "Project Manager"),
         role: "Manager",
         projectId: operation.projectId || item.projectId || "-",
-        approvalStage: "Project Manager",
+        approvalStage: tr("workflowMessages.roles.projectManager", {}, "Project Manager"),
         status: "Pending",
         reviewedAt: "",
         reviewNote: "",
@@ -231,28 +293,30 @@ export function mapBackendOperationApprovalForFrontend(item = {}, currentUser = 
   const changedFields = [
     {
       field: "transactionType",
-      label: "Operation Type",
+      label: tr("workflowMessages.fields.operationType", {}, "Operation Type"),
       oldValue: "-",
       newValue: frontendType || normalizedType || "Operation",
       sensitive: true,
     },
     {
       field: "sourceStation",
-      label: "Source Station",
+      label: tr("workflowMessages.fields.sourceStation", {}, "Source Station"),
       oldValue: "-",
-      newValue: sourceStationId || operation.externalStationName || "-",
+      newValue: sourceStationDisplay,
       sensitive: true,
     },
     {
       field: "destinationId",
-      label: assetId ? "Asset" : "Destination Station",
+      label: assetId
+        ? tr("workflowMessages.fields.asset", {}, "Asset")
+        : tr("workflowMessages.fields.destinationStation", {}, "Destination Station"),
       oldValue: "-",
-      newValue: destinationId,
+      newValue: destinationDisplay,
       sensitive: true,
     },
     {
       field: "dieselQuantity",
-      label: "Diesel Quantity",
+      label: tr("workflowMessages.fields.dieselQuantity", {}, "Diesel Quantity"),
       oldValue: "-",
       newValue: quantity === "" ? "-" : `${quantity} L`,
       sensitive: true,
@@ -262,7 +326,7 @@ export function mapBackendOperationApprovalForFrontend(item = {}, currentUser = 
   if (operation.odometer !== undefined && operation.odometer !== null) {
     changedFields.push({
       field: "odometer",
-      label: "Odometer / Hour Meter",
+      label: tr("workflowMessages.fields.odometer", {}, "Odometer / Hour Meter"),
       oldValue: "-",
       newValue: operation.odometer,
       sensitive: true,
@@ -272,7 +336,7 @@ export function mapBackendOperationApprovalForFrontend(item = {}, currentUser = 
   if (operation.stationCounter !== undefined && operation.stationCounter !== null) {
     changedFields.push({
       field: "stationCounter",
-      label: "Station Counter",
+      label: tr("workflowMessages.fields.stationCounter", {}, "Station Counter"),
       oldValue: "-",
       newValue: operation.stationCounter,
       sensitive: true,
@@ -282,7 +346,9 @@ export function mapBackendOperationApprovalForFrontend(item = {}, currentUser = 
   if (operation.externalStationName) {
     changedFields.push({
       field: "externalStationName",
-      label: normalizedType === "EXTERNAL_SUPPLY" ? "External Supplier" : "External Station",
+      label: normalizedType === "EXTERNAL_SUPPLY"
+        ? tr("workflowMessages.fields.externalSupplier", {}, "External Supplier")
+        : tr("workflowMessages.fields.externalStation", {}, "External Station"),
       oldValue: "-",
       newValue: operation.externalStationName,
       sensitive: false,
@@ -292,7 +358,7 @@ export function mapBackendOperationApprovalForFrontend(item = {}, currentUser = 
   if (operation.invoiceNumber) {
     changedFields.push({
       field: "invoiceNumber",
-      label: "Invoice / Receipt Number",
+      label: tr("workflowMessages.fields.invoiceNumber", {}, "Invoice / Receipt Number"),
       oldValue: "-",
       newValue: operation.invoiceNumber,
       sensitive: false,
@@ -305,12 +371,29 @@ export function mapBackendOperationApprovalForFrontend(item = {}, currentUser = 
     isBackendOperationApproval: true,
     type: requestType,
     module: "operations",
-    title: getOperationApprovalTitle(frontendType, operationNo),
+    title: resolveI18nMessage(t, approvalTitleMessage, approvalTitleMessage.fallback),
+    titleKey: approvalTitleMessage.key,
+    titleParams: approvalTitleMessage.params,
+    titleFallback: approvalTitleMessage.fallback,
     payload: {
       operation,
       backendOperationId: operationId,
     },
-    details: `${quantity || "-"} L - ${frontendType || normalizedType || "Operation"} - ${destinationId}`,
+    details: tr(
+      "workflowMessages.approvals.operation.details",
+      {
+        quantity: quantity || "-",
+        operationType: frontendType || normalizedType || "Operation",
+        destination: destinationDisplay,
+      },
+      `${quantity || "-"} L - ${frontendType || normalizedType || "Operation"} - ${destinationDisplay}`,
+    ),
+    detailsKey: "workflowMessages.approvals.operation.details",
+    detailsParams: {
+      quantity: quantity || "-",
+      operationType: frontendType || normalizedType || "Operation",
+      destination: destinationDisplay,
+    },
     status: requestStatus,
     changedFields,
     entityType: "Operation",
@@ -319,8 +402,8 @@ export function mapBackendOperationApprovalForFrontend(item = {}, currentUser = 
     riskLevel: "High",
     approvalRoute: {
       routeType: normalizedType === "EXTERNAL_TRANSFER" ? "dual_project_manager" : "single_project_manager",
-      sourceProject: sourceStationId || "-",
-      destinationProject: destinationId || "-",
+      sourceProject: sourceStationDisplay,
+      destinationProject: destinationDisplay,
       requiredApprovers,
       routeStatus: requestStatus,
     },
@@ -335,7 +418,9 @@ export function mapBackendOperationApprovalForFrontend(item = {}, currentUser = 
 
 }
 
-export function mapBackendOperationCorrectionForFrontend(item = {}, currentUser = {}, assets = [], stations = []) {
+export function mapBackendOperationCorrectionForFrontend(item = {}, currentUser = {}, assets = [], stations = [], t) {
+  const tr = (key, params = {}, fallback = "") =>
+    resolveI18nMessage(t, { key, params, fallback }, fallback);
   const correctionId = item.id || "";
   const operation = item.operation || {};
   const operationId = item.operationId || operation.id || "";
@@ -347,7 +432,7 @@ export function mapBackendOperationCorrectionForFrontend(item = {}, currentUser 
   const requestedBy = item.requestedBy || {};
   const status = normalizeApprovalStatus(item.status);
   const isPending = status === "PENDING";
-  const fieldLabel = getOperationCorrectionFieldLabel(fieldName);
+  const fieldLabel = getOperationCorrectionFieldLabel(fieldName, t);
 
   return {
     id: `BACKEND-OPERATION-CORRECTION-${correctionId}`,
@@ -356,14 +441,27 @@ export function mapBackendOperationCorrectionForFrontend(item = {}, currentUser 
     isBackendOperationCorrection: true,
     type: "operation_correction",
     module: "operations",
-    title: `Operation Correction - ${operationNo}`,
+    title: tr(
+      "workflowMessages.approvals.operationCorrection.title",
+      { operationNo },
+      `Operation Correction - ${operationNo}`,
+    ),
+    titleKey: "workflowMessages.approvals.operationCorrection.title",
+    titleParams: { operationNo },
+    titleFallback: `Operation Correction - ${operationNo}`,
     payload: {
       correction: item,
       operation,
       backendCorrectionId: correctionId,
       backendOperationId: operationId,
     },
-    details: `${fieldLabel} correction for ${operationNo}`,
+    details: tr(
+      "workflowMessages.approvals.operationCorrection.details",
+      { field: fieldLabel, operationNo },
+      `${fieldLabel} correction for ${operationNo}`,
+    ),
+    detailsKey: "workflowMessages.approvals.operationCorrection.details",
+    detailsParams: { field: fieldLabel, operationNo },
     status: isPending ? "Pending" : status === "APPROVED" ? "Approved" : "Rejected",
     changedFields: [
       {
@@ -389,7 +487,7 @@ export function mapBackendOperationCorrectionForFrontend(item = {}, currentUser 
               userName: currentUser.fullName || currentUser.email || "Manager",
               role: currentUser.role || "Manager",
               projectId: operation.projectId || "-",
-              approvalStage: "Manager Review",
+              approvalStage: tr("workflowMessages.roles.managerReview", {}, "Manager Review"),
               status: "Pending",
               reviewedAt: "",
               reviewNote: "",
@@ -438,6 +536,10 @@ export function buildApprovalChangedFields({ type, payload = {} }) {
     return payload.changedFields.map((item) => ({
       field: item.field,
       label: item.label || makeFieldLabel(item.field),
+      labelKey: item.labelKey || "",
+      labelParams: item.labelParams || {},
+      labelFallback:
+        item.labelFallback || item.label || makeFieldLabel(item.field),
       oldValue: normalizeApprovalValue(item.oldValue),
       newValue: normalizeApprovalValue(item.newValue),
       sensitive: item.sensitive ?? isSensitiveApprovalField(item.field),
@@ -473,14 +575,14 @@ export function buildApprovalChangedFields({ type, payload = {} }) {
     return [
       {
         field: "transactionType",
-        label: "Operation Type",
+        label: tr("workflowMessages.fields.operationType", {}, "Operation Type"),
         oldValue: "-",
         newValue: normalizeApprovalValue(operation.transactionType),
         sensitive: true,
       },
       {
         field: "sourceStation",
-        label: "Source Station",
+        label: tr("workflowMessages.fields.sourceStation", {}, "Source Station"),
         oldValue: "-",
         newValue: normalizeApprovalValue(operation.sourceStation),
         sensitive: false,
@@ -494,7 +596,7 @@ export function buildApprovalChangedFields({ type, payload = {} }) {
       },
       {
         field: "dieselQuantity",
-        label: "Diesel Quantity",
+        label: tr("workflowMessages.fields.dieselQuantity", {}, "Diesel Quantity"),
         oldValue: "-",
         newValue: `${normalizeApprovalValue(operation.dieselQuantity)} L`,
         sensitive: true,
@@ -510,14 +612,14 @@ export function buildApprovalChangedFields({ type, payload = {} }) {
     const changedFields = [
       {
         field: "transactionType",
-        label: "Operation Type",
+        label: tr("workflowMessages.fields.operationType", {}, "Operation Type"),
         oldValue: "-",
         newValue: normalizeApprovalValue(operation.transactionType),
         sensitive: true,
       },
       {
         field: "sourceStation",
-        label: "Source Station",
+        label: tr("workflowMessages.fields.sourceStation", {}, "Source Station"),
         oldValue: "-",
         newValue: normalizeApprovalValue(operation.sourceStation),
         sensitive: true,
@@ -531,7 +633,7 @@ export function buildApprovalChangedFields({ type, payload = {} }) {
       },
       {
         field: "dieselQuantity",
-        label: "Diesel Quantity",
+        label: tr("workflowMessages.fields.dieselQuantity", {}, "Diesel Quantity"),
         oldValue: "-",
         newValue: `${normalizeApprovalValue(operation.dieselQuantity)} L`,
         sensitive: true,
@@ -717,7 +819,7 @@ export function findStrictProjectManagerForProject(projectValue, users = [], pro
         matchedProject?.projectManagerName ||
         matchedProject?.managerName ||
         matchedProject?.projectManager?.fullName ||
-        "Project Manager",
+        tr("workflowMessages.roles.projectManager", {}, "Project Manager"),
       email:
         matchedProject?.projectManagerEmail ||
         matchedProject?.projectManager?.email ||
@@ -837,7 +939,22 @@ export function buildApprovalRoute({ requestedBy, users = [], projects = [], pay
   };
 }
 
-export function createApprovalRequest({ type, module, title, payload, requestedBy, details, users = [], projects = [] }) {
+export function createApprovalRequest({
+  type,
+  module,
+  title,
+  titleKey = "",
+  titleParams = {},
+  titleFallback = "",
+  payload,
+  requestedBy,
+  details,
+  detailsKey = "",
+  detailsParams = {},
+  detailsFallback = "",
+  users = [],
+  projects = [],
+}) {
   const changedFields = buildApprovalChangedFields({ type, payload });
   const sensitive = changedFields.some((item) => item.sensitive);
   const entityInfo = inferApprovalEntity({ type, payload });
@@ -848,8 +965,14 @@ export function createApprovalRequest({ type, module, title, payload, requestedB
     type,
     module,
     title,
+    titleKey,
+    titleParams,
+    titleFallback: titleFallback || title || "",
     payload,
     details,
+    detailsKey,
+    detailsParams,
+    detailsFallback: detailsFallback || details || "",
     status: "Pending",
     changedFields,
     entityType: entityInfo.entityType,

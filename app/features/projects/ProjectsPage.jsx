@@ -8,6 +8,7 @@ import Th from "../../components/ui/Th";
 import Td from "../../components/ui/Td";
 import Card from "../../components/ui/Card";
 import { useLanguage } from "../../context/LanguageContext";
+import { resolveEnumValue } from "../../lib/i18nMessageHelpers";
 
 import {
   formatNumber,
@@ -212,23 +213,11 @@ export default function ProjectsPage({
   const { language, t } = useLanguage();
   const isRtl = language === "ar";
 
-  const getProjectStatusLabel = (status) => {
-    const normalized = String(status || "").trim().toLowerCase();
-    if (normalized === "active") return t("projects.status.active");
-    if (normalized === "inactive") return t("projects.status.inactive");
-    if (normalized === "ended") return t("projects.status.ended");
-    return status || "-";
-  };
+  const getProjectStatusLabel = (status) =>
+    resolveEnumValue(t, "projectStatus", status, status || "-");
 
-  const getApprovalStatusLabel = (status) => {
-    const normalized = String(status || "").trim().toLowerCase();
-    if (normalized === "approved") return t("projects.approval.approved");
-    if (normalized === "pending approval" || normalized === "pending") {
-      return t("projects.approval.pending");
-    }
-    if (normalized === "rejected") return t("projects.approval.rejected");
-    return status || "-";
-  };
+  const getApprovalStatusLabel = (status) =>
+    resolveEnumValue(t, "approvalStatus", status, status || "-");
 
   const renderProjectStatusBadge = (status) => {
     const normalized = String(status || "").trim().toLowerCase();
@@ -1422,6 +1411,17 @@ export default function ProjectsPage({
         "Change Project Status",
         "projects",
         `${statusEdit.id} status changed to ${statusEdit.newStatus}.`,
+        {
+          actionKey: "notifications.activity.actions.changeProjectStatus",
+          actionFallback: "Change Project Status",
+          detailsKey: "notifications.activity.details.projectStatusChanged",
+          detailsParams: {
+            projectId: statusEdit.id,
+            status: statusEdit.newStatus,
+          },
+          detailsEnumParams: { status: "projectStatus" },
+          detailsFallback: `${statusEdit.id} status changed to ${statusEdit.newStatus}.`,
+        },
       );
       showToast?.("success", t("projectWorkflows.messages.statusChanged"));
       setStatusEdit(null);

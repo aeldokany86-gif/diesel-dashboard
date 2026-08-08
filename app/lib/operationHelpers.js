@@ -1,4 +1,5 @@
 import { isSameText } from "./helpers";
+import { createI18nMessage, resolveI18nMessage, resolveEnumValue } from "./i18nMessageHelpers";
 
 export function mapFrontendOperationToBackendPayload(operation = {}) {
   const normalizedType = String(operation.transactionType || "")
@@ -150,13 +151,13 @@ export function getPhotoLabel(type) {
   return labels[normalized] || normalized.split("-").map((part) => part.charAt(0).toUpperCase() + part.slice(1)).join(" ");
 }
 
-export function getOperationTypeDisplay(value) {
+export function getOperationTypeDisplay(value, t) {
   const normalized = String(value || "")
     .trim()
     .toUpperCase()
     .replace(/[\s-]+/g, "_");
 
-  const labels = {
+  const fallbackLabels = {
     DIRECT_REFUEL: "Direct Refuel",
     EXTERNAL_DIRECT_REFUEL: "External Direct Refuel",
     INTERNAL_TRANSFER: "Internal Transfer",
@@ -164,7 +165,13 @@ export function getOperationTypeDisplay(value) {
     EXTERNAL_TRANSFER: "External Transfer",
   };
 
-  return labels[normalized] || String(value || "-").replace(/_/g, " ");
+  const fallback =
+    fallbackLabels[normalized] ||
+    String(value || "-").replace(/_/g, " ");
+
+  return typeof t === "function"
+    ? resolveEnumValue(t, "operationType", normalized, fallback)
+    : fallback;
 }
 
 export function getOperationTypeBadgeClass(value) {
@@ -278,36 +285,121 @@ export function getOperationApprovalType(transactionType) {
   return "operation";
 }
 
-export function getOperationApprovalTitle(transactionType, operationId) {
+export function getOperationApprovalMessage(transactionType, operationId) {
   if (isExternalDirectRefuelTransactionType(transactionType)) {
-    return `External Direct Refuel ${operationId} pending approval`;
+    return createI18nMessage(
+      "workflowMessages.approvals.operation.externalDirectRefuelPending",
+      { operationNo: operationId },
+      `External Direct Refuel ${operationId} pending approval`,
+    );
   }
 
   if (isExternalSupplyTransactionType(transactionType)) {
-    return `External Supply ${operationId} pending approval`;
+    return createI18nMessage(
+      "workflowMessages.approvals.operation.externalSupplyPending",
+      { operationNo: operationId },
+      `External Supply ${operationId} pending approval`,
+    );
   }
 
   if (isExternalTransferTransactionType(transactionType)) {
-    return `External Transfer ${operationId} pending approval`;
+    return createI18nMessage(
+      "workflowMessages.approvals.operation.externalTransferPending",
+      { operationNo: operationId },
+      `External Transfer ${operationId} pending approval`,
+    );
   }
 
-  return `Operation ${operationId} pending approval`;
+  return createI18nMessage(
+    "workflowMessages.approvals.operation.genericPending",
+    { operationNo: operationId },
+    `Operation ${operationId} pending approval`,
+  );
 }
 
-export function getOperationApprovalSuccessMessage(transactionType) {
+export function getOperationApprovalTitle(transactionType, operationId, t) {
+  const message = getOperationApprovalMessage(transactionType, operationId);
+  return resolveI18nMessage(t, message, message.fallback);
+}
+
+export function getOperationApprovalSuccessMessageDescriptor(
+  transactionType,
+  status = "PENDING",
+) {
+  const normalizedStatus = String(status || "").trim().toUpperCase();
+
+  if (normalizedStatus === "PARTIALLY_APPROVED") {
+    return createI18nMessage(
+      "workflowMessages.operations.externalTransferPartiallyApproved",
+      {},
+      "External Transfer created with first manager approval and pending the second project manager.",
+    );
+  }
+
+  if (normalizedStatus === "COMPLETED") {
+    const typeKeyMap = {
+      DIRECT_REFUEL: "directRefuelCompleted",
+      EXTERNAL_DIRECT_REFUEL: "externalDirectRefuelCompleted",
+      INTERNAL_TRANSFER: "internalTransferCompleted",
+      EXTERNAL_SUPPLY: "externalSupplyCompleted",
+      EXTERNAL_TRANSFER: "externalTransferCompleted",
+    };
+
+    const normalizedType = String(transactionType || "")
+      .trim()
+      .toUpperCase()
+      .replace(/[\s-]+/g, "_");
+
+    const keySuffix = typeKeyMap[normalizedType] || "genericCompleted";
+
+    return createI18nMessage(
+      `workflowMessages.operations.${keySuffix}`,
+      {},
+      "Operation completed successfully.",
+    );
+  }
+
   if (isExternalDirectRefuelTransactionType(transactionType)) {
-    return "External Direct Refuel saved as Pending Manager Approval.";
+    return createI18nMessage(
+      "workflowMessages.operations.externalDirectRefuelPending",
+      {},
+      "External Direct Refuel request created and pending manager approval.",
+    );
   }
 
   if (isExternalSupplyTransactionType(transactionType)) {
-    return "External Supply saved as Pending Manager Approval.";
+    return createI18nMessage(
+      "workflowMessages.operations.externalSupplyPending",
+      {},
+      "External Supply request created and pending manager approval.",
+    );
   }
 
   if (isExternalTransferTransactionType(transactionType)) {
-    return "External Transfer saved as Pending Project Managers Approval.";
+    return createI18nMessage(
+      "workflowMessages.operations.externalTransferPending",
+      {},
+      "External Transfer request created and pending project managers approval.",
+    );
   }
 
-  return "Operation saved as Pending Manager Approval.";
+  return createI18nMessage(
+    "workflowMessages.operations.genericPending",
+    {},
+    "Operation saved as Pending Manager Approval.",
+  );
+}
+
+export function getOperationApprovalSuccessMessage(
+  transactionType,
+  status = "PENDING",
+  t,
+) {
+  const message = getOperationApprovalSuccessMessageDescriptor(
+    transactionType,
+    status,
+  );
+  return resolveI18nMessage(t, message, message.fallback);
 }
 
 export function shouldExternalSupplyRequireApproval(user) {

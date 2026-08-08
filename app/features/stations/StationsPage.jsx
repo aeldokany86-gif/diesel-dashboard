@@ -18,6 +18,7 @@ import Th from "../../components/ui/Th";
 import Td from "../../components/ui/Td";
 import Card from "../../components/ui/Card";
 import { useLanguage } from "../../context/LanguageContext";
+import { resolveEnumValue } from "../../lib/i18nMessageHelpers";
 
 import {
   normalizeScopeValue,
@@ -253,13 +254,8 @@ export default function StationsPage({
   const { language, t } = useLanguage();
   const isRtl = language === "ar";
 
-  const getStationStatusLabel = (status) => {
-    const normalized = String(status || "").trim().toLowerCase();
-    if (normalized === "active") return t("stations.status.active");
-    if (normalized === "inactive") return t("stations.status.inactive");
-    if (normalized === "retired") return t("stations.status.retired");
-    return status || "-";
-  };
+  const getStationStatusLabel = (status) =>
+    resolveEnumValue(t, "stationStatus", status, status || "-");
 
   const renderStationStatusBadge = (status) => {
     const normalized = String(status || "").trim().toLowerCase();
@@ -277,12 +273,8 @@ export default function StationsPage({
     );
   };
 
-  const getStationTypeLabel = (type) => {
-    const normalized = String(type || "").trim().toLowerCase();
-    if (normalized === "main") return t("stations.types.main");
-    if (normalized === "sub") return t("stations.types.sub");
-    return type || "-";
-  };
+  const getStationTypeLabel = (type) =>
+    resolveEnumValue(t, "stationType", type, type || "-");
 
   const getDirectionLabel = (direction) => {
     if (direction === "In") return t("stations.history.in");
@@ -523,7 +515,18 @@ export default function StationsPage({
       trackActivity?.(
         t("stationWorkflows.counter.title"),
         "stations",
-        `${station.id} counter reset from ${formatNumber(oldReading)} to ${formatNumber(parsedNewReading)}.`
+        `Station ${station.id} counter reset from ${formatNumber(oldReading)} to ${formatNumber(parsedNewReading)}.`,
+        {
+          actionKey: "notifications.activity.actions.resetStationCounter",
+          actionFallback: "Reset Station Counter",
+          detailsKey: "notifications.activity.details.stationCounterReset",
+          detailsParams: {
+            stationId: station.id,
+            oldReading: formatNumber(oldReading),
+            newReading: formatNumber(parsedNewReading),
+          },
+          detailsFallback: `Station ${station.id} counter reset from ${formatNumber(oldReading)} to ${formatNumber(parsedNewReading)}.`,
+        },
       );
 
       notifyUser(
@@ -572,6 +575,7 @@ export default function StationsPage({
   const [localStationStatusUpdates, setLocalStationStatusUpdates] = useState({});
   const [localStations, setLocalStations] = useState([]);
   const [stationSaveLoading, setStationSaveLoading] = useState(false);
+  const [stationIdBackendError, setStationIdBackendError] = useState("");
   const [newStation, setNewStation] = useState({
     id: "",
     type: "Main",
@@ -601,11 +605,19 @@ export default function StationsPage({
 
 
 
-  const stationIdDuplicateError = getDuplicateIdError(
-    newStation.id,
-    [...stations, ...localStations],
-    "Station ID"
+  const stationIdExistsLocally = Boolean(
+    getDuplicateIdError(
+      newStation.id,
+      [...stations, ...localStations],
+      "Station ID"
+    )
   );
+
+  const stationIdDuplicateError =
+    stationIdBackendError ||
+    (stationIdExistsLocally
+      ? t("stationWorkflows.validation.duplicateStationId")
+      : "");
 
   const resetNewStation = () => {
     setNewStation({
@@ -617,6 +629,7 @@ export default function StationsPage({
       status: "Active",
     });
     setNewStationOpeningCounter("0");
+    setStationIdBackendError("");
   };
 
   const closeAddStation = () => {
@@ -640,7 +653,6 @@ export default function StationsPage({
     }
 
     if (stationIdDuplicateError) {
-      showToast?.("warning", stationIdDuplicateError);
       return;
     }
 
@@ -756,7 +768,31 @@ export default function StationsPage({
 
       createdStation = mapBackendStationForState(createdStationData);
     } catch (error) {
-      const backendMessage = getFriendlyApiErrorMessage(error, t("stationWorkflows.messages.addFailed"));
+      const backendMessage = getFriendlyApiErrorMessage(
+        error,
+        t("stationWorkflows.messages.addFailed"),
+      );
+
+      const normalizedBackendMessage = String(backendMessage || "").toLowerCase();
+      const isStationIdConflict =
+        Number(error?.response?.status) === 409 ||
+        (
+          normalizedBackendMessage.includes("station id") &&
+          (
+            normalizedBackendMessage.includes("already") ||
+            normalizedBackendMessage.includes("previously used") ||
+            normalizedBackendMessage.includes("cannot be reused") ||
+            normalizedBackendMessage.includes("unique")
+          )
+        );
+
+      if (isStationIdConflict) {
+        setStationIdBackendError(
+          t("stationWorkflows.validation.stationIdPreviouslyUsed"),
+        );
+        setStationSaveLoading(false);
+        return;
+      }
 
       showToast?.("warning", backendMessage);
       setStationSaveLoading(false);
@@ -798,10 +834,19 @@ export default function StationsPage({
     }
 
     try {
+      const createdStationId = createdStation?.id || cleanStation.id;
+
       trackActivity?.(
         t("stations.actions.addStation"),
         "stations",
-        `${createdStation?.id || cleanStation.id} added from backend.`
+        `Station ${createdStationId} was added successfully.`,
+        {
+          actionKey: "notifications.activity.actions.addStation",
+          actionFallback: "Add Station",
+          detailsKey: "notifications.activity.details.stationAdded",
+          detailsParams: { stationId: createdStationId },
+          detailsFallback: `Station ${createdStationId} was added successfully.`,
+        },
       );
     } catch (activityError) {
       console.warn("Station was created, but activity tracking failed.", activityError);
@@ -1233,7 +1278,22 @@ export default function StationsPage({
       trackActivity?.(
         "Station Status Change",
         "stations",
-        `${statusEditStation.id} status changed from ${oldStatus || "-"} to ${newStationStatus}.`
+        `${statusEditStation.id} status changed from ${oldStatus || "-"} to ${newStationStatus}.`,
+        {
+          actionKey: "notifications.activity.actions.changeStationStatus",
+          actionFallback: "Change Station Status",
+          detailsKey: "notifications.activity.details.stationStatusChanged",
+          detailsParams: {
+            stationId: statusEditStation.id,
+            oldStatus: oldStatus || "-",
+            status: newStationStatus,
+          },
+          detailsEnumParams: {
+            oldStatus: "stationStatus",
+            status: "stationStatus",
+          },
+          detailsFallback: `${statusEditStation.id} status changed from ${oldStatus || "-"} to ${newStationStatus}.`,
+        },
       );
 
       setStatusEditStation(null);
@@ -1388,7 +1448,10 @@ export default function StationsPage({
     if (Math.abs(currentStock) > 0.000001) {
       showToast?.(
         "warning",
-        `Cannot delete station ${deleteTargetStation.id} because its current stock is ${formatNumber(currentStock)} L. Adjust the balance to zero before deletion.`
+        t("stationWorkflows.validation.cannotDeleteWithStock", {
+          id: deleteTargetStation.id,
+          stock: formatNumber(currentStock),
+        })
       );
       return;
     }
@@ -1433,7 +1496,10 @@ export default function StationsPage({
     if (Math.abs(currentStock) > 0.000001) {
       showToast?.(
         "warning",
-        `Cannot delete station ${deleteTargetStation.id} because its current stock is ${formatNumber(currentStock)} L. Adjust the balance to zero before deletion.`
+        t("stationWorkflows.validation.cannotDeleteWithStock", {
+          id: deleteTargetStation.id,
+          stock: formatNumber(currentStock),
+        })
       );
       return;
     }
@@ -1461,7 +1527,14 @@ export default function StationsPage({
       trackActivity?.(
         t("stationWorkflows.delete.title"),
         "stations",
-        `${deleteTargetStation.id} was soft deleted.${stationDeleteReason ? ` Reason: ${stationDeleteReason}` : ""}`
+        `Station ${deleteTargetStation.id} was deleted.${stationDeleteReason ? ` Reason: ${stationDeleteReason}` : ""}`,
+        {
+          actionKey: "notifications.activity.actions.deleteStation",
+          actionFallback: "Delete Station",
+          detailsKey: "notifications.activity.details.stationDeleted",
+          detailsParams: { stationId: deleteTargetStation.id, reason: stationDeleteReason || "-" },
+          detailsFallback: `Station ${deleteTargetStation.id} was deleted.${stationDeleteReason ? ` Reason: ${stationDeleteReason}` : ""}`,
+        },
       );
 
       setDeleteTargetStation(null);
@@ -1721,7 +1794,28 @@ export default function StationsPage({
       type: "station_stock_count_adjustment",
       module: "stations",
       title: `Inventory Adjustment - ${stockCountStation.id}`,
+      titleKey: "approvals.stationStockAdjustment.title",
+      titleParams: { stationId: stockCountStation.id },
+      titleFallback: `Inventory Adjustment - ${stockCountStation.id}`,
       details: `${currentUser?.fullName || currentUser?.name || t("stationWorkflows.defaults.manager")} requested inventory adjustment for station ${stockCountStation.id}.`,
+      detailsKey: "approvals.stationStockAdjustment.details",
+      detailsParams: {
+        stationId: stockCountStation.id,
+        currentStock: formatNumber(systemQty),
+        requestedStock: formatNumber(actualQty),
+        adjustmentQty: formatNumber(adjustmentQty),
+        reason,
+      },
+      detailsFallback: `${currentUser?.fullName || currentUser?.name || t("stationWorkflows.defaults.manager")} requested inventory adjustment for station ${stockCountStation.id}.`,
+      notificationDetailsKey:
+        "notifications.activity.details.stationStockAdjustmentRequested",
+      notificationDetailsParams: {
+        stationId: stockCountStation.id,
+        currentStock: formatNumber(systemQty),
+        requestedStock: formatNumber(actualQty),
+        adjustmentQty: formatNumber(adjustmentQty),
+        reason,
+      },
       payload: {
         entity: "station",
         id: stockCountStation.id,
@@ -1742,6 +1836,8 @@ export default function StationsPage({
           {
             field: "currentStock",
             label: "Inventory Adjustment",
+            labelKey: "approvals.fields.inventoryAdjustment",
+            labelFallback: "Inventory Adjustment",
             oldValue: `${systemQty} L`,
             newValue: `${actualQty} L`,
             sensitive: true,
@@ -1749,6 +1845,8 @@ export default function StationsPage({
           {
             field: "adjustmentQty",
             label: "Adjustment Quantity",
+            labelKey: "approvals.fields.adjustmentQuantity",
+            labelFallback: "Adjustment Quantity",
             oldValue: "-",
             newValue: `${adjustmentQty} L`,
             sensitive: true,
@@ -1756,6 +1854,8 @@ export default function StationsPage({
           {
             field: "reason",
             label: "Reason",
+            labelKey: "approvals.fields.reason",
+            labelFallback: "Reason",
             oldValue: "-",
             newValue: reason,
             sensitive: true,
@@ -1817,7 +1917,24 @@ export default function StationsPage({
         type: "station_zero_balance_adjustment",
         module: "stations",
         title: `Zero Balance Adjustment - ${selectedStation.id}`,
+        titleKey: "approvals.stationZeroBalance.title",
+        titleParams: { stationId: selectedStation.id },
+        titleFallback: `Zero Balance Adjustment - ${selectedStation.id}`,
         details: `${currentUser?.fullName || currentUser?.name || t("stationWorkflows.defaults.officer")} requested zero balance adjustment for station ${selectedStation.id}.`,
+        detailsKey: "approvals.stationZeroBalance.details",
+        detailsParams: {
+          stationId: selectedStation.id,
+          currentStock: formatNumber(currentStock),
+          reason,
+        },
+        detailsFallback: `${currentUser?.fullName || currentUser?.name || t("stationWorkflows.defaults.officer")} requested zero balance adjustment for station ${selectedStation.id}.`,
+        notificationDetailsKey:
+          "notifications.activity.details.stationZeroBalanceRequested",
+        notificationDetailsParams: {
+          stationId: selectedStation.id,
+          currentStock: formatNumber(currentStock),
+          reason,
+        },
         payload: {
           entity: "station",
           id: selectedStation.id,
@@ -1837,6 +1954,8 @@ export default function StationsPage({
             {
               field: "currentStock",
               label: "Zero Balance",
+              labelKey: "approvals.fields.zeroBalance",
+              labelFallback: "Zero Balance",
               oldValue: `${currentStock} L`,
               newValue: "0 L",
               sensitive: true,
@@ -2848,7 +2967,10 @@ export default function StationsPage({
                 label={t("stations.fields.stationId")}
                 placeholder="Main_Station"
                 value={newStation.id}
-                onChange={(e) => setNewStation({ ...newStation, id: e.target.value })}
+                onChange={(e) => {
+                  setStationIdBackendError("");
+                  setNewStation({ ...newStation, id: e.target.value });
+                }}
                 error={stationIdDuplicateError}
               />
 
@@ -2940,52 +3062,36 @@ export default function StationsPage({
       )}
 
       {statusEditStation && (
-        <div dir={isRtl ? "rtl" : "ltr"} className="fleet-modal-backdrop fixed inset-0 z-[12000] bg-black/60 flex items-center justify-center">
-          <div className="bg-white text-black w-[520px] rounded-xl shadow-xl p-6">
-            <div className="flex justify-between items-center mb-6 border-b pb-3">
-              <h2 className="text-xl sm:text-2xl font-bold">{t("stationWorkflows.status.title")}</h2>
-              <button onClick={() => setStatusEditStation(null)}>×</button>
-            </div>
-
-            <div className="bg-gray-100 p-4 rounded-lg space-y-2">
-              <p>
-                <strong>{t("stationWorkflows.labels.station")}:</strong> {statusEditStation.id}
-              </p>
-              <p>
-                <strong>{t("stationWorkflows.status.currentStatus")}:</strong> {getStationStatusLabel(getCurrentStationStatus(statusEditStation))}
-              </p>
-              <p>
-                <strong>{t("stationWorkflows.status.newStatus")}:</strong> {getStationStatusLabel(newStationStatus)}
-              </p>
-            </div>
-
-            <div className="flex justify-end gap-3 mt-6 border-t pt-4">
-              <button
-                onClick={() => setStatusEditStation(null)}
-                className="rounded-xl border border-slate-600 bg-slate-900 px-5 py-2.5 font-bold text-slate-200 hover:bg-slate-800 transition"
-              >
-                {t("common.cancel")}
-              </button>
-
-              <button
-                onClick={confirmStationStatusChange}
-                className="bg-amber-500 hover:bg-amber-400 text-black px-4 py-2 rounded-lg font-bold"
-              >
-                {t("stationWorkflows.status.confirmChange")}
-              </button>
+        <ModalPortal>
+          <div dir={isRtl ? "rtl" : "ltr"} className="fixed inset-0 z-[20000] bg-black/80 backdrop-blur-sm flex items-center justify-center p-3">
+            <div className={`w-[min(520px,calc(100vw-2rem))] rounded-2xl border border-slate-700 bg-slate-950 text-slate-100 shadow-2xl p-6 ${isRtl ? "text-right" : "text-left"}`}>
+              <div className="flex justify-between items-center mb-6 border-b border-slate-700 pb-3">
+                <h2 className="text-xl sm:text-2xl font-bold">{t("stationWorkflows.status.title")}</h2>
+                <button onClick={() => setStatusEditStation(null)} className="text-slate-400 hover:text-white text-xl">×</button>
+              </div>
+              <div className="bg-slate-900 border border-slate-800 p-4 rounded-xl space-y-2">
+                <p><strong>{t("stationWorkflows.labels.station")}:</strong> {statusEditStation.id}</p>
+                <p className="text-slate-300"><strong>{t("stationWorkflows.status.currentStatus")}:</strong> {getStationStatusLabel(getCurrentStationStatus(statusEditStation))}</p>
+                <p className="text-slate-300"><strong>{t("stationWorkflows.status.newStatus")}:</strong> <span className="font-bold text-amber-300">{getStationStatusLabel(newStationStatus)}</span></p>
+              </div>
+              <div className="flex justify-end gap-3 mt-6 border-t border-slate-700 pt-4">
+                <button onClick={() => setStatusEditStation(null)} className="rounded-xl border border-slate-600 bg-slate-900 px-5 py-2.5 font-bold text-slate-200 hover:bg-slate-800 transition">{t("common.cancel")}</button>
+                <button onClick={confirmStationStatusChange} className="bg-amber-500 hover:bg-amber-400 text-black px-4 py-2 rounded-lg font-bold">{t("stationWorkflows.status.confirmChange")}</button>
+              </div>
             </div>
           </div>
-        </div>
+        </ModalPortal>
       )}
 
       {deleteTargetStation && (
-        <div dir={isRtl ? "rtl" : "ltr"} className="fixed inset-0 z-[12000] bg-black/75 backdrop-blur-sm flex items-center justify-center p-3">
-          <div className="bg-white text-black w-[520px] rounded-2xl p-6 shadow-2xl">
+        <ModalPortal>
+        <div dir={isRtl ? "rtl" : "ltr"} className="fixed inset-0 z-[20000] bg-black/80 backdrop-blur-sm flex items-center justify-center p-3">
+          <div className={`w-[min(520px,calc(100vw-2rem))] rounded-2xl border border-slate-700 bg-slate-950 text-slate-100 p-6 shadow-2xl ${isRtl ? "text-right" : "text-left"}`}>
             <h2 className="text-xl sm:text-2xl font-bold mb-2 text-red-600">
               {t("stationWorkflows.delete.title")}
             </h2>
 
-            <p className="text-gray-600 mb-5">
+            <p className="text-slate-400 mb-5">
               {t("stationWorkflows.labels.station")}:{" "}
               <strong>{deleteTargetStation.id}</strong>
             </p>
@@ -2995,7 +3101,7 @@ export default function StationsPage({
               onChange={(e) => setStationDeleteReason(e.target.value)}
               placeholder={t("stationWorkflows.delete.reasonPlaceholder")}
               dir={isRtl ? "rtl" : "ltr"}
-              className={`border rounded-xl p-3 w-full h-28 mb-5 ${
+              className={`border border-slate-700 bg-slate-900 text-slate-100 placeholder:text-slate-500 rounded-xl p-3 w-full h-28 mb-5 outline-none focus:border-amber-500 ${
                 isRtl ? "text-right" : "text-left"
               }`}
             />
@@ -3006,7 +3112,7 @@ export default function StationsPage({
                   setDeleteTargetStation(null);
                   setStationDeleteReason("");
                 }}
-                className="bg-gray-200 px-3 lg:px-4 py-2 rounded-lg"
+                className="rounded-lg border border-slate-600 bg-slate-900 px-3 lg:px-4 py-2 text-slate-200 hover:bg-slate-800"
               >
                 {t("common.cancel")}
               </button>
@@ -3020,22 +3126,24 @@ export default function StationsPage({
             </div>
           </div>
         </div>
+        </ModalPortal>
       )}
 
       {showStationDeleteConfirm && (
-        <div dir={isRtl ? "rtl" : "ltr"} className="fixed inset-0 z-[12000] bg-black/75 backdrop-blur-sm flex items-center justify-center p-3">
-          <div className="bg-white text-black w-[500px] rounded-2xl p-6 shadow-2xl">
+        <ModalPortal>
+        <div dir={isRtl ? "rtl" : "ltr"} className="fixed inset-0 z-[20010] bg-black/80 backdrop-blur-sm flex items-center justify-center p-3">
+          <div className={`w-[min(500px,calc(100vw-2rem))] rounded-2xl border border-slate-700 bg-slate-950 text-slate-100 p-6 shadow-2xl ${isRtl ? "text-right" : "text-left"}`}>
             <h2 className="text-xl sm:text-2xl font-bold mb-4 text-red-600">
               {t("stationWorkflows.delete.requestTitle")}
             </h2>
 
-            <p className="text-gray-700 mb-5">
+            <p className="text-slate-300 mb-5">
               {t("stationWorkflows.delete.requestQuestion", {
                 id: deleteTargetStation?.id,
               })}
             </p>
 
-            <div className="bg-gray-100 rounded-xl p-4 mb-5 text-sm">
+            <div className="bg-slate-900 border border-slate-800 rounded-xl p-4 mb-5 text-sm text-slate-300">
               <p>
                 <strong>{t("stationWorkflows.labels.reason")}:</strong>{" "}
                 {stationDeleteReason}
@@ -3045,7 +3153,7 @@ export default function StationsPage({
             <div className="flex justify-end gap-3">
               <button
                 onClick={() => setShowStationDeleteConfirm(false)}
-                className="bg-gray-200 px-3 lg:px-4 py-2 rounded-lg"
+                className="rounded-lg border border-slate-600 bg-slate-900 px-3 lg:px-4 py-2 text-slate-200 hover:bg-slate-800"
               >
                 {t("stationWorkflows.actions.back")}
               </button>
@@ -3060,31 +3168,140 @@ export default function StationsPage({
             </div>
           </div>
         </div>
+        </ModalPortal>
       )}
 
 
 
       {showStockCountAdjustment && (
         <ModalPortal>
-          <div dir={isRtl ? "rtl" : "ltr"} className="fleet-portal-modal-backdrop fixed inset-0 z-[12000] bg-black/60 backdrop-blur-sm flex items-center justify-center p-4">
-          <div className="bg-white text-black w-[580px] rounded-xl shadow-xl p-6">
-            <h2 className="text-xl font-bold mb-4 text-amber-600">
-              {t("stationWorkflows.stock.title")}
-            </h2>
+          <div
+            dir={isRtl ? "rtl" : "ltr"}
+            className="fixed inset-0 z-[20020] bg-black/80 backdrop-blur-sm flex items-center justify-center p-4"
+          >
+            <div className={`w-[min(580px,calc(100vw-2rem))] rounded-2xl border border-slate-700 bg-slate-950 text-slate-100 shadow-2xl p-6 ${isRtl ? "text-right" : "text-left"}`}>
+              <h2 className="text-xl font-bold mb-4 text-amber-400">
+                {t("stationWorkflows.stock.title")}
+              </h2>
 
-            <div className="grid grid-cols-1 gap-4">
-              <div>
-                <label className="font-medium">{t("stationWorkflows.labels.selectStation")}</label>
+              <div className="grid grid-cols-1 gap-4">
+                <div>
+                  <label className="font-medium text-slate-200">{t("stationWorkflows.labels.selectStation")}</label>
+                  <select
+                    className="border border-slate-700 bg-slate-900 text-slate-100 rounded-lg p-2 w-full mt-2 outline-none focus:border-amber-500"
+                    value={stockCountStation?.id || ""}
+                    onChange={(e) => {
+                      const station = stationsWithBalance.find(
+                        (s) => s.id === e.target.value
+                      );
+                      setStockCountStation(station || null);
+                      setActualStockQty("");
+                      setStockCountReason("");
+                    }}
+                  >
+                    <option value="">{t("stationWorkflows.labels.selectStation")}</option>
+                    {stationsWithBalance.map((s) => (
+                      <option key={makeTenantEntityKey(s)} value={s.id}>
+                        {s.id}
+                      </option>
+                    ))}
+                  </select>
+                </div>
+
+                {stockCountStation && (
+                  <div className="bg-slate-900 border border-slate-800 p-4 rounded-xl text-slate-300">
+                    <p>
+                      <strong>{t("stationWorkflows.stock.systemBalance")}:</strong>{" "}
+                      {formatNumber(stockCountStation.currentStock)} L
+                    </p>
+                  </div>
+                )}
+
+                <div>
+                  <label className="font-medium text-slate-200">{t("stationWorkflows.stock.actualQuantity")}</label>
+                  <input
+                    type="number"
+                    value={actualStockQty}
+                    onChange={(e) => setActualStockQty(e.target.value)}
+                    className="border border-slate-700 bg-slate-900 text-slate-100 placeholder:text-slate-500 rounded-lg p-2 w-full mt-2 outline-none focus:border-amber-500"
+                    placeholder={t("stationWorkflows.stock.actualPlaceholder")}
+                  />
+                </div>
+
+                {stockCountStation && actualStockQty !== "" && (
+                  <div className="bg-slate-900 border border-slate-800 p-4 rounded-xl text-slate-300">
+                    <p>
+                      <strong>{t("stationWorkflows.stock.actualBalance")}:</strong>{" "}
+                      {formatNumber(Number(actualStockQty) || 0)} L
+                    </p>
+                    <p>
+                      <strong>{t("stationWorkflows.stock.adjustmentQty")}:</strong>{" "}
+                      {formatNumber((Number(actualStockQty) || 0) - (Number(stockCountStation.currentStock) || 0))} L
+                    </p>
+                    <p>
+                      <strong>{t("stationWorkflows.stock.finalBalance")}:</strong>{" "}
+                      {formatNumber(Number(actualStockQty) || 0)} L
+                    </p>
+                  </div>
+                )}
+
+                <div>
+                  <label className="font-medium text-slate-200">{t("stationWorkflows.labels.reason")}</label>
+                  <textarea
+                    value={stockCountReason}
+                    onChange={(e) => setStockCountReason(e.target.value)}
+                    className="border border-slate-700 bg-slate-900 text-slate-100 placeholder:text-slate-500 rounded-lg p-2 w-full mt-2 min-h-[80px] outline-none focus:border-amber-500"
+                    placeholder={t("stationWorkflows.stock.reasonPlaceholder")}
+                  />
+                </div>
+              </div>
+
+              <div className="flex justify-end gap-3 mt-6 border-t border-slate-700 pt-4">
+                <button
+                  onClick={() => {
+                    setShowStockCountAdjustment(false);
+                    setStockCountStation(null);
+                    setActualStockQty("");
+                    setStockCountReason("");
+                  }}
+                  className="rounded-lg border border-slate-600 bg-slate-900 px-4 py-2 text-slate-200 hover:bg-slate-800"
+                >
+                  {t("common.cancel")}
+                </button>
+
+                <button
+                  onClick={confirmStockCountAdjustment}
+                  className="bg-red-600 hover:bg-red-500 text-white px-4 py-2 rounded-lg font-bold"
+                >
+                  {t("stationWorkflows.stock.submit")}
+                </button>
+              </div>
+            </div>
+          </div>
+        </ModalPortal>
+      )}
+
+      {showConfirm && (
+        <ModalPortal>
+          <div
+            dir={isRtl ? "rtl" : "ltr"}
+            className="fixed inset-0 z-[20030] bg-black/80 backdrop-blur-sm flex items-center justify-center p-4"
+          >
+            <div className={`w-[min(560px,calc(100vw-2rem))] rounded-2xl border border-slate-700 bg-slate-950 text-slate-100 shadow-2xl p-6 ${isRtl ? "text-right" : "text-left"}`}>
+              <h2 className="text-xl font-bold mb-4 text-red-400">
+                {t("stationWorkflows.zero.title")}
+              </h2>
+
+              <div className="mb-4">
+                <label className="font-medium text-slate-200">{t("stationWorkflows.labels.selectStation")}</label>
                 <select
-                  className="border rounded-lg p-2 w-full mt-2"
-                  value={stockCountStation?.id || ""}
+                  className="border border-slate-700 bg-slate-900 text-slate-100 rounded-lg p-2 w-full mt-2 outline-none focus:border-amber-500"
+                  value={selectedStation?.id || ""}
                   onChange={(e) => {
                     const station = stationsWithBalance.find(
                       (s) => s.id === e.target.value
                     );
-                    setStockCountStation(station || null);
-                    setActualStockQty("");
-                    setStockCountReason("");
+                    setSelectedStation(station);
                   }}
                 >
                   <option value="">{t("stationWorkflows.labels.selectStation")}</option>
@@ -3096,154 +3313,54 @@ export default function StationsPage({
                 </select>
               </div>
 
-              {stockCountStation && (
-                <div className="bg-gray-100 p-4 rounded">
+              {selectedStation && (
+                <div className="bg-slate-900 border border-slate-800 p-4 rounded-xl mb-4 text-slate-300">
                   <p>
-                    <strong>{t("stationWorkflows.stock.systemBalance")}:</strong>{" "}
-                    {formatNumber(stockCountStation.currentStock)} L
-                  </p>
-                </div>
-              )}
-
-              <div>
-                <label className="font-medium">{t("stationWorkflows.stock.actualQuantity")}</label>
-                <input
-                  type="number"
-                  value={actualStockQty}
-                  onChange={(e) => setActualStockQty(e.target.value)}
-                  className="border rounded-lg p-2 w-full mt-2"
-                  placeholder={t("stationWorkflows.stock.actualPlaceholder")}
-                />
-              </div>
-
-              {stockCountStation && actualStockQty !== "" && (
-                <div className="bg-gray-100 p-4 rounded">
-                  <p>
-                    <strong>{t("stationWorkflows.stock.actualBalance")}:</strong>{" "}
-                    {formatNumber(Number(actualStockQty) || 0)} L
+                    <strong>{t("stationWorkflows.zero.currentBalance")}:</strong>{" "}
+                    {formatNumber(selectedStation.currentStock)} L
                   </p>
                   <p>
                     <strong>{t("stationWorkflows.stock.adjustmentQty")}:</strong>{" "}
-                    {formatNumber((Number(actualStockQty) || 0) - (Number(stockCountStation.currentStock) || 0))} L
+                    {formatNumber(-selectedStation.currentStock)} L
                   </p>
                   <p>
-                    <strong>{t("stationWorkflows.stock.finalBalance")}:</strong>{" "}
-                    {formatNumber(Number(actualStockQty) || 0)} L
+                    <strong>{t("stationWorkflows.stock.finalBalance")}:</strong> 0 L
                   </p>
                 </div>
               )}
 
-              <div>
-                <label className="font-medium">{t("stationWorkflows.labels.reason")}</label>
+              <div className="mb-4">
+                <label className="font-medium text-slate-200">{t("stationWorkflows.labels.reason")}</label>
                 <textarea
-                  value={stockCountReason}
-                  onChange={(e) => setStockCountReason(e.target.value)}
-                  className="border rounded-lg p-2 w-full mt-2 min-h-[80px]"
-                  placeholder={t("stationWorkflows.stock.reasonPlaceholder")}
+                  value={zeroBalanceReason}
+                  onChange={(e) => setZeroBalanceReason(e.target.value)}
+                  className="border border-slate-700 bg-slate-900 text-slate-100 placeholder:text-slate-500 rounded-lg p-2 w-full mt-2 min-h-[80px] outline-none focus:border-amber-500"
+                  placeholder={t("stationWorkflows.zero.defaultReason")}
                 />
               </div>
-            </div>
 
-            <div className="flex justify-end gap-3 mt-6 border-t pt-4">
-              <button
-                onClick={() => {
-                  setShowStockCountAdjustment(false);
-                  setStockCountStation(null);
-                  setActualStockQty("");
-                  setStockCountReason("");
-                              }}
-                className="bg-gray-200 px-4 py-2 rounded"
-              >
-                {t("common.cancel")}
-              </button>
+              <div className="flex justify-end gap-3 border-t border-slate-700 pt-4">
+                <button
+                  onClick={() => {
+                    setShowConfirm(false);
+                    setSelectedStation(null);
+                    setZeroBalanceReason(t("stationWorkflows.zero.defaultReason"));
+                  }}
+                  className="rounded-lg border border-slate-600 bg-slate-900 px-4 py-2 text-slate-200 hover:bg-slate-800"
+                >
+                  {t("common.cancel")}
+                </button>
 
-              <button
-                onClick={confirmStockCountAdjustment}
-                className="bg-red-600 text-white px-4 py-2 rounded"
-              >
-                {t("stationWorkflows.stock.submit")}
-              </button>
-            </div>
-          </div>
-        </div>
-        </ModalPortal>
-      )}
-
-      {showConfirm && (
-        <div dir={isRtl ? "rtl" : "ltr"} className="fleet-modal-backdrop fixed inset-0 z-[12000] bg-black/60 flex items-center justify-center">
-          <div className="bg-white text-black w-[560px] rounded-xl shadow-xl p-6">
-            <h2 className="text-xl font-bold mb-4 text-red-600">
-              {t("stationWorkflows.zero.title")}
-            </h2>
-
-            <div className="mb-4">
-              <label className="font-medium">{t("stationWorkflows.labels.selectStation")}</label>
-              <select
-                className="border rounded-lg p-2 w-full mt-2"
-                value={selectedStation?.id || ""}
-                onChange={(e) => {
-                  const station = stationsWithBalance.find(
-                    (s) => s.id === e.target.value
-                  );
-                  setSelectedStation(station);
-                }}
-              >
-                <option value="">{t("stationWorkflows.labels.selectStation")}</option>
-                {stationsWithBalance.map((s) => (
-                  <option key={makeTenantEntityKey(s)} value={s.id}>
-                    {s.id}
-                  </option>
-                ))}
-              </select>
-            </div>
-
-            {selectedStation && (
-              <div className="bg-gray-100 p-4 rounded mb-4">
-                <p>
-                  <strong>{t("stationWorkflows.zero.currentBalance")}:</strong>{" "}
-                  {formatNumber(selectedStation.currentStock)} L
-                </p>
-                <p>
-                  <strong>{t("stationWorkflows.stock.adjustmentQty")}:</strong>{" "}
-                  {formatNumber(-selectedStation.currentStock)} L
-                </p>
-                <p>
-                  <strong>{t("stationWorkflows.stock.finalBalance")}:</strong> 0 L
-                </p>
+                <button
+                  onClick={proceedToPassword}
+                  className="bg-red-600 hover:bg-red-500 text-white px-4 py-2 rounded-lg font-bold"
+                >
+                  {t("common.yesContinue")}
+                </button>
               </div>
-            )}
-
-            <div className="mb-4">
-              <label className="font-medium">{t("stationWorkflows.labels.reason")}</label>
-              <textarea
-                value={zeroBalanceReason}
-                onChange={(e) => setZeroBalanceReason(e.target.value)}
-                className="border rounded-lg p-2 w-full mt-2 min-h-[80px]"
-                placeholder={t("stationWorkflows.zero.defaultReason")}
-              />
-            </div>
-
-            <div className="flex justify-end gap-3">
-              <button
-                onClick={() => {
-                  setShowConfirm(false);
-                  setSelectedStation(null);
-                  setZeroBalanceReason(t("stationWorkflows.zero.defaultReason"));
-                }}
-                className="bg-gray-200 px-4 py-2 rounded"
-              >
-                {t("common.cancel")}
-              </button>
-
-              <button
-                onClick={proceedToPassword}
-                className="bg-red-600 text-white px-4 py-2 rounded"
-              >
-                {t("common.yesContinue")}
-              </button>
             </div>
           </div>
-        </div>
+        </ModalPortal>
       )}
 
 

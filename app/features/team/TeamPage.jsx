@@ -17,6 +17,7 @@ import Th from "../../components/ui/Th";
 import Td from "../../components/ui/Td";
 import Card from "../../components/ui/Card";
 import { useLanguage } from "../../context/LanguageContext";
+import { resolveEnumValue } from "../../lib/i18nMessageHelpers";
 
 import {
   cleanCsvCell,
@@ -175,32 +176,11 @@ export default function TeamPage({
   const { language, t } = useLanguage();
   const isRtl = language === "ar";
 
-  const getTeamStatusLabel = (status) => {
-    const normalized = String(status || "").trim().toLowerCase();
-
-    if (normalized === "on duty" || normalized === "active") {
-      return t("team.status.onDuty");
-    }
-
-    if (normalized === "in vacation" || normalized === "on leave") {
-      return t("team.status.onLeave");
-    }
-
-    if (
-      normalized === "retired / resigned" ||
-      normalized === "retired" ||
-      normalized === "resigned"
-    ) {
-      return t("team.status.retired");
-    }
-
-    return status || "-";
-  };
+  const getTeamStatusLabel = (status) =>
+    resolveEnumValue(t, "employeeStatus", status, status || "-");
 
   const getUserStatusLabel = (status) =>
-    String(status || "").trim().toLowerCase() === "linked"
-      ? t("team.userStatus.linked")
-      : t("team.userStatus.notLinked");
+    resolveEnumValue(t, "userStatus", status, status || "-");
 
   const [localFuelers, setLocalFuelers] = useState([]);
   const [localFuelerUpdates, setLocalFuelerUpdates] = useState({});

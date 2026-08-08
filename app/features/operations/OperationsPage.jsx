@@ -35,6 +35,7 @@ import {
   getOperationTypeBadgeClass,
   getOperationTotalCostAtOperation,
   getAllowedTransactionTypesForUser,
+  getOperationApprovalSuccessMessage,
   isAssetRefuelTransactionType,
   isExternalDirectRefuelTransactionType,
 } from "../../lib/operationHelpers";
@@ -811,8 +812,11 @@ const payload = mapFrontendOperationToBackendPayload({
 
       const createdOperation = await createOperation(payload, currentUser);
 
-      const backendMessage =
-        createdOperation?.message || t("operations.messages.operationSaved");
+      const backendMessage = getOperationApprovalSuccessMessage(
+        createdOperation?.operationType || operation.transactionType,
+        createdOperation?.status,
+        t,
+      ) || createdOperation?.message || t("operations.messages.operationSaved");
       const backendStatus = String(createdOperation?.status || "").toUpperCase();
       const toastType = backendStatus === "COMPLETED" ? "success" : "warning";
 
@@ -3133,7 +3137,7 @@ const payload = mapFrontendOperationToBackendPayload({
                                 operationTypeValue
                               )}`}
                             >
-                              {getOperationTypeDisplay(operationTypeValue)}
+                              {getOperationTypeDisplay(operationTypeValue, t)}
                             </span>
                           </Td>
 

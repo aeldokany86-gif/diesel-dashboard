@@ -30,6 +30,7 @@ import {
 } from "../../lib/helpers";
 
 import { isAssetRefuelTransactionType } from "../../lib/operationHelpers";
+import { createI18nMessage, resolveI18nMessage, resolveEnumValue } from "../../lib/i18nMessageHelpers";
 
 import {
   companyMatches,
@@ -190,6 +191,30 @@ function GenericModal({
   const { language, t } = useLanguage();
   const isRtl = language === "ar";
 
+  const resolveWorkflowMessage = (descriptor, fallback = "") =>
+    resolveI18nMessage(t, descriptor, fallback || descriptor?.fallback || "");
+
+  const createAssetWorkflowMessage = (key, params = {}, fallback = "") =>
+    createI18nMessage(`workflowMessages.assets.${key}`, params, fallback);
+
+  const assetActivityI18n = (
+    actionKey,
+    detailsKey,
+    params = {},
+    actionFallback = "",
+    detailsFallback = "",
+    options = {},
+  ) => ({
+    actionKey: `notifications.activity.actions.${actionKey}`,
+    actionParams: params,
+    actionEnumParams: options.actionEnumParams || {},
+    actionFallback,
+    detailsKey: `notifications.activity.details.${detailsKey}`,
+    detailsParams: params,
+    detailsEnumParams: options.detailsEnumParams || {},
+    detailsFallback,
+  });
+
   return (
     <ModalPortal>
       <div className="fleet-portal-modal-backdrop fixed inset-0 bg-black/60 flex items-center justify-center p-4" dir={isRtl ? "rtl" : "ltr"}>
@@ -251,13 +276,32 @@ export default function AssetsPage({
   const { language, t } = useLanguage();
   const isRtl = language === "ar";
 
-  const getAssetStatusLabel = (status) => {
-    const normalized = String(status || "").trim().toLowerCase();
-    if (normalized === "active") return t("assets.status.active");
-    if (normalized === "inactive") return t("assets.status.inactive");
-    if (normalized === "retired") return t("assets.status.retired");
-    return status || "-";
-  };
+  const resolveWorkflowMessage = (descriptor, fallback = "") =>
+    resolveI18nMessage(t, descriptor, fallback || descriptor?.fallback || "");
+
+  const createAssetWorkflowMessage = (key, params = {}, fallback = "") =>
+    createI18nMessage(`workflowMessages.assets.${key}`, params, fallback);
+
+  const assetActivityI18n = (
+    actionKey,
+    detailsKey,
+    params = {},
+    actionFallback = "",
+    detailsFallback = "",
+    options = {},
+  ) => ({
+    actionKey: `notifications.activity.actions.${actionKey}`,
+    actionParams: params,
+    actionEnumParams: options.actionEnumParams || {},
+    actionFallback,
+    detailsKey: `notifications.activity.details.${detailsKey}`,
+    detailsParams: params,
+    detailsEnumParams: options.detailsEnumParams || {},
+    detailsFallback,
+  });
+
+  const getAssetStatusLabel = (status) =>
+    resolveEnumValue(t, "assetStatus", status, status || "-");
 
   const renderAssetStatusBadge = (status) => {
     const normalized = String(status || "").trim().toLowerCase();
@@ -494,6 +538,7 @@ export default function AssetsPage({
 
   const [localAssetUpdates, setLocalAssetUpdates] = useState({});
   const [assetStatusConfirm, setAssetStatusConfirm] = useState(null);
+  const [assetIdBackendError, setAssetIdBackendError] = useState("");
 
   const [projectTargetAsset, setProjectTargetAsset] = useState(null);
   const [selectedProjectValue, setSelectedProjectValue] = useState("");
@@ -515,11 +560,19 @@ export default function AssetsPage({
   const [odometerReason, setOdometerReason] = useState("");
   const [showOdometerConfirm, setShowOdometerConfirm] = useState(false);
 
-  const assetIdDuplicateError = getDuplicateIdError(
-    newAsset.id,
-    assets,
-    "Asset ID"
+  const assetIdExistsLocally = Boolean(
+    getDuplicateIdError(
+      newAsset.id,
+      assets,
+      "Asset ID"
+    )
   );
+
+  const assetIdDuplicateError =
+    assetIdBackendError ||
+    (assetIdExistsLocally
+      ? t("assets.validation.duplicateAssetId")
+      : "");
 
   const resetNewAsset = () => {
     setNewAsset({
@@ -535,6 +588,7 @@ export default function AssetsPage({
     setCustomAssetType("");
     setUseCustomCategory(false);
     setCustomCategory("");
+    setAssetIdBackendError("");
   };
 
   const closeAddAsset = () => {
@@ -554,7 +608,6 @@ export default function AssetsPage({
     }
 
     if (assetIdDuplicateError) {
-      showToast?.("warning", assetIdDuplicateError);
       return;
     }
 
@@ -607,13 +660,51 @@ export default function AssetsPage({
     try {
       const createdAsset = await createAssetRecord(payload);
       replaceAssetInState(createdAsset);
-      trackActivity?.("Add Asset", "assets", `${payload.assetId} added from backend.`);
+      trackActivity?.(
+        "Add Asset",
+        "assets",
+        `${payload.assetId} added from backend.`,
+        assetActivityI18n(
+          "addAsset",
+          "assetAdded",
+          { assetId: payload.assetId },
+          "Add Asset",
+          `${payload.assetId} added from backend.`,
+        ),
+      );
       showToast?.("success", t("assets.messages.assetAdded"));
       closeAddAsset();
     } catch (error) {
+      const backendMessage = String(
+        error?.response?.data?.message ||
+        error?.response?.data?.error ||
+        error?.message ||
+        "",
+      );
+
+      const normalizedBackendMessage = backendMessage.toLowerCase();
+      const isAssetIdConflict =
+        Number(error?.response?.status) === 409 ||
+        (
+          normalizedBackendMessage.includes("asset id") &&
+          (
+            normalizedBackendMessage.includes("already") ||
+            normalizedBackendMessage.includes("previously used") ||
+            normalizedBackendMessage.includes("cannot be reused") ||
+            normalizedBackendMessage.includes("unique")
+          )
+        );
+
+      if (isAssetIdConflict) {
+        setAssetIdBackendError(
+          t("assets.validation.assetIdPreviouslyUsed"),
+        );
+        return;
+      }
+
       showToast?.(
         "warning",
-        error?.response?.data?.message || error?.message || t("assets.messages.assetAddFailed")
+        t("assets.messages.assetAddFailed")
       );
     }
   };
@@ -826,7 +917,18 @@ export default function AssetsPage({
       trackActivity?.(
         "Request Bulk Asset Transfer",
         "assets",
-        `${backendAssetIds.length} assets transfer requested to ${bulkTransferProjectValue}.`
+        `${backendAssetIds.length} assets transfer requested to ${bulkTransferProjectValue}.`,
+        assetActivityI18n(
+          "requestBulkAssetTransfer",
+          "bulkAssetTransferRequested",
+          {
+            count: backendAssetIds.length,
+            project: bulkTransferProjectValue,
+            assetIds: selectedAssets.map((asset) => asset.id).join(", "),
+          },
+          "Request Bulk Asset Transfer",
+          `${backendAssetIds.length} assets transfer requested to ${bulkTransferProjectValue}.`,
+        ),
       );
 
       showToast?.(
@@ -841,9 +943,7 @@ export default function AssetsPage({
     } catch (error) {
       showToast?.(
         "warning",
-        error?.response?.data?.message ||
-          error?.message ||
-          t("assetWorkflows.messages.bulkTransferFailed")
+        t("assetWorkflows.messages.bulkTransferFailed")
       );
     } finally {
       setSavingBulkTransfer(false);
@@ -944,12 +1044,24 @@ export default function AssetsPage({
       });
 
       replaceAssetInState(updatedAsset);
-      trackActivity?.("Change Asset Status", "assets", `${asset.id} status changed to ${newStatus}.`);
+      trackActivity?.(
+        "Change Asset Status",
+        "assets",
+        `${asset.id} status changed to ${newStatus}.`,
+        assetActivityI18n(
+          "changeAssetStatus",
+          "assetStatusChanged",
+          { assetId: asset.id, status: newStatus },
+          "Change Asset Status",
+          `${asset.id} status changed to ${newStatus}.`,
+          { detailsEnumParams: { status: "assetStatus" } },
+        ),
+      );
       showToast?.("success", t("assetWorkflows.messages.statusChanged", { status: getAssetStatusLabel(newStatus) }));
     } catch (error) {
       showToast?.(
         "warning",
-        error?.response?.data?.message || error?.message || t("assetWorkflows.messages.statusChangeFailed")
+        t("assetWorkflows.messages.statusChangeFailed")
       );
     } finally {
       setAssetStatusConfirm(null);
@@ -992,6 +1104,12 @@ export default function AssetsPage({
   };
 
   const confirmProjectUpdate = async () => {
+    const targetAssetSnapshot = projectTargetAsset;
+    if (!targetAssetSnapshot) {
+      setShowProjectConfirm(false);
+      return;
+    }
+
     if (!canCurrentUserCreateAssetTransfer()) {
       showToast?.("warning", t("assetWorkflows.messages.transferRoleRequired"));
       resetProjectWorkflow();
@@ -1045,14 +1163,23 @@ export default function AssetsPage({
         transferApplied ? "Transfer Asset" : "Request Asset Transfer",
         "assets",
         transferApplied
-          ? `${projectTargetAsset.id} transferred from ${projectTargetAsset.project || "-"} to ${selectedProjectValue}.`
-          : `${projectTargetAsset.id} transfer requested from ${projectTargetAsset.project || "-"} to ${selectedProjectValue}.`
+          ? `${targetAssetSnapshot.id} transferred from ${targetAssetSnapshot.project || "-"} to ${selectedProjectValue}.`
+          : `${targetAssetSnapshot.id} transfer requested from ${targetAssetSnapshot.project || "-"} to ${selectedProjectValue}.`,
+        assetActivityI18n(
+          transferApplied ? "transferAsset" : "requestAssetTransfer",
+          transferApplied ? "assetTransferred" : "assetTransferRequested",
+          { assetId: targetAssetSnapshot.id, fromProject: targetAssetSnapshot.project || "-", toProject: selectedProjectValue },
+          transferApplied ? "Transfer Asset" : "Request Asset Transfer",
+          transferApplied
+            ? `${targetAssetSnapshot.id} transferred from ${targetAssetSnapshot.project || "-"} to ${selectedProjectValue}.`
+            : `${targetAssetSnapshot.id} transfer requested from ${targetAssetSnapshot.project || "-"} to ${selectedProjectValue}.`,
+        ),
       );
       resetProjectWorkflow();
     } catch (error) {
       showToast?.(
         "warning",
-        error?.response?.data?.message || error?.message || t("assetWorkflows.messages.transferFailed")
+        t("assetWorkflows.messages.transferFailed")
       );
     }
   };
@@ -1093,13 +1220,80 @@ export default function AssetsPage({
           async () => deleteAssetRecord(backendAssetId)
         );
 
-        // Keep the soft-deleted record in state as Retired so the KPI updates
-        // immediately, while visibleAssets continues to hide it from the list.
-        replaceAssetInState({
-          ...deletedAsset,
+        // Preserve the current asset identity even if the DELETE endpoint
+        // returns no body (204) or only a partial record. Without this, the
+        // state updater cannot match the existing row, so it stays visible
+        // until the next full page reload.
+        const deletedAssetSnapshot = {
+          ...deleteTargetAsset,
+          ...(deletedAsset || {}),
+          backendId:
+            deletedAsset?.backendId ||
+            deletedAsset?.id ||
+            deleteTargetAsset?.backendId ||
+            deleteTargetAsset?.assetBackendId ||
+            backendAssetId,
+          assetBackendId:
+            deletedAsset?.assetBackendId ||
+            deletedAsset?.backendId ||
+            deletedAsset?.id ||
+            deleteTargetAsset?.assetBackendId ||
+            deleteTargetAsset?.backendId ||
+            backendAssetId,
+          id:
+            deleteTargetAsset?.id ||
+            deletedAsset?.assetId ||
+            deletedAsset?.equipmentNo ||
+            deletedAsset?.equipmentNumber ||
+            deletedAsset?.id ||
+            "-",
           deletedAt: deletedAsset?.deletedAt || new Date().toISOString(),
           status: "Retired",
-        });
+        };
+
+        // Update the local display overlay first. displayAssets gives
+        // localAssetUpdates priority over the parent assets prop, so this is
+        // the guaranteed immediate UI update even if the parent state refresh
+        // is delayed or the DELETE endpoint returns a partial payload.
+        setLocalAssetUpdates((prev) => ({
+          ...prev,
+          [deleteTargetAsset?.id]: {
+            ...prev[deleteTargetAsset?.id],
+            status: "Retired",
+          },
+        }));
+
+        // Remove the deleted asset from the visible parent state immediately.
+        // Do NOT pass a soft-deleted asset through replaceAssetInState here:
+        // mapBackendAssetForState normalizes backend status values for normal
+        // active/inactive records and can turn a local "Retired" snapshot back
+        // into "Active". Filtering by both backend identity and display ID makes
+        // the UI update deterministic without waiting for a full page reload.
+        if (typeof setAssets === "function") {
+          setAssets((prev) =>
+            (prev || []).filter((item) => {
+              const sameBackendAsset =
+                normalizeScopeValue(getBackendAssetId(item)) ===
+                normalizeScopeValue(backendAssetId);
+
+              const sameDisplayAsset =
+                normalizeScopeValue(item?.id) ===
+                normalizeScopeValue(deleteTargetAsset?.id);
+
+              return !sameBackendAsset && !sameDisplayAsset;
+            }),
+          );
+        }
+
+        // Also clear it from any current bulk selection immediately.
+        setSelectedAssetIds((prev) =>
+          (prev || []).filter(
+            (id) =>
+              normalizeScopeValue(id) !== normalizeScopeValue(backendAssetId) &&
+              normalizeScopeValue(id) !==
+                normalizeScopeValue(deleteTargetAsset?.id),
+          ),
+        );
 
         // Close every UI layer related to the deleted asset immediately.
         setShowDeleteConfirm(false);
@@ -1111,7 +1305,7 @@ export default function AssetsPage({
       } catch (error) {
         showToast?.(
           "warning",
-          error?.response?.data?.message || error?.message || t("assetWorkflows.messages.assetDeleteFailed")
+          t("assetWorkflows.messages.assetDeleteFailed")
         );
       }
       return;
@@ -1124,11 +1318,28 @@ export default function AssetsPage({
     }
 
     await runWithActionLoading(t("assetWorkflows.loading.submittingDelete"), async () => {
+      const deleteTitleMessage = createAssetWorkflowMessage(
+        "deleteApproval.title",
+        { assetId: deleteTargetAsset?.id || "-" },
+        `Asset ${deleteTargetAsset?.id} deletion request`,
+      );
+      const deleteDetailsMessage = createAssetWorkflowMessage(
+        "deleteApproval.details",
+        { assetId: deleteTargetAsset?.id || "-", reason: deleteReason },
+        deleteReason,
+      );
+
       submitApprovalRequest({
         type: "master_data_change",
         module: "assets",
-        title: `Asset ${deleteTargetAsset?.id} deletion request`,
-        details: deleteReason,
+        title: resolveWorkflowMessage(deleteTitleMessage),
+        titleKey: deleteTitleMessage.key,
+        titleParams: deleteTitleMessage.params,
+        titleFallback: deleteTitleMessage.fallback,
+        details: resolveWorkflowMessage(deleteDetailsMessage),
+        detailsKey: deleteDetailsMessage.key,
+        detailsParams: deleteDetailsMessage.params,
+        detailsFallback: deleteDetailsMessage.fallback,
         payload: {
           entity: "asset",
           action: "delete",
@@ -1141,9 +1352,11 @@ export default function AssetsPage({
           changedFields: [
             {
               field: "delete",
-              label: "Soft Delete Request",
+              label: t("assetWorkflows.approvalFields.softDeleteRequest"),
+              labelKey: "assetWorkflows.approvalFields.softDeleteRequest",
               oldValue: deleteTargetAsset?.id || "-",
-              newValue: "Requested Deletion",
+              newValue: t("assetWorkflows.approvalFields.requestedDeletion"),
+              newValueKey: "assetWorkflows.approvalFields.requestedDeletion",
               sensitive: true,
             },
           ],
@@ -1357,7 +1570,7 @@ export default function AssetsPage({
       } catch (error) {
         showToast?.(
           "warning",
-          error?.response?.data?.message || error?.message || t("assetWorkflows.messages.odometerResetFailed")
+          t("assetWorkflows.messages.odometerResetFailed")
         );
       }
 
@@ -1370,11 +1583,28 @@ export default function AssetsPage({
     }
 
     await runWithActionLoading(t("assetWorkflows.loading.submittingOdometerReset"), async () => {
+      const odometerTitleMessage = createAssetWorkflowMessage(
+        "odometerApproval.title",
+        { assetId: odometerTargetAsset?.id || "-" },
+        `Asset ${odometerTargetAsset?.id} odometer reset`,
+      );
+      const odometerDetailsMessage = createAssetWorkflowMessage(
+        "odometerApproval.details",
+        { assetId: odometerTargetAsset?.id || "-", reason: odometerReason },
+        odometerReason,
+      );
+
       submitApprovalRequest({
         type: "master_data_change",
         module: "assets",
-        title: `Asset ${odometerTargetAsset?.id} odometer reset`,
-        details: odometerReason,
+        title: resolveWorkflowMessage(odometerTitleMessage),
+        titleKey: odometerTitleMessage.key,
+        titleParams: odometerTitleMessage.params,
+        titleFallback: odometerTitleMessage.fallback,
+        details: resolveWorkflowMessage(odometerDetailsMessage),
+        detailsKey: odometerDetailsMessage.key,
+        detailsParams: odometerDetailsMessage.params,
+        detailsFallback: odometerDetailsMessage.fallback,
         payload: {
           entity: "asset",
           action: "odometer_reset",
@@ -1387,6 +1617,7 @@ export default function AssetsPage({
             {
               field: "currentOdometer",
               label: t("assetWorkflows.odometer.title"),
+              labelKey: "assetWorkflows.odometer.title",
               oldValue: oldReading,
               newValue: newReading,
               sensitive: true,
@@ -1504,6 +1735,8 @@ export default function AssetsPage({
             font-family: Arial, sans-serif;
             color: #111;
             padding: 10px;
+            direction: ${language === "ar" ? "rtl" : "ltr"};
+            text-align: ${language === "ar" ? "right" : "left"};
           }
 
           h1 {
@@ -1520,6 +1753,11 @@ export default function AssetsPage({
             margin-bottom: 18px;
             font-size: 12px;
             color: #555;
+            text-align: ${language === "ar" ? "right" : "left"};
+          }
+
+          h1, h2 {
+            text-align: ${language === "ar" ? "right" : "left"};
           }
 
           table {
@@ -1531,7 +1769,7 @@ export default function AssetsPage({
           th, td {
             border: 1px solid #bbb;
             padding: 6px 8px;
-            text-align: left;
+            text-align: ${language === "ar" ? "right" : "left"};
           }
 
           th {
@@ -1874,27 +2112,28 @@ export default function AssetsPage({
       </div>
 
       {assetStatusConfirm && (
-        <div className="fixed inset-0 bg-black/75 backdrop-blur-sm flex items-center justify-center z-[10020] p-3" dir={isRtl ? "rtl" : "ltr"}>
-          <div className={`bg-white text-black w-[min(520px,calc(100vw-2rem))] rounded-2xl shadow-2xl p-6 ${isRtl ? "text-right" : "text-left"}`}>
-            <div className="flex justify-between items-center mb-5 border-b pb-3">
+        <ModalPortal>
+        <div className="fixed inset-0 bg-black/80 backdrop-blur-sm flex items-center justify-center z-[20000] p-3" dir={isRtl ? "rtl" : "ltr"}>
+          <div className={`w-[min(520px,calc(100vw-2rem))] rounded-2xl border border-slate-700 bg-slate-950 text-slate-100 shadow-2xl p-6 ${isRtl ? "text-right" : "text-left"}`}>
+            <div className="flex justify-between items-center mb-5 border-b border-slate-700 pb-3">
               <h2 className="text-xl sm:text-2xl font-bold">{t("assetWorkflows.status.title")}</h2>
               <button
                 onClick={() => setAssetStatusConfirm(null)}
-                className="text-gray-500 hover:text-black text-xl"
+                className="text-slate-400 hover:text-white text-xl"
               >
                 ×
               </button>
             </div>
 
-            <div className="bg-gray-100 rounded-xl p-4 mb-5">
-              <p className="text-sm text-gray-600">{t("assets.fields.assetId")}</p>
+            <div className="bg-slate-900 border border-slate-800 rounded-xl p-4 mb-5">
+              <p className="text-sm text-slate-400">{t("assets.fields.assetId")}</p>
               <p className="text-base sm:text-lg font-bold">{assetStatusConfirm.asset?.id}</p>
-              <p className="text-sm text-gray-600 mt-2">
+              <p className="text-sm text-slate-300 mt-2">
                 {getAssetStatusLabel(assetStatusConfirm.oldStatus)} → <span className="font-bold">{getAssetStatusLabel(assetStatusConfirm.newStatus)}</span>
               </p>
             </div>
 
-            <p className="text-sm text-gray-600 mb-5">
+            <p className="text-sm text-slate-400 mb-5">
               {t("assetWorkflows.status.directSaveNotice")}
             </p>
 
@@ -1915,6 +2154,7 @@ export default function AssetsPage({
             </div>
           </div>
         </div>
+        </ModalPortal>
       )}
 
       {showForm && (
@@ -1935,7 +2175,10 @@ export default function AssetsPage({
             label={t("assets.fields.assetId")}
             placeholder="1-316"
             value={newAsset.id}
-            onChange={(e) => setNewAsset({ ...newAsset, id: e.target.value })}
+            onChange={(e) => {
+              setAssetIdBackendError("");
+              setNewAsset({ ...newAsset, id: e.target.value });
+            }}
             error={assetIdDuplicateError}
           />
           <div className="grid grid-cols-1 sm:grid-cols-3 items-start sm:items-center gap-2 sm:gap-4">
@@ -2275,12 +2518,13 @@ export default function AssetsPage({
       )}
 
       {projectTargetAsset && (
-        <div className="fleet-modal-backdrop fixed inset-0 z-[9998] bg-black/60 flex items-center justify-center z-50" dir={isRtl ? "rtl" : "ltr"}>
+        <ModalPortal>
+          <div className="fleet-portal-modal-backdrop fixed inset-0 z-[10050] bg-black/60 flex items-center justify-center p-4" dir={isRtl ? "rtl" : "ltr"}>
           <div className={`bg-white text-black w-[520px] rounded-xl shadow-xl p-6 ${isRtl ? "text-right" : "text-left"}`}>
             <h2 className="text-xl font-bold mb-4">{t("assetWorkflows.transfer.title")}</h2>
 
             <p className="text-sm text-gray-500 mb-4">
-              {t("assetWorkflows.labels.asset")}:{" "}<strong>{projectTargetAsset.id}</strong>
+              {t("assetWorkflows.labels.asset")}:{" "}<strong>{projectTargetAsset?.id || "-"}</strong>
             </p>
 
             <select
@@ -2320,10 +2564,12 @@ export default function AssetsPage({
             </div>
           </div>
         </div>
+        </ModalPortal>
       )}
 
-      {showProjectConfirm && (
-        <div className="fleet-modal-backdrop fixed inset-0 z-[9998] bg-black/60 flex items-center justify-center z-50" dir={isRtl ? "rtl" : "ltr"}>
+      {showProjectConfirm && projectTargetAsset && (
+        <ModalPortal>
+          <div className="fleet-portal-modal-backdrop fixed inset-0 z-[10100] bg-black/70 backdrop-blur-sm flex items-center justify-center p-4" dir={isRtl ? "rtl" : "ltr"}>
           <div className={`bg-white text-black w-[520px] rounded-xl shadow-xl p-6 ${isRtl ? "text-right" : "text-left"}`}>
             <h2 className="text-xl font-bold mb-4 text-red-600">
               {t("assetWorkflows.transfer.confirmTitle")}
@@ -2331,10 +2577,10 @@ export default function AssetsPage({
 
             <div className="bg-gray-100 p-4 rounded mb-4">
               <p>
-                <strong>{t("assetWorkflows.labels.asset")}:</strong> {projectTargetAsset.id}
+                <strong>{t("assetWorkflows.labels.asset")}:</strong> {projectTargetAsset?.id || "-"}
               </p>
               <p>
-                <strong>{t("assetWorkflows.transfer.oldProject")}:</strong> {projectTargetAsset.project || "-"}
+                <strong>{t("assetWorkflows.transfer.oldProject")}:</strong> {projectTargetAsset?.project || "-"}
               </p>
               <p>
                 <strong>{t("assetWorkflows.transfer.newProject")}:</strong> {selectedProjectValue}
@@ -2358,17 +2604,18 @@ export default function AssetsPage({
             </div>
           </div>
         </div>
+        </ModalPortal>
       )}
 
-
       {deleteTargetAsset && (
-        <div className="fixed inset-0 bg-black/75 backdrop-blur-sm flex items-center justify-center z-[10000] p-3" dir={isRtl ? "rtl" : "ltr"}>
-          <div className={`bg-white text-black w-[520px] rounded-2xl p-6 shadow-2xl ${isRtl ? "text-right" : "text-left"}`}>
+        <ModalPortal>
+        <div className="fixed inset-0 bg-black/80 backdrop-blur-sm flex items-center justify-center z-[20000] p-3" dir={isRtl ? "rtl" : "ltr"}>
+          <div className={`w-[min(520px,calc(100vw-2rem))] rounded-2xl border border-slate-700 bg-slate-950 text-slate-100 p-6 shadow-2xl ${isRtl ? "text-right" : "text-left"}`}>
             <h2 className="text-xl sm:text-2xl font-bold mb-2 text-red-600">
               {t("assetWorkflows.delete.title")}
             </h2>
 
-            <p className="text-gray-600 mb-5">
+            <p className="text-slate-400 mb-5">
               {t("assetWorkflows.labels.asset")}:{" "}<strong>{deleteTargetAsset.id}</strong>
             </p>
 
@@ -2376,7 +2623,7 @@ export default function AssetsPage({
               value={deleteReason}
               onChange={(e) => setDeleteReason(e.target.value)}
               placeholder={t("assetWorkflows.delete.reasonPlaceholder")}
-              dir={isRtl ? "rtl" : "ltr"} className={`border rounded-xl p-3 w-full h-28 mb-5 ${isRtl ? "text-right" : "text-left"}`}
+              dir={isRtl ? "rtl" : "ltr"} className={`border border-slate-700 bg-slate-900 text-slate-100 placeholder:text-slate-500 rounded-xl p-3 w-full h-28 mb-5 outline-none focus:border-amber-500 ${isRtl ? "text-right" : "text-left"}`}
             />
 
             <div className="flex justify-end gap-3">
@@ -2385,7 +2632,7 @@ export default function AssetsPage({
                   setDeleteTargetAsset(null);
                   setDeleteReason("");
                 }}
-                className="bg-gray-200 px-3 lg:px-4 py-2 rounded-lg"
+                className="rounded-lg border border-slate-600 bg-slate-900 px-3 lg:px-4 py-2 text-slate-200 hover:bg-slate-800"
               >
                 {t("common.cancel")}
               </button>
@@ -2399,11 +2646,13 @@ export default function AssetsPage({
             </div>
           </div>
         </div>
+        </ModalPortal>
       )}
 
       {showDeleteConfirm && (
-        <div className="fixed inset-0 bg-black/75 backdrop-blur-sm flex items-center justify-center z-[10000] p-3" dir={isRtl ? "rtl" : "ltr"}>
-          <div className={`bg-white text-black w-[500px] rounded-2xl p-6 ${isRtl ? "text-right" : "text-left"}`}>
+        <ModalPortal>
+        <div className="fixed inset-0 bg-black/80 backdrop-blur-sm flex items-center justify-center z-[20010] p-3" dir={isRtl ? "rtl" : "ltr"}>
+          <div className={`w-[min(500px,calc(100vw-2rem))] rounded-2xl border border-slate-700 bg-slate-950 text-slate-100 p-6 shadow-2xl ${isRtl ? "text-right" : "text-left"}`}>
             <h2 className="text-xl font-bold mb-4">
               {t("assetWorkflows.delete.confirmTitle")}
             </h2>
@@ -2417,7 +2666,7 @@ export default function AssetsPage({
             <div className="flex justify-end gap-3">
               <button
                 onClick={() => setShowDeleteConfirm(false)}
-                className="bg-gray-200 px-3 lg:px-4 py-2 rounded-lg"
+                className="rounded-lg border border-slate-600 bg-slate-900 px-3 lg:px-4 py-2 text-slate-200 hover:bg-slate-800"
               >
                 {t("common.cancel")}
               </button>
@@ -2431,6 +2680,7 @@ export default function AssetsPage({
             </div>
           </div>
         </div>
+        </ModalPortal>
       )}
 
 

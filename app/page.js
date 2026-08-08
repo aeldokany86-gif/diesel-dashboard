@@ -401,7 +401,13 @@ function mapLegacyPermissionToBackendPermission(module, action = "view") {
   return `${backendModule}.${normalizedAction}`;
 }
 
-function createActivityRecord({ user, action, module, details }) {
+function createActivityRecord({
+  user,
+  action,
+  module,
+  details,
+  i18n = {},
+}) {
   return {
     id: `ACT-${Date.now()}-${Math.floor(Math.random() * 1000)}`,
     userId: user?.id || "System",
@@ -410,6 +416,17 @@ function createActivityRecord({ user, action, module, details }) {
     action,
     module,
     details,
+
+    // Structured localization metadata. Existing callers remain compatible.
+    actionKey: i18n.actionKey || "",
+    actionParams: i18n.actionParams || {},
+    actionEnumParams: i18n.actionEnumParams || {},
+    actionFallback: i18n.actionFallback || action || "",
+    detailsKey: i18n.detailsKey || "",
+    detailsParams: i18n.detailsParams || {},
+    detailsEnumParams: i18n.detailsEnumParams || {},
+    detailsFallback: i18n.detailsFallback || details || "",
+
     createdAt: new Date().toISOString(),
   };
 }
@@ -1186,9 +1203,15 @@ export default function Home() {
     ];
   };
 
-  const trackActivity = (action, module, details) => {
+  const trackActivity = (action, module, details, i18n = {}) => {
     setActivityLog((prev) => [
-      createActivityRecord({ user: currentUser, action, module, details }),
+      createActivityRecord({
+        user: currentUser,
+        action,
+        module,
+        details,
+        i18n,
+      }),
       ...prev,
     ]);
   };
@@ -1222,7 +1245,27 @@ export default function Home() {
           action: "Submit Approval Request",
           module: request.module,
           details:
-            request.title || request.details || "Approval request submitted.",
+            request.details ||
+            request.title ||
+            "Approval request submitted.",
+          i18n: {
+            actionKey: "notifications.activity.actions.submitApprovalRequest",
+            actionFallback: "Submit Approval Request",
+            detailsKey:
+              request.notificationDetailsKey ||
+              "notifications.activity.details.approvalRequestSubmitted",
+            detailsParams:
+              request.notificationDetailsParams || {
+                requestTitle:
+                  request.title ||
+                  request.details ||
+                  "Approval request submitted.",
+              },
+            detailsFallback:
+              request.details ||
+              request.title ||
+              "Approval request submitted.",
+          },
         }),
         ...prev,
       ]);
@@ -3391,7 +3434,15 @@ export default function Home() {
   };
 
   const backendOperationApprovalRequests = backendOperationApprovals
-    .map((item) => mapBackendOperationApprovalForFrontend(item, currentUser))
+    .map((item) =>
+      mapBackendOperationApprovalForFrontend(
+        item,
+        currentUser,
+        companyAssets,
+        companyStations,
+        t,
+      ),
+    )
     .filter(Boolean);
 
   const backendOperationCorrectionRequests = backendOperationCorrections
@@ -3401,6 +3452,7 @@ export default function Home() {
         currentUser,
         companyAssets,
         companyStations,
+        t,
       ),
     )
     .filter(Boolean);
@@ -3496,12 +3548,31 @@ export default function Home() {
       const requestedBy =
         companyUsers.find((user) => user.id === transfer.requestedByUserId) ||
         currentUser;
+      const assetDisplayId =
+        transfer.assetName ||
+        transfer.assetId ||
+        transfer.assetBackendId ||
+        "Asset";
+      const fromProjectDisplay =
+        transfer.fromProjectName || transfer.fromProjectId || "-";
+      const toProjectDisplay =
+        transfer.toProjectName || transfer.toProjectId || "-";
+
       const requiredApprovers = (transfer.approvals || [])
         .filter((approval) => ["Pending", "Approved"].includes(approval.status))
         .map((approval) => {
           const approverUser = companyUsers.find(
             (user) => user.id === approval.approverUserId,
           );
+          const rawStage = approval.approvalStage || "Project Manager";
+          const normalizedStage = String(rawStage).trim().toLowerCase();
+          const stageKey =
+            normalizedStage.includes("source")
+              ? "approvals.stages.sourceProjectManager"
+              : normalizedStage.includes("destination")
+                ? "approvals.stages.destinationProjectManager"
+                : "approvals.stages.projectManager";
+
           return {
             userId: approval.approverUserId,
             userName:
@@ -3510,7 +3581,9 @@ export default function Home() {
               approval.approverUserId,
             role: "Manager",
             projectId: approval.projectId || "-",
-            approvalStage: approval.approvalStage || "Project Manager",
+            approvalStage: rawStage,
+            approvalStageKey: stageKey,
+            approvalStageFallback: rawStage,
             status: approval.status || "Pending",
             reviewedAt: approval.reviewedAt || "",
             reviewNote: approval.note || "",
@@ -3521,23 +3594,33 @@ export default function Home() {
         id: `ASSET-TRANSFER-${transfer.id}`,
         type: "asset_transfer",
         module: "assets",
-        // A shared transferBatchId is the group identity for bulk transfers.
-        // Single transfers keep null and therefore remain independent cards.
         transferBatchId: transfer.transferBatchId || null,
-        title: `Asset Transfer: ${transfer.assetName || transfer.assetId || "Asset"}`,
+        title: `Asset Transfer: ${assetDisplayId}`,
+        titleKey: "approvals.assetTransfer.title",
+        titleParams: { assetId: assetDisplayId },
+        titleFallback: `Asset Transfer: ${assetDisplayId}`,
         payload: {
           transfer,
           assetTransferId: transfer.id,
           transferBatchId: transfer.transferBatchId || null,
         },
-        details: `Transfer ${transfer.assetName || transfer.assetId || "asset"} from ${transfer.fromProjectName || "-"} to ${transfer.toProjectName || "-"}.`,
+        details: `Transfer ${assetDisplayId} from ${fromProjectDisplay} to ${toProjectDisplay}.`,
+        detailsKey: "approvals.assetTransfer.details",
+        detailsParams: {
+          assetId: assetDisplayId,
+          fromProject: fromProjectDisplay,
+          toProject: toProjectDisplay,
+        },
+        detailsFallback: `Transfer ${assetDisplayId} from ${fromProjectDisplay} to ${toProjectDisplay}.`,
         status: "Pending",
         changedFields: [
           {
             field: "project",
             label: "Asset Project Transfer",
-            oldValue: transfer.fromProjectName || transfer.fromProjectId || "-",
-            newValue: transfer.toProjectName || transfer.toProjectId || "-",
+            labelKey: "approvals.fields.assetProjectTransfer",
+            labelFallback: "Asset Project Transfer",
+            oldValue: fromProjectDisplay,
+            newValue: toProjectDisplay,
             sensitive: true,
           },
         ],
@@ -3547,10 +3630,8 @@ export default function Home() {
         riskLevel: "High",
         approvalRoute: {
           routeType: "dual_project_manager",
-          sourceProject:
-            transfer.fromProjectName || transfer.fromProjectId || "-",
-          destinationProject:
-            transfer.toProjectName || transfer.toProjectId || "-",
+          sourceProject: fromProjectDisplay,
+          destinationProject: toProjectDisplay,
           requiredApprovers,
           routeStatus: "Pending",
         },
