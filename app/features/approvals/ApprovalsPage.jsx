@@ -575,25 +575,40 @@ export default function ApprovalsPage({
     );
 
     setSelectedApprovalGroup(null);
-    trackActivity(
-      fullyApproved ? "Approve Request" : "Approve Request Stage",
-      request.module,
-      `${request.title} (${currentStage?.approvalStage || "Approval Stage"})`,
-      {
-        actionKey: fullyApproved
-          ? "notifications.activity.actions.approveRequest"
-          : "notifications.activity.actions.approveRequestStage",
-        detailsKey: fullyApproved
-          ? "notifications.activity.details.requestApproved"
-          : "notifications.activity.details.requestStageApproved",
-        detailsParams: {
-          requestTitle: request.title || t("approvals.defaults.requestTitle"),
-          entityType: request.entityType || "Request",
-          entityId: request.entityId || "-",
-          stage: getApprovalStageLabel(currentStage || {}),
+
+    const approvedStationAction =
+      request?.payload?.action ||
+      request?.payload?.values?.action ||
+      "";
+
+    const hasDedicatedFinalActivity =
+      fullyApproved &&
+      request?.module === "stations" &&
+      ["stock_count_adjustment", "zero_balance_adjustment"].includes(
+        approvedStationAction,
+      );
+
+    if (!hasDedicatedFinalActivity) {
+      trackActivity(
+        fullyApproved ? "Approve Request" : "Approve Request Stage",
+        request.module,
+        `${request.title} (${currentStage?.approvalStage || "Approval Stage"})`,
+        {
+          actionKey: fullyApproved
+            ? "notifications.activity.actions.approveRequest"
+            : "notifications.activity.actions.approveRequestStage",
+          detailsKey: fullyApproved
+            ? "notifications.activity.details.requestApproved"
+            : "notifications.activity.details.requestStageApproved",
+          detailsParams: {
+            requestTitle: request.title || t("approvals.defaults.requestTitle"),
+            entityType: request.entityType || "Request",
+            entityId: request.entityId || "-",
+            stage: getApprovalStageLabel(currentStage || {}),
+          },
         },
-      },
-    );
+      );
+    }
     showToast?.("success", fullyApproved ? t("approvals.messages.fullyApproved") : t("approvals.messages.stageApprovedPending"));
   
     });
@@ -797,20 +812,66 @@ export default function ApprovalsPage({
     );
 
     setSelectedApprovalGroup(null);
-    trackActivity(
-      "Reject Request",
-      request.module,
-      `${request.title} (${request.entityType || "Request"}: ${request.entityId || "-"})`,
-      {
-        actionKey: "notifications.activity.actions.rejectRequest",
-        detailsKey: "notifications.activity.details.requestRejected",
-        detailsParams: {
-          requestTitle: request.title || t("approvals.defaults.requestTitle"),
-          entityType: request.entityType || "Request",
-          entityId: request.entityId || "-",
+
+    const rejectedStationAction =
+      request?.payload?.action ||
+      request?.payload?.values?.action ||
+      "";
+    const rejectedStationId =
+      request?.payload?.stationId ||
+      request?.payload?.id ||
+      request?.entityId ||
+      "-";
+
+    if (rejectedStationAction === "zero_balance_adjustment") {
+      trackActivity(
+        "Reject Zero Balance Request",
+        request.module,
+        `Zero balance request rejected for station ${rejectedStationId}. Reason: ${note}`,
+        {
+          actionKey: "notifications.activity.actions.zeroBalanceRequestRejected",
+          actionFallback: "Reject Zero Balance Request",
+          detailsKey: "notifications.activity.details.zeroBalanceRequestRejected",
+          detailsParams: {
+            stationId: rejectedStationId,
+            reason: note,
+          },
+          detailsFallback: `Zero balance request rejected for station ${rejectedStationId}. Reason: ${note}`,
         },
-      },
-    );
+      );
+    } else if (rejectedStationAction === "stock_count_adjustment") {
+      trackActivity(
+        "Reject Inventory Adjustment",
+        request.module,
+        `Inventory adjustment request rejected for station ${rejectedStationId}. Reason: ${note}`,
+        {
+          actionKey: "notifications.activity.actions.inventoryAdjustmentRejected",
+          actionFallback: "Reject Inventory Adjustment",
+          detailsKey: "notifications.activity.details.inventoryAdjustmentRejected",
+          detailsParams: {
+            stationId: rejectedStationId,
+            reason: note,
+          },
+          detailsFallback: `Inventory adjustment request rejected for station ${rejectedStationId}. Reason: ${note}`,
+        },
+      );
+    } else {
+      trackActivity(
+        "Reject Request",
+        request.module,
+        `${request.title} (${request.entityType || "Request"}: ${request.entityId || "-"})`,
+        {
+          actionKey: "notifications.activity.actions.rejectRequest",
+          detailsKey: "notifications.activity.details.requestRejected",
+          detailsParams: {
+            requestTitle: request.title || t("approvals.defaults.requestTitle"),
+            entityType: request.entityType || "Request",
+            entityId: request.entityId || "-",
+          },
+        },
+      );
+    }
+
     showToast?.("error", t("approvals.messages.requestRejected"));
   
     });

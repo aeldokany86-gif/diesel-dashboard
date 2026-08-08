@@ -286,7 +286,7 @@ export default function StationsPage({
     const digits = String(safeValue).padStart(7, "0").slice(-7).split("");
 
     return (
-      <div className="w-full flex items-center gap-2">
+      <div dir="ltr" className="w-full flex items-center gap-2">
         {digits.map((digit, index) => (
           <span
             key={`${digit}-${index}`}
@@ -2018,7 +2018,18 @@ export default function StationsPage({
       trackActivity?.(
         "Zero Balance Adjustment",
         "stations",
-        `${selectedStation.id} balance zeroed. Adjustment: ${formatNumber(adjustmentQty)} L.`
+        `${selectedStation.id} balance zeroed. Adjustment: ${formatNumber(adjustmentQty)} L.`,
+        {
+          actionKey: "notifications.activity.actions.zeroBalanceCompleted",
+          actionFallback: "Zero Balance Completed",
+          detailsKey: "notifications.activity.details.zeroBalanceCompletedDirect",
+          detailsParams: {
+            stationId: selectedStation.id,
+            previousStock: formatNumber(currentStock),
+            adjustmentQty: formatNumber(adjustmentQty),
+          },
+          detailsFallback: `Station ${selectedStation.id} balance was zeroed from ${formatNumber(currentStock)} L. Adjustment: ${formatNumber(adjustmentQty)} L.`,
+        },
       );
 
       setShowConfirm(false);

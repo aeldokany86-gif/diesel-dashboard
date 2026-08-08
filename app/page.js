@@ -2383,6 +2383,22 @@ export default function Home() {
         },
       ]);
 
+      trackActivity?.(
+        "Zero Balance Request Approved",
+        "stations",
+        `Zero balance request approved for station ${requestedStationId}. Previous stock: ${formatNumber(balanceBefore)} L. New stock: 0 L.`,
+        {
+          actionKey: "notifications.activity.actions.zeroBalanceRequestApproved",
+          actionFallback: "Zero Balance Request Approved",
+          detailsKey: "notifications.activity.details.zeroBalanceRequestApproved",
+          detailsParams: {
+            stationId: requestedStationId,
+            previousStock: formatNumber(balanceBefore),
+          },
+          detailsFallback: `Zero balance request approved for station ${requestedStationId}. Previous stock: ${formatNumber(balanceBefore)} L. New stock: 0 L.`,
+        },
+      );
+
       return zeroBalanceResult;
     }
 
@@ -2446,6 +2462,18 @@ export default function Home() {
       "Inventory Adjustment Approved",
       "stations",
       `${requestedStationId} adjusted from ${formatNumber(confirmedSystemQty)} L to ${formatNumber(confirmedActualQty)} L. Difference: ${formatNumber(adjustmentQty)} L.`,
+      {
+        actionKey: "notifications.activity.actions.inventoryAdjustmentApproved",
+        actionFallback: "Inventory Adjustment Approved",
+        detailsKey: "notifications.activity.details.inventoryAdjustmentApproved",
+        detailsParams: {
+          stationId: requestedStationId,
+          previousStock: formatNumber(confirmedSystemQty),
+          actualStock: formatNumber(confirmedActualQty),
+          adjustmentQty: formatNumber(adjustmentQty),
+        },
+        detailsFallback: `${requestedStationId} adjusted from ${formatNumber(confirmedSystemQty)} L to ${formatNumber(confirmedActualQty)} L. Difference: ${formatNumber(adjustmentQty)} L.`,
+      },
     );
 
     return inventoryAdjustmentResult;

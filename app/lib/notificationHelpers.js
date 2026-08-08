@@ -167,6 +167,44 @@ function approvalMessageDescriptor(item) {
       item?.operation?.type,
   );
 
+  const approvalStatus = String(item?.status || "").trim().toLowerCase();
+  const stationAction =
+    item?.payload?.action ||
+    item?.payload?.values?.action ||
+    "";
+  const stationId =
+    item?.payload?.stationId ||
+    item?.payload?.id ||
+    item?.entityId ||
+    "-";
+  const rejectionReason =
+    item?.reviewNote ||
+    item?.rejectionReason ||
+    item?.payload?.reviewNote ||
+    "-";
+
+  if (approvalStatus === "rejected" && stationAction === "zero_balance_adjustment") {
+    return createI18nMessage(
+      "notifications.workflow.stationZeroBalanceRejected",
+      {
+        stationId,
+        reason: rejectionReason,
+      },
+      `Zero balance request rejected for station ${stationId}. Reason: ${rejectionReason}`,
+    );
+  }
+
+  if (approvalStatus === "rejected" && stationAction === "stock_count_adjustment") {
+    return createI18nMessage(
+      "notifications.workflow.stationInventoryAdjustmentRejected",
+      {
+        stationId,
+        reason: rejectionReason,
+      },
+      `Inventory adjustment request rejected for station ${stationId}. Reason: ${rejectionReason}`,
+    );
+  }
+
   if (
     item?.detailsKey === "workflowMessages.approvals.operation.details" &&
     operationType
@@ -728,6 +766,14 @@ export function buildNotificationItems({
 
   const visibleActivities = activityLog
     .filter((item) => item.userId === currentUser?.id)
+    // Submitting an approval request already creates a dedicated approval
+    // notification for the requester/approver. Keep the activity in the
+    // Activity Log / Audit Timeline, but do not duplicate it in Notifications.
+    .filter(
+      (item) =>
+        item?.action !== "Submit Approval Request" &&
+        item?.actionKey !== "notifications.activity.actions.submitApprovalRequest",
+    )
     .slice(0, 8)
     .map((item) => {
       const descriptors = activityDescriptors(item);
