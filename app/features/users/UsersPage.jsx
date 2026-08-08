@@ -3,6 +3,7 @@
 import { useEffect, useMemo, useRef, useState } from "react";
 
 import ModalPortal from "../../components/ui/ModalPortal";
+import { useLanguage } from "../../context/LanguageContext";
 
 import {
   normalizeBackendRoleName,
@@ -18,6 +19,10 @@ import {
 import {
   ROLE_PERMISSIONS,
 } from "../../lib/permissionHelpers";
+
+import {
+  resolveEnumValue,
+} from "../../lib/i18nMessageHelpers";
 
 import {
   createUserRecord,
@@ -165,7 +170,40 @@ export default function UsersPage({
   trackActivity = () => {},
   showToast,
 }) {
+  const { language, t } = useLanguage();
+  const isRtl = language === "ar";
+
+  const getUserStatusLabel = (status) =>
+    resolveEnumValue(t, "userStatus", status, status || "-");
+
+  const getUserRoleLabel = (roleValue) =>
+    resolveEnumValue(
+      t,
+      "userRole",
+      normalizeBackendRoleName(roleValue),
+      roleValue || "-"
+    );
+
+  const userActivityI18n = (
+    actionKey,
+    detailsKey,
+    params = {},
+    actionFallback = "",
+    detailsFallback = "",
+    options = {}
+  ) => ({
+    actionKey: `notifications.activity.actions.${actionKey}`,
+    actionParams: params,
+    actionEnumParams: options.actionEnumParams || {},
+    actionFallback,
+    detailsKey: `notifications.activity.details.${detailsKey}`,
+    detailsParams: params,
+    detailsEnumParams: options.detailsEnumParams || {},
+    detailsFallback,
+  });
+
   const [searchTerm, setSearchTerm] = useState("");
+  const [usersPage, setUsersPage] = useState(1);
   const [roleFilter, setRoleFilter] = useState("All");
   const [statusFilter, setStatusFilter] = useState("All");
   const [settingsOpen, setSettingsOpen] = useState(false);
@@ -180,7 +218,7 @@ export default function UsersPage({
     open: false,
     title: "",
     message: "",
-    confirmLabel: "Confirm",
+    confirmLabel: "",
     confirmTone: "amber",
     onConfirm: null,
   });
@@ -238,7 +276,7 @@ export default function UsersPage({
       isActive,
       passwordResetRequired: Boolean(user.mustChangePassword ?? user.passwordResetRequired),
       mustChangePassword: Boolean(user.mustChangePassword ?? user.passwordResetRequired),
-      lastLogin: user.lastLogin || "",
+      lastLogin: user.lastLoginAt || user.lastLogin || "",
       createdAt: user.createdAt || "",
       updatedAt: user.updatedAt || "",
       backendUser: true,
@@ -371,7 +409,7 @@ export default function UsersPage({
     companies.find((company) => companyMatches(company.id, currentUser?.companyId))?.name ||
     currentUser?.companyName ||
     currentUser?.companyId ||
-    "Current Company";
+    t("users.values.currentCompany");
 
   const selectedFormCompanyName =
     companyOptions.find((company) => companyMatches(company.id, effectiveUserFormCompanyId))?.name ||
@@ -413,7 +451,7 @@ export default function UsersPage({
     } catch (error) {
       logHandledApiIssue("Failed to load roles from backend", error);
       setBackendRoles([]);
-      notifyUser(showToast, "warning", "Failed to load roles for the selected company.");
+      notifyUser(showToast, "warning", t("users.messages.loadRolesFailed"));
       return [];
     }
   };
@@ -459,7 +497,7 @@ export default function UsersPage({
       setBackendRoles((prevRoles) => (Array.isArray(prevRoles) ? prevRoles : []));
     } catch (error) {
       logHandledApiIssue("Failed to load users and roles from backend", error);
-      notifyUser(showToast, "warning", "Failed to load users and roles from backend.");
+      notifyUser(showToast, "warning", t("users.messages.loadUsersFailed"));
     }
   };
 
@@ -501,13 +539,35 @@ export default function UsersPage({
     return matchesSearch && matchesRole && matchesStatus;
   });
 
+  const USERS_PAGE_SIZE = 5;
+  const usersTotalPages = Math.max(
+    1,
+    Math.ceil(filteredUsers.length / USERS_PAGE_SIZE)
+  );
+  const safeUsersPage = Math.min(usersPage, usersTotalPages);
+  const usersPageStartIndex = (safeUsersPage - 1) * USERS_PAGE_SIZE;
+  const paginatedUsers = filteredUsers.slice(
+    usersPageStartIndex,
+    usersPageStartIndex + USERS_PAGE_SIZE
+  );
+
+  useEffect(() => {
+    setUsersPage(1);
+  }, [searchTerm, roleFilter, statusFilter]);
+
+  useEffect(() => {
+    if (usersPage > usersTotalPages) {
+      setUsersPage(usersTotalPages);
+    }
+  }, [usersPage, usersTotalPages]);
+
   const activeUsersCount = users.filter((user) => user.status === "Active").length;
   const inactiveUsersCount = users.filter((user) => user.status !== "Active").length;
   const resetRequiredCount = users.filter((user) => user.passwordResetRequired || user.mustChangePassword).length;
 
   const openAddUserModal = async () => {
     if (!hasPermission("users", "add")) {
-      notifyUser(showToast, "warning", "You do not have permission to add users.");
+      notifyUser(showToast, "warning", t("users.validation.noAddPermission"));
       return;
     }
 
@@ -585,12 +645,12 @@ export default function UsersPage({
     }
 
     if (!payload.fullName || !payload.email || !payload.roleId) {
-      notifyUser(showToast, "warning", "Full name, email, and role are required.");
+      notifyUser(showToast, "warning", t("users.validation.requiredFields"));
       return;
     }
 
     if (userModalMode === "add" && !payload.companyId) {
-      notifyUser(showToast, "warning", "Company is required before creating a user.");
+      notifyUser(showToast, "warning", t("users.validation.companyRequired"));
       return;
     }
 
@@ -598,7 +658,7 @@ export default function UsersPage({
       payload.password = userForm.password.trim();
 
       if (!payload.password) {
-        notifyUser(showToast, "warning", "Temporary password is required for new users.");
+        notifyUser(showToast, "warning", t("users.validation.temporaryPasswordRequired"));
         return;
       }
     }
@@ -615,8 +675,19 @@ export default function UsersPage({
           ...prev.filter((user) => user.id !== savedUser.id),
         ]);
 
-        trackActivity("Add User", "users", `${savedUser.username || savedUser.fullName || "User"} created.`);
-        notifyUser(showToast, "success", "User added successfully.");
+        trackActivity(
+          "Add User",
+          "users",
+          `${savedUser.username || savedUser.fullName || "User"} created.`,
+          userActivityI18n(
+            "addUser",
+            "userAdded",
+            { userName: savedUser.username || savedUser.fullName || "User" },
+            "Add User",
+            `${savedUser.username || savedUser.fullName || "User"} created.`
+          )
+        );
+        notifyUser(showToast, "success", t("users.messages.userAdded"));
       }
 
       closeUserModal();
@@ -625,8 +696,14 @@ export default function UsersPage({
       const message =
         error?.response?.data?.message ||
         error?.message ||
-        "Failed to save user.";
-      notifyUser(showToast, inferToastTypeFromMessage(message), message);
+        t("users.messages.saveFailed");
+      notifyUser(
+        showToast,
+        inferToastTypeFromMessage(message),
+        error?.response?.data?.message
+          ? t("users.messages.saveFailedWithReason", { reason: String(error.response.data.message) })
+          : t("users.messages.saveFailed")
+      );
     } finally {
       setSavingUser(false);
     }
@@ -705,7 +782,7 @@ export default function UsersPage({
     if (!user?.id || !nextRoleId) return;
 
     if (!hasPermission("users", "edit") && !hasPermission("users", "assignRoles")) {
-      notifyUser(showToast, "warning", "You do not have permission to change user roles.");
+      notifyUser(showToast, "warning", t("users.validation.noRolePermission"));
       return;
     }
 
@@ -744,16 +821,27 @@ export default function UsersPage({
       trackActivity(
         "Update User Role",
         "users",
-        `${savedUser.username || savedUser.fullName || "User"} role updated to ${formatRoleLabel(savedUser)}.`
+        `${savedUser.username || savedUser.fullName || "User"} role updated to ${formatRoleLabel(savedUser)}.`,
+        userActivityI18n(
+          "updateUserRole",
+          "userRoleUpdated",
+          {
+            userName: savedUser.username || savedUser.fullName || "User",
+            role: savedUser.roleName || savedUser.role || "Operator",
+          },
+          "Update User Role",
+          `${savedUser.username || savedUser.fullName || "User"} role updated to ${formatRoleLabel(savedUser)}.`,
+          { detailsEnumParams: { role: "userRole" } }
+        )
       );
-      notifyUser(showToast, "success", "User role updated successfully.");
+      notifyUser(showToast, "success", t("users.messages.roleUpdated"));
     } catch (error) {
       logHandledApiIssue("Failed to update user role", error);
       const message =
         error?.response?.data?.message ||
         error?.message ||
-        "Failed to update user role.";
-      notifyUser(showToast, inferToastTypeFromMessage(message), message);
+        t("users.messages.roleUpdateFailed");
+      notifyUser(showToast, inferToastTypeFromMessage(message), t("users.messages.roleUpdateFailed"));
     } finally {
       setUpdatingUserRoleById((prev) => {
         const next = { ...prev };
@@ -765,7 +853,7 @@ export default function UsersPage({
 
   const askChangeUserStatus = (user) => {
     if (!hasPermission("users", "deactivate")) {
-      notifyUser(showToast, "warning", "You do not have permission to change user status.");
+      notifyUser(showToast, "warning", t("users.validation.noStatusPermission"));
       return;
     }
 
@@ -774,18 +862,25 @@ export default function UsersPage({
     if (updatingUserStatusById[user.id]) return;
 
     if (user.id === currentUser?.id) {
-      notifyUser(showToast, "warning", "You cannot deactivate the currently signed-in user.");
+      notifyUser(showToast, "warning", t("users.validation.cannotDeactivateSelf"));
       return;
     }
 
     const nextIsActive = user.status !== "Active";
     const nextStatus = nextIsActive ? "Active" : "Inactive";
+    const userName = user.username || user.fullName || "-";
 
     setUserConfirmModal({
       open: true,
-      title: `${nextStatus} User`,
-      message: `Are you sure you want to ${nextStatus.toLowerCase()} ${user.username || user.fullName}?`,
-      confirmLabel: nextStatus === "Active" ? "Activate" : "Deactivate",
+      title: nextIsActive
+        ? t("users.confirm.activateTitle")
+        : t("users.confirm.deactivateTitle"),
+      message: nextIsActive
+        ? t("users.confirm.activateMessage", { userName })
+        : t("users.confirm.deactivateMessage", { userName }),
+      confirmLabel: nextIsActive
+        ? t("users.actions.activate")
+        : t("users.actions.deactivate"),
       confirmTone: nextStatus === "Active" ? "emerald" : "red",
       onConfirm: async () => {
         const previousUser = { ...user };
@@ -831,8 +926,29 @@ export default function UsersPage({
             })
           );
 
-          trackActivity("Change User Status", "users", `${updatedUser.username || updatedUser.fullName} changed to ${updatedUser.status}.`);
-          notifyUser(showToast, "success", `User changed to ${updatedUser.status}.`);
+          trackActivity(
+            "Change User Status",
+            "users",
+            `${updatedUser.username || updatedUser.fullName} changed to ${updatedUser.status}.`,
+            userActivityI18n(
+              "changeUserStatus",
+              "userStatusChanged",
+              {
+                userName: updatedUser.username || updatedUser.fullName || "User",
+                status: updatedUser.status,
+              },
+              "Change User Status",
+              `${updatedUser.username || updatedUser.fullName} changed to ${updatedUser.status}.`,
+              { detailsEnumParams: { status: "userStatus" } }
+            )
+          );
+          notifyUser(
+            showToast,
+            "success",
+            t("users.messages.statusChanged", {
+              status: getUserStatusLabel(updatedUser.status),
+            })
+          );
         } catch (error) {
           logHandledApiIssue("Failed to change user status", error);
 
@@ -840,7 +956,7 @@ export default function UsersPage({
             prev.map((item) => (item.id === previousUser.id ? previousUser : item))
           );
 
-          notifyUser(showToast, "warning", "Failed to change user status.");
+          notifyUser(showToast, "warning", t("users.messages.statusChangeFailed"));
         } finally {
           setUpdatingUserStatusById((prev) => {
             const next = { ...prev };
@@ -854,7 +970,7 @@ export default function UsersPage({
 
   const resetPassword = (user) => {
     if (!hasPermission("users", "resetPassword")) {
-      notifyUser(showToast, "warning", "You do not have permission to reset passwords.");
+      notifyUser(showToast, "warning", t("users.validation.noResetPasswordPermission"));
       return;
     }
 
@@ -862,9 +978,11 @@ export default function UsersPage({
 
     setUserConfirmModal({
       open: true,
-      title: "Reset Password",
-      message: `Generate a temporary password for ${user.username || user.fullName}? The user must change it after next login.`,
-      confirmLabel: "Reset Password",
+      title: t("users.confirm.resetPasswordTitle"),
+      message: t("users.confirm.resetPasswordMessage", {
+        userName: user.username || user.fullName || "-",
+      }),
+      confirmLabel: t("users.actions.resetPassword"),
       confirmTone: "amber",
       onConfirm: async () => {
         setResettingPassword(true);
@@ -891,11 +1009,22 @@ export default function UsersPage({
             temporaryPassword,
           });
 
-          trackActivity("Reset Password", "users", `${user.username || user.fullName} temporary password generated.`);
-          notifyUser(showToast, "success", "Temporary password generated.");
+          trackActivity(
+            "Reset Password",
+            "users",
+            `${user.username || user.fullName} temporary password generated.`,
+            userActivityI18n(
+              "resetUserPassword",
+              "userPasswordReset",
+              { userName: user.username || user.fullName || "User" },
+              "Reset Password",
+              `${user.username || user.fullName} temporary password generated.`
+            )
+          );
+          notifyUser(showToast, "success", t("users.messages.temporaryPasswordGenerated"));
         } catch (error) {
           logHandledApiIssue("Failed to reset password", error);
-          notifyUser(showToast, "warning", "Failed to reset password.");
+          notifyUser(showToast, "warning", t("users.messages.resetPasswordFailed"));
         } finally {
           setResettingPassword(false);
         }
@@ -905,6 +1034,9 @@ export default function UsersPage({
 
   const formatRoleLabel = (user) =>
     user.roleName || user.role || "Operator";
+
+  const formatRoleDisplayLabel = (user) =>
+    getUserRoleLabel(user.roleName || user.role || "Operator");
 
   const getUserCompanyName = (user = {}) => {
     if (user.companyName) return user.companyName;
@@ -921,20 +1053,22 @@ export default function UsersPage({
 
   const exportUsersCSV = () => {
     const headers = [
-      "Username",
-      "Employee ID",
-      "Role",
-      "Status",
-      "Password Reset Required",
-      "Last Login",
+      t("users.table.username"),
+      t("users.table.employeeId"),
+      t("users.table.role"),
+      t("users.table.status"),
+      t("users.table.passwordResetRequired"),
+      t("users.table.lastLogin"),
     ];
 
     const rows = filteredUsers.map((user) => [
       user.username || "",
       user.employeeId || "",
-      formatRoleLabel(user),
-      user.status || "",
-      user.passwordResetRequired || user.mustChangePassword ? "Yes" : "No",
+      formatRoleDisplayLabel(user),
+      getUserStatusLabel(user.status),
+      user.passwordResetRequired || user.mustChangePassword
+        ? t("common.yes")
+        : t("common.no"),
       user.lastLogin || "",
     ]);
 
@@ -951,7 +1085,7 @@ export default function UsersPage({
     link.click();
     URL.revokeObjectURL(url);
 
-    notifyUser(showToast, "success", "Users exported successfully.");
+    notifyUser(showToast, "success", t("users.messages.exported"));
   };
 
   const printUsersTable = () => {
@@ -961,10 +1095,10 @@ export default function UsersPage({
           <tr>
             <td>${user.username || "-"}</td>
             <td>${user.employeeId || "-"}</td>
-            <td>${formatRoleLabel(user)}</td>
-            <td>${user.status || "-"}</td>
-            <td>${user.passwordResetRequired || user.mustChangePassword ? "Required" : "No"}</td>
-            <td>${user.lastLogin || "Never"}</td>
+            <td>${formatRoleDisplayLabel(user)}</td>
+            <td>${getUserStatusLabel(user.status)}</td>
+            <td>${user.passwordResetRequired || user.mustChangePassword ? t("users.values.required") : t("common.no")}</td>
+            <td>${user.lastLogin || t("users.values.never")}</td>
           </tr>
         `
       )
@@ -973,16 +1107,16 @@ export default function UsersPage({
     const printWindow = window.open("", "_blank", "width=1100,height=800");
 
     if (!printWindow) {
-      notifyUser(showToast, "warning", "Please allow popups to print the users table.");
+      notifyUser(showToast, "warning", t("users.messages.allowPopups"));
       return;
     }
 
     printWindow.document.write(`
       <html>
         <head>
-          <title>Fleet Fuel PRO - Users</title>
+          <title>Fleet Fuel PRO - ${t("users.title")}</title>
           <style>
-            body { font-family: Arial, sans-serif; padding: 24px; color: #0f172a; }
+            body { font-family: Arial, sans-serif; padding: 24px; color: #0f172a; direction: ${isRtl ? "rtl" : "ltr"}; }
             h1 { margin: 0 0 4px; font-size: 22px; }
             p { margin: 0 0 18px; color: #475569; }
             table { width: 100%; border-collapse: collapse; font-size: 12px; }
@@ -992,20 +1126,20 @@ export default function UsersPage({
           </style>
         </head>
         <body>
-          <h1>Fleet Fuel PRO - Users & Roles</h1>
-          <p>Printed on ${new Date().toLocaleString()}</p>
+          <h1>Fleet Fuel PRO - ${t("users.title")}</h1>
+          <p>${t("users.print.printedOn")} ${new Date().toLocaleString(language === "ar" ? "ar-SA" : "en-US")}</p>
           <table>
             <thead>
               <tr>
-                <th>Username</th>
-                <th>Employee ID</th>
-                <th>Role</th>
-                <th>Status</th>
-                <th>Password Reset</th>
-                <th>Last Login</th>
+                <th>${t("users.table.username")}</th>
+                <th>${t("users.table.employeeId")}</th>
+                <th>${t("users.table.role")}</th>
+                <th>${t("users.table.status")}</th>
+                <th>${t("users.table.passwordReset")}</th>
+                <th>${t("users.table.lastLogin")}</th>
               </tr>
             </thead>
-            <tbody>${rowsHtml || `<tr><td colspan="6">No users found.</td></tr>`}</tbody>
+            <tbody>${rowsHtml || `<tr><td colspan="6">${t("users.states.noUsersFound")}</td></tr>`}</tbody>
           </table>
         </body>
       </html>
@@ -1024,7 +1158,7 @@ export default function UsersPage({
       open: false,
       title: "",
       message: "",
-      confirmLabel: "Confirm",
+      confirmLabel: "",
       confirmTone: "amber",
       onConfirm: null,
     });
@@ -1038,18 +1172,21 @@ export default function UsersPage({
       : "bg-amber-400 hover:bg-amber-300 text-slate-950 shadow-amber-500/20";
 
   return (
-    <div className="bg-transparent min-h-screen text-slate-100 overflow-y-auto h-screen scroll-smooth [scrollbar-color:#334155_transparent]">
+    <div
+      className="bg-transparent min-h-screen text-slate-100 overflow-y-auto h-screen scroll-smooth [scrollbar-color:#334155_transparent]"
+      dir={isRtl ? "rtl" : "ltr"}
+    >
       <div className="fleet-page-shell w-full max-w-[1920px] mx-auto px-2 sm:px-3 lg:px-4 xl:px-5 2xl:px-8 py-3 sm:py-4 lg:py-5 text-[12px] lg:text-[13px]">
         <div className="flex flex-col xl:flex-row justify-between xl:items-center gap-3 mb-4">
           <div>
             <p className="text-[11px] font-black uppercase tracking-[0.28em] text-amber-300 mb-2">
-              Access Control
+              {t("users.eyebrow")}
             </p>
             <h1 className="text-xl sm:text-2xl font-black tracking-tight text-slate-100">
-              Users & Roles
+              {t("users.title")}
             </h1>
             <p className="text-slate-400 text-sm">
-              Manage users, roles, password resets, and account status inside the current company.
+              {t("users.subtitle")}
             </p>
           </div>
 
@@ -1057,7 +1194,7 @@ export default function UsersPage({
             <button
               onClick={() => setSettingsOpen((prev) => !prev)}
               className="h-12 w-12 rounded-2xl border border-slate-700 bg-slate-950/80 hover:border-amber-400 hover:bg-slate-900 text-slate-200 hover:text-amber-300 transition flex items-center justify-center cursor-pointer"
-              title="Users settings"
+              title={t("users.actions.settings")}
             >
               <span className="flex flex-col gap-1">
                 <span className="block h-0.5 w-5 rounded-full bg-current" />
@@ -1067,32 +1204,32 @@ export default function UsersPage({
             </button>
 
             {settingsOpen && (
-              <div className="absolute right-0 mt-2 w-56 rounded-2xl border border-slate-700 bg-slate-950 shadow-2xl shadow-black/40 z-40 overflow-hidden">
+              <div className={`absolute ${isRtl ? "left-0" : "right-0"} mt-2 w-56 rounded-2xl border border-slate-700 bg-slate-950 shadow-2xl shadow-black/40 z-40 overflow-hidden`}>
                 {isPlatformConsoleCompanyContext && (
                   <button
                     onClick={openAddUserModal}
-                    className="w-full px-4 py-3 text-left text-sm font-bold text-slate-200 hover:bg-slate-800/80 hover:text-amber-300 transition flex items-center gap-3 disabled:opacity-40 disabled:cursor-not-allowed"
+                    className={`w-full px-4 py-3 ${isRtl ? "text-right" : "text-left"} text-sm font-bold text-slate-200 hover:bg-slate-800/80 hover:text-amber-300 transition flex items-center gap-3 disabled:opacity-40 disabled:cursor-not-allowed`}
                     disabled={!hasPermission("users", "add")}
                   >
                     <span>＋</span>
-                    <span>Add User</span>
+                    <span>{t("users.actions.addUser")}</span>
                   </button>
                 )}
 
                 <button
                   onClick={exportUsersCSV}
-                  className="w-full px-4 py-3 text-left text-sm font-bold text-slate-200 hover:bg-slate-800/80 hover:text-amber-300 transition flex items-center gap-3"
+                  className={`w-full px-4 py-3 ${isRtl ? "text-right" : "text-left"} text-sm font-bold text-slate-200 hover:bg-slate-800/80 hover:text-amber-300 transition flex items-center gap-3`}
                 >
                   <span>⇩</span>
-                  <span>Export CSV</span>
+                  <span>{t("common.exportCsv")}</span>
                 </button>
 
                 <button
                   onClick={printUsersTable}
-                  className="w-full px-4 py-3 text-left text-sm font-bold text-slate-200 hover:bg-slate-800/80 hover:text-amber-300 transition flex items-center gap-3"
+                  className={`w-full px-4 py-3 ${isRtl ? "text-right" : "text-left"} text-sm font-bold text-slate-200 hover:bg-slate-800/80 hover:text-amber-300 transition flex items-center gap-3`}
                 >
                   <span>⎙</span>
-                  <span>Print Table</span>
+                  <span>{t("users.actions.printTable")}</span>
                 </button>
               </div>
             )}
@@ -1101,22 +1238,22 @@ export default function UsersPage({
 
         <div className="grid grid-cols-1 md:grid-cols-4 gap-3 mb-4">
           <div className="bg-slate-900/80 border border-slate-700/80 rounded-2xl p-4 shadow-xl">
-            <p className="text-slate-400 text-xs uppercase tracking-[0.2em]">Total Users</p>
+            <p className="text-slate-400 text-xs uppercase tracking-[0.2em]">{t("users.cards.total")}</p>
             <p className="text-2xl font-black mt-2">{users.length}</p>
           </div>
 
           <div className="bg-slate-900/80 border border-slate-700/80 rounded-2xl p-4 shadow-xl">
-            <p className="text-slate-400 text-xs uppercase tracking-[0.2em]">Active</p>
+            <p className="text-slate-400 text-xs uppercase tracking-[0.2em]">{t("users.cards.active")}</p>
             <p className="text-2xl font-black mt-2 text-emerald-300">{activeUsersCount}</p>
           </div>
 
           <div className="bg-slate-900/80 border border-slate-700/80 rounded-2xl p-4 shadow-xl">
-            <p className="text-slate-400 text-xs uppercase tracking-[0.2em]">Inactive</p>
+            <p className="text-slate-400 text-xs uppercase tracking-[0.2em]">{t("users.cards.inactive")}</p>
             <p className="text-2xl font-black mt-2 text-red-300">{inactiveUsersCount}</p>
           </div>
 
           <div className="bg-slate-900/80 border border-slate-700/80 rounded-2xl p-4 shadow-xl">
-            <p className="text-slate-400 text-xs uppercase tracking-[0.2em]">Password Reset</p>
+            <p className="text-slate-400 text-xs uppercase tracking-[0.2em]">{t("users.cards.passwordReset")}</p>
             <p className="text-2xl font-black mt-2 text-amber-300">{resetRequiredCount}</p>
           </div>
         </div>
@@ -1126,7 +1263,7 @@ export default function UsersPage({
             <input
               value={searchTerm}
               onChange={(e) => setSearchTerm(e.target.value)}
-              placeholder="Search username, employee ID, role..."
+              placeholder={t("users.searchPlaceholder")}
               className="bg-[#080d19] border border-slate-700 hover:border-amber-400 focus:border-amber-400 focus:ring-2 focus:ring-amber-400/20 text-slate-100 px-3 py-2.5 rounded-xl w-full outline-none"
             />
 
@@ -1135,9 +1272,9 @@ export default function UsersPage({
               onChange={(e) => setRoleFilter(e.target.value)}
               className="bg-[#080d19] border border-slate-700 text-slate-100 px-3 py-2.5 rounded-xl w-full outline-none"
             >
-              <option value="All">All Roles</option>
+              <option value="All">{t("users.filters.allRoles")}</option>
               {roleOptions.map((role) => (
-                <option key={role.id} value={role.normalizedName}>{role.name}</option>
+                <option key={role.id} value={role.normalizedName}>{getUserRoleLabel(role.normalizedName || role.name)}</option>
               ))}
             </select>
 
@@ -1146,13 +1283,13 @@ export default function UsersPage({
               onChange={(e) => setStatusFilter(e.target.value)}
               className="bg-[#080d19] border border-slate-700 text-slate-100 px-3 py-2.5 rounded-xl w-full outline-none"
             >
-              <option value="All">All Status</option>
-              <option value="Active">Active</option>
-              <option value="Inactive">Inactive</option>
+              <option value="All">{t("users.filters.allStatus")}</option>
+              <option value="Active">{getUserStatusLabel("Active")}</option>
+              <option value="Inactive">{getUserStatusLabel("Inactive")}</option>
             </select>
 
             <div className="bg-slate-950 border border-slate-700 rounded-xl px-3 py-2.5 text-sm">
-              Current: <span className="text-amber-300 font-bold">{currentUser?.username || currentUser?.fullName || "-"}</span>
+              {t("users.currentUser")}: <span className="text-amber-300 font-bold">{currentUser?.username || currentUser?.fullName || "-"}</span>
             </div>
           </div>
         </div>
@@ -1160,33 +1297,37 @@ export default function UsersPage({
 
         {usersLoadError && !usersLoading && (
           <div className="mb-4 rounded-2xl border border-red-400/30 bg-red-500/10 px-4 py-3 text-sm font-semibold text-red-200">
-            {usersLoadError}
+            {t("users.messages.loadUsersFailed")}
           </div>
         )}
 
         <div className="bg-slate-900/80 border border-slate-700/80 rounded-2xl shadow-xl overflow-hidden">
           <div className="overflow-x-auto">
-            <table className="w-full text-left text-sm min-w-[920px]">
+            <table className={`w-full text-sm min-w-[920px] ${isRtl ? "text-right" : "text-left"}`}>
               <thead className="bg-slate-950 sticky top-0 z-[5]">
                 <tr>
-                  <th className="p-3">Username</th>
-                  <th className="p-3">Employee ID</th>
-                  <th className="p-3">Role</th>
-                  <th className="p-3">Status</th>
-                  <th className="p-3">Password Reset</th>
-                  <th className="p-3">Last Login</th>
-                  <th className="p-3 text-right">Security</th>
+                  <th className="p-3">{t("users.table.username")}</th>
+                  <th className="p-3">{t("users.table.employeeId")}</th>
+                  <th className="p-3">{t("users.table.role")}</th>
+                  <th className="p-3">{t("users.table.status")}</th>
+                  <th className="p-3">{t("users.table.passwordReset")}</th>
+                  <th className="p-3">{t("users.table.lastLogin")}</th>
+                  <th className={`p-3 ${isRtl ? "text-left" : "text-right"}`}>{t("users.table.security")}</th>
                 </tr>
               </thead>
               <tbody>
-                {filteredUsers.map((user) => (
+                {paginatedUsers.map((user) => (
                   <tr key={user.id} className="border-t border-slate-800 hover:bg-slate-800/50 transition">
                     <td className="p-3">
-                      <span className="block font-black text-slate-100 text-left">
+                      <span
+                        className={`block font-black text-slate-100 ${
+                          isRtl ? "text-right" : "text-left"
+                        }`}
+                      >
                         {user.username || "-"}
                       </span>
                       <div className="text-xs text-slate-500">
-  			{user.fullName || "Unnamed User"}
+  			{user.fullName || t("users.values.unnamedUser")}
 		      </div>
                     </td>
                     <td className="p-3 text-slate-300 font-semibold">{user.employeeId || "-"}</td>
@@ -1194,7 +1335,7 @@ export default function UsersPage({
                       {updatingUserRoleById[user.id] ? (
                         <span className="inline-flex items-center gap-2 rounded-xl border border-amber-400/40 bg-amber-500/10 px-3 py-2 text-xs font-black text-amber-200">
                           <span className="h-3 w-3 animate-spin rounded-full border-2 border-amber-200 border-t-transparent" />
-                          Updating...
+                          {t("users.states.updating")}
                         </span>
                       ) : (
                         <select
@@ -1205,12 +1346,12 @@ export default function UsersPage({
                         >
                           {!getUserRoleSelectValue(user) && (
                             <option value="" className="bg-slate-900 text-slate-100">
-                              Select role
+                              {t("users.filters.selectRole")}
                             </option>
                           )}
                           {roleOptions.map((role) => (
                             <option key={role.id} value={role.id} className="bg-slate-900 text-slate-100">
-                              {role.name}
+                              {getUserRoleLabel(role.normalizedName || role.name)}
                             </option>
                           ))}
                         </select>
@@ -1220,7 +1361,7 @@ export default function UsersPage({
                       {updatingUserStatusById[user.id] ? (
                         <span className="inline-flex items-center gap-2 rounded-full border border-amber-400/40 bg-amber-500/10 px-3 py-1 text-xs font-black text-amber-200">
                           <span className="h-3 w-3 animate-spin rounded-full border-2 border-amber-200 border-t-transparent" />
-                          Updating...
+                          {t("users.states.updating")}
                         </span>
                       ) : (
                         <button
@@ -1233,24 +1374,24 @@ export default function UsersPage({
                               : "bg-red-500/15 text-red-300 border-red-500/30 hover:bg-red-500/25"
                           }`}
                         >
-                          {user.status}
+                          {getUserStatusLabel(user.status)}
                         </button>
                       )}
                     </td>
                     <td className="p-3 text-slate-300">
-                      {user.passwordResetRequired || user.mustChangePassword ? "Required" : "No"}
+                      {user.passwordResetRequired || user.mustChangePassword ? t("users.values.required") : t("common.no")}
                     </td>
                     <td className="p-3 whitespace-nowrap text-slate-300">
-                      {user.lastLogin ? new Date(user.lastLogin).toLocaleString() : "Never"}
+                      {user.lastLogin ? new Date(user.lastLogin).toLocaleString(language === "ar" ? "ar-SA" : "en-US") : t("users.values.never")}
                     </td>
-                    <td className="p-3 text-right">
+                    <td className={`p-3 ${isRtl ? "text-left" : "text-right"}`}>
                       <button
                         type="button"
                         onClick={() => resetPassword(user)}
                         disabled={!hasPermission("users", "resetPassword")}
                         className="px-3 py-1.5 rounded-lg bg-amber-400/15 hover:bg-amber-400/25 border border-amber-400/30 text-amber-300 text-xs font-bold disabled:opacity-40 disabled:cursor-not-allowed"
                       >
-                        Reset Password
+                        {t("users.actions.resetPassword")}
                       </button>
                     </td>
                   </tr>
@@ -1260,30 +1401,63 @@ export default function UsersPage({
                   <tr>
                     <td colSpan={7} className="p-8 text-center text-slate-500">
                       {usersLoading
-                        ? "Loading users..."
+                        ? t("users.states.loadingUsers")
                         : usersLoaded
-                          ? "No users found."
-                          : "No user data is available."}
+                          ? t("users.states.noUsersFound")
+                          : t("users.states.noUserData")}
                     </td>
                   </tr>
                 )}
               </tbody>
             </table>
           </div>
+
+          {filteredUsers.length > USERS_PAGE_SIZE && (
+            <div className="flex items-center justify-center gap-3 border-t border-slate-700/80 px-4 py-3">
+              <button
+                type="button"
+                onClick={() => setUsersPage((page) => Math.max(1, page - 1))}
+                disabled={safeUsersPage <= 1}
+                className="grid h-9 w-9 place-items-center rounded-lg border border-slate-600 bg-slate-950 text-slate-200 transition hover:bg-slate-800 disabled:cursor-not-allowed disabled:opacity-40"
+                aria-label={t("users.pagination.previous")}
+              >
+                {isRtl ? "›" : "‹"}
+              </button>
+
+              <span className="min-w-[90px] text-center text-sm font-bold text-slate-300" dir="ltr">
+                {safeUsersPage} / {usersTotalPages}
+              </span>
+
+              <button
+                type="button"
+                onClick={() =>
+                  setUsersPage((page) => Math.min(usersTotalPages, page + 1))
+                }
+                disabled={safeUsersPage >= usersTotalPages}
+                className="grid h-9 w-9 place-items-center rounded-lg border border-slate-600 bg-slate-950 text-slate-200 transition hover:bg-slate-800 disabled:cursor-not-allowed disabled:opacity-40"
+                aria-label={t("users.pagination.next")}
+              >
+                {isRtl ? "‹" : "›"}
+              </button>
+            </div>
+          )}
         </div>
       </div>
 
       {userModalMode === "add" && (
         <ModalPortal>
-          <div className="fleet-modal-backdrop fixed inset-0 z-[9998] bg-black/70 backdrop-blur-sm flex items-center justify-center p-4">
+          <div
+            className="fleet-modal-backdrop fixed inset-0 z-[9998] bg-black/70 backdrop-blur-sm flex items-center justify-center p-4"
+            dir={isRtl ? "rtl" : "ltr"}
+          >
             <div className="bg-slate-950 border border-slate-700 rounded-2xl shadow-2xl w-full max-w-2xl max-h-[90vh] overflow-y-auto text-slate-100">
               <div className="p-5 border-b border-slate-800 flex items-center justify-between">
                 <div>
-                  <h2 className="text-xl font-black text-slate-100">Add User</h2>
+                  <h2 className="text-xl font-black text-slate-100">{t("users.addModal.title")}</h2>
                   <p className="text-sm text-slate-400">
                     {isPlatformUserContext
-                      ? "Create a backend user account inside the selected company."
-                      : "Create a backend user account inside your company."}
+                      ? t("users.addModal.platformSubtitle")
+                      : t("users.addModal.companySubtitle")}
                   </p>
                 </div>
                 <button onClick={closeUserModal} className="text-slate-400 hover:text-white text-xl cursor-pointer">×</button>
@@ -1292,28 +1466,28 @@ export default function UsersPage({
               <form onSubmit={handleSaveUser}>
                 <div className="p-5 grid grid-cols-1 md:grid-cols-2 gap-4">
                   <div>
-                    <label className="block text-xs text-slate-400 mb-1">Full Name</label>
+                    <label className="block text-xs text-slate-400 mb-1">{t("users.fields.fullName")}</label>
                     <input
                       value={userForm.fullName}
                       onChange={(e) => handleUserFormChange("fullName", e.target.value)}
-                      placeholder="Enter full name"
+                      placeholder={t("users.placeholders.fullName")}
                       className="w-full bg-slate-900 border border-slate-700 rounded-xl p-3 text-slate-100 placeholder:text-slate-500 outline-none focus:border-amber-400 focus:ring-2 focus:ring-amber-400/20 disabled:bg-slate-800 disabled:text-slate-500"
                     />
                   </div>
 
                   <div>
-                    <label className="block text-xs text-slate-400 mb-1">Email</label>
+                    <label className="block text-xs text-slate-400 mb-1">{t("users.fields.email")}</label>
                     <input
                       value={userForm.email}
                       onChange={(e) => handleUserFormChange("email", e.target.value.toLowerCase())}
                       type="email"
-                      placeholder="name@company.com"
+                      placeholder={t("users.placeholders.email")}
                       className="w-full bg-slate-900 border border-slate-700 rounded-xl p-3 text-slate-100 placeholder:text-slate-500 outline-none focus:border-amber-400 focus:ring-2 focus:ring-amber-400/20 disabled:bg-slate-800 disabled:text-slate-500"
                     />
                   </div>
 
                   <div>
-                    <label className="block text-xs text-slate-400 mb-1">Company</label>
+                    <label className="block text-xs text-slate-400 mb-1">{t("users.fields.company")}</label>
                     {canChangeUserCompany ? (
                       <select
                         value={userForm.companyId}
@@ -1321,7 +1495,7 @@ export default function UsersPage({
                         disabled={savingUser}
                         className="w-full bg-slate-900 border border-slate-700 rounded-xl p-3 text-slate-100 placeholder:text-slate-500 outline-none focus:border-amber-400 focus:ring-2 focus:ring-amber-400/20 disabled:bg-slate-800 disabled:text-slate-400 disabled:cursor-not-allowed"
                       >
-                        <option value="" className="bg-slate-900 text-slate-100">Select company</option>
+                        <option value="" className="bg-slate-900 text-slate-100">{t("users.placeholders.selectCompany")}</option>
                         {companyOptions.map((company) => (
                           <option key={company.id} value={company.id} className="bg-slate-900 text-slate-100">
                             {company.name}{company.code ? ` (${company.code})` : ""}
@@ -1337,25 +1511,25 @@ export default function UsersPage({
                     )}
                     <p className="text-xs text-slate-500 mt-2">
                       {canChangeUserCompany
-                        ? "Platform Console can select the target company before assigning roles."
+                        ? t("users.addModal.platformCompanyHelp")
                         : isPlatformUserContext
-                          ? "Company is locked to the selected company context."
-                          : "Company is locked to the signed-in admin company."}
+                          ? t("users.addModal.contextCompanyHelp")
+                          : t("users.addModal.adminCompanyHelp")}
                     </p>
                   </div>
 
                   <div>
-                    <label className="block text-xs text-slate-400 mb-1">Phone</label>
+                    <label className="block text-xs text-slate-400 mb-1">{t("users.fields.phone")}</label>
                     <input
                       value={userForm.phone}
                       onChange={(e) => handleUserFormChange("phone", e.target.value)}
-                      placeholder="Enter phone number"
+                      placeholder={t("users.placeholders.phone")}
                       className="w-full bg-slate-900 border border-slate-700 rounded-xl p-3 text-slate-100 placeholder:text-slate-500 outline-none focus:border-amber-400 focus:ring-2 focus:ring-amber-400/20 disabled:bg-slate-800 disabled:text-slate-500"
                     />
                   </div>
 
                   <div>
-                    <label className="block text-xs text-slate-400 mb-1">Role</label>
+                    <label className="block text-xs text-slate-400 mb-1">{t("users.fields.role")}</label>
                     <select
                       value={userForm.roleId}
                       onChange={(e) => handleUserFormChange("roleId", e.target.value)}
@@ -1364,27 +1538,29 @@ export default function UsersPage({
                     >
                       {(!effectiveUserFormCompanyId || !roleOptions.length) && (
                         <option value="" className="bg-slate-900 text-slate-100">
-                          {!effectiveUserFormCompanyId ? "Select company first" : "No roles available"}
+                          {!effectiveUserFormCompanyId
+                            ? t("users.placeholders.selectCompanyFirst")
+                            : t("users.states.noRolesAvailable")}
                         </option>
                       )}
                       {roleOptions.map((role) => (
-                        <option key={role.id} value={role.id} className="bg-slate-900 text-slate-100">{role.name}</option>
+                        <option key={role.id} value={role.id} className="bg-slate-900 text-slate-100">{getUserRoleLabel(role.normalizedName || role.name)}</option>
                       ))}
                     </select>
                   </div>
 
                   {userModalMode === "add" && (
                     <div className="md:col-span-2">
-                      <label className="block text-xs text-slate-400 mb-1">Temporary Password</label>
+                      <label className="block text-xs text-slate-400 mb-1">{t("users.fields.temporaryPassword")}</label>
                       <input
                         value={userForm.password}
                         onChange={(e) => handleUserFormChange("password", e.target.value)}
                         type="text"
-                        placeholder="Temporary password"
+                        placeholder={t("users.placeholders.temporaryPassword")}
                         className="w-full bg-slate-900 border border-slate-700 rounded-xl p-3 text-slate-100 placeholder:text-slate-500 outline-none focus:border-amber-400 focus:ring-2 focus:ring-amber-400/20 disabled:bg-slate-800 disabled:text-slate-500"
                       />
                       <p className="text-xs text-slate-500 mt-2">
-                        The user will be required to change this password after the first login.
+                        {t("users.addModal.passwordHelp")}
                       </p>
                     </div>
                   )}
@@ -1396,14 +1572,14 @@ export default function UsersPage({
                     onClick={closeUserModal}
                     className="px-4 py-2 rounded-xl bg-slate-800 hover:bg-slate-700 text-slate-200 font-bold cursor-pointer"
                   >
-                    Cancel
+                    {t("common.cancel")}
                   </button>
                   <button
                     type="submit"
                     disabled={savingUser}
                     className="px-4 py-2 rounded-xl bg-amber-400 hover:bg-amber-300 text-slate-950 font-black disabled:opacity-60 disabled:cursor-not-allowed"
                   >
-                    {savingUser ? "Saving..." : "Add User"}
+                    {savingUser ? t("common.saving") : t("users.actions.addUser")}
                   </button>
                 </div>
               </form>
@@ -1414,7 +1590,10 @@ export default function UsersPage({
 
       {userConfirmModal.open && (
         <ModalPortal>
-          <div className="fixed inset-0 z-[9999] flex items-center justify-center bg-black/70 backdrop-blur-sm p-4">
+          <div
+            className="fixed inset-0 z-[9999] flex items-center justify-center bg-black/70 backdrop-blur-sm p-4"
+            dir={isRtl ? "rtl" : "ltr"}
+          >
             <div className="w-full max-w-md rounded-3xl border border-slate-700 bg-[#071226] shadow-2xl shadow-black/50 overflow-hidden">
               <div className="px-6 pt-6 pb-4 border-b border-slate-700/60">
                 <h3 className="text-xl font-extrabold text-amber-300">
@@ -1431,7 +1610,7 @@ export default function UsersPage({
                   disabled={resettingPassword}
                   className="px-5 py-2 rounded-xl border border-slate-600 text-slate-300 hover:bg-slate-700/40 transition cursor-pointer disabled:opacity-50"
                 >
-                  Cancel
+                  {t("common.cancel")}
                 </button>
 
                 <button
@@ -1446,7 +1625,7 @@ export default function UsersPage({
                   disabled={resettingPassword}
                   className={`px-5 py-2 rounded-xl font-black transition shadow-lg cursor-pointer disabled:opacity-50 ${confirmButtonClass}`}
                 >
-                  {resettingPassword ? "Processing..." : userConfirmModal.confirmLabel}
+                  {resettingPassword ? t("users.states.processing") : userConfirmModal.confirmLabel}
                 </button>
               </div>
             </div>
@@ -1456,12 +1635,17 @@ export default function UsersPage({
 
       {temporaryPasswordResult && (
         <ModalPortal>
-          <div className="fixed inset-0 z-[10000] flex items-center justify-center bg-black/70 backdrop-blur-sm p-4">
+          <div
+            className="fixed inset-0 z-[10000] flex items-center justify-center bg-black/70 backdrop-blur-sm p-4"
+            dir={isRtl ? "rtl" : "ltr"}
+          >
             <div className="w-full max-w-lg rounded-3xl border border-amber-500/30 bg-[#071226] shadow-2xl shadow-black/50 overflow-hidden">
               <div className="px-6 pt-6 pb-4 border-b border-slate-700/60">
-                <h3 className="text-xl font-extrabold text-amber-300">Temporary Password Generated</h3>
+                <h3 className="text-xl font-extrabold text-amber-300">{t("users.passwordModal.title")}</h3>
                 <p className="text-slate-300 text-sm mt-2">
-                  Share this temporary password with {temporaryPasswordResult.userName}. It is shown here only once.
+                  {t("users.passwordModal.description", {
+                    userName: temporaryPasswordResult.userName,
+                  })}
                 </p>
               </div>
 
@@ -1475,17 +1659,17 @@ export default function UsersPage({
                 <button
                   onClick={() => {
                     navigator.clipboard?.writeText(temporaryPasswordResult.temporaryPassword);
-                    notifyUser(showToast, "success", "Temporary password copied.");
+                    notifyUser(showToast, "success", t("users.messages.passwordCopied"));
                   }}
                   className="px-5 py-2 rounded-xl border border-amber-400/40 text-amber-300 hover:bg-amber-400/10 transition cursor-pointer font-bold"
                 >
-                  Copy
+                  {t("users.actions.copy")}
                 </button>
                 <button
                   onClick={() => setTemporaryPasswordResult(null)}
                   className="px-5 py-2 rounded-xl bg-amber-400 text-slate-950 font-black hover:bg-amber-300 transition cursor-pointer"
                 >
-                  Done
+                  {t("users.actions.done")}
                 </button>
               </div>
             </div>

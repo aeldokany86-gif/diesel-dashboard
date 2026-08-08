@@ -188,6 +188,75 @@ function approvalMessageDescriptor(item) {
       ? item?.payload?.transfer || item?.payload || {}
       : null;
 
+  const employeeTransfer =
+    item?.type === "employee_transfer"
+      ? item?.payload?.transfer || item?.payload || {}
+      : null;
+
+  if (employeeTransfer) {
+    const employeeId =
+      employeeTransfer.employeeId ||
+      employeeTransfer.employeeBackendId ||
+      item?.entityId ||
+      "-";
+    const employeeName =
+      employeeTransfer.employeeName ||
+      item?.payload?.employeeName ||
+      employeeId;
+    const fromProject =
+      employeeTransfer.fromProjectName ||
+      employeeTransfer.fromProjectId ||
+      item?.payload?.fromProject ||
+      "-";
+    const toProject =
+      employeeTransfer.toProjectName ||
+      employeeTransfer.toProjectId ||
+      item?.payload?.toProject ||
+      "-";
+    const reason =
+      item?.reviewNote ||
+      employeeTransfer.rejectionReason ||
+      rejectionReason;
+
+    if (approvalStatus === "rejected") {
+      return createI18nMessage(
+        "notifications.workflow.employeeTransferRejected",
+        {
+          employeeId,
+          employeeName,
+          fromProject,
+          toProject,
+          reason,
+        },
+        `Team member ${employeeName} (${employeeId}) transfer from ${fromProject} to ${toProject} was rejected. Reason: ${reason}`,
+      );
+    }
+
+    if (approvalStatus === "approved") {
+      return createI18nMessage(
+        "notifications.workflow.employeeTransferApproved",
+        {
+          employeeId,
+          employeeName,
+          fromProject,
+          toProject,
+        },
+        `Team member ${employeeName} (${employeeId}) transfer from ${fromProject} to ${toProject} was approved.`,
+      );
+    }
+
+    return createI18nMessage(
+      "notifications.workflow.employeeTransferPending",
+      {
+        employeeId,
+        employeeName,
+        fromProject,
+        toProject,
+      },
+      `Team member ${employeeName} (${employeeId}) transfer from ${fromProject} to ${toProject} is pending approval.`,
+    );
+  }
+
   if (stationTransfer) {
     const transferStationId =
       stationTransfer.stationId ||

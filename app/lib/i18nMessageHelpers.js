@@ -21,6 +21,18 @@ const ENUM_ALIASES = {
     "not linked": "notLinked",
     notlinked: "notLinked",
   },
+  userRole: {
+    admin: "admin",
+    manager: "manager",
+    officer: "officer",
+    operator: "operator",
+    supervisor: "supervisor",
+    "top management": "topManagement",
+    topmanagement: "topManagement",
+    platformadmin: "platformAdmin",
+    "platform admin": "platformAdmin",
+    "platform user": "platformAdmin",
+  },
   companyStatus: { active: "active", inactive: "inactive" },
   approvalStatus: {
     pending: "pending",

@@ -184,6 +184,14 @@ export default function TeamPage({
   const getUserStatusLabel = (status) =>
     resolveEnumValue(t, "userStatus", status, status || "-");
 
+  const getUserRoleLabel = (role) =>
+    resolveEnumValue(
+      t,
+      "userRole",
+      normalizeBackendRoleName(role),
+      role || "-"
+    );
+
   const getTeamStatusSelectValue = (status) => {
     const value = cleanCsvCell(status)
       .toLowerCase()
@@ -224,6 +232,7 @@ export default function TeamPage({
   const [fuelerAuditLog, setFuelerAuditLog] = useState([]);
   const [showFuelersSettings, setShowFuelersSettings] = useState(false);
   const [teamSearch, setTeamSearch] = useState("");
+  const [teamPage, setTeamPage] = useState(1);
   const [selectedTeamMemberIds, setSelectedTeamMemberIds] = useState([]);
   const [bulkTransferModalOpen, setBulkTransferModalOpen] = useState(false);
   const [bulkTransferProjectId, setBulkTransferProjectId] = useState("");
@@ -729,11 +738,30 @@ export default function TeamPage({
       })
     : platformVisibleTeamFuelers;
 
+  const TEAM_PAGE_SIZE = 5;
+  const teamTotalPages = Math.max(1, Math.ceil(visibleTeamFuelers.length / TEAM_PAGE_SIZE));
+  const safeTeamPage = Math.min(teamPage, teamTotalPages);
+  const teamPageStartIndex = (safeTeamPage - 1) * TEAM_PAGE_SIZE;
+  const paginatedTeamFuelers = visibleTeamFuelers.slice(
+    teamPageStartIndex,
+    teamPageStartIndex + TEAM_PAGE_SIZE
+  );
+
+  useEffect(() => {
+    setTeamPage(1);
+  }, [teamSearch]);
+
+  useEffect(() => {
+    if (teamPage > teamTotalPages) {
+      setTeamPage(teamTotalPages);
+    }
+  }, [teamPage, teamTotalPages]);
+
   const selectedTeamFuelers = selectedTeamMemberIds
     .map((id) => platformVisibleTeamFuelers.find((fueler) => normalizeText(fueler.backendId || fueler.id) === normalizeText(id)))
     .filter(Boolean);
 
-  const visibleSelectableFuelerIds = visibleTeamFuelers.map((fueler) => fueler.backendId || fueler.id);
+  const visibleSelectableFuelerIds = paginatedTeamFuelers.map((fueler) => fueler.backendId || fueler.id);
   const allVisibleFuelersSelected =
     visibleSelectableFuelerIds.length > 0 &&
     visibleSelectableFuelerIds.every((id) => selectedTeamMemberIds.includes(id));
@@ -2323,7 +2351,7 @@ export default function TeamPage({
               </thead>
 
               <tbody>
-                {visibleTeamFuelers.map((fueler, i) => {
+                {paginatedTeamFuelers.map((fueler, i) => {
                   const selectionKey = fueler.backendId || fueler.id;
                   const isSelected = selectedTeamMemberIds.includes(selectionKey);
 
@@ -2338,7 +2366,7 @@ export default function TeamPage({
                         title={t("team.actions.selectMember")}
                       />
                     </Td>
-                    <Td>{i + 1}</Td>
+                    <Td>{teamPageStartIndex + i + 1}</Td>
 
                     <Td>
                       <button
@@ -2590,6 +2618,32 @@ export default function TeamPage({
               </tbody>
             </table>
           </div>
+
+          {visibleTeamFuelers.length > TEAM_PAGE_SIZE && (
+            <div className="flex items-center justify-center gap-3 border-t border-slate-700/80 px-4 py-3">
+              <button
+                type="button"
+                onClick={() => setTeamPage((page) => Math.max(1, page - 1))}
+                disabled={safeTeamPage <= 1}
+                className="grid h-9 w-9 place-items-center rounded-lg border border-slate-600 bg-slate-900 text-slate-200 transition hover:bg-slate-800 disabled:cursor-not-allowed disabled:opacity-40"
+                aria-label="Previous page"
+              >
+                {isRtl ? "›" : "‹"}
+              </button>
+              <span className="min-w-[90px] text-center text-sm font-bold text-slate-300" dir="ltr">
+                {safeTeamPage} / {teamTotalPages}
+              </span>
+              <button
+                type="button"
+                onClick={() => setTeamPage((page) => Math.min(teamTotalPages, page + 1))}
+                disabled={safeTeamPage >= teamTotalPages}
+                className="grid h-9 w-9 place-items-center rounded-lg border border-slate-600 bg-slate-900 text-slate-200 transition hover:bg-slate-800 disabled:cursor-not-allowed disabled:opacity-40"
+                aria-label="Next page"
+              >
+                {isRtl ? "‹" : "›"}
+              </button>
+            </div>
+          )}
         </div>
 
         <div className="bg-gray-800 rounded-xl shadow overflow-hidden border border-gray-700 p-4 mb-5">
@@ -2748,7 +2802,7 @@ export default function TeamPage({
                       {!loadingTeamRoles &&
                         teamRoleOptions.map((role) => (
                           <option key={role.id} value={role.id}>
-                            {role.name}
+                            {getUserRoleLabel(role.normalizedName || role.name)}
                           </option>
                         ))}
                     </select>

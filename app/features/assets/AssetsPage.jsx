@@ -442,6 +442,7 @@ export default function AssetsPage({
 
   const [showForm, setShowForm] = useState(false);
   const [searchTerm, setSearchTerm] = useState("");
+  const [assetsPage, setAssetsPage] = useState(1);
   const [newAsset, setNewAsset] = useState({
     id: "",
     project: "",
@@ -796,6 +797,28 @@ export default function AssetsPage({
     return searchableText.includes(search);
   });
 
+  const ASSETS_PAGE_SIZE = 5;
+  const assetsTotalPages = Math.max(
+    1,
+    Math.ceil(filteredAssets.length / ASSETS_PAGE_SIZE)
+  );
+  const safeAssetsPage = Math.min(assetsPage, assetsTotalPages);
+  const assetsPageStartIndex = (safeAssetsPage - 1) * ASSETS_PAGE_SIZE;
+  const paginatedAssets = filteredAssets.slice(
+    assetsPageStartIndex,
+    assetsPageStartIndex + ASSETS_PAGE_SIZE
+  );
+
+  useEffect(() => {
+    setAssetsPage(1);
+  }, [searchTerm]);
+
+  useEffect(() => {
+    if (assetsPage > assetsTotalPages) {
+      setAssetsPage(assetsTotalPages);
+    }
+  }, [assetsPage, assetsTotalPages]);
+
   const getAssetSelectionKey = (asset) =>
     getBackendAssetId(asset) || asset?.id || "";
 
@@ -809,7 +832,7 @@ export default function AssetsPage({
     )
     .filter(Boolean);
 
-  const visibleSelectableAssetIds = filteredAssets
+  const visibleSelectableAssetIds = paginatedAssets
     .filter(
       (asset) =>
         asset.status?.trim().toLowerCase() === "active" &&
@@ -1995,7 +2018,7 @@ export default function AssetsPage({
             </thead>
 
             <tbody>
-              {filteredAssets.map((asset, i) => (
+              {paginatedAssets.map((asset, i) => (
                 <tr
                   key={makeTenantEntityKey(asset)}
                   className="odd:bg-slate-900/20 even:bg-slate-800/20 hover:bg-amber-400/10 transition-colors duration-200"
@@ -2014,7 +2037,7 @@ export default function AssetsPage({
                     />
                   </Td>
 
-                  <Td>{i + 1}</Td>
+                  <Td>{assetsPageStartIndex + i + 1}</Td>
 
                   <Td>
                     <button
@@ -2060,6 +2083,36 @@ export default function AssetsPage({
             </tbody>
           </table>
         </div>
+
+        {filteredAssets.length > ASSETS_PAGE_SIZE && (
+          <div className="flex items-center justify-center gap-3 border-t border-slate-700/80 px-4 py-3">
+            <button
+              type="button"
+              onClick={() => setAssetsPage((page) => Math.max(1, page - 1))}
+              disabled={safeAssetsPage <= 1}
+              className="grid h-9 w-9 place-items-center rounded-lg border border-slate-600 bg-slate-950 text-slate-200 transition hover:bg-slate-800 disabled:cursor-not-allowed disabled:opacity-40"
+              aria-label="Previous page"
+            >
+              {isRtl ? "›" : "‹"}
+            </button>
+
+            <span className="min-w-[90px] text-center text-sm font-bold text-slate-300" dir="ltr">
+              {safeAssetsPage} / {assetsTotalPages}
+            </span>
+
+            <button
+              type="button"
+              onClick={() =>
+                setAssetsPage((page) => Math.min(assetsTotalPages, page + 1))
+              }
+              disabled={safeAssetsPage >= assetsTotalPages}
+              className="grid h-9 w-9 place-items-center rounded-lg border border-slate-600 bg-slate-950 text-slate-200 transition hover:bg-slate-800 disabled:cursor-not-allowed disabled:opacity-40"
+              aria-label="Next page"
+            >
+              {isRtl ? "‹" : "›"}
+            </button>
+          </div>
+        )}
       </div>
 
 

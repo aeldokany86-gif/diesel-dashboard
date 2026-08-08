@@ -54,6 +54,7 @@ import {
   mapBackendStationTransferForState,
   mapBackendEmployeeTransferForState,
   getStationTransferWorkflowMessageDescriptor,
+  getEmployeeTransferWorkflowMessageDescriptor,
 } from "./lib/transferHelpers";
 
 import {
@@ -2925,7 +2926,7 @@ export default function Home() {
       mustChangePassword: Boolean(
         user.mustChangePassword ?? user.passwordResetRequired,
       ),
-      lastLogin: user.lastLogin || "",
+      lastLogin: user.lastLoginAt || user.lastLogin || "",
       createdAt: user.createdAt || "",
       updatedAt: user.updatedAt || "",
       backendUser: true,
@@ -3939,25 +3940,53 @@ export default function Home() {
           };
         });
 
+      const employeeDisplayId =
+        transfer.employeeId || transfer.employeeBackendId || "-";
+      const employeeDisplayName =
+        transfer.employeeName || employeeDisplayId;
+      const fromProject =
+        transfer.fromProjectName || transfer.fromProjectId || "-";
+      const toProject =
+        transfer.toProjectName || transfer.toProjectId || "-";
+      const employeeTransferMessage =
+        getEmployeeTransferWorkflowMessageDescriptor(transfer, "pending");
+
       return {
         id: `EMP-TRANSFER-${transfer.id}`,
         type: "employee_transfer",
         module: "team",
         transferBatchId: transfer.transferBatchId || null,
-        title: `${isManagerTransfer ? "Manager / Top Management Transfer" : "Team Transfer"}: ${transfer.employeeName || transfer.employeeId || "Team Member"}`,
+        title: `${isManagerTransfer ? "Manager / Top Management Transfer" : "Team Transfer"}: ${employeeDisplayName}`,
+        titleKey: isManagerTransfer
+          ? "approvals.employeeTransfer.managerTitle"
+          : "approvals.employeeTransfer.title",
+        titleParams: {
+          employeeId: employeeDisplayId,
+          employeeName: employeeDisplayName,
+        },
+        titleFallback: `${isManagerTransfer ? "Manager / Top Management Transfer" : "Team Transfer"}: ${employeeDisplayName}`,
         payload: {
           transfer,
           employeeTransferId: transfer.id,
           transferBatchId: transfer.transferBatchId || null,
+          employeeId: employeeDisplayId,
+          employeeName: employeeDisplayName,
+          fromProject,
+          toProject,
         },
-        details: `${isManagerTransfer ? "Manager / Top Management transfer requiring Admin approval" : "Transfer"} ${transfer.employeeName || transfer.employeeId || "team member"} from ${transfer.fromProjectName || "-"} to ${transfer.toProjectName || "-"}.`,
+        details: employeeTransferMessage.fallback,
+        detailsKey: employeeTransferMessage.key,
+        detailsParams: employeeTransferMessage.params,
+        detailsFallback: employeeTransferMessage.fallback,
         status: "Pending",
         changedFields: [
           {
             field: "project",
             label: "Project Transfer",
-            oldValue: transfer.fromProjectName || transfer.fromProjectId || "-",
-            newValue: transfer.toProjectName || transfer.toProjectId || "-",
+            labelKey: "approvals.fields.employeeProjectTransfer",
+            labelFallback: "Project Transfer",
+            oldValue: fromProject,
+            newValue: toProject,
             sensitive: true,
           },
         ],

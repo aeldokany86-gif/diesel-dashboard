@@ -628,7 +628,59 @@ export default function ApprovalsPage({
         approvedStationAction,
       );
 
-    if (request?.type === "station_transfer") {
+    if (request?.type === "employee_transfer") {
+      const transfer = request?.payload?.transfer || {};
+      const employeeId =
+        transfer?.employeeId ||
+        transfer?.employeeBackendId ||
+        request?.entityId ||
+        "-";
+      const employeeName =
+        transfer?.employeeName ||
+        request?.payload?.employeeName ||
+        employeeId;
+      const fromProject =
+        transfer?.fromProjectName ||
+        transfer?.fromProjectId ||
+        request?.payload?.fromProject ||
+        "-";
+      const toProject =
+        transfer?.toProjectName ||
+        transfer?.toProjectId ||
+        request?.payload?.toProject ||
+        "-";
+
+      trackActivity(
+        fullyApproved
+          ? "Approve Team Transfer"
+          : "Approve Team Transfer Stage",
+        "team",
+        fullyApproved
+          ? `Team member ${employeeName} (${employeeId}) transfer from ${fromProject} to ${toProject} was approved.`
+          : `Team member ${employeeName} (${employeeId}) transfer approval stage completed from ${fromProject} to ${toProject}.`,
+        {
+          actionKey: fullyApproved
+            ? "notifications.activity.actions.employeeTransferApproved"
+            : "notifications.activity.actions.employeeTransferStageApproved",
+          actionFallback: fullyApproved
+            ? "Team Transfer Approved"
+            : "Team Transfer Stage Approved",
+          detailsKey: fullyApproved
+            ? "notifications.activity.details.employeeTransferApproved"
+            : "notifications.activity.details.employeeTransferStageApproved",
+          detailsParams: {
+            employeeId,
+            employeeName,
+            fromProject,
+            toProject,
+            stage: getApprovalStageLabel(currentStage || {}),
+          },
+          detailsFallback: fullyApproved
+            ? `Team member ${employeeName} (${employeeId}) transfer from ${fromProject} to ${toProject} was approved.`
+            : `Team member ${employeeName} (${employeeId}) transfer approval stage completed from ${fromProject} to ${toProject}.`,
+        },
+      );
+    } else if (request?.type === "station_transfer") {
       const transfer = request?.payload?.transfer || {};
       const stationId =
         transfer?.stationId ||
@@ -972,6 +1024,46 @@ export default function ApprovalsPage({
             reason: note,
           },
           detailsFallback: `Inventory adjustment request rejected for station ${rejectedStationId}. Reason: ${note}`,
+        },
+      );
+    } else if (request?.type === "employee_transfer") {
+      const transfer = request?.payload?.transfer || {};
+      const employeeId =
+        transfer?.employeeId ||
+        transfer?.employeeBackendId ||
+        request?.entityId ||
+        "-";
+      const employeeName =
+        transfer?.employeeName ||
+        request?.payload?.employeeName ||
+        employeeId;
+      const fromProject =
+        transfer?.fromProjectName ||
+        transfer?.fromProjectId ||
+        request?.payload?.fromProject ||
+        "-";
+      const toProject =
+        transfer?.toProjectName ||
+        transfer?.toProjectId ||
+        request?.payload?.toProject ||
+        "-";
+
+      trackActivity(
+        "Reject Team Transfer",
+        "team",
+        `Team member ${employeeName} (${employeeId}) transfer from ${fromProject} to ${toProject} was rejected. Reason: ${note}`,
+        {
+          actionKey: "notifications.activity.actions.employeeTransferRejected",
+          actionFallback: "Team Transfer Rejected",
+          detailsKey: "notifications.activity.details.employeeTransferRejected",
+          detailsParams: {
+            employeeId,
+            employeeName,
+            fromProject,
+            toProject,
+            reason: note,
+          },
+          detailsFallback: `Team member ${employeeName} (${employeeId}) transfer from ${fromProject} to ${toProject} was rejected. Reason: ${note}`,
         },
       );
     } else if (request?.type === "station_transfer") {

@@ -254,3 +254,60 @@ export function getStationTransferWorkflowMessageDescriptor(
     `Station ${stationId} transfer from ${params.fromProject} to ${params.toProject} is pending approval.`,
   );
 }
+
+
+export function getEmployeeTransferWorkflowMessageDescriptor(
+  transfer = {},
+  state = "pending",
+  reviewReason = "",
+) {
+  const employeeId =
+    transfer.employeeId ||
+    transfer.employeeBackendId ||
+    transfer.id ||
+    "-";
+  const employeeName =
+    transfer.employeeName ||
+    transfer.employee?.name ||
+    employeeId;
+
+  const params = {
+    employeeId,
+    employeeName,
+    fromProject: transfer.fromProjectName || transfer.fromProjectId || "-",
+    toProject: transfer.toProjectName || transfer.toProjectId || "-",
+    reason:
+      reviewReason ||
+      transfer.rejectionReason ||
+      transfer.reason ||
+      "-",
+  };
+
+  const normalizedState = String(state || "pending").trim().toLowerCase();
+
+  if (
+    normalizedState === "approved" ||
+    normalizedState === "completed" ||
+    normalizedState === "applied"
+  ) {
+    return createI18nMessage(
+      "workflowMessages.team.transfer.approved",
+      params,
+      `Team member ${employeeName} (${employeeId}) transferred from ${params.fromProject} to ${params.toProject}.`,
+    );
+  }
+
+  if (normalizedState === "rejected") {
+    return createI18nMessage(
+      "workflowMessages.team.transfer.rejected",
+      params,
+      `Team member ${employeeName} (${employeeId}) transfer from ${params.fromProject} to ${params.toProject} was rejected. Reason: ${params.reason}`,
+    );
+  }
+
+  return createI18nMessage(
+    "workflowMessages.team.transfer.pending",
+    params,
+    `Team member ${employeeName} (${employeeId}) transfer from ${params.fromProject} to ${params.toProject} is pending approval.`,
+  );
+}
