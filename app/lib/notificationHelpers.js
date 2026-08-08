@@ -183,6 +183,71 @@ function approvalMessageDescriptor(item) {
     item?.payload?.reviewNote ||
     "-";
 
+  const stationTransfer =
+    item?.type === "station_transfer"
+      ? item?.payload?.transfer || item?.payload || {}
+      : null;
+
+  if (stationTransfer) {
+    const transferStationId =
+      stationTransfer.stationId ||
+      stationTransfer.stationName ||
+      item?.entityId ||
+      "-";
+    const fromProject =
+      stationTransfer.fromProjectName ||
+      stationTransfer.fromProjectId ||
+      item?.payload?.fromProject ||
+      "-";
+    const toProject =
+      stationTransfer.toProjectName ||
+      stationTransfer.toProjectId ||
+      item?.payload?.toProject ||
+      "-";
+
+    if (approvalStatus === "rejected") {
+      return createI18nMessage(
+        "notifications.workflow.stationTransferRejected",
+        {
+          stationId: transferStationId,
+          fromProject,
+          toProject,
+          reason:
+            item?.reviewNote ||
+            stationTransfer.rejectionReason ||
+            rejectionReason,
+        },
+        `Station ${transferStationId} transfer from ${fromProject} to ${toProject} was rejected. Reason: ${
+          item?.reviewNote ||
+          stationTransfer.rejectionReason ||
+          rejectionReason
+        }`,
+      );
+    }
+
+    if (approvalStatus === "approved") {
+      return createI18nMessage(
+        "notifications.workflow.stationTransferApproved",
+        {
+          stationId: transferStationId,
+          fromProject,
+          toProject,
+        },
+        `Station ${transferStationId} transfer from ${fromProject} to ${toProject} was approved.`,
+      );
+    }
+
+    return createI18nMessage(
+      "notifications.workflow.stationTransferPending",
+      {
+        stationId: transferStationId,
+        fromProject,
+        toProject,
+      },
+      `Station ${transferStationId} transfer from ${fromProject} to ${toProject} is pending approval.`,
+    );
+  }
+
   if (approvalStatus === "rejected" && stationAction === "zero_balance_adjustment") {
     return createI18nMessage(
       "notifications.workflow.stationZeroBalanceRejected",

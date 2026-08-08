@@ -53,6 +53,7 @@ import {
   mapBackendAssetTransferForState,
   mapBackendStationTransferForState,
   mapBackendEmployeeTransferForState,
+  getStationTransferWorkflowMessageDescriptor,
 } from "./lib/transferHelpers";
 
 import {
@@ -4111,23 +4112,48 @@ export default function Home() {
           };
         });
 
+      const stationDisplayId =
+        transfer.stationId ||
+        transfer.stationName ||
+        transfer.stationBackendId ||
+        "-";
+      const fromProject =
+        transfer.fromProjectName || transfer.fromProjectId || "-";
+      const toProject =
+        transfer.toProjectName || transfer.toProjectId || "-";
+      const transferMessage = getStationTransferWorkflowMessageDescriptor(
+        transfer,
+        "pending",
+      );
+
       return {
         id: `STATION-TRANSFER-${transfer.id}`,
         type: "station_transfer",
         module: "stations",
-        title: `Station Transfer: ${transfer.stationName || transfer.stationId || "Station"}`,
+        title: `Station Transfer: ${stationDisplayId}`,
+        titleKey: "approvals.stationTransfer.title",
+        titleParams: { stationId: stationDisplayId },
+        titleFallback: `Station Transfer: ${stationDisplayId}`,
         payload: {
           transfer,
           stationTransferId: transfer.id,
+          stationId: stationDisplayId,
+          fromProject,
+          toProject,
         },
-        details: `Transfer ${transfer.stationName || transfer.stationId || "station"} from ${transfer.fromProjectName || "-"} to ${transfer.toProjectName || "-"}.`,
+        details: transferMessage.fallback,
+        detailsKey: transferMessage.key,
+        detailsParams: transferMessage.params,
+        detailsFallback: transferMessage.fallback,
         status: "Pending",
         changedFields: [
           {
             field: "project",
             label: "Station Project Transfer",
-            oldValue: transfer.fromProjectName || transfer.fromProjectId || "-",
-            newValue: transfer.toProjectName || transfer.toProjectId || "-",
+            labelKey: "approvals.fields.stationProjectTransfer",
+            labelFallback: "Station Project Transfer",
+            oldValue: fromProject,
+            newValue: toProject,
             sensitive: true,
           },
         ],
@@ -5427,6 +5453,72 @@ function LoginPage({
         [data-theme="light"] .project-card-print .border-slate-700\/80,
         [data-theme="light"] .project-card-print .border-gray-700 {
           border-color: #cbd5e1 !important;
+        }
+
+
+        /* Station cards theme alignment */
+        .station-card-print {
+          isolation: isolate;
+        }
+
+        .station-card-print::before {
+          content: "";
+          position: absolute;
+          inset-inline: 0;
+          top: 0;
+          height: 3px;
+          background: linear-gradient(
+            90deg,
+            rgba(245, 158, 11, 0.95),
+            rgba(59, 130, 246, 0.55),
+            transparent
+          );
+          pointer-events: none;
+          z-index: 1;
+        }
+
+        [data-theme="light"] .station-card-print {
+          background: linear-gradient(
+            135deg,
+            #ffffff 0%,
+            #f8fafc 100%
+          ) !important;
+          color: #0f172a !important;
+          border-color: #cbd5e1 !important;
+          box-shadow: 0 18px 35px rgba(15, 23, 42, 0.1) !important;
+        }
+
+        [data-theme="light"] .station-card-print .station-title {
+          color: #1e3a8a !important;
+        }
+
+        [data-theme="light"] .station-card-print .station-title:hover {
+          color: #b45309 !important;
+        }
+
+        [data-theme="light"] .station-card-print .station-metric {
+          background: #f8fafc !important;
+          border-color: #cbd5e1 !important;
+          box-shadow: inset 0 1px 0 rgba(255, 255, 255, 0.85) !important;
+        }
+
+        [data-theme="light"] .station-card-print .station-counter-digit {
+          background: #f8fafc !important;
+          border-color: #cbd5e1 !important;
+          color: #b45309 !important;
+          box-shadow:
+            inset 0 1px 2px rgba(15, 23, 42, 0.08),
+            0 1px 2px rgba(15, 23, 42, 0.05) !important;
+          text-shadow: none !important;
+        }
+
+        [data-theme="light"] .station-card-print .station-lifetime {
+          background: #f8fafc !important;
+          border-color: #cbd5e1 !important;
+        }
+
+        [data-theme="light"] .station-card-print .station-lifetime .text-amber-300 {
+          color: #b45309 !important;
         }
 
         /* Global clickable cursor */

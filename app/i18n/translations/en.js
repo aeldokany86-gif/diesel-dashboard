@@ -653,6 +653,7 @@ const en = {
       addFailed: "Failed to add station.",
       added: "Station added successfully.",
       transferPendingApproval: "Station transfer request submitted for project manager approval.",
+      transferCompleted: "Station transferred successfully to project {{project}}.",
       transferFailed: "Failed to submit station transfer request.",
       readOnlyStatus: "Read-only access: you cannot change station status.",
       statusUpdated: "Station status updated successfully.",
@@ -1048,6 +1049,10 @@ const en = {
       destinationProjectManager: "Destination Project Manager",
       projectManager: "Project Manager",
     },
+    stationTransfer: {
+      title: "Station Transfer: {{stationId}}",
+      details: "Transfer station {{stationId}} from {{fromProject}} to {{toProject}}.",
+    },
     assetTransfer: {
       title: "Asset Transfer: {{assetId}}",
       details: "Transfer asset {{assetId}} from {{fromProject}} to {{toProject}}.",
@@ -1069,6 +1074,7 @@ const en = {
       reason: "Reason",
       zeroBalance: "Zero Balance",
       assetProjectTransfer: "Asset Project Transfer",
+      stationProjectTransfer: "Station Project Transfer",
     },
     stationStockAdjustment: {
       title: "Inventory Adjustment - {{stationId}}",
@@ -1179,6 +1185,13 @@ const en = {
       genericPending: "Operation saved as Pending Manager Approval.",
     },
 
+    stations: {
+      transfer: {
+        pending: "Station {{stationId}} transfer from {{fromProject}} to {{toProject}} is pending approval.",
+        approved: "Station {{stationId}} was transferred from {{fromProject}} to {{toProject}}.",
+        rejected: "Station {{stationId}} transfer from {{fromProject}} to {{toProject}} was rejected. Reason: {{reason}}",
+      },
+    },
     assets: {
       deleteApproval: { title: "Asset {{assetId}} deletion request", details: "Asset {{assetId}} deletion request. Reason: {{reason}}" },
       odometerApproval: { title: "Asset {{assetId}} odometer reset request", details: "Asset {{assetId}} odometer reset request. Reason: {{reason}}" },
@@ -1257,6 +1270,9 @@ const en = {
       approvalUpdate: "Approval workflow update.",
       stationZeroBalanceRejected: "Zero balance request for station {{stationId}} was rejected. Reason: {{reason}}",
       stationInventoryAdjustmentRejected: "Inventory adjustment request for station {{stationId}} was rejected. Reason: {{reason}}",
+      stationTransferPending: "Station {{stationId}} transfer from {{fromProject}} to {{toProject}} is pending approval.",
+      stationTransferApproved: "Station {{stationId}} transfer from {{fromProject}} to {{toProject}} was approved.",
+      stationTransferRejected: "Station {{stationId}} transfer from {{fromProject}} to {{toProject}} was rejected. Reason: {{reason}}",
       operationDetails: {
         directRefuel: "{{quantity}} L - Direct Refuel - {{destination}}",
         externalDirectRefuel: "{{quantity}} L - External Direct Refuel - {{destination}}",
@@ -1294,6 +1310,11 @@ const en = {
         changeProjectStatus: "Change Project Status",
         transferAsset: "Transfer Asset",
         requestAssetTransfer: "Request Asset Transfer",
+        transferStation: "Transfer Station",
+        requestStationTransfer: "Request Station Transfer",
+        stationTransferApproved: "Station Transfer Approved",
+        stationTransferStageApproved: "Station Transfer Stage Approved",
+        stationTransferRejected: "Station Transfer Rejected",
       },
       details: {
         operationRequestApproved: "Operation request {{operationNo}} was approved.",
@@ -1324,6 +1345,11 @@ const en = {
         projectStatusChanged: "Project {{projectId}} status changed to {{status}}.",
         assetTransferred: "Asset {{assetId}} transferred from {{fromProject}} to {{toProject}}.",
         assetTransferRequested: "Transfer request submitted for asset {{assetId}} from {{fromProject}} to {{toProject}}.",
+        stationTransferred: "Station {{stationId}} transferred from {{fromProject}} to {{toProject}}.",
+        stationTransferRequested: "Station {{stationId}} transfer request submitted from {{fromProject}} to {{toProject}} for approval.",
+        stationTransferApproved: "Station {{stationId}} transfer from {{fromProject}} to {{toProject}} was approved.",
+        stationTransferStageApproved: "Stage {{stage}} approved for station {{stationId}} transfer from {{fromProject}} to {{toProject}}. The request is still waiting for the remaining approval.",
+        stationTransferRejected: "Station {{stationId}} transfer from {{fromProject}} to {{toProject}} was rejected. Reason: {{reason}}",
       },
     },
     detailLabels: {

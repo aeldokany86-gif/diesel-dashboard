@@ -202,3 +202,55 @@ export function getAssetTransferWorkflowMessageDescriptor(transfer = {}, state =
   }
   return createI18nMessage("workflowMessages.assets.transfer.pending", params, `Asset ${assetId} transfer pending approval`);
 }
+
+
+export function getStationTransferWorkflowMessageDescriptor(
+  transfer = {},
+  state = "pending",
+  reviewReason = "",
+) {
+  const stationId =
+    transfer.stationId ||
+    transfer.stationName ||
+    transfer.id ||
+    "-";
+
+  const params = {
+    stationId,
+    fromProject: transfer.fromProjectName || transfer.fromProjectId || "-",
+    toProject: transfer.toProjectName || transfer.toProjectId || "-",
+    reason:
+      reviewReason ||
+      transfer.rejectionReason ||
+      transfer.reason ||
+      "-",
+  };
+
+  const normalizedState = String(state || "pending").trim().toLowerCase();
+
+  if (
+    normalizedState === "approved" ||
+    normalizedState === "completed" ||
+    normalizedState === "applied"
+  ) {
+    return createI18nMessage(
+      "workflowMessages.stations.transfer.approved",
+      params,
+      `Station ${stationId} transferred from ${params.fromProject} to ${params.toProject}.`,
+    );
+  }
+
+  if (normalizedState === "rejected") {
+    return createI18nMessage(
+      "workflowMessages.stations.transfer.rejected",
+      params,
+      `Station ${stationId} transfer from ${params.fromProject} to ${params.toProject} was rejected. Reason: ${params.reason}`,
+    );
+  }
+
+  return createI18nMessage(
+    "workflowMessages.stations.transfer.pending",
+    params,
+    `Station ${stationId} transfer from ${params.fromProject} to ${params.toProject} is pending approval.`,
+  );
+}

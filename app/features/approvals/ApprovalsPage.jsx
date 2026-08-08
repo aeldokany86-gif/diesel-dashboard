@@ -628,7 +628,54 @@ export default function ApprovalsPage({
         approvedStationAction,
       );
 
-    if (!hasDedicatedFinalActivity) {
+    if (request?.type === "station_transfer") {
+      const transfer = request?.payload?.transfer || {};
+      const stationId =
+        transfer?.stationId ||
+        transfer?.stationName ||
+        request?.entityId ||
+        "-";
+      const fromProject =
+        transfer?.fromProjectName ||
+        transfer?.fromProjectId ||
+        request?.payload?.fromProject ||
+        "-";
+      const toProject =
+        transfer?.toProjectName ||
+        transfer?.toProjectId ||
+        request?.payload?.toProject ||
+        "-";
+
+      trackActivity(
+        fullyApproved
+          ? "Approve Station Transfer"
+          : "Approve Station Transfer Stage",
+        "stations",
+        fullyApproved
+          ? `Station ${stationId} transfer from ${fromProject} to ${toProject} was approved.`
+          : `Station ${stationId} transfer approval stage completed from ${fromProject} to ${toProject}.`,
+        {
+          actionKey: fullyApproved
+            ? "notifications.activity.actions.stationTransferApproved"
+            : "notifications.activity.actions.stationTransferStageApproved",
+          actionFallback: fullyApproved
+            ? "Station Transfer Approved"
+            : "Station Transfer Stage Approved",
+          detailsKey: fullyApproved
+            ? "notifications.activity.details.stationTransferApproved"
+            : "notifications.activity.details.stationTransferStageApproved",
+          detailsParams: {
+            stationId,
+            fromProject,
+            toProject,
+            stage: getApprovalStageLabel(currentStage || {}),
+          },
+          detailsFallback: fullyApproved
+            ? `Station ${stationId} transfer from ${fromProject} to ${toProject} was approved.`
+            : `Station ${stationId} transfer approval stage completed from ${fromProject} to ${toProject}.`,
+        },
+      );
+    } else if (!hasDedicatedFinalActivity) {
       trackActivity(
         fullyApproved ? "Approve Request" : "Approve Request Stage",
         request.module,
@@ -927,6 +974,41 @@ export default function ApprovalsPage({
           detailsFallback: `Inventory adjustment request rejected for station ${rejectedStationId}. Reason: ${note}`,
         },
       );
+    } else if (request?.type === "station_transfer") {
+      const transfer = request?.payload?.transfer || {};
+      const stationId =
+        transfer?.stationId ||
+        transfer?.stationName ||
+        request?.entityId ||
+        "-";
+      const fromProject =
+        transfer?.fromProjectName ||
+        transfer?.fromProjectId ||
+        request?.payload?.fromProject ||
+        "-";
+      const toProject =
+        transfer?.toProjectName ||
+        transfer?.toProjectId ||
+        request?.payload?.toProject ||
+        "-";
+
+      trackActivity(
+        "Reject Station Transfer",
+        "stations",
+        `Station ${stationId} transfer from ${fromProject} to ${toProject} was rejected. Reason: ${note}`,
+        {
+          actionKey: "notifications.activity.actions.stationTransferRejected",
+          actionFallback: "Station Transfer Rejected",
+          detailsKey: "notifications.activity.details.stationTransferRejected",
+          detailsParams: {
+            stationId,
+            fromProject,
+            toProject,
+            reason: note,
+          },
+          detailsFallback: `Station ${stationId} transfer from ${fromProject} to ${toProject} was rejected. Reason: ${note}`,
+        },
+      );
     } else {
       trackActivity(
         "Reject Request",
@@ -1090,23 +1172,39 @@ export default function ApprovalsPage({
       return <p className="text-sm text-slate-500">{t("approvals.empty.noChanges")}</p>;
     }
 
+    const oldValueLabel = isRtl ? "القيمة القديمة" : "Old Value";
+    const newValueLabel = isRtl ? "القيمة الجديدة" : "New Value";
+
     return (
-      <div className="rounded-2xl border border-slate-700 overflow-hidden">
+      <div className="space-y-2">
         {fields.map((field, index) => (
           <div
             key={`${request.id}-${field.field}-${index}`}
-            className="grid grid-cols-[minmax(110px,0.8fr)_1fr_auto_1fr] items-center gap-3 bg-slate-950 px-4 py-3 border-b border-slate-700 last:border-b-0"
+            className="rounded-xl border border-slate-700 bg-slate-950 px-3 py-3"
           >
-            <p className="text-xs font-bold text-slate-300">
+            <p className="mb-2 text-xs font-black text-slate-200">
               {getApprovalFieldLabel(field)}
             </p>
-            <p className="text-sm text-slate-400 break-words">
-              {normalizeApprovalValue(field.oldValue)}
-            </p>
-            <span className="text-slate-600">→</span>
-            <p className="text-sm font-bold text-amber-300 break-words">
-              {normalizeApprovalValue(field.newValue)}
-            </p>
+
+            <div className="grid grid-cols-1 sm:grid-cols-2 gap-2">
+              <div className="rounded-lg border border-slate-800 bg-slate-900/70 px-3 py-2">
+                <p className="text-[10px] font-bold uppercase tracking-wide text-slate-500">
+                  {oldValueLabel}
+                </p>
+                <p className="mt-1 text-sm font-bold text-slate-200 break-words" dir="ltr">
+                  {normalizeApprovalValue(field.oldValue)}
+                </p>
+              </div>
+
+              <div className="rounded-lg border border-amber-500/30 bg-amber-500/5 px-3 py-2">
+                <p className="text-[10px] font-bold uppercase tracking-wide text-amber-500/80">
+                  {newValueLabel}
+                </p>
+                <p className="mt-1 text-sm font-black text-amber-300 break-words" dir="ltr">
+                  {normalizeApprovalValue(field.newValue)}
+                </p>
+              </div>
+            </div>
           </div>
         ))}
       </div>
@@ -1127,7 +1225,7 @@ export default function ApprovalsPage({
           return (
             <div
               key={`${request.id}-${approver.approvalStage}-${index}`}
-              className="flex items-center gap-2 rounded-full border border-slate-700 bg-slate-900 px-3 py-2"
+              className="flex items-center gap-2 rounded-full border border-slate-700 bg-slate-900 px-3 py-1.5"
             >
               <span
                 className={`grid h-5 w-5 place-items-center rounded-full text-xs font-black ${
@@ -1227,13 +1325,15 @@ export default function ApprovalsPage({
                       </h2>
 
                       {direction ? (
-                        <div
-                          dir="ltr"
-                          className="mt-2 flex flex-wrap items-center gap-2 text-sm"
-                        >
-                          <span className="font-bold text-slate-200">{direction.from}</span>
-                          <span className="text-amber-400">→</span>
-                          <span className="font-bold text-amber-300">{direction.to}</span>
+                        <div className="mt-2 flex flex-wrap items-center gap-3 text-xs">
+                          <span className="text-slate-500">
+                            {isRtl ? "القيمة القديمة:" : "Old Value:"}{" "}
+                            <strong className="text-slate-200" dir="ltr">{direction.from}</strong>
+                          </span>
+                          <span className="text-amber-500/80">
+                            {isRtl ? "القيمة الجديدة:" : "New Value:"}{" "}
+                            <strong className="text-amber-300" dir="ltr">{direction.to}</strong>
+                          </span>
                         </div>
                       ) : (
                         <p className="text-sm text-slate-400 mt-1 line-clamp-1">{request.details}</p>
@@ -1265,8 +1365,8 @@ export default function ApprovalsPage({
 
         return (
           <div className="fleet-modal-backdrop fixed inset-0 z-[9999] bg-black/70 backdrop-blur-sm flex items-center justify-center p-3 sm:p-4" dir={isRtl ? "rtl" : "ltr"}>
-            <div className="bg-slate-950 border border-slate-700 rounded-3xl shadow-2xl w-full max-w-3xl max-h-[90vh] overflow-hidden flex flex-col">
-              <div className="p-4 sm:p-5 border-b border-slate-700 flex items-start justify-between gap-3">
+            <div className="bg-slate-950 border border-slate-700 rounded-2xl shadow-2xl w-full max-w-2xl max-h-[84vh] overflow-hidden flex flex-col">
+              <div className="px-4 py-3 border-b border-slate-700 flex items-start justify-between gap-3">
                 <div className="min-w-0">
                   <div className="flex flex-wrap items-center gap-2 mb-2">
                     <span className={`px-2 py-1 rounded-full text-xs font-bold border ${
@@ -1284,16 +1384,9 @@ export default function ApprovalsPage({
                       </span>
                     )}
                   </div>
-                  <h2 className="text-xl font-black text-slate-100">
+                  <h2 className="text-lg sm:text-xl font-black text-slate-100 leading-snug">
                     {group.isBatch ? t("approvals.batch.reviewTitle", { count: group.requests.length, entity: getEntityTypeLabel(primary.entityType) }) : getApprovalTitle(primary)}
                   </h2>
-                  {direction && (
-                    <p className="text-sm mt-1">
-                      <span className="text-slate-300 font-semibold">{direction.from}</span>
-                      <span className="mx-2 text-amber-400">→</span>
-                      <span className="text-amber-300 font-bold">{direction.to}</span>
-                    </p>
-                  )}
                 </div>
                 <button
                   onClick={() => setSelectedApprovalGroup(null)}
@@ -1303,7 +1396,7 @@ export default function ApprovalsPage({
                 </button>
               </div>
 
-              <div className="p-4 sm:p-5 overflow-y-auto space-y-5">
+              <div className="px-4 py-3 overflow-y-auto space-y-3.5">
                 {group.isBatch ? (
                   <section>
                     <div className="flex flex-wrap items-center justify-between gap-2 mb-2">
@@ -1341,39 +1434,43 @@ export default function ApprovalsPage({
                     </div>
                   </section>
                 ) : (
-                  <section className="rounded-2xl border border-slate-700 bg-slate-900/60 px-4 py-3">
-                    <p className="text-xs text-slate-500">{t("approvals.sections.requestedBy")}</p>
-                    <p className="text-sm font-bold text-slate-100">
-                      {primary.requestedByName || t("approvals.defaults.unknownUser")} • {formatApprovalDate(primary.requestedAt, language === "ar" ? "ar-SA" : "en-GB")}
-                    </p>
+                  <section className="flex flex-wrap items-center gap-x-2 gap-y-1 rounded-xl border border-slate-800 bg-slate-900/50 px-3 py-2">
+                    <span className="text-[11px] font-bold text-slate-500">{t("approvals.sections.requestedBy")}:</span>
+                    <span className="text-sm font-bold text-slate-100">
+                      {primary.requestedByName || t("approvals.defaults.unknownUser")}
+                    </span>
+                    <span className="text-slate-600">•</span>
+                    <span className="text-xs text-slate-400" dir="ltr">
+                      {formatApprovalDate(primary.requestedAt, language === "ar" ? "ar-SA" : "en-GB")}
+                    </span>
                   </section>
                 )}
 
                 <section>
-                  <h3 className="text-xs font-black uppercase tracking-[0.14em] text-slate-300 mb-2">{t("approvals.sections.changes")}</h3>
+                  <h3 className="text-[11px] font-black uppercase tracking-[0.12em] text-slate-400 mb-1.5">{t("approvals.sections.changes")}</h3>
                   {renderCompactChanges(primary)}
                 </section>
 
                 <section>
-                  <h3 className="text-xs font-black uppercase tracking-[0.14em] text-slate-300 mb-2">{t("approvals.sections.progress")}</h3>
+                  <h3 className="text-[11px] font-black uppercase tracking-[0.12em] text-slate-400 mb-1.5">{t("approvals.sections.progress")}</h3>
                   {renderCompactRoute(primary)}
                 </section>
 
                 {group.status === "Pending" && (
                   <section>
-                    <h3 className="text-xs font-black uppercase tracking-[0.14em] text-slate-300 mb-2">{t("approvals.sections.reviewNote")}</h3>
+                    <h3 className="text-[11px] font-black uppercase tracking-[0.12em] text-slate-400 mb-1.5">{t("approvals.sections.reviewNote")}</h3>
                     <textarea
                       value={getGroupReviewNote()}
                       onChange={(event) => applyGroupReviewNote(event.target.value)}
                       placeholder={t("approvals.placeholders.optionalNote")}
-                      className={`w-full bg-slate-900 border border-slate-700 rounded-xl p-3 text-sm text-slate-100 min-h-[72px] ${isRtl ? "text-right" : "text-left"}`}
+                      className={`w-full bg-slate-900 border border-slate-700 rounded-xl px-3 py-2 text-sm text-slate-100 min-h-[58px] resize-none ${isRtl ? "text-right" : "text-left"}`}
                     />
                   </section>
                 )}
               </div>
 
               {group.status === "Pending" && (
-                <div className="p-4 border-t border-slate-700 bg-slate-950 flex items-center justify-between gap-3">
+                <div className="px-4 py-3 border-t border-slate-700 bg-slate-950 flex items-center justify-between gap-3">
                   <p className="text-xs text-slate-500">
                     {group.isBatch ? t("approvals.selectedCount", { count: pendingSelectedCount }) : t("approvals.actions.readyForReview")}
                   </p>
@@ -1381,14 +1478,14 @@ export default function ApprovalsPage({
                     <button
                       disabled={isGroupActionRunning || pendingSelectedCount === 0}
                       onClick={() => reviewSelectedRequests("reject")}
-                      className="bg-red-600 hover:bg-red-500 disabled:opacity-40 text-white px-4 py-2.5 rounded-xl font-bold"
+                      className="bg-red-600 hover:bg-red-500 disabled:opacity-40 text-white px-4 py-2 rounded-xl font-bold"
                     >
                       {group.isBatch ? t("approvals.actions.rejectSelected") : t("approvals.actions.reject")}
                     </button>
                     <button
                       disabled={isGroupActionRunning || pendingSelectedCount === 0}
                       onClick={() => reviewSelectedRequests("approve")}
-                      className="bg-emerald-600 hover:bg-emerald-500 disabled:opacity-40 text-white px-4 py-2.5 rounded-xl font-bold"
+                      className="bg-emerald-600 hover:bg-emerald-500 disabled:opacity-40 text-white px-4 py-2 rounded-xl font-bold"
                     >
                       {group.isBatch ? t("approvals.actions.approveSelected") : t("approvals.actions.approve")}
                     </button>

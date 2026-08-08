@@ -285,14 +285,14 @@ export default function StationsPage({
   };
   const FlowmeterCounterDisplay = ({ value }) => {
     const safeValue = Math.max(0, Math.floor(Number(value) || 0));
-    const digits = String(safeValue).padStart(7, "0").slice(-7).split("");
+    const digits = String(safeValue).padStart(9, "0").slice(-9).split("");
 
     return (
-      <div dir="ltr" className="w-full flex items-center gap-2">
+      <div dir="ltr" className="station-counter-display w-full flex items-center gap-1.5">
         {digits.map((digit, index) => (
           <span
             key={`${digit}-${index}`}
-            className="w-7 h-9 flex items-center justify-center rounded-md border border-slate-600/80 bg-slate-950 text-amber-300 font-mono text-lg font-black shadow-inner shadow-black/80 tabular-nums"
+            className="station-counter-digit w-6 h-9 sm:w-7 flex items-center justify-center rounded-md border border-slate-600/80 bg-slate-950 text-amber-300 font-mono text-base sm:text-lg font-black shadow-inner shadow-black/80 tabular-nums"
             style={{
               textShadow:
                 "0 0 4px rgba(251,191,36,0.75), 0 0 8px rgba(245,158,11,0.35)",
@@ -1114,14 +1114,35 @@ export default function StationsPage({
         transferApplied ? "Transfer Station" : "Request Station Transfer",
         "stations",
         transferApplied
-          ? `${station.id} transferred from ${station.project || "-"} to ${newStationProject}. ${stockSnapshotNote}`
-          : `${station.id} transfer requested from ${station.project || "-"} to ${newStationProject}. ${stockSnapshotNote}`
+          ? `${station.id} transferred from ${station.project || "-"} to ${newStationProject}.`
+          : `${station.id} transfer requested from ${station.project || "-"} to ${newStationProject}.`,
+        {
+          actionKey: transferApplied
+            ? "notifications.activity.actions.transferStation"
+            : "notifications.activity.actions.requestStationTransfer",
+          actionFallback: transferApplied
+            ? "Transfer Station"
+            : "Request Station Transfer",
+          detailsKey: transferApplied
+            ? "notifications.activity.details.stationTransferred"
+            : "notifications.activity.details.stationTransferRequested",
+          detailsParams: {
+            stationId: station.id,
+            fromProject: station.project || "-",
+            toProject: newStationProject,
+          },
+          detailsFallback: transferApplied
+            ? `Station ${station.id} transferred from ${station.project || "-"} to ${newStationProject}.`
+            : `Station ${station.id} transfer requested from ${station.project || "-"} to ${newStationProject}.`,
+        },
       );
 
       if (transferApplied) {
         showToast?.(
           "success",
-          `Station transferred successfully to ${newStationProject}.`
+          t("stationWorkflows.messages.transferCompleted", {
+            project: newStationProject,
+          })
         );
       } else {
         showToast?.(
@@ -2167,7 +2188,36 @@ export default function StationsPage({
   };
 
   return (
-    <div className="bg-gray-900 min-h-screen text-white overflow-y-auto overflow-x-hidden h-screen">
+    <>
+      <style jsx global>{`
+        .station-card-print .station-lifetime {
+          background-color: rgba(2, 6, 23, 0.6);
+          border-color: rgba(51, 65, 85, 0.8);
+        }
+
+        .station-card-print .station-lifetime-label {
+          color: #94a3b8;
+        }
+
+        .station-card-print .station-lifetime-value {
+          color: #fcd34d;
+        }
+
+        [data-theme="light"] .station-card-print .station-lifetime {
+          background-color: #f8fafc !important;
+          border-color: #cbd5e1 !important;
+          box-shadow: inset 0 1px 0 rgba(255, 255, 255, 0.9);
+        }
+
+        [data-theme="light"] .station-card-print .station-lifetime-label {
+          color: #64748b !important;
+        }
+
+        [data-theme="light"] .station-card-print .station-lifetime-value {
+          color: #b45309 !important;
+        }
+      `}</style>
+      <div className="bg-gray-900 min-h-screen text-white overflow-y-auto overflow-x-hidden h-screen">
       <div className="fleet-page-shell w-full max-w-full min-w-0 mx-auto px-2 sm:px-3 lg:px-4 xl:px-5 2xl:px-8 py-3 sm:py-4 lg:py-5 text-[12px] lg:text-[13px]">
       <div className="flex flex-col sm:flex-row justify-between sm:items-start xl:items-center gap-3 mb-4">
         <div>
@@ -2332,7 +2382,7 @@ export default function StationsPage({
           {filteredStations.map((station) => (
             <div
               key={makeTenantEntityKey(station)}
-              className="bg-gray-900 border border-gray-700 rounded-2xl p-4 shadow-lg hover:border-yellow-400/60 hover:shadow-yellow-400/10 transition-all duration-300"
+              className="station-card-print relative overflow-hidden bg-gray-900 border border-gray-700 rounded-2xl p-4 shadow-lg hover:border-yellow-400/60 hover:shadow-yellow-400/10 transition-all duration-300"
             >
               <div className="grid grid-cols-[minmax(0,1fr)_auto] items-start gap-3 mb-4 w-full min-w-0">
                 <div>
@@ -2340,7 +2390,7 @@ export default function StationsPage({
                   <div className="flex items-center gap-3">
                     <button
                       onClick={() => setSelectedStationHistory(station)}
-                      className="text-xl font-bold text-blue-200 truncate min-w-0 max-w-full"
+                      className="station-title text-xl font-bold text-blue-200 truncate min-w-0 max-w-full"
                     >
                       {station.id}
                     </button>
@@ -2371,7 +2421,7 @@ export default function StationsPage({
                       setEditingProjectStation(station);
                       setNewStationProject("");
                                                         }}
-                    className={`mt-3 border border-slate-700/80 rounded-2xl bg-slate-950/50 px-4 py-3 min-w-[170px] shadow-lg transition-all duration-300 text-left ${
+                    className={`station-metric mt-3 border border-slate-700/80 rounded-2xl bg-slate-950/50 px-4 py-3 min-w-[170px] shadow-lg transition-all duration-300 text-left ${
                       canCurrentUserCreateStationTransfer()
                         ? "hover:border-yellow-400 hover:bg-slate-900 cursor-pointer"
                         : "cursor-default"
@@ -2406,11 +2456,11 @@ export default function StationsPage({
 
                     <FlowmeterCounterDisplay value={station.currentCounter} />
 
-                    <div className="mt-3 flex items-center justify-between gap-3 rounded-lg border border-slate-700/80 bg-slate-950/60 px-3 py-2">
-                      <span className="text-[10px] uppercase tracking-[0.16em] text-slate-400">
+                    <div className="station-lifetime mt-3 flex items-center justify-between gap-3 rounded-xl border px-3 py-2.5">
+                      <span className="station-lifetime-label text-[10px] uppercase tracking-[0.16em]">
                         {t("stations.table.lifetimeCounter")}
                       </span>
-                      <span className="text-sm font-bold text-amber-300 tabular-nums">
+                      <span className="station-lifetime-value text-sm font-black tabular-nums">
                         {formatNumber(station.lifetimeCounter)}
                       </span>
                     </div>
@@ -2470,7 +2520,7 @@ export default function StationsPage({
                 </div>
               </div>
 
-              <div className="bg-gray-800 rounded-xl p-4">
+              <div className="station-metric bg-gray-800 rounded-xl p-4">
                 <p className="text-xs text-gray-400 mb-3">{t("stations.table.tankLevel")}</p>
                 <FuelLevelIcon
                   percentage={station.percentage}
@@ -2642,140 +2692,175 @@ export default function StationsPage({
 
 
       {editingProjectStation && (
-        <div dir={isRtl ? "rtl" : "ltr"} className="fixed inset-0 z-[12000] bg-black/70 flex items-center justify-center">
-          <div className={`bg-white text-black w-[560px] rounded-2xl shadow-2xl p-6 ${isRtl ? "text-right" : "text-left"}`}>
-            <div className="flex justify-between items-center mb-5 border-b pb-3">
-              <div>
-                <h2 className="text-2xl font-extrabold text-white">{t("stationWorkflows.transfer.title")}</h2>
-                <p className="text-sm text-gray-500 mt-1">
-                  {t("stationWorkflows.labels.station")}: {editingProjectStation.id}
-                </p>
+        <ModalPortal>
+          <div
+            dir={isRtl ? "rtl" : "ltr"}
+            className="fleet-portal-modal-backdrop bg-black/80 backdrop-blur-[3px] flex items-center justify-center p-4"
+          >
+            <div
+              className={`fleet-portal-modal-panel w-full max-w-[560px] overflow-hidden rounded-2xl border border-slate-700 bg-slate-950 text-slate-100 shadow-2xl ${
+                isRtl ? "text-right" : "text-left"
+              }`}
+            >
+              <div className="flex items-start justify-between gap-4 border-b border-slate-700 px-5 py-4">
+                <div className="min-w-0">
+                  <h2 className="text-xl sm:text-2xl font-extrabold text-white">
+                    {t("stationWorkflows.transfer.title")}
+                  </h2>
+                  <p className="mt-1 text-sm text-slate-400">
+                    {t("stationWorkflows.labels.station")}:{" "}
+                    <span className="font-semibold text-slate-200" dir="ltr">
+                      {editingProjectStation.id}
+                    </span>
+                  </p>
+                </div>
+
+                <button
+                  type="button"
+                  onClick={closeStationProjectTransferModal}
+                  className="grid h-9 w-9 shrink-0 place-items-center rounded-lg border border-slate-700 bg-slate-900 text-lg text-slate-400 transition hover:bg-slate-800 hover:text-white"
+                  aria-label={t("common.close")}
+                >
+                  ×
+                </button>
               </div>
 
-              <button
-                type="button"
-                onClick={closeStationProjectTransferModal}
-                className="text-gray-500 hover:text-black text-xl"
-              >
-                ×
-              </button>
-            </div>
+              <div className="space-y-4 px-5 py-4">
+                <div className="rounded-xl border border-slate-700 bg-slate-900/70 p-4">
+                  <p className="text-xs font-medium text-slate-400">
+                    {t("stationWorkflows.transfer.currentProject")}
+                  </p>
+                  <p className="mt-1 text-lg font-bold text-white">
+                    {editingProjectStation.project || "-"}
+                  </p>
+                </div>
 
-            <div className="bg-gray-100 rounded-xl p-4 mb-4">
-              <p className="text-sm text-gray-600">{t("stationWorkflows.transfer.currentProject")}</p>
-              <p className="text-xl font-bold">
-                {editingProjectStation.project || "-"}
-              </p>
-            </div>
+                <div>
+                  <label className="text-sm font-semibold text-slate-300">
+                    {t("stationWorkflows.transfer.newProject")}
+                  </label>
 
-            <div className="mb-4">
-              <label className="font-medium text-gray-700">{t("stationWorkflows.transfer.newProject")}</label>
-
-              <select
-                value={newStationProject}
-                onChange={(e) => setNewStationProject(e.target.value)}
-                className="border rounded-lg p-3 w-full mt-2"
-              >
-                <option value="">{t("stations.placeholders.selectProject")}</option>
-
-                {filterActiveProjects(transferProjects || projects || [])
-                  .filter(
-                    (project) =>
-                      normalizeScopeValue(project.name || project.id) !==
-                      normalizeScopeValue(editingProjectStation.project)
-                  )
-                  .map((project) => (
-                  <option
-                    key={makeTenantEntityKey(project, project.name)}
-                    value={project.name || project.id}
+                  <select
+                    value={newStationProject}
+                    onChange={(e) => setNewStationProject(e.target.value)}
+                    className={`mt-2 w-full rounded-xl border border-slate-600 bg-slate-900 px-3 py-3 text-slate-100 outline-none transition focus:border-amber-500 focus:ring-2 focus:ring-amber-500/20 ${
+                      isRtl ? "text-right" : "text-left"
+                    }`}
                   >
-                    {project.name || project.id}
-                  </option>
-                ))}
-              </select>
-            </div>
+                    <option value="">{t("stations.placeholders.selectProject")}</option>
 
+                    {filterActiveProjects(transferProjects || projects || [])
+                      .filter(
+                        (project) =>
+                          normalizeScopeValue(project.name || project.id) !==
+                          normalizeScopeValue(editingProjectStation.project)
+                      )
+                      .map((project) => (
+                        <option
+                          key={makeTenantEntityKey(project, project.name)}
+                          value={project.name || project.id}
+                        >
+                          {project.name || project.id}
+                        </option>
+                      ))}
+                  </select>
+                </div>
+              </div>
 
-            <div className="flex justify-end gap-3 border-t border-slate-700/80 px-6 py-5 bg-slate-950/90">
-              <button
-                type="button"
-                onClick={closeStationProjectTransferModal}
-                className="rounded-xl border border-slate-600 bg-slate-900 px-5 py-2.5 font-bold text-slate-200 hover:bg-slate-800 transition"
-              >
-                {t("common.cancel")}
-              </button>
+              <div className="flex justify-end gap-3 border-t border-slate-700 bg-slate-950 px-5 py-4">
+                <button
+                  type="button"
+                  onClick={closeStationProjectTransferModal}
+                  className="rounded-xl border border-slate-600 bg-slate-900 px-5 py-2.5 font-bold text-slate-200 transition hover:bg-slate-800"
+                >
+                  {t("common.cancel")}
+                </button>
 
-              <button
-                type="button"
-                onClick={submitStationProjectTransferRequest}
-                className="bg-yellow-500 text-black px-4 py-2 rounded-lg font-semibold"
-              >
-                {t("stationWorkflows.transfer.submit")}
-              </button>
+                <button
+                  type="button"
+                  onClick={submitStationProjectTransferRequest}
+                  className="rounded-xl bg-amber-500 px-5 py-2.5 font-bold text-slate-950 transition hover:bg-amber-400"
+                >
+                  {t("stationWorkflows.transfer.submit")}
+                </button>
+              </div>
             </div>
           </div>
-        </div>
+        </ModalPortal>
       )}
 
       {stationTransferStockConfirmation && (
-        <div dir={isRtl ? "rtl" : "ltr"} className="fleet-modal-backdrop fixed inset-0 z-[12000] bg-black/60 flex items-center justify-center p-4">
-          <div className="bg-white text-black w-full max-w-[520px] rounded-xl shadow-xl p-6">
-            <div className="flex justify-between items-center mb-6 border-b pb-3">
-              <h2 className="text-xl sm:text-2xl font-bold">
-                {t("stationWorkflows.transfer.confirmTitle")}
-              </h2>
-              <button
-                type="button"
-                onClick={() => setStationTransferStockConfirmation(null)}
-                className="text-gray-500 hover:text-black text-xl"
-              >
-                ×
-              </button>
-            </div>
+        <ModalPortal>
+          <div
+            dir={isRtl ? "rtl" : "ltr"}
+            className="fleet-portal-modal-backdrop bg-black/85 backdrop-blur-[3px] flex items-start justify-center p-4 pt-[7vh] sm:pt-[9vh]"
+          >
+            <div className="fleet-portal-modal-panel w-full max-w-[540px] overflow-hidden rounded-2xl border border-slate-700 bg-slate-950 text-slate-100 shadow-2xl">
+              <div className="flex items-start justify-between gap-4 border-b border-slate-700 px-5 py-4">
+                <h2 className="text-xl sm:text-2xl font-extrabold text-white">
+                  {t("stationWorkflows.transfer.confirmTitle")}
+                </h2>
+                <button
+                  type="button"
+                  onClick={() => setStationTransferStockConfirmation(null)}
+                  className="grid h-9 w-9 shrink-0 place-items-center rounded-lg border border-slate-700 bg-slate-900 text-lg text-slate-400 transition hover:bg-slate-800 hover:text-white"
+                  aria-label={t("common.close")}
+                >
+                  ×
+                </button>
+              </div>
 
-            <div className="bg-amber-50 border border-amber-300 p-4 rounded-lg space-y-2">
-              <p>
-                <strong>{t("stationWorkflows.labels.station")}:</strong>{" "}
-                {stationTransferStockConfirmation.station?.id || "-"}
-              </p>
-              <p>
-                <strong>{t("stationWorkflows.transfer.currentProject")}:</strong>{" "}
-                {stationTransferStockConfirmation.station?.project || "-"}
-              </p>
-              <p>
-                <strong>{t("stationWorkflows.transfer.newProject")}:</strong> {newStationProject || "-"}
-              </p>
-              <p>
-                <strong>{t("stations.table.currentStock")}:</strong>{" "}
-                {formatNumber(
-                  stationTransferStockConfirmation.currentStock
-                )}{" "}
-                L
-              </p>
-            </div>
+              <div className="space-y-4 px-5 py-4">
+                <div className="rounded-xl border border-amber-500/30 bg-amber-500/10 p-4 space-y-2.5">
+                  <p className="flex flex-wrap justify-between gap-2 text-sm">
+                    <strong className="text-slate-400">{t("stationWorkflows.labels.station")}</strong>
+                    <span className="font-bold text-white" dir="ltr">
+                      {stationTransferStockConfirmation.station?.id || "-"}
+                    </span>
+                  </p>
+                  <p className="flex flex-wrap justify-between gap-2 text-sm">
+                    <strong className="text-slate-400">{t("stationWorkflows.transfer.currentProject")}</strong>
+                    <span className="font-bold text-white">
+                      {stationTransferStockConfirmation.station?.project || "-"}
+                    </span>
+                  </p>
+                  <p className="flex flex-wrap justify-between gap-2 text-sm">
+                    <strong className="text-slate-400">{t("stationWorkflows.transfer.newProject")}</strong>
+                    <span className="font-bold text-amber-300">{newStationProject || "-"}</span>
+                  </p>
+                  <p className="flex flex-wrap justify-between gap-2 text-sm">
+                    <strong className="text-slate-400">{t("stations.table.currentStock")}</strong>
+                    <span className="font-black text-amber-300" dir="ltr">
+                      {formatNumber(stationTransferStockConfirmation.currentStock)} L
+                    </span>
+                  </p>
+                </div>
 
-            <p className="mt-4 text-sm text-gray-700">
-              {t("stationWorkflows.transfer.stockQuestion")}
-            </p>
+                <p className="text-sm leading-6 text-slate-300">
+                  {t("stationWorkflows.transfer.stockQuestion")}
+                </p>
+              </div>
 
-            <div className="flex justify-end gap-3 mt-6 border-t pt-4">
-              <button
-                onClick={() => setStationTransferStockConfirmation(null)}
-                className="rounded-xl border border-slate-600 bg-slate-900 px-5 py-2.5 font-bold text-slate-200 hover:bg-slate-800 transition"
-              >
-                {t("common.cancel")}
-              </button>
+              <div className="flex justify-end gap-3 border-t border-slate-700 bg-slate-950 px-5 py-4">
+                <button
+                  type="button"
+                  onClick={() => setStationTransferStockConfirmation(null)}
+                  className="rounded-xl border border-slate-600 bg-slate-900 px-5 py-2.5 font-bold text-slate-200 transition hover:bg-slate-800"
+                >
+                  {t("common.cancel")}
+                </button>
 
-              <button
-                type="button"
-                onClick={confirmStationTransferWithStock}
-                className="bg-amber-500 hover:bg-amber-400 text-black px-4 py-2 rounded-lg font-bold"
-              >
-                {t("stationWorkflows.transfer.withStock")}
-              </button>
+                <button
+                  type="button"
+                  onClick={confirmStationTransferWithStock}
+                  className="rounded-xl bg-amber-500 px-5 py-2.5 font-bold text-slate-950 transition hover:bg-amber-400"
+                >
+                  {t("stationWorkflows.transfer.withStock")}
+                </button>
+              </div>
             </div>
           </div>
-        </div>
+        </ModalPortal>
       )}
 
 
@@ -3313,6 +3398,7 @@ export default function StationsPage({
 
       </div>
     </div>
+    </>
   );
 }
 
@@ -3366,6 +3452,6 @@ function FuelLevelIcon({ percentage, lowLabel, mediumLabel, goodLabel }) {
           {level < 30 ? lowLabel : level < 60 ? mediumLabel : goodLabel}
         </p>
       </div>
-    </div>
+      </div>
   );
 }

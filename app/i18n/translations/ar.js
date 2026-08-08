@@ -653,6 +653,7 @@ const ar = {
       addFailed: "تعذر إضافة المحطة.",
       added: "تمت إضافة المحطة بنجاح.",
       transferPendingApproval: "تم إرسال طلب نقل المحطة بانتظار موافقة مدير المشروع.",
+      transferCompleted: "تم نقل المحطة بنجاح إلى مشروع {{project}}.",
       transferFailed: "تعذر إرسال طلب نقل المحطة.",
       readOnlyStatus: "صلاحية عرض فقط: لا يمكنك تغيير حالة المحطة.",
       statusUpdated: "تم تحديث حالة المحطة بنجاح.",
@@ -1069,6 +1070,7 @@ const ar = {
       reason: "السبب",
       zeroBalance: "تصفير الرصيد",
       assetProjectTransfer: "نقل مشروع المعدة",
+      stationProjectTransfer: "نقل مشروع المحطة",
     },
     stationStockAdjustment: {
       title: "تعديل مخزون المحطة - {{stationId}}",
@@ -1179,6 +1181,13 @@ const ar = {
       genericPending: "تم حفظ العملية وهي بانتظار موافقة المدير.",
     },
 
+    stations: {
+      transfer: {
+        pending: "طلب نقل المحطة {{stationId}} من مشروع {{fromProject}} إلى مشروع {{toProject}} بانتظار الموافقة.",
+        approved: "تم نقل المحطة {{stationId}} من مشروع {{fromProject}} إلى مشروع {{toProject}}.",
+        rejected: "تم رفض نقل المحطة {{stationId}} من مشروع {{fromProject}} إلى مشروع {{toProject}}. سبب الرفض: {{reason}}",
+      },
+    },
     assets: {
       deleteApproval: { title: "طلب حذف المعدة {{assetId}}", details: "طلب حذف المعدة {{assetId}}. السبب: {{reason}}" },
       odometerApproval: { title: "طلب إعادة ضبط عداد المعدة {{assetId}}", details: "طلب إعادة ضبط عداد المعدة {{assetId}}. السبب: {{reason}}" },
@@ -1257,6 +1266,9 @@ const ar = {
       approvalUpdate: "تحديث في مسار الموافقة.",
       stationZeroBalanceRejected: "تم رفض طلب تصفير رصيد المحطة {{stationId}}. سبب الرفض: {{reason}}",
       stationInventoryAdjustmentRejected: "تم رفض طلب تسوية مخزون المحطة {{stationId}}. سبب الرفض: {{reason}}",
+      stationTransferPending: "طلب نقل المحطة {{stationId}} من مشروع {{fromProject}} إلى مشروع {{toProject}} بانتظار الموافقة.",
+      stationTransferApproved: "تم اعتماد نقل المحطة {{stationId}} من مشروع {{fromProject}} إلى مشروع {{toProject}}.",
+      stationTransferRejected: "تم رفض نقل المحطة {{stationId}} من مشروع {{fromProject}} إلى مشروع {{toProject}}. سبب الرفض: {{reason}}",
       operationDetails: {
         directRefuel: "{{quantity}} لتر - تعبئة مباشرة - {{destination}}",
         externalDirectRefuel: "{{quantity}} لتر - تعبئة مباشرة خارجية - {{destination}}",
@@ -1294,6 +1306,11 @@ const ar = {
         changeProjectStatus: "تغيير حالة المشروع",
         transferAsset: "نقل معدة",
         requestAssetTransfer: "طلب نقل معدة",
+        transferStation: "نقل محطة",
+        requestStationTransfer: "طلب نقل محطة",
+        stationTransferApproved: "تم اعتماد نقل المحطة",
+        stationTransferStageApproved: "تم اعتماد مرحلة نقل المحطة",
+        stationTransferRejected: "تم رفض نقل المحطة",
       },
       details: {
         operationRequestApproved: "تم اعتماد طلب العملية {{operationNo}}.",
@@ -1324,6 +1341,11 @@ const ar = {
         projectStatusChanged: "تم تغيير حالة المشروع {{projectId}} إلى {{status}}.",
         assetTransferred: "تم نقل المعدة {{assetId}} من {{fromProject}} إلى {{toProject}}.",
         assetTransferRequested: "تم إرسال طلب نقل المعدة {{assetId}} من مشروع {{fromProject}} إلى مشروع {{toProject}} للموافقة.",
+        stationTransferred: "تم نقل المحطة {{stationId}} من مشروع {{fromProject}} إلى مشروع {{toProject}}.",
+        stationTransferRequested: "تم إرسال طلب نقل المحطة {{stationId}} من مشروع {{fromProject}} إلى مشروع {{toProject}} للموافقة.",
+        stationTransferApproved: "تم اعتماد نقل المحطة {{stationId}} من مشروع {{fromProject}} إلى مشروع {{toProject}}.",
+        stationTransferStageApproved: "تم اعتماد مرحلة {{stage}} لنقل المحطة {{stationId}} من مشروع {{fromProject}} إلى مشروع {{toProject}}، وما زال الطلب بانتظار الاعتماد المتبقي.",
+        stationTransferRejected: "تم رفض نقل المحطة {{stationId}} من مشروع {{fromProject}} إلى مشروع {{toProject}}. سبب الرفض: {{reason}}",
       },
     },
     detailLabels: {
