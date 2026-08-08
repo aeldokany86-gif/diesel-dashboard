@@ -18,6 +18,7 @@ import ChartFrame from "../../components/charts/ChartFrame";
 import Th from "../../components/ui/Th";
 import Td from "../../components/ui/Td";
 import Card from "../../components/ui/Card";
+import ModalPortal from "../../components/ui/ModalPortal";
 import { Fuel } from "../../components/icons/SidebarIcons";
 
 import {
@@ -2999,8 +3000,12 @@ const payload = mapFrontendOperationToBackendPayload({
       </div>
 
       {selectedEquipmentHistory && (
-        <div className="fixed inset-0 bg-black/75 backdrop-blur-sm flex items-center justify-center z-[10000] p-3">
-          <div className="bg-slate-950 text-white w-full max-w-[min(1150px,calc(100vw-2rem))] max-h-[92vh] rounded-3xl shadow-2xl border border-slate-700 overflow-hidden">
+        <ModalPortal>
+          <div
+            dir={language === "ar" ? "rtl" : "ltr"}
+            className="fleet-portal-modal-backdrop fixed inset-0 bg-black/75 backdrop-blur-sm flex items-center justify-center p-3"
+          >
+            <div className="fleet-portal-modal-panel bg-slate-950 text-white w-[min(1150px,calc(100vw-2rem))] max-h-[88vh] rounded-3xl shadow-2xl border border-slate-700 overflow-hidden">
             <div className="p-3 sm:p-5 border-b border-gray-700 flex justify-between items-start gap-3">
               <div>
                 <h2 className="text-xl sm:text-2xl font-bold text-yellow-400 italic underline">
@@ -3022,7 +3027,7 @@ const payload = mapFrontendOperationToBackendPayload({
               </button>
             </div>
 
-            <div className="p-3 sm:p-5 overflow-auto max-h-[68vh]">
+            <div className="p-3 sm:p-5 overflow-auto max-h-[66vh]">
               <table className="min-w-[1160px] lg:min-w-[1280px] xl:min-w-[1420px] 2xl:min-w-[1500px] w-full border-collapse text-[11px] sm:text-xs lg:text-sm">
                 <thead className="bg-slate-800 sticky top-0 z-[1] shadow-sm">
                   <tr>
@@ -3255,8 +3260,9 @@ const payload = mapFrontendOperationToBackendPayload({
                 </div>
               )}
             </div>
+            </div>
           </div>
-        </div>
+        </ModalPortal>
       )}
 
       {operationPhotoViewer && (

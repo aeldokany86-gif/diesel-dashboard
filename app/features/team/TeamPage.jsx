@@ -2948,8 +2948,12 @@ export default function TeamPage({
         )}
 
         {selectedFuelerHistory && (
-          <div dir={isRtl ? "rtl" : "ltr"} className="fixed inset-0 bg-black/75 backdrop-blur-sm flex items-center justify-center z-[10000] p-3">
-            <div className="bg-gray-900 text-white w-[1180px] max-h-[92vh] rounded-3xl shadow-2xl border border-gray-700 overflow-hidden">
+          <ModalPortal>
+            <div
+              dir={isRtl ? "rtl" : "ltr"}
+              className="fleet-portal-modal-backdrop fixed inset-0 bg-black/75 backdrop-blur-sm flex items-center justify-center p-3"
+            >
+              <div className="fleet-portal-modal-panel bg-gray-900 text-white w-[min(1150px,calc(100vw-2rem))] max-h-[88vh] rounded-3xl shadow-2xl border border-gray-700 overflow-hidden">
               <div className="p-3 sm:p-5 border-b border-gray-700 flex justify-between items-start gap-3">
                 <div>
                   <h2 className="text-xl sm:text-2xl font-bold text-yellow-400 italic underline">
@@ -2989,7 +2993,7 @@ export default function TeamPage({
                 />
               </div>
 
-              <div className="p-5 overflow-auto max-h-[58vh]">
+              <div className="p-3 sm:p-5 overflow-auto max-h-[52vh]">
                 <table className="min-w-[820px] lg:min-w-[960px] xl:min-w-[1050px] w-full border-collapse text-[11px] sm:text-xs lg:text-sm">
                   <thead className="bg-slate-800 sticky top-0 z-[1] shadow-sm">
                     <tr>
@@ -3040,8 +3044,9 @@ export default function TeamPage({
                   </tbody>
                 </table>
               </div>
+              </div>
             </div>
-          </div>
+          </ModalPortal>
         )}
 
         {showAddFueler && (
