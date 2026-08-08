@@ -90,6 +90,8 @@ import {
   fetchPendingAssetTransfers,
   reviewAssetTransfer,
   resetAssetOdometer,
+  fetchAssetActionRequests,
+  reviewAssetActionRequest,
 } from "./services/assetsService";
 
 import {
@@ -99,6 +101,8 @@ import {
   reviewStationTransfer,
   zeroStationBalance,
   adjustStationInventory,
+  fetchStationActionRequests,
+  reviewStationActionRequest,
 } from "./services/stationsService";
 
 import {
@@ -732,6 +736,8 @@ export default function Home() {
   const [loginError, setLoginError] = useState("");
   const [activityLog, setActivityLog] = useState([]);
   const [pendingApprovals, setPendingApprovals] = useState([]);
+  const [backendAssetActionApprovals, setBackendAssetActionApprovals] = useState([]);
+  const [backendStationActionApprovals, setBackendStationActionApprovals] = useState([]);
   const [backendOperationApprovals, setBackendOperationApprovals] = useState(
     [],
   );
@@ -1578,6 +1584,316 @@ export default function Home() {
     }
   };
 
+  const mapBackendActionStatus = (status) => {
+    const normalized = String(status || "").trim().toUpperCase();
+    if (normalized === "APPROVED") return "Approved";
+    if (normalized === "REJECTED") return "Rejected";
+    if (normalized === "PROCESSING") return "Pending";
+    return "Pending";
+  };
+
+  const mapBackendAssetActionForApproval = (request = {}) => {
+    const asset = request.asset || {};
+    const project = request.project || asset.project || {};
+    const requestedBy = request.requestedBy || {};
+    const reviewedBy = request.reviewedBy || {};
+    const displayAssetId = asset.assetId || request.assetId || "-";
+    const managerId = project.projectManagerId || asset.project?.projectManagerId || "";
+    const status = mapBackendActionStatus(request.status);
+    const requestedOdometer = Number(request.requestedOdometer ?? 0);
+
+    return {
+      id: `ASSET-ACTION-${request.id}`,
+      backendAssetActionRequestId: request.id,
+      isBackendAssetAction: true,
+      type: "asset_action",
+      module: "assets",
+      title: `Asset ${displayAssetId} odometer reset`,
+      titleKey: "workflowMessages.assets.odometerApproval.title",
+      titleParams: { assetId: displayAssetId },
+      titleFallback: `Asset ${displayAssetId} odometer reset`,
+      details: `Asset ${displayAssetId} odometer reset request. Reason: ${request.reason || "-"}`,
+      detailsKey: "workflowMessages.assets.odometerApproval.details",
+      detailsParams: { assetId: displayAssetId, reason: request.reason || "-" },
+      detailsFallback: `Asset ${displayAssetId} odometer reset request. Reason: ${request.reason || "-"}`,
+      status,
+      payload: {
+        entity: "asset",
+        action: "odometer_reset",
+        id: displayAssetId,
+        assetId: displayAssetId,
+        backendAssetId: request.assetId,
+        assetBackendId: request.assetId,
+        backendActionRequestId: request.id,
+        projectId: request.projectId,
+        reason: request.reason,
+        values: {
+          assetId: displayAssetId,
+          backendAssetId: request.assetId,
+          newOdometerAfterReset: requestedOdometer,
+          newReading: requestedOdometer,
+          effectiveDate: request.effectiveAt,
+          reason: request.reason,
+        },
+        changedFields: [
+          {
+            field: "currentOdometer",
+            label: "Odometer Reset",
+            labelKey: "assetWorkflows.odometer.title",
+            oldValue: Number(asset.currentOdometer ?? 0),
+            newValue: requestedOdometer,
+            sensitive: true,
+          },
+        ],
+      },
+      changedFields: [
+        {
+          field: "currentOdometer",
+          label: "Odometer Reset",
+          labelKey: "assetWorkflows.odometer.title",
+          oldValue: Number(asset.currentOdometer ?? 0),
+          newValue: requestedOdometer,
+          sensitive: true,
+        },
+      ],
+      entityType: "Asset",
+      entityId: displayAssetId,
+      sensitivity: "Sensitive",
+      riskLevel: "High",
+      approvalRoute: {
+        routeType: "project_manager",
+        sourceProject: project.name || project.code || request.projectId || "-",
+        destinationProject: project.name || project.code || request.projectId || "-",
+        requiredApprovers: managerId
+          ? [{
+              userId: managerId,
+              userName:
+                companyUsers.find((user) => user.id === managerId)?.fullName ||
+                companyUsers.find((user) => user.id === managerId)?.email ||
+                managerId,
+              role: "Manager",
+              projectId: request.projectId || project.id || "-",
+              approvalStage: "Project Manager",
+              approvalStageKey: "approvals.stages.projectManager",
+              status,
+              reviewedAt: request.reviewedAt || "",
+              reviewNote: request.reviewNote || "",
+            }]
+          : [],
+        routeStatus: status,
+      },
+      requestedById: request.requestedByUserId || requestedBy.id || "System",
+      requestedByName: requestedBy.fullName || requestedBy.email || "System",
+      requestedByRole: normalizeBackendRoleName(requestedBy.role?.name || requestedBy.roleName || "Officer"),
+      requestedAt: request.createdAt || new Date().toISOString(),
+      reviewedBy: reviewedBy.fullName || reviewedBy.email || "",
+      reviewedAt: request.reviewedAt || "",
+      reviewNote: request.reviewNote || "",
+    };
+  };
+
+  const mapBackendStationActionForApproval = (request = {}) => {
+    const station = request.station || {};
+    const project = request.project || station.project || {};
+    const requestedBy = request.requestedBy || {};
+    const reviewedBy = request.reviewedBy || {};
+    const displayStationId = station.stationId || request.stationId || "-";
+    const rawAction = String(request.actionType || "").toUpperCase();
+    const action =
+      rawAction === "ZERO_BALANCE"
+        ? "zero_balance_adjustment"
+        : rawAction === "INVENTORY_ADJUSTMENT"
+          ? "stock_count_adjustment"
+          : "counter_reset";
+    const status = mapBackendActionStatus(request.status);
+    const managerId = project.projectManagerId || station.project?.projectManagerId || "";
+    const isInventory = rawAction === "INVENTORY_ADJUSTMENT";
+    const requestedValue = isInventory
+      ? Number(request.requestedActualStock ?? 0)
+      : rawAction === "COUNTER_RESET"
+        ? Number(request.requestedCounter ?? 0)
+        : 0;
+    const currentValue =
+      rawAction === "COUNTER_RESET"
+        ? Number(station.currentCounter ?? 0)
+        : Number(station.currentStock ?? 0);
+
+    const titleKey =
+      rawAction === "ZERO_BALANCE"
+        ? "approvals.stationZeroBalance.title"
+        : rawAction === "INVENTORY_ADJUSTMENT"
+          ? "approvals.stationStockAdjustment.title"
+          : "approvals.defaults.requestTitle";
+
+    return {
+      id: `STATION-ACTION-${request.id}`,
+      backendStationActionRequestId: request.id,
+      isBackendStationAction: true,
+      type: "station_action",
+      module: "stations",
+      title:
+        rawAction === "ZERO_BALANCE"
+          ? `Zero Balance Adjustment - ${displayStationId}`
+          : rawAction === "INVENTORY_ADJUSTMENT"
+            ? `Inventory Adjustment - ${displayStationId}`
+            : `Station Counter Reset - ${displayStationId}`,
+      titleKey,
+      titleParams: { stationId: displayStationId },
+      titleFallback:
+        rawAction === "ZERO_BALANCE"
+          ? `Zero Balance Adjustment - ${displayStationId}`
+          : rawAction === "INVENTORY_ADJUSTMENT"
+            ? `Inventory Adjustment - ${displayStationId}`
+            : `Station Counter Reset - ${displayStationId}`,
+      details:
+        rawAction === "ZERO_BALANCE"
+          ? `Zero-balance request submitted for station ${displayStationId}. Current stock: ${currentValue} L → 0 L. Reason: ${request.reason || "-"}`
+          : rawAction === "INVENTORY_ADJUSTMENT"
+            ? `Stock adjustment request submitted for station ${displayStationId}. Current stock: ${currentValue} L → requested stock: ${requestedValue} L. Adjustment: ${requestedValue - currentValue} L. Reason: ${request.reason || "-"}`
+            : `Station ${displayStationId} counter reset request. Current counter: ${currentValue} → requested counter: ${requestedValue}. Reason: ${request.reason || "-"}`,
+      detailsKey:
+        rawAction === "ZERO_BALANCE"
+          ? "notifications.activity.details.stationZeroBalanceRequested"
+          : rawAction === "INVENTORY_ADJUSTMENT"
+            ? "notifications.activity.details.stationStockAdjustmentRequested"
+            : "",
+      detailsParams:
+        rawAction === "ZERO_BALANCE"
+          ? {
+              stationId: displayStationId,
+              currentStock: currentValue,
+              reason: request.reason || "-",
+            }
+          : rawAction === "INVENTORY_ADJUSTMENT"
+            ? {
+                stationId: displayStationId,
+                currentStock: currentValue,
+                requestedStock: requestedValue,
+                adjustmentQty: requestedValue - currentValue,
+                reason: request.reason || "-",
+              }
+            : {},
+      detailsFallback:
+        rawAction === "ZERO_BALANCE"
+          ? `Zero-balance request submitted for station ${displayStationId}. Current stock: ${currentValue} L → 0 L. Reason: ${request.reason || "-"}`
+          : rawAction === "INVENTORY_ADJUSTMENT"
+            ? `Stock adjustment request submitted for station ${displayStationId}. Current stock: ${currentValue} L → requested stock: ${requestedValue} L. Adjustment: ${requestedValue - currentValue} L. Reason: ${request.reason || "-"}`
+            : `Station ${displayStationId} counter reset request. Current counter: ${currentValue} → requested counter: ${requestedValue}. Reason: ${request.reason || "-"}`,
+      status,
+      payload: {
+        entity: "station",
+        action,
+        id: displayStationId,
+        stationId: displayStationId,
+        backendStationId: request.stationId,
+        stationBackendId: request.stationId,
+        backendActionRequestId: request.id,
+        projectId: request.projectId,
+        reason: request.reason,
+        oldValue: currentValue,
+        newValue: requestedValue,
+        values: {
+          action,
+          stationId: displayStationId,
+          backendStationId: request.stationId,
+          oldValue: currentValue,
+          newValue: requestedValue,
+          newCounter: request.requestedCounter,
+          actualStock: request.requestedActualStock,
+          effectiveAt: request.effectiveAt,
+          reason: request.reason,
+        },
+      },
+      changedFields: [
+        {
+          field: rawAction === "COUNTER_RESET" ? "currentCounter" : "currentStock",
+          label:
+            rawAction === "ZERO_BALANCE"
+              ? "Zero Balance"
+              : rawAction === "INVENTORY_ADJUSTMENT"
+                ? "Inventory Adjustment"
+                : "Station Counter Reset",
+          oldValue: currentValue,
+          newValue: requestedValue,
+          sensitive: true,
+        },
+      ],
+      entityType: "Station",
+      entityId: displayStationId,
+      sensitivity: "Sensitive",
+      riskLevel: "High",
+      approvalRoute: {
+        routeType: isInventory ? "admin" : "project_manager",
+        sourceProject: project.name || project.code || request.projectId || "-",
+        destinationProject: project.name || project.code || request.projectId || "-",
+        requiredApprovers: isInventory
+          ? []
+          : managerId
+            ? [{
+                userId: managerId,
+                userName:
+                  companyUsers.find((user) => user.id === managerId)?.fullName ||
+                  companyUsers.find((user) => user.id === managerId)?.email ||
+                  managerId,
+                role: "Manager",
+                projectId: request.projectId || project.id || "-",
+                approvalStage: "Project Manager",
+                approvalStageKey: "approvals.stages.projectManager",
+                status,
+                reviewedAt: request.reviewedAt || "",
+                reviewNote: request.reviewNote || "",
+              }]
+            : [],
+        routeStatus: status,
+      },
+      requestedById: request.requestedByUserId || requestedBy.id || "System",
+      requestedByName: requestedBy.fullName || requestedBy.email || "System",
+      requestedByRole: normalizeBackendRoleName(requestedBy.role?.name || requestedBy.roleName || (isInventory ? "Manager" : "Officer")),
+      requestedAt: request.createdAt || new Date().toISOString(),
+      reviewedBy: reviewedBy.fullName || reviewedBy.email || "",
+      reviewedAt: request.reviewedAt || "",
+      reviewNote: request.reviewNote || "",
+    };
+  };
+
+  const refreshBackendAssetActions = async () => {
+    const userId = backendAuthUser?.id || currentUser?.id || "";
+    if (!userId) {
+      setBackendAssetActionApprovals([]);
+      return [];
+    }
+
+    try {
+      const requests = await fetchAssetActionRequests({ userId });
+      const mapped = (requests || []).map(mapBackendAssetActionForApproval);
+      setBackendAssetActionApprovals(mapped);
+      return mapped;
+    } catch (error) {
+      console.warn("Asset action requests API is not available.", error);
+      setBackendAssetActionApprovals([]);
+      return [];
+    }
+  };
+
+  const refreshBackendStationActions = async () => {
+    const userId = backendAuthUser?.id || currentUser?.id || "";
+    if (!userId) {
+      setBackendStationActionApprovals([]);
+      return [];
+    }
+
+    try {
+      const requests = await fetchStationActionRequests({ userId });
+      const mapped = (requests || []).map(mapBackendStationActionForApproval);
+      setBackendStationActionApprovals(mapped);
+      return mapped;
+    } catch (error) {
+      console.warn("Station action requests API is not available.", error);
+      setBackendStationActionApprovals([]);
+      return [];
+    }
+  };
+
   const handleCreateEmployee = async (payload) => {
     const createdEmployeeData = await createEmployeeRecord(payload);
     const createdEmployee = mapBackendEmployeeForState(createdEmployeeData);
@@ -2177,7 +2493,26 @@ export default function Home() {
     return reviewedTransfer;
   };
 
-  const handleApproveAssetAction = async (request) => {
+  const handleApproveAssetAction = async (request, reviewNote = "") => {
+    if (request?.isBackendAssetAction || request?.backendAssetActionRequestId) {
+      const requestId =
+        request?.backendAssetActionRequestId ||
+        request?.payload?.backendActionRequestId;
+      const reviewerUserId = backendAuthUser?.id || currentUser?.id || "";
+
+      const reviewed = await reviewAssetActionRequest(requestId, {
+        reviewerUserId,
+        approve: true,
+        reviewNote: reviewNote || "Approved",
+      });
+
+      if (reviewed?.result?.asset) {
+        replaceBackendAssetInState(reviewed.result.asset);
+      }
+      await Promise.all([refreshBackendAssetActions(), refreshBackendAssets()]);
+      return reviewed;
+    }
+
     const payload = request?.payload || {};
     const action = payload.action || payload?.values?.action || "";
     const values = payload.values || {};
@@ -2295,7 +2630,30 @@ export default function Home() {
     throw new Error("Unsupported asset approval action.");
   };
 
-  const handleApproveStationAction = async (request) => {
+  const handleApproveStationAction = async (request, reviewNote = "") => {
+    if (request?.isBackendStationAction || request?.backendStationActionRequestId) {
+      const requestId =
+        request?.backendStationActionRequestId ||
+        request?.payload?.backendActionRequestId;
+      const reviewerUserId = backendAuthUser?.id || currentUser?.id || "";
+
+      const reviewed = await reviewStationActionRequest(requestId, {
+        reviewerUserId,
+        approve: true,
+        reviewNote: reviewNote || "Approved",
+      });
+
+      if (reviewed?.result?.station) {
+        replaceBackendStationInState(reviewed.result.station);
+      }
+
+      await Promise.all([
+        refreshBackendStationActions(),
+        refreshBackendStations(currentCompanyId),
+      ]);
+      return reviewed;
+    }
+
     const payload = request?.payload || {};
     const values = payload.values || {};
     const action = payload.action || values.action || "";
@@ -2477,6 +2835,39 @@ export default function Home() {
     );
 
     return inventoryAdjustmentResult;
+  };
+
+
+  const handleRejectAssetAction = async (request, reviewNote = "") => {
+    const requestId =
+      request?.backendAssetActionRequestId ||
+      request?.payload?.backendActionRequestId;
+    const reviewerUserId = backendAuthUser?.id || currentUser?.id || "";
+
+    const reviewed = await reviewAssetActionRequest(requestId, {
+      reviewerUserId,
+      approve: false,
+      reviewNote: reviewNote || "Rejected",
+    });
+
+    await refreshBackendAssetActions();
+    return reviewed;
+  };
+
+  const handleRejectStationAction = async (request, reviewNote = "") => {
+    const requestId =
+      request?.backendStationActionRequestId ||
+      request?.payload?.backendActionRequestId;
+    const reviewerUserId = backendAuthUser?.id || currentUser?.id || "";
+
+    const reviewed = await reviewStationActionRequest(requestId, {
+      reviewerUserId,
+      approve: false,
+      reviewNote: reviewNote || "Rejected",
+    });
+
+    await refreshBackendStationActions();
+    return reviewed;
   };
 
   const mapBackendUserForState = (user = {}) => {
@@ -2932,6 +3323,8 @@ export default function Home() {
     refreshBackendEmployeeTransfers();
     refreshBackendAssetTransfers();
     refreshBackendStationTransfers();
+    refreshBackendAssetActions();
+    refreshBackendStationActions();
   }, [
     backendIsLoggedIn,
     currentCompanyId,
@@ -2939,6 +3332,19 @@ export default function Home() {
     backendAuthUser?.id,
     hasBackendPermission,
   ]);
+
+  useEffect(() => {
+    if (!backendIsLoggedIn || !currentUser?.id) return;
+
+    const refreshPersistentApprovals = () => {
+      refreshBackendAssetActions();
+      refreshBackendStationActions();
+    };
+
+    refreshPersistentApprovals();
+    const intervalId = window.setInterval(refreshPersistentApprovals, 15000);
+    return () => window.clearInterval(intervalId);
+  }, [backendIsLoggedIn, currentUser?.id, currentUser?.role, currentCompanyId]);
 
   const companyProjects = filterByCompany(
     projects,
@@ -3751,6 +4157,8 @@ export default function Home() {
 
   const allApprovalRequests = [
     ...pendingApprovals,
+    ...backendAssetActionApprovals,
+    ...backendStationActionApprovals,
     ...backendOperationApprovalRequests,
     ...backendOperationCorrectionRequests,
     ...employeeTransferApprovals,
@@ -3836,6 +4244,7 @@ export default function Home() {
           trackActivity={trackActivity}
           submitApprovalRequest={submitApprovalRequest}
           onAssetTransferCreated={upsertAssetTransferRequest}
+          onAssetActionRequestCreated={refreshBackendAssetActions}
           runWithActionLoading={runWithActionLoading}
         />
       );
@@ -3863,6 +4272,7 @@ export default function Home() {
           trackActivity={trackActivity}
           submitApprovalRequest={submitApprovalRequest}
           onStationTransferCreated={upsertStationTransferRequest}
+          onStationActionRequestCreated={refreshBackendStationActions}
           externalStockAdjustments={approvedStationStockAdjustments}
         />
       );
@@ -3979,7 +4389,9 @@ export default function Home() {
           onApproveStationTransfer={handleApproveStationTransfer}
           onRejectStationTransfer={handleRejectStationTransfer}
           onApproveAssetAction={handleApproveAssetAction}
+          onRejectAssetAction={handleRejectAssetAction}
           onApproveStationAction={handleApproveStationAction}
+          onRejectStationAction={handleRejectStationAction}
           onOperationApprovalReviewed={loadPendingBackendOperationApprovals}
           onOperationCorrectionReviewed={loadPendingBackendOperationCorrections}
           onOperationsWorkspaceRefresh={refreshOperationsWorkspace}

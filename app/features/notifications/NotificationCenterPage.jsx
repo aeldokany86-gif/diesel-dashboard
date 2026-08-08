@@ -63,7 +63,120 @@ function NotificationCenterPage({
       }),
     );
 
+  const getPersistentApprovalKind = (item) => {
+    const raw = String(
+      item?.titleFallback ||
+      item?.title ||
+      item?.messageFallback ||
+      item?.message ||
+      ""
+    ).toLowerCase();
+
+    if (raw.includes("zero balance") || raw.includes("zero-balance")) {
+      return "stationZeroBalance";
+    }
+    if (raw.includes("inventory adjustment") || raw.includes("stock adjustment")) {
+      return "stationInventoryAdjustment";
+    }
+    if (raw.includes("station counter reset")) {
+      return "stationCounterReset";
+    }
+    if (raw.includes("odometer reset")) {
+      return "assetOdometerReset";
+    }
+
+    return "";
+  };
+
+  const getPersistentApprovalSubject = (kind, entityId) => {
+    const id = entityId || "-";
+
+    if (language === "ar") {
+      const map = {
+        stationZeroBalance: `تصفير رصيد المحطة ${id}`,
+        stationInventoryAdjustment: `تسوية مخزون المحطة ${id}`,
+        stationCounterReset: `إعادة ضبط عداد المحطة ${id}`,
+        assetOdometerReset: `إعادة ضبط عداد المعدة ${id}`,
+      };
+      return map[kind] || "";
+    }
+
+    const map = {
+      stationZeroBalance: `zero-balance request for station ${id}`,
+      stationInventoryAdjustment: `inventory adjustment for station ${id}`,
+      stationCounterReset: `counter reset for station ${id}`,
+      assetOdometerReset: `odometer reset for asset ${id}`,
+    };
+    return map[kind] || "";
+  };
+
+  const getPersistentApprovalTitle = (item) => {
+    const kind = getPersistentApprovalKind(item);
+    if (!kind) return "";
+
+    const subject = getPersistentApprovalSubject(kind, item?.entityId);
+    const status = String(item?.status || "").trim().toLowerCase();
+
+    if (language === "ar") {
+      if (status === "approved") return `تم اعتماد طلب ${subject}`;
+      if (status === "rejected") return `تم رفض طلب ${subject}`;
+      if (item?.actionable) return `مطلوب اعتماد ${subject}`;
+      return `طلب ${subject} بانتظار الموافقة`;
+    }
+
+    if (status === "approved") return `Approved: ${subject}`;
+    if (status === "rejected") return `Rejected: ${subject}`;
+    if (item?.actionable) return `Approval required: ${subject}`;
+    return `Pending approval: ${subject}`;
+  };
+
+  const getPersistentApprovalMessage = (item) => {
+    const kind = getPersistentApprovalKind(item);
+    if (!kind) return "";
+
+    const subject = getPersistentApprovalSubject(kind, item?.entityId);
+    const status = String(item?.status || "").trim().toLowerCase();
+
+    const genericFallbacks = new Set([
+      "",
+      "approval workflow update.",
+      "workflow update.",
+      "تحديث في مسار الموافقة",
+      "تحديث في مسار الموافقة.",
+    ]);
+
+    let reason = String(item?.messageFallback || item?.message || "").trim();
+    if (genericFallbacks.has(reason.toLowerCase())) reason = "";
+
+    // If page.js supplied a complete workflow sentence, keep it in English mode.
+    // Arabic mode gets an explicit Arabic action sentence instead of the generic workflow text.
+    if (language !== "ar" && reason && !genericFallbacks.has(reason.toLowerCase())) {
+      return reason;
+    }
+
+    const reasonSuffix = reason
+      ? language === "ar"
+        ? ` سبب الطلب: ${reason}`
+        : ` Reason: ${reason}`
+      : "";
+
+    if (language === "ar") {
+      if (status === "approved") return `تم اعتماد وتنفيذ طلب ${subject}.${reasonSuffix}`;
+      if (status === "rejected") return `تم رفض طلب ${subject}.${reasonSuffix}`;
+      if (item?.actionable) return `يوجد طلب ${subject} يحتاج إلى مراجعتك واعتمادك.${reasonSuffix}`;
+      return `تم إرسال طلب ${subject} وهو الآن بانتظار الموافقة.${reasonSuffix}`;
+    }
+
+    if (status === "approved") return `The ${subject} was approved and applied.${reasonSuffix}`;
+    if (status === "rejected") return `The ${subject} was rejected.${reasonSuffix}`;
+    if (item?.actionable) return `The ${subject} requires your review and approval.${reasonSuffix}`;
+    return `The ${subject} has been submitted and is waiting for approval.${reasonSuffix}`;
+  };
+
   const getNotificationTitle = (item) => {
+    const persistentTitle = getPersistentApprovalTitle(item);
+    if (persistentTitle) return persistentTitle;
+
     const titleParams = resolveNestedMessageParams(item?.titleParams || {});
 
     return resolveI18nMessage(
@@ -78,8 +191,12 @@ function NotificationCenterPage({
     );
   };
 
-  const getNotificationMessage = (item) =>
-    resolveRecordMessage(t, item, "message", item?.message || "");
+  const getNotificationMessage = (item) => {
+    const persistentMessage = getPersistentApprovalMessage(item);
+    if (persistentMessage) return persistentMessage;
+
+    return resolveRecordMessage(t, item, "message", item?.message || "");
+  };
 
   const getNotificationCategory = (item) =>
     resolveRecordMessage(t, item, "category", item?.category || "");
@@ -239,15 +356,17 @@ function NotificationCenterPage({
       {selectedNotification && (
         <div className="fleet-modal-backdrop fixed inset-0 z-[9998] bg-black/70 backdrop-blur-sm z-[9999] flex items-center justify-center p-4">
           <div className="bg-slate-950 border border-slate-700 rounded-3xl shadow-2xl w-full max-w-3xl overflow-hidden">
-            <div className="p-5 border-b border-slate-800 flex items-start justify-between gap-3">
-              <div>
+            <div className="p-5 border-b border-slate-800 flex items-start justify-between gap-4">
+              <div className="min-w-0 flex-1">
                 <p className="text-[10px] uppercase tracking-[0.18em] text-amber-300 mb-2">{getNotificationCategory(selectedNotification)}</p>
-                <h2 className="text-xl font-black text-slate-100">{getNotificationTitle(selectedNotification)}</h2>
+                <h2 className="text-xl font-black text-slate-100 break-words whitespace-normal leading-8" dir={isRtl ? "rtl" : "ltr"}>
+                  {getNotificationTitle(selectedNotification)}
+                </h2>
                 <p className="text-sm text-slate-400 mt-1">{formatNotificationDate(selectedNotification.createdAt, language)}</p>
               </div>
               <button
                 onClick={() => setSelectedNotification(null)}
-                className="bg-slate-800 hover:bg-slate-700 border border-slate-700 text-white rounded-xl px-4 py-2 font-bold"
+                className="shrink-0 bg-slate-800 hover:bg-slate-700 border border-slate-700 text-white rounded-xl px-4 py-2 font-bold"
               >
                 {t("common.close")}
               </button>
@@ -256,7 +375,9 @@ function NotificationCenterPage({
             <div className="p-5 space-y-4">
               <div className="bg-slate-900 border border-slate-800 rounded-2xl p-4">
                 <p className="text-[10px] uppercase tracking-[0.16em] text-slate-500 mb-2">{t("notifications.modal.message")}</p>
-                <p className="text-slate-100 text-sm leading-6">{getNotificationMessage(selectedNotification)}</p>
+                <p className="text-slate-100 text-sm leading-7 break-words whitespace-normal" dir={isRtl ? "rtl" : "ltr"}>
+                  {getNotificationMessage(selectedNotification)}
+                </p>
               </div>
 
               {selectedNotification.actionable && (

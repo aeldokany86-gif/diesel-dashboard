@@ -178,3 +178,37 @@ export async function fetchStationCounterMeterHistory({
 
   return Array.isArray(response.data) ? response.data : [];
 }
+
+
+export async function createStationActionRequest(stationId, payload) {
+  if (!stationId) {
+    throw new Error("Station backend ID is required.");
+  }
+
+  const response = await api.post(`/stations/${stationId}/action-requests`, payload);
+  return response.data;
+}
+
+export async function fetchStationActionRequests({ userId = "", status = "" } = {}) {
+  if (!userId) {
+    throw new Error("User ID is required.");
+  }
+
+  const response = await api.get("/stations/actions/requests", {
+    params: {
+      userId,
+      ...(status ? { status } : {}),
+    },
+  });
+
+  return Array.isArray(response.data) ? response.data : [];
+}
+
+export async function reviewStationActionRequest(requestId, payload) {
+  if (!requestId) {
+    throw new Error("Station action request ID is required.");
+  }
+
+  const response = await api.patch(`/stations/action-requests/${requestId}/review`, payload);
+  return response.data;
+}

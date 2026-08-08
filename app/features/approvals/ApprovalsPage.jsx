@@ -225,7 +225,9 @@ export default function ApprovalsPage({
   onApproveStationTransfer,
   onRejectStationTransfer,
   onApproveAssetAction,
+  onRejectAssetAction,
   onApproveStationAction,
+  onRejectStationAction,
   onOperationApprovalReviewed,
   onOperationCorrectionReviewed,
   onOperationsWorkspaceRefresh,
@@ -300,6 +302,12 @@ export default function ApprovalsPage({
 
   const isBackendOperationRequest = (request) =>
     Boolean(request?.isBackendOperationApproval || (request?.backendOperationId && !isBackendOperationCorrectionRequest(request)));
+
+  const isBackendAssetActionRequest = (request) =>
+    Boolean(request?.isBackendAssetAction || request?.backendAssetActionRequestId);
+
+  const isBackendStationActionRequest = (request) =>
+    Boolean(request?.isBackendStationAction || request?.backendStationActionRequestId);
 
   const visibleApprovals = approvals.filter((item) => {
     if (!canUserViewApproval(currentUser, item)) return false;
@@ -519,6 +527,38 @@ export default function ApprovalsPage({
       }
     }
 
+    if (isBackendAssetActionRequest(request)) {
+      try {
+        await onApproveAssetAction?.(request, note);
+        setSelectedApprovalGroup(null);
+        showToast?.("success", t("approvals.messages.fullyApproved"));
+      } catch (error) {
+        showToast?.(
+          "warning",
+          error?.response?.data?.message ||
+            error?.message ||
+            t("approvals.messages.assetApprovalApplyFailed")
+        );
+      }
+      return;
+    }
+
+    if (isBackendStationActionRequest(request)) {
+      try {
+        await onApproveStationAction?.(request, note);
+        setSelectedApprovalGroup(null);
+        showToast?.("success", t("approvals.messages.fullyApproved"));
+      } catch (error) {
+        showToast?.(
+          "warning",
+          error?.response?.data?.message ||
+            error?.message ||
+            t("approvals.messages.stationApprovalApplyFailed")
+        );
+      }
+      return;
+    }
+
     if (
       fullyApproved &&
       request.module === "assets" &&
@@ -628,6 +668,38 @@ export default function ApprovalsPage({
 
     const reviewedAt = new Date().toISOString();
     const note = reviewNotes[request.id] || t("approvals.defaults.rejectedNote");
+
+    if (isBackendAssetActionRequest(request)) {
+      try {
+        await onRejectAssetAction?.(request, note);
+        setSelectedApprovalGroup(null);
+        showToast?.("error", t("approvals.messages.requestRejected"));
+      } catch (error) {
+        showToast?.(
+          "warning",
+          error?.response?.data?.message ||
+            error?.message ||
+            t("approvals.messages.assetApprovalApplyFailed")
+        );
+      }
+      return;
+    }
+
+    if (isBackendStationActionRequest(request)) {
+      try {
+        await onRejectStationAction?.(request, note);
+        setSelectedApprovalGroup(null);
+        showToast?.("error", t("approvals.messages.requestRejected"));
+      } catch (error) {
+        showToast?.(
+          "warning",
+          error?.response?.data?.message ||
+            error?.message ||
+            t("approvals.messages.stationApprovalApplyFailed")
+        );
+      }
+      return;
+    }
 
     if (isBackendOperationCorrectionRequest(request)) {
       if (!["Manager", "Admin", "PlatformAdmin"].includes(currentUser?.role)) {

@@ -48,6 +48,7 @@ import {
   createStationTransfer,
   zeroStationBalance,
   resetStationCounter,
+  createStationActionRequest,
 } from "../../services/stationsService";
 
 function notifyUser(showToastFn, type, message) {
@@ -247,6 +248,7 @@ export default function StationsPage({
   trackActivity = () => {},
   submitApprovalRequest = () => {},
   onStationTransferCreated = () => {},
+  onStationActionRequestCreated = () => {},
   externalStockAdjustments = [],
 
   stationCounterResetHistory,
@@ -453,6 +455,26 @@ export default function StationsPage({
     setStationCounterResetLoading(true);
 
     try {
+      if (isOfficerUser(currentUser)) {
+        const createdRequest = await createStationActionRequest(backendId, {
+          actionType: "COUNTER_RESET",
+          requestedByUserId: currentUser?.id,
+          reason: cleanReason,
+          newCounter: parsedNewReading,
+          effectiveAt: effectiveFrom || new Date().toISOString(),
+        });
+
+        await onStationActionRequestCreated?.(createdRequest);
+        notifyUser(
+          showToast,
+          "success",
+          language === "ar"
+            ? "تم إرسال طلب إعادة ضبط عداد المحطة للموافقة."
+            : "Station counter reset request sent for approval."
+        );
+        return true;
+      }
+
       const result = await resetStationCounter(backendId, {
         newCounter: parsedNewReading,
         reason: cleanReason,
@@ -1790,89 +1812,35 @@ export default function StationsPage({
     const adjustmentQty = actualQty - systemQty;
     const backendId = getStationBackendId(stockCountStation);
 
-    const approvalRequest = submitApprovalRequest?.({
-      type: "station_stock_count_adjustment",
-      module: "stations",
-      title: `Inventory Adjustment - ${stockCountStation.id}`,
-      titleKey: "approvals.stationStockAdjustment.title",
-      titleParams: { stationId: stockCountStation.id },
-      titleFallback: `Inventory Adjustment - ${stockCountStation.id}`,
-      details: `${currentUser?.fullName || currentUser?.name || t("stationWorkflows.defaults.manager")} requested inventory adjustment for station ${stockCountStation.id}.`,
-      detailsKey: "approvals.stationStockAdjustment.details",
-      detailsParams: {
-        stationId: stockCountStation.id,
-        currentStock: formatNumber(systemQty),
-        requestedStock: formatNumber(actualQty),
-        adjustmentQty: formatNumber(adjustmentQty),
-        reason,
-      },
-      detailsFallback: `${currentUser?.fullName || currentUser?.name || t("stationWorkflows.defaults.manager")} requested inventory adjustment for station ${stockCountStation.id}.`,
-      notificationDetailsKey:
-        "notifications.activity.details.stationStockAdjustmentRequested",
-      notificationDetailsParams: {
-        stationId: stockCountStation.id,
-        currentStock: formatNumber(systemQty),
-        requestedStock: formatNumber(actualQty),
-        adjustmentQty: formatNumber(adjustmentQty),
-        reason,
-      },
-      payload: {
-        entity: "station",
-        id: stockCountStation.id,
-        backendStationId: backendId,
-        stationBackendId: backendId,
-        action: "stock_count_adjustment",
-        stationId: stockCountStation.id,
-        field: "currentStock",
-        oldValue: systemQty,
-        newValue: actualQty,
-        adjustmentQty,
-        reason,
-        project: stockCountStation.projectId || stockCountStation.project,
-        projectId: stockCountStation.projectId || "",
-        projectName: stockCountStation.projectName || stockCountStation.project || "",
-        approvalRouteStrategy: "admin",
-        changedFields: [
-          {
-            field: "currentStock",
-            label: "Inventory Adjustment",
-            labelKey: "approvals.fields.inventoryAdjustment",
-            labelFallback: "Inventory Adjustment",
-            oldValue: `${systemQty} L`,
-            newValue: `${actualQty} L`,
-            sensitive: true,
-          },
-          {
-            field: "adjustmentQty",
-            label: "Adjustment Quantity",
-            labelKey: "approvals.fields.adjustmentQuantity",
-            labelFallback: "Adjustment Quantity",
-            oldValue: "-",
-            newValue: `${adjustmentQty} L`,
-            sensitive: true,
-          },
-          {
-            field: "reason",
-            label: "Reason",
-            labelKey: "approvals.fields.reason",
-            labelFallback: "Reason",
-            oldValue: "-",
-            newValue: reason,
-            sensitive: true,
-          },
-        ],
-      },
-    });
-
-    if (!approvalRequest) {
+    if (!backendId) {
+      showToast?.("warning", t("stationWorkflows.validation.stationNotLinked"));
       return;
     }
 
-    setShowStockCountAdjustment(false);
-    setStockCountStation(null);
-    setActualStockQty("");
-    setStockCountReason("");
-    showToast?.("warning", t("stationWorkflows.messages.adjustmentPendingApproval"));
+    createStationActionRequest(backendId, {
+      actionType: "INVENTORY_ADJUSTMENT",
+      requestedByUserId: currentUser?.id,
+      reason,
+      actualStock: actualQty,
+      movementAt: new Date().toISOString(),
+    })
+      .then(async (createdRequest) => {
+        await onStationActionRequestCreated?.(createdRequest);
+        setShowStockCountAdjustment(false);
+        setStockCountStation(null);
+        setActualStockQty("");
+        setStockCountReason("");
+        showToast?.("warning", t("stationWorkflows.messages.adjustmentPendingApproval"));
+      })
+      .catch((error) => {
+        showToast?.(
+          "warning",
+          getFriendlyApiErrorMessage(
+            error,
+            t("stationWorkflows.messages.adjustmentFailed")
+          )
+        );
+      });
   };
 
   const proceedToPassword = () => {
@@ -1902,7 +1870,7 @@ export default function StationsPage({
 
     const currentStock = Number(selectedStation.currentStock) || 0;
 
-    if (currentStock <= 0) {
+    if (currentStock === 0) {
       showToast?.("warning", t("stationWorkflows.validation.stockAlreadyZero"));
       return;
     }
@@ -1913,65 +1881,33 @@ export default function StationsPage({
     const backendId = getStationBackendId(selectedStation);
 
     if (currentUser?.role === "Officer") {
-      const approvalRequest = submitApprovalRequest?.({
-        type: "station_zero_balance_adjustment",
-        module: "stations",
-        title: `Zero Balance Adjustment - ${selectedStation.id}`,
-        titleKey: "approvals.stationZeroBalance.title",
-        titleParams: { stationId: selectedStation.id },
-        titleFallback: `Zero Balance Adjustment - ${selectedStation.id}`,
-        details: `${currentUser?.fullName || currentUser?.name || t("stationWorkflows.defaults.officer")} requested zero balance adjustment for station ${selectedStation.id}.`,
-        detailsKey: "approvals.stationZeroBalance.details",
-        detailsParams: {
-          stationId: selectedStation.id,
-          currentStock: formatNumber(currentStock),
-          reason,
-        },
-        detailsFallback: `${currentUser?.fullName || currentUser?.name || t("stationWorkflows.defaults.officer")} requested zero balance adjustment for station ${selectedStation.id}.`,
-        notificationDetailsKey:
-          "notifications.activity.details.stationZeroBalanceRequested",
-        notificationDetailsParams: {
-          stationId: selectedStation.id,
-          currentStock: formatNumber(currentStock),
-          reason,
-        },
-        payload: {
-          entity: "station",
-          id: selectedStation.id,
-          backendStationId: backendId,
-          stationBackendId: backendId,
-          action: "zero_balance_adjustment",
-          stationId: selectedStation.id,
-          field: "currentStock",
-          oldValue: currentStock,
-          newValue: 0,
-          reason,
-          project: selectedStation.projectId || selectedStation.project,
-          projectId: selectedStation.projectId || "",
-          projectName: selectedStation.projectName || selectedStation.project || "",
-          approvalRouteStrategy: "project_manager",
-          changedFields: [
-            {
-              field: "currentStock",
-              label: "Zero Balance",
-              labelKey: "approvals.fields.zeroBalance",
-              labelFallback: "Zero Balance",
-              oldValue: `${currentStock} L`,
-              newValue: "0 L",
-              sensitive: true,
-            },
-          ],
-        },
-      });
-
-      if (!approvalRequest) {
+      if (!backendId) {
+        showToast?.("warning", t("stationWorkflows.validation.stationNotLinked"));
         return;
       }
 
-      setShowConfirm(false);
-      setSelectedStation(null);
-      setZeroBalanceReason(t("stationWorkflows.zero.defaultReason"));
-      showToast?.("warning", t("stationWorkflows.messages.zeroPendingApproval"));
+      try {
+        const createdRequest = await createStationActionRequest(backendId, {
+          actionType: "ZERO_BALANCE",
+          requestedByUserId: currentUser?.id,
+          reason,
+          movementAt: new Date().toISOString(),
+        });
+
+        await onStationActionRequestCreated?.(createdRequest);
+        setShowConfirm(false);
+        setSelectedStation(null);
+        setZeroBalanceReason(t("stationWorkflows.zero.defaultReason"));
+        showToast?.("warning", t("stationWorkflows.messages.zeroPendingApproval"));
+      } catch (error) {
+        showToast?.(
+          "warning",
+          getFriendlyApiErrorMessage(
+            error,
+            t("stationWorkflows.messages.zeroFailed")
+          )
+        );
+      }
       return;
     }
 

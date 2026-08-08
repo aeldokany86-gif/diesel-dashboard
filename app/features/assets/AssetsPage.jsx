@@ -45,6 +45,7 @@ import {
   createAssetTransfer,
   createBulkAssetTransfer,
   resetAssetOdometer,
+  createAssetActionRequest,
 } from "../../services/assetsService";
 
 function notifyUser(showToastFn, type, message) {
@@ -271,6 +272,7 @@ export default function AssetsPage({
   trackActivity = () => {},
   submitApprovalRequest = () => {},
   onAssetTransferCreated = () => {},
+  onAssetActionRequestCreated = () => {},
   runWithActionLoading = async (_label, actionFn) => actionFn(),
 }) {
   const { language, t } = useLanguage();
@@ -1577,64 +1579,41 @@ export default function AssetsPage({
       return;
     }
 
-    // Officer request only. No backend reset is executed here.
-    if (setAssetOdometerHistory) {
-      setAssetOdometerHistory((prev) => [...(prev || []), odometerHistoryRecord]);
+    // Officer request is persisted in the backend so it is visible across devices.
+    try {
+      const createdRequest = await runWithActionLoading(
+        t("assetWorkflows.loading.submittingOdometerReset"),
+        async () =>
+          createAssetActionRequest(backendAssetId, {
+            actionType: "ODOMETER_RESET",
+            requestedByUserId: currentUser?.id,
+            reason: odometerReason,
+            newOdometer: newReading,
+            effectiveAt: odometerEffectiveDate || undefined,
+          }),
+      );
+
+      await onAssetActionRequestCreated?.(createdRequest);
+      closeOdometerResetUi();
+
+      showToast
+        ? showToast(
+            "success",
+            t("assetWorkflows.messages.odometerResetPendingApproval")
+          )
+        : notifyUser(
+            typeof showToast !== "undefined" ? showToast : null,
+            inferToastTypeFromMessage(t("assetWorkflows.messages.odometerResetPendingApproval")),
+            t("assetWorkflows.messages.odometerResetPendingApproval")
+          );
+    } catch (error) {
+      const backendMessage =
+        error?.response?.data?.message ||
+        error?.response?.data?.error ||
+        error?.message ||
+        t("assetWorkflows.messages.odometerResetFailed");
+      showToast?.("warning", backendMessage);
     }
-
-    await runWithActionLoading(t("assetWorkflows.loading.submittingOdometerReset"), async () => {
-      const odometerTitleMessage = createAssetWorkflowMessage(
-        "odometerApproval.title",
-        { assetId: odometerTargetAsset?.id || "-" },
-        `Asset ${odometerTargetAsset?.id} odometer reset`,
-      );
-      const odometerDetailsMessage = createAssetWorkflowMessage(
-        "odometerApproval.details",
-        { assetId: odometerTargetAsset?.id || "-", reason: odometerReason },
-        odometerReason,
-      );
-
-      submitApprovalRequest({
-        type: "master_data_change",
-        module: "assets",
-        title: resolveWorkflowMessage(odometerTitleMessage),
-        titleKey: odometerTitleMessage.key,
-        titleParams: odometerTitleMessage.params,
-        titleFallback: odometerTitleMessage.fallback,
-        details: resolveWorkflowMessage(odometerDetailsMessage),
-        detailsKey: odometerDetailsMessage.key,
-        detailsParams: odometerDetailsMessage.params,
-        detailsFallback: odometerDetailsMessage.fallback,
-        payload: {
-          entity: "asset",
-          action: "odometer_reset",
-          id: odometerTargetAsset?.id,
-          backendAssetId,
-          approvalRouteStrategy: "project_manager",
-          project: odometerTargetAsset?.project || odometerTargetAsset?.projectId || "",
-          values: odometerHistoryRecord,
-          changedFields: [
-            {
-              field: "currentOdometer",
-              label: t("assetWorkflows.odometer.title"),
-              labelKey: "assetWorkflows.odometer.title",
-              oldValue: oldReading,
-              newValue: newReading,
-              sensitive: true,
-            },
-          ],
-        },
-      });
-    });
-
-    closeOdometerResetUi();
-
-    showToast
-      ? showToast(
-          "success",
-          t("assetWorkflows.messages.odometerResetPendingApproval")
-        )
-      : notifyUser(typeof showToast !== "undefined" ? showToast : null, inferToastTypeFromMessage(t("assetWorkflows.messages.odometerResetPendingApproval")), t("assetWorkflows.messages.odometerResetPendingApproval"));
   };
 
   const exportAssetsToCSV = () => {
@@ -2725,6 +2704,7 @@ export default function AssetsPage({
             <input
               type="date"
               value={odometerEffectiveDate}
+              max={new Date().toISOString().slice(0, 10)}
               onChange={(e) => setOdometerEffectiveDate(e.target.value)}
               className="border rounded-xl p-3 w-full mb-4"
             />

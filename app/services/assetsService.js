@@ -115,3 +115,37 @@ export async function fetchAssetMeterHistory(params = {}) {
 
   return Array.isArray(response.data) ? response.data : [];
 }
+
+
+export async function createAssetActionRequest(assetId, payload) {
+  if (!assetId) {
+    throw new Error("Asset ID is required.");
+  }
+
+  const response = await api.post(`/assets/${assetId}/action-requests`, payload);
+  return response.data;
+}
+
+export async function fetchAssetActionRequests({ userId = "", status = "" } = {}) {
+  if (!userId) {
+    throw new Error("User ID is required.");
+  }
+
+  const response = await api.get("/assets/actions/requests", {
+    params: {
+      userId,
+      ...(status ? { status } : {}),
+    },
+  });
+
+  return Array.isArray(response.data) ? response.data : [];
+}
+
+export async function reviewAssetActionRequest(requestId, payload) {
+  if (!requestId) {
+    throw new Error("Asset action request ID is required.");
+  }
+
+  const response = await api.patch(`/assets/action-requests/${requestId}/review`, payload);
+  return response.data;
+}
