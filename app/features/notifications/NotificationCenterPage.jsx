@@ -137,40 +137,32 @@ function NotificationCenterPage({
     const subject = getPersistentApprovalSubject(kind, item?.entityId);
     const status = String(item?.status || "").trim().toLowerCase();
 
-    const genericFallbacks = new Set([
-      "",
-      "approval workflow update.",
-      "workflow update.",
-      "تحديث في مسار الموافقة",
-      "تحديث في مسار الموافقة.",
-    ]);
-
-    let reason = String(item?.messageFallback || item?.message || "").trim();
-    if (genericFallbacks.has(reason.toLowerCase())) reason = "";
-
-    // If page.js supplied a complete workflow sentence, keep it in English mode.
-    // Arabic mode gets an explicit Arabic action sentence instead of the generic workflow text.
-    if (language !== "ar" && reason && !genericFallbacks.has(reason.toLowerCase())) {
-      return reason;
-    }
+    // Use only the original user-entered reason from the structured descriptor.
+    // Do not reuse message/messageFallback because those may already contain a full
+    // English workflow sentence, which caused duplicated mixed Arabic/English text.
+    const reason = String(
+      item?.messageParams?.reason ||
+      item?.detailsParams?.reason ||
+      ""
+    ).trim();
 
     const reasonSuffix = reason
       ? language === "ar"
-        ? ` سبب الطلب: ${reason}`
-        : ` Reason: ${reason}`
+        ? ` السبب: ${reason}.`
+        : ` Reason: ${reason}.`
       : "";
 
     if (language === "ar") {
       if (status === "approved") return `تم اعتماد وتنفيذ طلب ${subject}.${reasonSuffix}`;
       if (status === "rejected") return `تم رفض طلب ${subject}.${reasonSuffix}`;
-      if (item?.actionable) return `يوجد طلب ${subject} يحتاج إلى مراجعتك واعتمادك.${reasonSuffix}`;
-      return `تم إرسال طلب ${subject} وهو الآن بانتظار الموافقة.${reasonSuffix}`;
+      if (item?.actionable) return `طلب ${subject} يحتاج إلى مراجعتك واعتمادك.${reasonSuffix}`;
+      return `طلب ${subject} بانتظار الموافقة.${reasonSuffix}`;
     }
 
     if (status === "approved") return `The ${subject} was approved and applied.${reasonSuffix}`;
     if (status === "rejected") return `The ${subject} was rejected.${reasonSuffix}`;
     if (item?.actionable) return `The ${subject} requires your review and approval.${reasonSuffix}`;
-    return `The ${subject} has been submitted and is waiting for approval.${reasonSuffix}`;
+    return `The ${subject} is waiting for approval.${reasonSuffix}`;
   };
 
   const getNotificationTitle = (item) => {
