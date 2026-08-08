@@ -109,6 +109,7 @@ import {
 import {
   fetchEmployees,
   createEmployeeRecord,
+  checkEmployeeIdAvailability,
   updateEmployeeRecord,
   fetchPendingEmployeeTransfers,
   createEmployeeTransfer,
@@ -1893,6 +1894,19 @@ export default function Home() {
       setBackendStationActionApprovals([]);
       return [];
     }
+  };
+
+  const handleCheckEmployeeIdAvailability = async ({
+    employeeId,
+    companyId = "",
+  } = {}) => {
+    return checkEmployeeIdAvailability({
+      employeeId,
+      companyId:
+        companyId && !isPlatformContextValue(companyId)
+          ? companyId
+          : "",
+    });
   };
 
   const handleCreateEmployee = async (payload) => {
@@ -4317,6 +4331,7 @@ export default function Home() {
           hasPermission={hasPermission}
           submitApprovalRequest={submitApprovalRequest}
           onCreateEmployee={handleCreateEmployee}
+          onCheckEmployeeIdAvailability={handleCheckEmployeeIdAvailability}
           onUpdateEmployee={handleUpdateEmployee}
           onCreateEmployeeTransfer={handleCreateEmployeeTransfer}
           onCreateBulkEmployeeTransfer={handleCreateBulkEmployeeTransfer}

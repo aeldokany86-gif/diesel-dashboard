@@ -18,6 +18,7 @@ import Td from "../../components/ui/Td";
 import Card from "../../components/ui/Card";
 import { useLanguage } from "../../context/LanguageContext";
 import { resolveEnumValue } from "../../lib/i18nMessageHelpers";
+import { checkEmployeeIdAvailability } from "../../services/employeesService";
 
 import {
   cleanCsvCell,
@@ -164,6 +165,7 @@ export default function TeamPage({
   hasPermission = () => false,
   submitApprovalRequest = () => {},
   onCreateEmployee,
+  onCheckEmployeeIdAvailability,
   onUpdateEmployee,
   onCreateEmployeeTransfer,
   onCreateBulkEmployeeTransfer,
@@ -181,6 +183,33 @@ export default function TeamPage({
 
   const getUserStatusLabel = (status) =>
     resolveEnumValue(t, "userStatus", status, status || "-");
+
+  const getTeamStatusSelectValue = (status) => {
+    const value = cleanCsvCell(status)
+      .toLowerCase()
+      .replace(/[\s_-]+/g, " ")
+      .trim();
+
+    if (
+      value === "in vacation" ||
+      value === "vacation" ||
+      value === "on leave" ||
+      value === "leave"
+    ) {
+      return "In Vacation";
+    }
+
+    if (
+      value === "retired / resigned" ||
+      value === "retired/resigned" ||
+      value === "retired" ||
+      value === "resigned"
+    ) {
+      return "Retired / Resigned";
+    }
+
+    return "On Duty";
+  };
 
   const [localFuelers, setLocalFuelers] = useState([]);
   const [localFuelerUpdates, setLocalFuelerUpdates] = useState({});
@@ -236,6 +265,12 @@ export default function TeamPage({
     projectId: "",
     projectName: "",
     status: "On Duty",
+  });
+
+  const [employeeIdRemoteValidation, setEmployeeIdRemoteValidation] = useState({
+    checking: false,
+    status: "",
+    checkedValue: "",
   });
 
   const dieselIndex = getHeaderIndex(headers, [
@@ -348,11 +383,110 @@ export default function TeamPage({
   };
 
   const masterFuelers = [...fuelers, ...localFuelers];
-  const teamMemberIdDuplicateError = getDuplicateIdError(
+  const localTeamMemberIdDuplicateError = getDuplicateIdError(
     newFueler.id,
     masterFuelers,
-    "Team Member ID"
+    t("team.table.memberId")
   );
+
+  const normalizedNewEmployeeId = String(newFueler.id || "")
+    .trim()
+    .toUpperCase();
+
+  const employeeIdValidationCompanyId = platformBootstrapMode
+    ? newFueler.companyId
+    : currentUser?.companyId || "";
+
+  const remoteEmployeeIdStatus =
+    employeeIdRemoteValidation.checkedValue === normalizedNewEmployeeId
+      ? employeeIdRemoteValidation.status
+      : "";
+
+  const teamMemberIdDuplicateError =
+    localTeamMemberIdDuplicateError ||
+    remoteEmployeeIdStatus === "ACTIVE_DUPLICATE" ||
+    remoteEmployeeIdStatus === "PREVIOUSLY_USED";
+
+  const teamMemberIdValidationMessage = localTeamMemberIdDuplicateError
+    ? t("team.validation.duplicateMemberId")
+    : remoteEmployeeIdStatus === "PREVIOUSLY_USED"
+    ? t("team.validation.previouslyUsedMemberId")
+    : remoteEmployeeIdStatus === "ACTIVE_DUPLICATE"
+    ? t("team.validation.duplicateMemberId")
+    : "";
+
+  useEffect(() => {
+    if (!showAddFueler) {
+      setEmployeeIdRemoteValidation({
+        checking: false,
+        status: "",
+        checkedValue: "",
+      });
+      return undefined;
+    }
+
+    if (
+      !normalizedNewEmployeeId ||
+      localTeamMemberIdDuplicateError ||
+      !employeeIdValidationCompanyId
+    ) {
+      setEmployeeIdRemoteValidation({
+        checking: false,
+        status: "",
+        checkedValue: "",
+      });
+      return undefined;
+    }
+
+    let cancelled = false;
+
+    setEmployeeIdRemoteValidation({
+      checking: true,
+      status: "",
+      checkedValue: normalizedNewEmployeeId,
+    });
+
+    const timer = window.setTimeout(async () => {
+      try {
+        const checker =
+          typeof onCheckEmployeeIdAvailability === "function"
+            ? onCheckEmployeeIdAvailability
+            : checkEmployeeIdAvailability;
+
+        const result = await checker({
+          employeeId: normalizedNewEmployeeId,
+          companyId: employeeIdValidationCompanyId,
+        });
+
+        if (cancelled) return;
+
+        setEmployeeIdRemoteValidation({
+          checking: false,
+          status: String(result?.status || "AVAILABLE").toUpperCase(),
+          checkedValue: normalizedNewEmployeeId,
+        });
+      } catch (error) {
+        if (cancelled) return;
+
+        console.warn("Employee ID availability check failed.", error);
+        setEmployeeIdRemoteValidation({
+          checking: false,
+          status: "CHECK_FAILED",
+          checkedValue: normalizedNewEmployeeId,
+        });
+      }
+    }, 350);
+
+    return () => {
+      cancelled = true;
+      window.clearTimeout(timer);
+    };
+  }, [
+    showAddFueler,
+    normalizedNewEmployeeId,
+    localTeamMemberIdDuplicateError,
+    employeeIdValidationCompanyId,
+  ]);
 
   const displayFuelers = masterFuelers.map((fueler) => {
     const localUpdate = localFuelerUpdates[fueler.id] || {};
@@ -840,13 +974,13 @@ export default function TeamPage({
         ...prev,
         {
           fuelerId: selectedTeamFuelers.map((fueler) => fueler.id).join(", "),
-          fuelerName: `${selectedTeamFuelers.length} selected team member(s)`,
-          field: "Bulk Transfer",
+          fuelerName: t("team.audit.selectedMembers", { count: selectedTeamFuelers.length }),
+          field: t("team.audit.bulkTransfer"),
           oldValue: selectedTeamFuelers.map((fueler) => `${fueler.id} - ${fueler.projectName || "-"}`).join(" | "),
           newValue: targetProjectName,
           reason: bulkResult?.transferBatchId
-            ? `Bulk transfer request ${bulkResult.transferBatchId}`
-            : "Bulk transfer request",
+            ? t("team.audit.bulkTransferRequestWithId", { id: bulkResult.transferBatchId })
+            : t("team.audit.bulkTransferRequest"),
           editedBy: currentUser?.fullName || currentUser?.email || "System",
           editedAt: new Date().toISOString(),
         },
@@ -872,7 +1006,14 @@ export default function TeamPage({
       return "bg-green-500/20 text-green-300 border border-green-500/30";
     }
 
-    if (value === "in vacation" || value === "vacation" || value === "في اجازة") {
+    if (
+      value === "in vacation" ||
+      value === "vacation" ||
+      value === "on leave" ||
+      value === "on_leave" ||
+      value === "في اجازة" ||
+      value === "في إجازة"
+    ) {
       return "bg-yellow-500/20 text-yellow-300 border border-yellow-500/30";
     }
 
@@ -1053,6 +1194,11 @@ export default function TeamPage({
       projectName: "",
       status: "On Duty",
     });
+    setEmployeeIdRemoteValidation({
+      checking: false,
+      status: "",
+      checkedValue: "",
+    });
   };
 
   const closeAddFueler = () => {
@@ -1062,11 +1208,25 @@ export default function TeamPage({
 
   const saveNewFueler = async () => {
     if (!hasPermission("team", "add")) {
-      showToast?.("warning", "Read-only access: you cannot add team members.");
+      showToast?.("warning", t("team.validation.readOnlyAdd"));
       return;
     }
 
     const fuelerId = newFueler.id.trim();
+
+    if (employeeIdRemoteValidation.checking) {
+      showToast?.("warning", t("team.validation.checkingMemberId"));
+      return;
+    }
+
+    if (teamMemberIdDuplicateError) {
+      showToast?.(
+        "warning",
+        teamMemberIdValidationMessage || t("team.validation.duplicateMemberId")
+      );
+      return;
+    }
+
     const fuelerName = newFueler.name.trim();
     const mobile = newFueler.mobile.trim();
     const email = newFueler.email.trim();
@@ -1093,7 +1253,7 @@ export default function TeamPage({
     }
 
     if (!mobile) {
-      notifyUser(typeof showToast !== "undefined" ? showToast : null, inferToastTypeFromMessage("Please enter Mobile Number."), "Please enter Mobile Number.");
+      notifyUser(typeof showToast !== "undefined" ? showToast : null, "warning", t("team.validation.enterMobile"));
       return;
     }
 
@@ -1143,7 +1303,13 @@ export default function TeamPage({
           type: "master_data_change",
           module: "team",
           title: `New team member ${fuelerId}`,
-          details: `Officer requested new operator ${fuelerName}`,
+          titleKey: "workflowMessages.team.addMember.title",
+          titleParams: { employeeId: fuelerId },
+          titleFallback: `New team member ${fuelerId}`,
+          details: `Officer requested new team member ${fuelerName}`,
+          detailsKey: "workflowMessages.team.addMember.details",
+          detailsParams: { employeeId: fuelerId, employeeName: fuelerName },
+          detailsFallback: `Officer requested new team member ${fuelerName}`,
           payload: { entity: "team_member", action: "add", values: { ...newFueler, id: fuelerId, name: fuelerName, mobile, email } },
         });
         closeAddFueler();
@@ -1171,7 +1337,7 @@ export default function TeamPage({
       const message =
         error?.response?.data?.message ||
         error?.message ||
-        "Failed to add team member.";
+        t("team.errors.addFailed");
       showToast?.("warning", message);
     }
   };
@@ -1187,14 +1353,14 @@ export default function TeamPage({
   };
 
   const getTeamFieldLabel = (field) => {
-    if (field === "name") return "Name";
-    if (field === "mobile") return "Mobile";
-    if (field === "email") return "Email";
-    if (field === "jobTitle") return "Job Title";
-    if (field === "status") return "Operational Status";
-    if (field === "project") return "Project";
-    if (field === "userLink") return "User Status";
-    return "Field";
+    if (field === "name") return t("team.fields.name");
+    if (field === "mobile") return t("team.fields.mobile");
+    if (field === "email") return t("team.fields.email");
+    if (field === "jobTitle") return t("team.fields.jobTitle");
+    if (field === "status") return t("team.fields.operationalStatus");
+    if (field === "project") return t("team.fields.project");
+    if (field === "userLink") return t("team.fields.userStatus");
+    return t("team.fields.field");
   };
 
   const getProjectNameById = (projectId) => {
@@ -1277,18 +1443,18 @@ export default function TeamPage({
 
   const buildTeamChangeMessage = ({ field, oldDisplayValue, newDisplayValue }) => {
     if (field === "project") {
-      return `Are you sure you want to submit a transfer request from ${oldDisplayValue || "-"} to ${newDisplayValue || "-"}? The current project will not change until final approval, and the transfer takes effect on that approval date.`;
+      return t("team.confirm.transfer", { fromProject: oldDisplayValue || "-", toProject: newDisplayValue || "-" });
     }
 
-    return `Are you sure you want to change ${getTeamFieldLabel(field)} from ${oldDisplayValue || "-"} to ${newDisplayValue || "-"}?`;
+    return t("team.confirm.changeField", { field: getTeamFieldLabel(field), oldValue: oldDisplayValue || "-", newValue: newDisplayValue || "-" });
   };
 
   const buildUserLinkMessage = ({ action }) => {
     if (action === "unlink") {
-      return "Are you sure you want to deactivate login access for this employee? The employee-user link will remain saved so you can reactivate it later.";
+      return t("team.confirm.deactivateLogin");
     }
 
-    return "Are you sure you want to activate login access for this employee?";
+    return t("team.confirm.activateLogin");
   };
 
   const getExistingUserForFueler = (fueler) => {
@@ -1414,7 +1580,7 @@ export default function TeamPage({
       if (!backendRoles.length) {
         showToast?.(
           "warning",
-          "No backend roles are available for this company."
+          t("team.validation.noBackendRoles")
         );
         return;
       }
@@ -1440,7 +1606,7 @@ export default function TeamPage({
     const canManageUserLink = canManageFuelerUserStatus(fueler);
 
     if (!canManageUserLink) {
-      showToast?.("warning", "Read-only access: you cannot link team members to users.");
+      showToast?.("warning", t("team.validation.readOnlyLinkUser"));
       return;
     }
 
@@ -1460,8 +1626,8 @@ export default function TeamPage({
         user: existingUser,
         oldValue: "Linked",
         newValue: "Not Linked",
-        oldDisplayValue: "Linked",
-        newDisplayValue: "Not Linked",
+        oldDisplayValue: getUserStatusLabel("Linked"),
+        newDisplayValue: getUserStatusLabel("Not Linked"),
         message: buildUserLinkMessage({ action: "unlink" }),
       });
 
@@ -1478,8 +1644,8 @@ export default function TeamPage({
         user: existingUser,
         oldValue: fueler.userStatus || "Not Linked",
         newValue: "Linked",
-        oldDisplayValue: "Not Linked",
-        newDisplayValue: "Linked",
+        oldDisplayValue: getUserStatusLabel(fueler.userStatus || "Not Linked"),
+        newDisplayValue: getUserStatusLabel("Linked"),
         message: buildUserLinkMessage({
           action: "link-existing",
         }),
@@ -1499,22 +1665,22 @@ export default function TeamPage({
     if (!linkUserModal?.fueler) return;
 
     if (!linkUserModal.roleId) {
-      showToast?.("warning", "Please select user role.");
+      showToast?.("warning", t("team.validation.selectUserRole"));
       return;
     }
 
     if (!String(linkUserModal.password || "").trim()) {
-      showToast?.("warning", "Temporary password is required.");
+      showToast?.("warning", t("team.validation.tempPasswordRequired"));
       return;
     }
 
     if (typeof onCreateUserFromEmployee !== "function") {
-      showToast?.("warning", "Create user API is not configured.");
+      showToast?.("warning", t("team.validation.createUserApiMissing"));
       return;
     }
 
     if (typeof onUpdateEmployee !== "function") {
-      showToast?.("warning", "Employee update API is not configured.");
+      showToast?.("warning", t("team.validation.employeeUpdateApiMissing"));
       return;
     }
 
@@ -1527,7 +1693,7 @@ export default function TeamPage({
       const linkedEmployeeId = fueler.backendId || fueler.employeeBackendId || "";
 
       if (!employeeId) {
-        showToast?.("warning", "Employee ID is required before creating a system user.");
+        showToast?.("warning", t("team.validation.employeeIdRequiredForUser"));
         setSavingLinkedUser(false);
         return;
       }
@@ -1552,7 +1718,7 @@ export default function TeamPage({
       if (!selectedTeamRole?.id) {
         showToast?.(
           "warning",
-          "Selected backend role is no longer available for this company."
+          t("team.validation.backendRoleUnavailable")
         );
         setSavingLinkedUser(false);
         setUpdatingUserStatusByFuelerId((prev) => ({
@@ -1573,7 +1739,7 @@ export default function TeamPage({
       ) {
         showToast?.(
           "warning",
-          "Platform User can create the first company user with Admin role only."
+          t("team.validation.platformFirstUserAdminOnly")
         );
         setSavingLinkedUser(false);
         setUpdatingUserStatusByFuelerId((prev) => ({
@@ -1612,7 +1778,7 @@ export default function TeamPage({
       }));
 
       closeLinkUserModal();
-      showToast?.("success", "System user created and linked. Saving employee link...");
+      showToast?.("success", t("team.messages.userCreatedLinkSaving"));
 
       await onUpdateEmployee(fueler, {
         linkedUserId: createdUser.id,
@@ -1629,12 +1795,12 @@ export default function TeamPage({
         },
       }));
 
-      showToast?.("success", "Employee-user link saved successfully.");
+      showToast?.("success", t("team.messages.userLinkSaved"));
     } catch (error) {
       const message =
         error?.response?.data?.message ||
         error?.message ||
-        "Failed to create and link user.";
+        t("team.errors.createLinkUserFailed");
       showToast?.("warning", message);
     } finally {
       const fuelerId = linkUserModal?.fueler?.id;
@@ -1657,13 +1823,13 @@ export default function TeamPage({
         showToast?.(
           "warning",
           isFuelerManagerSystemRole(fueler)
-            ? "Only Officer can request transferring a Manager user."
-            : "Read-only access: you cannot transfer this team member."
+            ? t("team.validation.managerTransferOfficerOnly")
+            : t("team.validation.readOnlyTransfer")
         );
         return;
       }
     } else if (!hasPermission("team", "edit")) {
-      showToast?.("warning", "Read-only access: you cannot edit team members.");
+      showToast?.("warning", t("team.validation.readOnlyEdit"));
       return;
     }
 
@@ -1672,12 +1838,23 @@ export default function TeamPage({
     if (normalizeText(oldValue) === normalizeText(newValue)) return;
 
     if (!String(newValue || "").trim()) {
-      showToast?.("warning", `Please select or enter ${getTeamFieldLabel(field)}.`);
+      showToast?.("warning", t("team.validation.selectOrEnterField", { field: getTeamFieldLabel(field) }));
       return;
     }
 
-    const oldDisplayValue = field === "project" ? fueler.projectName || "-" : oldValue || "-";
-    const newDisplayValue = field === "project" ? getProjectNameById(newValue) : newValue || "-";
+    const oldDisplayValue =
+      field === "project"
+        ? fueler.projectName || "-"
+        : field === "status"
+        ? getTeamStatusLabel(oldValue)
+        : oldValue || "-";
+
+    const newDisplayValue =
+      field === "project"
+        ? getProjectNameById(newValue)
+        : field === "status"
+        ? getTeamStatusLabel(newValue)
+        : newValue || "-";
 
     if (field === "status" && isRetiredTeamStatus(newValue)) {
       setPendingTeamChange({
@@ -1686,9 +1863,9 @@ export default function TeamPage({
         oldValue,
         newValue: "Retired / Resigned",
         oldDisplayValue,
-        newDisplayValue: "Retired / Resigned",
+        newDisplayValue: getTeamStatusLabel("Retired / Resigned"),
         message:
-          "This team member will be retired and hidden from the Team page. If linked, the system user will be deactivated and removed from the active Users list. Historical operations and reports will remain unchanged. If this employee returns later, create a new team member with a new Team Member ID.",
+          t("team.confirm.retireMember"),
       });
       return;
     }
@@ -1702,7 +1879,7 @@ export default function TeamPage({
       newDisplayValue,
       message:
         field === "project" && isFuelerManagerSystemRole(fueler)
-          ? `Are you sure you want to submit a Manager / Top Management transfer request from ${oldDisplayValue || "-"} to ${newDisplayValue || "-"}? This transfer requires Admin approval and takes effect on final approval.`
+          ? t("team.confirm.managerTransfer", { fromProject: oldDisplayValue || "-", toProject: newDisplayValue || "-" })
           : buildTeamChangeMessage({ field, oldDisplayValue, newDisplayValue }),
     });
   };
@@ -1727,11 +1904,11 @@ export default function TeamPage({
           const linkedUserId = pendingTeamChange.user?.id || fueler.linkedUserId || "";
 
           if (!linkedUserId) {
-            throw new Error("Linked user ID is required.");
+            throw new Error(t("team.validation.linkedUserIdRequired"));
           }
 
           if (typeof onUpdateUserStatus !== "function") {
-            throw new Error("User status API is not configured.");
+            throw new Error(t("team.validation.userStatusApiMissing"));
           }
 
           setUpdatingUserStatusByFuelerId((prev) => ({
@@ -1755,7 +1932,7 @@ export default function TeamPage({
             },
           }));
 
-          showToast?.("success", "User login deactivated. The employee-user link remains saved.");
+          showToast?.("success", t("team.messages.userLoginDeactivated"));
           setPendingTeamChange(null);
           return;
         }
@@ -1763,11 +1940,11 @@ export default function TeamPage({
         const targetUser = pendingTeamChange.user;
 
         if (!targetUser?.id) {
-          throw new Error("Target user is required.");
+          throw new Error(t("team.validation.targetUserRequired"));
         }
 
         if (typeof onUpdateUserStatus !== "function") {
-          throw new Error("User status API is not configured.");
+          throw new Error(t("team.validation.userStatusApiMissing"));
         }
 
         setUpdatingUserStatusByFuelerId((prev) => ({
@@ -1788,14 +1965,14 @@ export default function TeamPage({
           },
         }));
 
-        showToast?.("success", "Employee linked and user login activated.");
+        showToast?.("success", t("team.messages.userLinkedActivated"));
         setPendingTeamChange(null);
         return;
       }
 
       if (field === "retire") {
         if (typeof onUpdateEmployee !== "function") {
-          throw new Error("Employee update API is not configured.");
+          throw new Error(t("team.validation.employeeUpdateApiMissing"));
         }
 
         await onUpdateEmployee(fueler, {
@@ -1838,7 +2015,7 @@ export default function TeamPage({
 
         showToast?.(
           "success",
-          "Team member retired successfully. The linked user was removed from the active Users list, while historical records remain unchanged."
+          t("team.messages.retiredSuccessfully")
         );
 
         setPendingTeamChange(null);
@@ -1868,10 +2045,10 @@ export default function TeamPage({
         showToast?.(
           transferApplied ? "success" : "warning",
           transferApplied
-            ? `Team member transferred successfully to ${newDisplayValue}.`
+            ? t("team.messages.transferCompleted", { project: newDisplayValue })
             : isFuelerManagerSystemRole(fueler)
-            ? "Manager transfer request submitted for Admin approval."
-            : "Transfer request submitted for approval. The current project will remain unchanged until approval is completed."
+            ? t("team.messages.managerTransferPendingAdmin")
+            : t("team.messages.transferPendingApproval")
         );
 
         setPendingTeamChange(null);
@@ -1928,13 +2105,13 @@ export default function TeamPage({
         },
       ]);
 
-      showToast?.("success", `${fieldLabel} updated successfully.`);
+      showToast?.("success", t("team.messages.fieldUpdated", { field: fieldLabel }));
       setPendingTeamChange(null);
     } catch (error) {
       const message =
         error?.response?.data?.message ||
         error?.message ||
-        "Failed to save team change.";
+        t("team.errors.saveChangeFailed");
       showToast?.("warning", message);
     } finally {
       setSavingTeamChange(false);
@@ -2377,8 +2554,14 @@ export default function TeamPage({
                     <Td>
                       {hasPermission("team", "edit") ? (
                         <select
-                          value={getTeamStatusLabel(fueler.status)}
-                          onChange={(e) => requestTeamChange({ fueler, field: "status", newValue: e.target.value })}
+                          value={getTeamStatusSelectValue(fueler.status)}
+                          onChange={(e) =>
+                            requestTeamChange({
+                              fueler,
+                              field: "status",
+                              newValue: e.target.value,
+                            })
+                          }
                           className={`rounded-full px-2 py-1 text-xs font-semibold outline-none cursor-pointer ${getStatusBadgeClass(fueler.status)}`}
                         >
                           <option value="On Duty">{t("team.status.onDuty")}</option>
@@ -2526,24 +2709,24 @@ export default function TeamPage({
                     </div>
 
                     <div className="sm:col-span-2 rounded-2xl border border-amber-400/20 bg-amber-400/10 p-3">
-                      <p className="text-gray-400 text-xs">Generated Username</p>
+                      <p className="text-gray-400 text-xs">{t("team.linkUser.generatedUsername")}</p>
                       <p className="font-black text-amber-300 tracking-wide">{getGeneratedUsernameForFueler(linkUserModal.fueler)}</p>
                     </div>
 
                     <div>
-                      <p className="text-gray-500 text-xs">Email</p>
+                      <p className="text-gray-500 text-xs">{t("team.fields.email")}</p>
                       <p className="font-semibold">{linkUserModal.fueler.email || "-"}</p>
                     </div>
 
                     <div>
-                      <p className="text-gray-500 text-xs">Mobile</p>
+                      <p className="text-gray-500 text-xs">{t("team.fields.mobile")}</p>
                       <p className="font-semibold">{linkUserModal.fueler.mobile || "-"}</p>
                     </div>
                   </div>
 
                   <div>
                     <label className="block text-sm text-gray-300 mb-1">
-                      User Role
+                      {t("team.linkUser.userRole")}
                     </label>
                     <select
                       value={linkUserModal.roleId}
@@ -2557,10 +2740,10 @@ export default function TeamPage({
                       className="w-full rounded-xl border border-slate-700 bg-slate-950 px-3 py-2 text-white outline-none focus:border-amber-400"
                     >
                       {loadingTeamRoles && (
-                        <option value="">Loading backend roles...</option>
+                        <option value="">{t("team.linkUser.loadingRoles")}</option>
                       )}
                       {!loadingTeamRoles && !teamRoleOptions.length && (
-                        <option value="">No backend roles available</option>
+                        <option value="">{t("team.linkUser.noRoles")}</option>
                       )}
                       {!loadingTeamRoles &&
                         teamRoleOptions.map((role) => (
@@ -2573,7 +2756,7 @@ export default function TeamPage({
 
                   <div>
                     <label className="block text-sm text-gray-300 mb-1">
-                      Temporary Password
+                      {t("team.linkUser.temporaryPassword")}
                     </label>
                     <input
                       value={linkUserModal.password}
@@ -2587,7 +2770,7 @@ export default function TeamPage({
                       className="w-full rounded-xl border border-slate-700 bg-slate-950 px-3 py-2 text-white outline-none focus:border-amber-400"
                     />
                     <p className="text-xs text-gray-500 mt-1">
-                      The user will be asked to change this password after login.
+                      {t("team.linkUser.passwordHelp")}
                     </p>
                   </div>
                 </div>
@@ -2611,7 +2794,7 @@ export default function TeamPage({
                     }
                     className="px-4 py-2 rounded-xl bg-yellow-500 hover:bg-yellow-400 text-black font-bold disabled:opacity-60"
                   >
-                    {savingLinkedUser ? "Saving..." : "Create & Link"}
+                    {savingLinkedUser ? t("common.saving") : t("team.linkUser.createAndLink")}
                   </button>
                 </div>
               </div>
@@ -2868,17 +3051,27 @@ export default function TeamPage({
                   <input
                     type="text"
                     value={newFueler.id}
-                    onChange={(e) => setNewFueler({ ...newFueler, id: e.target.value })}
+                    onChange={(e) =>
+                      setNewFueler({ ...newFueler, id: e.target.value })
+                    }
                     className={`w-full mt-2 rounded-lg border bg-slate-900 p-3 text-white placeholder:text-slate-500 outline-none focus:ring-2 ${
                       teamMemberIdDuplicateError
                         ? "border-red-500 bg-red-500/10 focus:ring-red-500/30"
+                        : employeeIdRemoteValidation.checking
+                        ? "border-amber-400/70 focus:ring-amber-400/20"
                         : "border-slate-700 focus:border-amber-400 focus:ring-amber-400/20"
                     }`}
                     placeholder={t("team.add.memberIdPlaceholder")}
                   />
+                  {employeeIdRemoteValidation.checking &&
+                    !teamMemberIdDuplicateError && (
+                      <p className="mt-1 text-xs font-semibold text-amber-300">
+                        {t("team.validation.checkingMemberId")}
+                      </p>
+                    )}
                   {teamMemberIdDuplicateError && (
                     <p className="mt-1 text-xs font-semibold text-red-300">
-                      {teamMemberIdDuplicateError}
+                      {teamMemberIdValidationMessage}
                     </p>
                   )}
                 </div>
@@ -2985,11 +3178,13 @@ export default function TeamPage({
                   onClick={saveNewFueler}
                   disabled={
                     Boolean(teamMemberIdDuplicateError) ||
+                    employeeIdRemoteValidation.checking ||
                     !newFueler.id.trim() ||
                     (platformBootstrapMode && !newFueler.companyId)
                   }
                   className={`px-3 lg:px-4 py-2 rounded-lg font-semibold ${
                     teamMemberIdDuplicateError ||
+                    employeeIdRemoteValidation.checking ||
                     !newFueler.id.trim() ||
                     (platformBootstrapMode && !newFueler.companyId)
                       ? "bg-slate-700 text-slate-400 opacity-60 cursor-not-allowed"

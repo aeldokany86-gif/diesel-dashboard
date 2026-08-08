@@ -19,6 +19,34 @@ export async function createEmployeeRecord(payload) {
   return response.data;
 }
 
+export async function checkEmployeeIdAvailability({
+  employeeId,
+  companyId = "",
+} = {}) {
+  const normalizedEmployeeId = String(employeeId || "").trim();
+
+  if (!normalizedEmployeeId) {
+    return {
+      employeeId: "",
+      available: false,
+      status: "EMPTY",
+    };
+  }
+
+  const response = await api.get("/employees/check-id", {
+    params: {
+      employeeId: normalizedEmployeeId,
+      ...(companyId ? { companyId } : {}),
+    },
+  });
+
+  return response.data || {
+    employeeId: normalizedEmployeeId,
+    available: true,
+    status: "AVAILABLE",
+  };
+}
+
 export async function updateEmployeeRecord(employeeId, payload) {
   const response = await api.patch(`/employees/${employeeId}`, payload);
   return response.data;
