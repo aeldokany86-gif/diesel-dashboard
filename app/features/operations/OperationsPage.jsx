@@ -3027,79 +3027,79 @@ const payload = mapFrontendOperationToBackendPayload({
               </button>
             </div>
 
-            <div className="p-3 sm:p-5 overflow-auto max-h-[66vh]">
-              <table className="min-w-[1160px] lg:min-w-[1280px] xl:min-w-[1420px] 2xl:min-w-[1500px] w-full border-collapse text-[11px] sm:text-xs lg:text-sm">
-                <thead className="bg-slate-800 sticky top-0 z-[1] shadow-sm">
+            <div className="max-h-[66vh] overflow-x-scroll overflow-y-auto [scrollbar-gutter:stable_both-edges] overscroll-contain">
+              <table className="min-w-[1160px] lg:min-w-[1280px] xl:min-w-[1420px] 2xl:min-w-[1500px] w-full border-separate border-spacing-0 text-[11px] sm:text-xs lg:text-sm">
+                <thead className="relative z-30 shadow-sm">
                   <tr>
                     <Th
                   dir={language === "ar" ? "rtl" : "ltr"}
-                  className={`align-middle ${
+                  className={`sticky top-0 z-40 bg-slate-800 align-middle ${
                     language === "ar" ? "text-right" : "text-left"
                   }`}
                 >#</Th>
                     <Th
                   dir={language === "ar" ? "rtl" : "ltr"}
-                  className={`align-middle ${
+                  className={`sticky top-0 z-40 bg-slate-800 align-middle ${
                     language === "ar" ? "text-right" : "text-left"
                   }`}
                 >{t("operations.table.date")}</Th>
                     <Th
                   dir={language === "ar" ? "rtl" : "ltr"}
-                  className={`align-middle ${
+                  className={`sticky top-0 z-40 bg-slate-800 align-middle ${
                     language === "ar" ? "text-right" : "text-left"
                   }`}
                 >{t("operations.history.operationId")}</Th>
                     <Th
                   dir={language === "ar" ? "rtl" : "ltr"}
-                  className={`align-middle ${
+                  className={`sticky top-0 z-40 bg-slate-800 align-middle ${
                     language === "ar" ? "text-right" : "text-left"
                   }`}
                 >{t("operations.history.type")}</Th>
                     <Th
                   dir={language === "ar" ? "rtl" : "ltr"}
-                  className={`align-middle ${
+                  className={`sticky top-0 z-40 bg-slate-800 align-middle ${
                     language === "ar" ? "text-right" : "text-left"
                   }`}
                 >{t("operations.history.project")}</Th>
                     <Th
                   dir={language === "ar" ? "rtl" : "ltr"}
-                  className={`align-middle ${
+                  className={`sticky top-0 z-40 bg-slate-800 align-middle ${
                     language === "ar" ? "text-right" : "text-left"
                   }`}
                 >{t("operations.history.sourceExternal")}</Th>
                     <Th
                   dir={language === "ar" ? "rtl" : "ltr"}
-                  className={`align-middle ${
+                  className={`sticky top-0 z-40 bg-slate-800 align-middle ${
                     language === "ar" ? "text-right" : "text-left"
                   }`}
                 >{t("operations.history.fueler")}</Th>
                     <Th
                   dir={language === "ar" ? "rtl" : "ltr"}
-                  className={`align-middle ${
+                  className={`sticky top-0 z-40 bg-slate-800 align-middle ${
                     language === "ar" ? "text-right" : "text-left"
                   }`}
                 >{t("operations.table.equipment")}</Th>
                     <Th
                   dir={language === "ar" ? "rtl" : "ltr"}
-                  className={`align-middle ${
+                  className={`sticky top-0 z-40 bg-slate-800 align-middle ${
                     language === "ar" ? "text-right" : "text-left"
                   }`}
                 >{t("operations.history.liters")}</Th>
                     <Th
                   dir={language === "ar" ? "rtl" : "ltr"}
-                  className={`align-middle ${
+                  className={`sticky top-0 z-40 bg-slate-800 align-middle ${
                     language === "ar" ? "text-right" : "text-left"
                   }`}
                 >{t("operations.history.cost")}</Th>
                     <Th
                   dir={language === "ar" ? "rtl" : "ltr"}
-                  className={`align-middle ${
+                  className={`sticky top-0 z-40 bg-slate-800 align-middle ${
                     language === "ar" ? "text-right" : "text-left"
                   }`}
                 >{t("operations.history.odometer")}</Th>
                     <Th
                   dir={language === "ar" ? "rtl" : "ltr"}
-                  className={`align-middle ${
+                  className={`sticky top-0 z-40 bg-slate-800 align-middle ${
                     language === "ar" ? "text-right" : "text-left"
                   }`}
                 >{t("operations.history.photos")}</Th>

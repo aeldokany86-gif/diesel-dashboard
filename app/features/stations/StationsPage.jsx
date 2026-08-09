@@ -950,6 +950,17 @@ export default function StationsPage({
     "id",
   ]);
 
+  const externalSourceNameIndex = getHeaderIndex(headers, [
+    "external_station_name",
+    "External station name",
+    "external station name",
+    "externalStationName",
+    "supplier",
+    "supplier_name",
+    "Supplier",
+    "Supplier Name",
+  ]);
+
   const formatDisplayDate = (rawDate) => {
     if (!rawDate) return "-";
 
@@ -1017,6 +1028,25 @@ export default function StationsPage({
     }
 
     return "-";
+  };
+
+  const getStationHistorySourceDisplay = (row) => {
+    const operation = row?.__operation || {};
+    const type = typeIndex !== -1 ? row?.[typeIndex] : operation.type || "";
+
+    if (isSameText(type, "External_Supply")) {
+      return (
+        operation.externalSupplierName ||
+        operation.supplierName ||
+        operation.externalStationName ||
+        (externalSourceNameIndex !== -1
+          ? row?.[externalSourceNameIndex]
+          : "") ||
+        "-"
+      );
+    }
+
+    return sourceIndex !== -1 ? row?.[sourceIndex] || "-" : "-";
   };
 
   const getCurrentStationProject = (station) => station?.project || "-";
@@ -2612,19 +2642,19 @@ export default function StationsPage({
               </button>
             </div>
 
-            <div className="p-3 sm:p-5 overflow-auto max-h-[68vh]">
-              <table className="min-w-[820px] lg:min-w-[960px] xl:min-w-[1050px] w-full border-collapse text-[11px] sm:text-xs lg:text-sm">
-                <thead className="bg-slate-800 sticky top-0 z-[1] shadow-sm">
+            <div className="max-h-[68vh] overflow-x-scroll overflow-y-auto [scrollbar-gutter:stable_both-edges] overscroll-contain">
+              <table className="min-w-[820px] lg:min-w-[960px] xl:min-w-[1050px] w-full border-separate border-spacing-0 text-[11px] sm:text-xs lg:text-sm">
+                <thead className="relative z-30 shadow-sm">
                   <tr>
-                    <Th>#</Th>
-                    <Th className={isRtl ? "text-right" : "text-left"}>{t("stations.history.date")}</Th>
-                    <Th className={isRtl ? "text-right" : "text-left"}>{t("stations.history.operationId")}</Th>
-                    <Th className={isRtl ? "text-right" : "text-left"}>{t("stations.table.type")}</Th>
-                    <Th className={isRtl ? "text-right" : "text-left"}>{t("stations.history.direction")}</Th>
-                    <Th className={isRtl ? "text-right" : "text-left"}>{t("stations.history.source")}</Th>
-                    <Th className={isRtl ? "text-right" : "text-left"}>{t("stations.history.destination")}</Th>
-                    <Th className={isRtl ? "text-right" : "text-left"}>{t("stations.history.fueler")}</Th>
-                    <Th className={isRtl ? "text-right" : "text-left"}>{t("stations.history.qtyLiters")}</Th>
+                    <Th className="sticky top-0 z-40 bg-slate-800">#</Th>
+                    <Th className={`sticky top-0 z-40 bg-slate-800 ${isRtl ? "text-right" : "text-left"}`}>{t("stations.history.date")}</Th>
+                    <Th className={`sticky top-0 z-40 bg-slate-800 ${isRtl ? "text-right" : "text-left"}`}>{t("stations.history.operationId")}</Th>
+                    <Th className={`sticky top-0 z-40 bg-slate-800 ${isRtl ? "text-right" : "text-left"}`}>{t("stations.table.type")}</Th>
+                    <Th className={`sticky top-0 z-40 bg-slate-800 ${isRtl ? "text-right" : "text-left"}`}>{t("stations.history.direction")}</Th>
+                    <Th className={`sticky top-0 z-40 bg-slate-800 ${isRtl ? "text-right" : "text-left"}`}>{t("stations.history.source")}</Th>
+                    <Th className={`sticky top-0 z-40 bg-slate-800 ${isRtl ? "text-right" : "text-left"}`}>{t("stations.history.destination")}</Th>
+                    <Th className={`sticky top-0 z-40 bg-slate-800 ${isRtl ? "text-right" : "text-left"}`}>{t("stations.history.fueler")}</Th>
+                    <Th className={`sticky top-0 z-40 bg-slate-800 ${isRtl ? "text-right" : "text-left"}`}>{t("stations.history.qtyLiters")}</Th>
                   </tr>
                 </thead>
 
@@ -2675,7 +2705,7 @@ export default function StationsPage({
                             </span>
                           </Td>
 
-                          <Td>{row[sourceIndex] || "-"}</Td>
+                          <Td>{getStationHistorySourceDisplay(row)}</Td>
                           <Td>{row[destinationIndex] || "-"}</Td>
                           <Td>{fuelerIndex !== -1 ? row[fuelerIndex] || "-" : "-"}</Td>
                           <Td>{formatNumber(row[dieselIndex])}</Td>

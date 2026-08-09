@@ -37,6 +37,14 @@ import {
   makeTenantEntityKey,
 } from "../../lib/companyHelpers";
 
+import {
+  normalizeOperationAttachments,
+  getPhotoLabel,
+  getOperationTypeDisplay,
+} from "../../lib/operationHelpers";
+
+import { getUploadSignedUrl } from "../../services/operationsService";
+
 function notifyUser(showToastFn, type, message) {
   const safeType = type || "info";
   const safeMessage = String(message ?? "");
@@ -229,6 +237,8 @@ export default function TeamPage({
   const [savingLinkedUser, setSavingLinkedUser] = useState(false);
   const [showAddFueler, setShowAddFueler] = useState(false);
   const [selectedFuelerHistory, setSelectedFuelerHistory] = useState(null);
+  const [operationPhotoViewer, setOperationPhotoViewer] = useState(null);
+  const [operationPhotoViewerLoading, setOperationPhotoViewerLoading] = useState(false);
   const [fuelerAuditLog, setFuelerAuditLog] = useState([]);
   const [showFuelersSettings, setShowFuelersSettings] = useState(false);
   const [teamSearch, setTeamSearch] = useState("");
@@ -342,6 +352,26 @@ export default function TeamPage({
     "Odometer at fueling",
     "odometer at fueling",
     "odometer",
+  ]);
+
+  const projectIndex = getHeaderIndex(headers, [
+    "project_name",
+    "Project Name",
+    "project name",
+    "project",
+    "project_id",
+    "Project ID",
+  ]);
+
+  const externalStationNameIndex = getHeaderIndex(headers, [
+    "external_station_name",
+    "External station name",
+    "external station name",
+    "externalStationName",
+    "supplier",
+    "supplier_name",
+    "Supplier",
+    "Supplier Name",
   ]);
 
   const normalizeText = (value) => String(value || "").trim().toLowerCase();
@@ -615,16 +645,12 @@ export default function TeamPage({
     };
   });
 
-  const equipmentRefuelOperations =
-    typeIndex === -1
-      ? []
-      : data
-          .map((row, originalIndex) => ({ row, originalIndex }))
-          .filter(
-            (item) =>
-              isSameText(item.row[typeIndex], "Direct_Refuel") ||
-              isSameText(item.row[typeIndex], "External_Direct_Refuel")
-          );
+  // Full historical operation set. The employee is matched per operation,
+  // so this is not limited to the employee's current project or to refuel-only rows.
+  const allOperationRows = data.map((row, originalIndex) => ({
+    row,
+    originalIndex,
+  }));
 
   const getFuelerIdentityKeys = (fueler) => {
     const keys = [
@@ -646,8 +672,13 @@ export default function TeamPage({
 
     return [
       operation.fuelerEmployeeIdAtOperation,
+      operation.fuelerEmployeeBackendIdAtOperation,
+      operation.employeeIdAtOperation,
+      operation.employeeBackendIdAtOperation,
       linkedEmployee.employeeId,
+      linkedEmployee.id,
       requestedBy.employeeId,
+      requestedBy.linkedEmployeeId,
       operation.requestedByUserId,
       fuelerIndex !== -1 ? item?.row?.[fuelerIndex] : "",
     ]
@@ -655,13 +686,76 @@ export default function TeamPage({
       .filter(Boolean);
   };
 
-  const getFuelerOperations = (fueler) => {
-    if (typeIndex === -1) return [];
+  const getOperationProjectName = (item) => {
+    const row = item?.row || [];
+    const operation = row?.__operation || {};
 
+    return (
+      operation.projectNameAtOperation ||
+      operation.projectSnapshotName ||
+      operation.project?.name ||
+      operation.projectName ||
+      (projectIndex !== -1 ? row?.[projectIndex] : "") ||
+      operation.projectIdAtOperation ||
+      operation.projectSnapshotId ||
+      operation.projectId ||
+      "-"
+    );
+  };
+
+  const getOperationSourceDisplay = (item) => {
+    const row = item?.row || [];
+    const operation = row?.__operation || {};
+    const operationType =
+      typeIndex !== -1 ? row?.[typeIndex] : operation.type || "";
+
+    const isExternalSourceOperation =
+      isSameText(operationType, "External_Direct_Refuel") ||
+      isSameText(operationType, "External_Supply");
+
+    if (isExternalSourceOperation) {
+      return (
+        operation.externalStationName ||
+        operation.externalSupplierName ||
+        operation.supplierName ||
+        (externalStationNameIndex !== -1
+          ? row?.[externalStationNameIndex]
+          : "") ||
+        t("team.history.externalSource")
+      );
+    }
+
+    return sourceIndex !== -1 ? row?.[sourceIndex] || "-" : "-";
+  };
+
+  const getTranslatedPhotoLabel = (type) => {
+    const normalized = String(type || "photo")
+      .replace(/[\s_]+/g, "-")
+      .toLowerCase();
+
+    const keyMap = {
+      "source-meter": "sourceMeter",
+      "station-meter": "stationMeter",
+      "asset-meter": "assetMeter",
+      odometer: "odometer",
+      asset: "assetPhoto",
+      "asset-photo": "assetPhoto",
+      equipment: "equipmentPhoto",
+      invoice: "invoice",
+    };
+
+    const translationKey = keyMap[normalized];
+
+    return translationKey
+      ? t(`team.history.photoTypes.${translationKey}`)
+      : getPhotoLabel(type);
+  };
+
+  const getFuelerOperations = (fueler) => {
     const fuelerIdentityKeys = getFuelerIdentityKeys(fueler);
     if (fuelerIdentityKeys.size === 0) return [];
 
-    return equipmentRefuelOperations
+    return allOperationRows
       .filter((item) => {
         const operationFuelerKeys = getOperationFuelerIdentityKeys(item);
         return operationFuelerKeys.some((key) => fuelerIdentityKeys.has(key));
@@ -681,14 +775,122 @@ export default function TeamPage({
     }, 0);
   };
 
+  const getFuelerProjectsWorkedCount = (fueler) => {
+    const projectsWorked = new Set(
+      getFuelerOperations(fueler)
+        .map((item) => getOperationProjectName(item))
+        .map((value) => String(value || "").trim())
+        .filter((value) => value && value !== "-")
+    );
+
+    return projectsWorked.size;
+  };
+
+  const getOperationAttachmentsFromRow = (row) => {
+    const directAttachments = normalizeOperationAttachments(
+      row?.__attachments ||
+        row?.__operation?.attachments ||
+        row?.__operation?.requiredPhotos ||
+        row?.__operation?.photos
+    );
+
+    if (directAttachments.length) return directAttachments;
+
+    const backendOperationIdIndexSafe =
+      headers?.indexOf?.("backend_operation_id") ?? -1;
+    const operationNoIndexSafe =
+      operationIdIndex !== -1
+        ? operationIdIndex
+        : headers?.indexOf?.("operation_id") ?? -1;
+
+    const backendOperationId =
+      backendOperationIdIndexSafe !== -1
+        ? row?.[backendOperationIdIndexSafe]
+        : row?.__operation?.id || "";
+
+    const operationNo =
+      operationNoIndexSafe !== -1
+        ? row?.[operationNoIndexSafe]
+        : row?.__operation?.operationNo || row?.__operation?.id || "";
+
+    const matchedBackendRow = (data || []).find((candidateRow) => {
+      const candidateBackendId =
+        backendOperationIdIndexSafe !== -1
+          ? candidateRow?.[backendOperationIdIndexSafe]
+          : candidateRow?.__operation?.id || "";
+
+      const candidateOperationNo =
+        operationNoIndexSafe !== -1
+          ? candidateRow?.[operationNoIndexSafe]
+          : candidateRow?.__operation?.operationNo ||
+            candidateRow?.__operation?.id ||
+            "";
+
+      return (
+        (backendOperationId &&
+          String(candidateBackendId) === String(backendOperationId)) ||
+        (operationNo && String(candidateOperationNo) === String(operationNo))
+      );
+    });
+
+    return normalizeOperationAttachments(
+      matchedBackendRow?.__attachments ||
+        matchedBackendRow?.__operation?.attachments ||
+        matchedBackendRow?.__operation?.requiredPhotos ||
+        matchedBackendRow?.__operation?.photos
+    );
+  };
+
+  const openOperationPhotoViewer = async (row) => {
+    const attachments = getOperationAttachmentsFromRow(row);
+    const operationNo =
+      operationIdIndex !== -1
+        ? row?.[operationIdIndex]
+        : row?.__operation?.operationNo ||
+          row?.__operation?.id ||
+          "Operation";
+
+    if (!attachments.length) return;
+
+    setOperationPhotoViewer({
+      operationNo,
+      photos: attachments.map((attachment) => ({
+        ...attachment,
+        signedUrl: "",
+      })),
+    });
+    setOperationPhotoViewerLoading(true);
+
+    try {
+      const photos = await Promise.all(
+        attachments.map(async (attachment) => ({
+          ...attachment,
+          signedUrl: await getUploadSignedUrl(attachment.path, currentUser),
+        }))
+      );
+
+      setOperationPhotoViewer({ operationNo, photos });
+    } catch (error) {
+      notifyUser(
+        showToast,
+        "warning",
+        error?.message || t("team.history.photoLoadFailed")
+      );
+    } finally {
+      setOperationPhotoViewerLoading(false);
+    }
+  };
+
   const fuelersWithKpi = displayFuelers.map((fueler) => {
     const operations = getFuelerOperations(fueler);
     const dieselQty = getFuelerDieselQty(fueler);
+    const projectsWorkedCount = getFuelerProjectsWorkedCount(fueler);
 
     return {
       ...fueler,
       operationsCount: operations.length,
       dieselQty,
+      projectsWorkedCount,
     };
   });
 
@@ -2188,15 +2390,6 @@ export default function TeamPage({
               {t("team.subtitle")}
             </p>
           </div>
-
-          {hasPermission("team", "add") && (
-            <button
-              onClick={() => setShowAddFueler(true)}
-              className="bg-yellow-500 hover:bg-yellow-400 text-black px-3 lg:px-4 py-2 rounded-lg font-semibold transition"
-            >
-              {t("team.actions.addMember")}
-            </button>
-          )}
         </div>
 
         <div className="grid grid-cols-1 sm:grid-cols-2 2xl:grid-cols-4 gap-3 mb-4">
@@ -2247,6 +2440,24 @@ export default function TeamPage({
 
                 {showFuelersSettings && (
                   <div className={`absolute mt-2 w-44 bg-slate-950 border border-slate-700 rounded-xl shadow-2xl z-[9999] overflow-hidden ${isRtl ? "left-0" : "right-0"}`}>
+                  {hasPermission("team", "add") && (
+                    <button
+                      type="button"
+                      onClick={() => {
+                        setShowFuelersSettings(false);
+                        setShowAddFueler(true);
+                      }}
+                      className={`w-full px-4 py-3 ${
+                        isRtl ? "text-right" : "text-left"
+                      } text-sm font-medium text-slate-100 hover:bg-slate-800/80 hover:text-amber-300 transition flex items-center gap-2 border-b border-slate-800 whitespace-nowrap`}
+                    >
+                        <span className="whitespace-nowrap">
+                        {t("team.actions.addMember")}
+                      </span>
+                    </button>
+                  )}
+
+
                     <button
                       onClick={() => {
                         exportFuelersCSV();
@@ -2337,7 +2548,7 @@ export default function TeamPage({
                       title={t("team.actions.selectAllVisible")}
                     />
                   </Th>
-                  <Th>#</Th>
+                  <Th className="sticky top-0 z-30 bg-slate-800">#</Th>
                   <Th className={isRtl ? "text-right" : "text-left"}>{t("team.table.memberId")}</Th>
                   <Th className={isRtl ? "text-right" : "text-left"}>{t("team.table.name")}</Th>
                   {platformBootstrapMode && <Th className={isRtl ? "text-right" : "text-left"}>{t("team.table.company")}</Th>}
@@ -2953,97 +3164,264 @@ export default function TeamPage({
               dir={isRtl ? "rtl" : "ltr"}
               className="fleet-portal-modal-backdrop fixed inset-0 bg-black/75 backdrop-blur-sm flex items-center justify-center p-3"
             >
-              <div className="fleet-portal-modal-panel bg-gray-900 text-white w-[min(1150px,calc(100vw-2rem))] max-h-[88vh] rounded-3xl shadow-2xl border border-gray-700 overflow-hidden">
-              <div className="p-3 sm:p-5 border-b border-gray-700 flex justify-between items-start gap-3">
-                <div>
-                  <h2 className="text-xl sm:text-2xl font-bold text-yellow-400 italic underline">
-                    {t("team.history.title")}
-                  </h2>
-                  <p className="text-gray-400 mt-1">
-                    Team Member: {" "}
-                    <span className="text-blue-300 font-semibold">
-                      {selectedFuelerHistory.id} - {selectedFuelerHistory.name}
-                    </span>
-                  </p>
-                  <p className="text-xs text-gray-500 mt-1">
-                    Read-only view based on Direct and External Direct Refuel operations
-                  </p>
+              <div className="fleet-portal-modal-panel bg-gray-900 text-white w-[min(1180px,calc(100vw-2rem))] h-[88vh] max-h-[88vh] rounded-3xl shadow-2xl border border-gray-700 overflow-hidden flex flex-col">
+                <div className="shrink-0 border-b border-gray-700 px-4 py-3 sm:px-5">
+                  <div className="flex flex-col xl:flex-row xl:items-center justify-between gap-3">
+                    <div className="min-w-0 flex-1">
+                      <div className="flex items-start justify-between gap-3">
+                        <div className="min-w-0">
+                          <h2 className="text-xl sm:text-2xl font-bold text-yellow-400 italic underline">
+                            {t("team.history.title")}
+                          </h2>
+                          <p className="text-gray-400 mt-1">
+                            {t("team.history.teamMember")}:{" "}
+                            <span className="text-blue-300 font-semibold">
+                              {selectedFuelerHistory.id} - {selectedFuelerHistory.name}
+                            </span>
+                          </p>
+                          <p className="text-xs text-gray-500 mt-1">
+                            {t("team.history.auditDescription")}
+                          </p>
+                        </div>
+
+                        <button
+                          onClick={() => setSelectedFuelerHistory(null)}
+                          className="xl:hidden shrink-0 text-gray-400 hover:text-red-400 text-2xl"
+                          aria-label={t("common.close")}
+                        >
+                          ×
+                        </button>
+                      </div>
+                    </div>
+
+                    <div className="flex items-stretch gap-2 sm:gap-3">
+                      <div className="min-w-[120px] rounded-xl border border-slate-700 bg-slate-950/70 px-3 py-2">
+                        <p className="text-[10px] sm:text-[11px] text-slate-400">
+                          {t("team.history.totalOperations")}
+                        </p>
+                        <p className="mt-1 text-lg sm:text-xl font-black text-slate-100">
+                          {formatNumber(selectedFuelerHistory.operationsCount)}
+                        </p>
+                      </div>
+
+                      <div className="min-w-[135px] rounded-xl border border-slate-700 bg-slate-950/70 px-3 py-2">
+                        <p className="text-[10px] sm:text-[11px] text-slate-400">
+                          {t("team.history.dieselQuantity")}
+                        </p>
+                        <p className="mt-1 text-lg sm:text-xl font-black text-slate-100">
+                          {formatNumber(selectedFuelerHistory.dieselQty)}
+                        </p>
+                      </div>
+
+                      <div className="min-w-[120px] rounded-xl border border-slate-700 bg-slate-950/70 px-3 py-2">
+                        <p className="text-[10px] sm:text-[11px] text-slate-400">
+                          {t("team.history.projectsWorked")}
+                        </p>
+                        <p className="mt-1 text-lg sm:text-xl font-black text-slate-100">
+                          {formatNumber(selectedFuelerHistory.projectsWorkedCount)}
+                        </p>
+                      </div>
+
+                      <button
+                        onClick={() => setSelectedFuelerHistory(null)}
+                        className="hidden xl:flex h-10 w-10 shrink-0 items-center justify-center text-gray-400 hover:text-red-400 text-2xl"
+                        aria-label={t("common.close")}
+                      >
+                        ×
+                      </button>
+                    </div>
+                  </div>
                 </div>
 
-                <button
-                  onClick={() => setSelectedFuelerHistory(null)}
-                  className="text-gray-400 hover:text-red-400 text-2xl"
-                >
-                  ×
-                </button>
-              </div>
-
-              <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-3 p-3 sm:p-4 lg:p-5 border-b border-gray-700 bg-gray-950/40">
-                <Card
-                  title="Equipment Refuel Operations"
-                  value={formatNumber(selectedFuelerHistory.operationsCount)}
-                />
-                <Card
-                  title="Diesel Quantity (L)"
-                  value={formatNumber(selectedFuelerHistory.dieselQty)}
-                />
-                <Card
-                  title="Project"
-                  value={selectedFuelerHistory.projectName || "-"}
-                />
-              </div>
-
-              <div className="p-3 sm:p-5 overflow-auto max-h-[52vh]">
-                <table className="min-w-[820px] lg:min-w-[960px] xl:min-w-[1050px] w-full border-collapse text-[11px] sm:text-xs lg:text-sm">
-                  <thead className="bg-slate-800 sticky top-0 z-[1] shadow-sm">
-                    <tr>
-                      <Th>#</Th>
-                      <Th className={isRtl ? "text-right" : "text-left"}>{t("team.history.date")}</Th>
-                      <Th className={isRtl ? "text-right" : "text-left"}>{t("team.history.operationId")}</Th>
-                      <Th className={isRtl ? "text-right" : "text-left"}>{t("team.history.source")}</Th>
-                      <Th className={isRtl ? "text-right" : "text-left"}>{t("team.history.destination")}</Th>
-                      <Th className={isRtl ? "text-right" : "text-left"}>{t("team.history.qtyLiters")}</Th>
-                      <Th className={isRtl ? "text-right" : "text-left"}>{t("team.history.odometer")}</Th>
-                      <Th className={isRtl ? "text-right" : "text-left"}>{t("team.history.type")}</Th>
-                    </tr>
-                  </thead>
-
-                  <tbody>
-                    {getFuelerOperations(selectedFuelerHistory).map((item, i) => {
-                      const row = item.row;
-
-                      return (
-                        <tr key={item.originalIndex} className="hover:bg-slate-800/70 transition-colors duration-150">
-                          <Td>{i + 1}</Td>
-                          <Td>{dateIndex !== -1 ? formatDisplayDate(row[dateIndex]) : "-"}</Td>
-                          <Td>
-                            {operationIdIndex !== -1
-                              ? row[operationIdIndex] || "-"
-                              : item.originalIndex + 1}
-                          </Td>
-                          <Td>{sourceIndex !== -1 ? row[sourceIndex] || "-" : "-"}</Td>
-                          <Td>
-                            {destinationIndex !== -1 ? row[destinationIndex] || "-" : "-"}
-                          </Td>
-                          <Td>
-                            {dieselIndex !== -1 ? formatNumber(row[dieselIndex]) : "-"} L
-                          </Td>
-                          <Td>
-                            {odometerIndex !== -1 ? formatNumber(row[odometerIndex]) : "-"}
-                          </Td>
-                          <Td>{typeIndex !== -1 ? row[typeIndex] || "-" : "-"}</Td>
-                        </tr>
-                      );
-                    })}
-
-                    {getFuelerOperations(selectedFuelerHistory).length === 0 && (
+                <div className="min-h-0 flex-1 overflow-x-scroll overflow-y-auto [scrollbar-gutter:stable_both-edges] overscroll-contain">
+                  <table className="min-w-[1240px] w-full border-separate border-spacing-0 text-[11px] sm:text-xs lg:text-sm">
+                    <thead>
                       <tr>
-                        <Td colSpan={8}>{t("team.history.none")}</Td>
+                        <Th className="sticky top-0 z-40 bg-slate-800">#</Th>
+                        <Th className={`sticky top-0 z-40 bg-slate-800 ${isRtl ? "text-right" : "text-left"}`}>
+                          {t("team.history.date")}
+                        </Th>
+                        <Th className={`sticky top-0 z-40 bg-slate-800 ${isRtl ? "text-right" : "text-left"}`}>
+                          {t("team.history.operationId")}
+                        </Th>
+                        <Th className={`sticky top-0 z-40 bg-slate-800 ${isRtl ? "text-right" : "text-left"}`}>
+                          {t("team.history.photos")}
+                        </Th>
+                        <Th className={`sticky top-0 z-40 bg-slate-800 ${isRtl ? "text-right" : "text-left"}`}>
+                          {t("team.history.project")}
+                        </Th>
+                        <Th className={`sticky top-0 z-40 bg-slate-800 ${isRtl ? "text-right" : "text-left"}`}>
+                          {t("team.history.type")}
+                        </Th>
+                        <Th className={`sticky top-0 z-40 bg-slate-800 ${isRtl ? "text-right" : "text-left"}`}>
+                          {t("team.history.source")}
+                        </Th>
+                        <Th className={`sticky top-0 z-40 bg-slate-800 ${isRtl ? "text-right" : "text-left"}`}>
+                          {t("team.history.destination")}
+                        </Th>
+                        <Th className={`sticky top-0 z-40 bg-slate-800 ${isRtl ? "text-right" : "text-left"}`}>
+                          {t("team.history.qtyLiters")}
+                        </Th>
+                        <Th className={`sticky top-0 z-40 bg-slate-800 ${isRtl ? "text-right" : "text-left"}`}>
+                          {t("team.history.odometer")}
+                        </Th>
                       </tr>
-                    )}
-                  </tbody>
-                </table>
+                    </thead>
+
+                    <tbody>
+                      {getFuelerOperations(selectedFuelerHistory).map((item, i) => {
+                        const row = item.row;
+                        const operationType =
+                          typeIndex !== -1
+                            ? row[typeIndex]
+                            : row?.__operation?.type || "-";
+                        const attachments = getOperationAttachmentsFromRow(row);
+
+                        return (
+                          <tr
+                            key={item.originalIndex}
+                            className="hover:bg-slate-800/70 transition-colors duration-150"
+                          >
+                            <Td>{i + 1}</Td>
+                            <Td>
+                              {dateIndex !== -1
+                                ? formatDisplayDate(row[dateIndex])
+                                : "-"}
+                            </Td>
+                            <Td>
+                              {operationIdIndex !== -1
+                                ? row[operationIdIndex] || "-"
+                                : row?.__operation?.operationNo ||
+                                  item.originalIndex + 1}
+                            </Td>
+                            <Td>
+                              {attachments.length ? (
+                                <button
+                                  type="button"
+                                  onClick={() => openOperationPhotoViewer(row)}
+                                  className="inline-flex h-8 min-w-8 items-center justify-center rounded-lg bg-amber-400 px-2 font-bold text-slate-950 transition hover:bg-amber-300"
+                                  title={t("team.history.viewPhotos")}
+                                >
+                                  📷
+                                </button>
+                              ) : (
+                                <span className="text-slate-500">-</span>
+                              )}
+                            </Td>
+                            <Td>{getOperationProjectName(item)}</Td>
+                            <Td>{getOperationTypeDisplay(operationType, t)}</Td>
+                            <Td>{getOperationSourceDisplay(item)}</Td>
+                            <Td>
+                              {destinationIndex !== -1
+                                ? row[destinationIndex] || "-"
+                                : "-"}
+                            </Td>
+                            <Td>
+                              {dieselIndex !== -1 &&
+                              Number.isFinite(Number(row[dieselIndex]))
+                                ? `${formatNumber(row[dieselIndex])} L`
+                                : "-"}
+                            </Td>
+                            <Td>
+                              {odometerIndex !== -1 &&
+                              row[odometerIndex] !== undefined &&
+                              row[odometerIndex] !== null &&
+                              row[odometerIndex] !== ""
+                                ? formatNumber(row[odometerIndex])
+                                : "-"}
+                            </Td>
+                          </tr>
+                        );
+                      })}
+
+                      {getFuelerOperations(selectedFuelerHistory).length === 0 && (
+                        <tr>
+                          <Td colSpan={10}>{t("team.history.none")}</Td>
+                        </tr>
+                      )}
+                    </tbody>
+                  </table>
+                </div>
               </div>
+            </div>
+          </ModalPortal>
+        )}
+
+        {operationPhotoViewer && (
+          <ModalPortal>
+            <div
+              dir={isRtl ? "rtl" : "ltr"}
+              className="fleet-portal-modal-backdrop fixed inset-0 bg-black/80 backdrop-blur-sm flex items-center justify-center p-3"
+            >
+              <div className="fleet-portal-modal-panel bg-slate-950 text-white w-full max-w-[min(980px,calc(100vw-2rem))] max-h-[92vh] rounded-3xl shadow-2xl border border-slate-700 overflow-hidden">
+                <div className="p-4 border-b border-slate-700 flex items-start justify-between gap-3">
+                  <div>
+                    <h2 className="text-xl font-bold text-yellow-400 italic underline">
+                      {t("operations.photos.title")}
+                    </h2>
+                    <p className="text-gray-400 mt-1">
+                      {t("operations.photos.operation")}:{" "}
+                      <span className="text-blue-300 font-semibold">
+                        {operationPhotoViewer.operationNo}
+                      </span>
+                    </p>
+                  </div>
+
+                  <button
+                    onClick={() => setOperationPhotoViewer(null)}
+                    className="text-gray-400 hover:text-red-400 text-2xl"
+                    aria-label={t("common.close")}
+                  >
+                    ×
+                  </button>
+                </div>
+
+                <div className="p-4 overflow-auto max-h-[75vh]">
+                  {operationPhotoViewerLoading ? (
+                    <div className="text-center text-slate-300 py-10">
+                      {t("operations.photos.loading")}
+                    </div>
+                  ) : operationPhotoViewer.photos?.length ? (
+                    <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-4">
+                      {operationPhotoViewer.photos.map((photo, index) => (
+                        <div
+                          key={`${photo.path}-${index}`}
+                          className="bg-slate-900 border border-slate-700 rounded-2xl overflow-hidden"
+                        >
+                          <div className="px-3 py-2 border-b border-slate-700 text-sm font-bold text-amber-300">
+                            {getTranslatedPhotoLabel(photo.type || photo.photoType)}
+                          </div>
+
+                          {photo.signedUrl ? (
+                            <a
+                              href={photo.signedUrl}
+                              target="_blank"
+                              rel="noreferrer"
+                            >
+                              <img
+                                src={photo.signedUrl}
+                                alt={getTranslatedPhotoLabel(photo.type || photo.photoType)}
+                                className="w-full h-64 object-contain bg-black"
+                              />
+                            </a>
+                          ) : (
+                            <div className="h-64 flex items-center justify-center text-red-300 bg-black/40">
+                              {t("operations.photos.loadFailed")}
+                            </div>
+                          )}
+
+                          <div className="p-3 text-[11px] text-slate-400 break-all">
+                            {photo.path}
+                          </div>
+                        </div>
+                      ))}
+                    </div>
+                  ) : (
+                    <div className="text-center text-slate-400 py-10">
+                      {t("operations.photos.none")}
+                    </div>
+                  )}
+                </div>
               </div>
             </div>
           </ModalPortal>
