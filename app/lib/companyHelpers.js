@@ -105,6 +105,7 @@ export const PLATFORM_COMPANY_OPTION = {
   timezone: "Asia/Riyadh",
   language: "EN-AR",
   status: "Active",
+  dataImportEnabled: false,
   isPlatformContext: true,
 };
 
@@ -187,6 +188,7 @@ export function normalizeCompanyForState(company = {}) {
     subscriptionPlan: company.subscriptionPlan || "trial",
     status: isActive ? "Active" : "Inactive",
     isActive,
+    dataImportEnabled: Boolean(company.dataImportEnabled),
     isPlatformContext: Boolean(company.isPlatformContext) || isPlatformCompany(company),
     createdAt: company.createdAt || "",
     updatedAt: company.updatedAt || "",

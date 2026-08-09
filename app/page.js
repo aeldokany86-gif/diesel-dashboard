@@ -33,6 +33,7 @@ import CompaniesPage, {
 import NotificationCenterPage from "./features/notifications/NotificationCenterPage";
 import AuditTimelinePage from "./features/audit/AuditTimelinePage";
 import ReportsPage from "./features/reports/ReportsPage";
+import DataImportCenterPage from "./features/imports/DataImportCenterPage";
 
 import {
   normalizeSystemUserStatus,
@@ -83,6 +84,7 @@ import {
   fetchCompanies,
   fetchPublicCompanies,
 } from "./services/companiesService";
+import { fetchDataImportAccess } from "./services/importsService";
 
 import {
   fetchAssets,
@@ -718,6 +720,7 @@ export default function Home() {
   const [fuelers, setFuelers] = useState([]);
   const [projects, setProjects] = useState([]);
   const [companies, setCompanies] = useState([]);
+  const [companyAdminDataImportAllowed, setCompanyAdminDataImportAllowed] = useState(false);
 
   const [assetProjectHistory, setAssetProjectHistory] = useState([]);
   const [assetOdometerHistory, setAssetOdometerHistory] = useState([]);
@@ -3023,12 +3026,19 @@ export default function Home() {
       try {
         const fetchBackendCompanies = async () => {
           try {
-            const backendCompanies = await fetchPublicCompanies();
+            // Platform User must load the protected companies payload so
+            // platform-only fields such as dataImportEnabled are preserved
+            // after reload/login. Other users continue using the public list.
+            const backendCompanies = isPlatformAdminUser(currentUser)
+              ? await fetchCompanies()
+              : await fetchPublicCompanies();
 
             return mergePlatformConsoleWithCompanies(backendCompanies);
           } catch (error) {
             console.warn(
-              "Public companies API is not available. Using Platform Console fallback only.",
+              isPlatformAdminUser(currentUser)
+                ? "Protected companies API is not available. Using Platform Console fallback only."
+                : "Public companies API is not available. Using Platform Console fallback only.",
               error,
             );
 
@@ -3196,6 +3206,7 @@ export default function Home() {
                 ? "Inactive"
                 : company.status || "Active",
             isActive: company.isActive !== false,
+            dataImportEnabled: Boolean(company.dataImportEnabled),
             isPlatformContext:
               Boolean(company.isPlatformContext) || isPlatformCompany(company),
             createdAt: company.createdAt || "",
@@ -3286,6 +3297,44 @@ export default function Home() {
       companyMatches(company.code, currentCompanyId) ||
       companyMatches(company.name, currentCompanyId),
   );
+
+  useEffect(() => {
+    let cancelled = false;
+
+    async function checkCompanyAdminDataImportAccess() {
+      if (!backendIsLoggedIn || !currentUser?.id) {
+        if (!cancelled) setCompanyAdminDataImportAllowed(false);
+        return;
+      }
+
+      if (currentUser.role === "PlatformAdmin") {
+        if (!cancelled) setCompanyAdminDataImportAllowed(true);
+        return;
+      }
+
+      if (currentUser.role !== "Admin") {
+        if (!cancelled) setCompanyAdminDataImportAllowed(false);
+        return;
+      }
+
+      try {
+        await fetchDataImportAccess();
+        if (!cancelled) setCompanyAdminDataImportAllowed(true);
+      } catch (_error) {
+        if (!cancelled) setCompanyAdminDataImportAllowed(false);
+      }
+    }
+
+    checkCompanyAdminDataImportAccess();
+
+    return () => {
+      cancelled = true;
+    };
+  }, [backendIsLoggedIn, currentUser?.id, currentUser?.role, currentUser?.companyId]);
+
+  const canOpenDataImportCenter =
+    currentUser?.role === "PlatformAdmin" ||
+    (currentUser?.role === "Admin" && companyAdminDataImportAllowed);
 
   const companyUsers = isPlatformAdminUser(currentUser)
     ? isPlatformConsoleContext
@@ -4403,6 +4452,27 @@ export default function Home() {
       );
     }
 
+    if (page === "dataImport") {
+      if (!canOpenDataImportCenter) {
+        return (
+          <div className="min-h-screen p-6 text-slate-100">
+            <div className="rounded-2xl border border-red-500/30 bg-red-500/10 p-5 text-red-300 font-bold">
+              {t("dataImport.messages.notAvailable")}
+            </div>
+          </div>
+        );
+      }
+
+      return (
+        <DataImportCenterPage
+          currentUser={currentUser}
+          companies={companies}
+          contextCompanyId={selectedCompanyId}
+          showToast={showToast}
+        />
+      );
+    }
+
     if (page === "reports") {
       return (
         <ReportsPage
@@ -5224,6 +5294,20 @@ export default function Home() {
                       <button type="button" onClick={() => setActiveSettingsSection("language")} className="w-full flex items-center justify-between px-4 py-3 text-sm text-slate-200 border-t border-slate-700 hover:bg-slate-800 transition-colors">
                         <span>{t("common.language")}</span><span className="text-slate-500">›</span>
                       </button>
+                      {canOpenDataImportCenter && (
+                        <button
+                          type="button"
+                          onClick={() => {
+                            setPage("dataImport");
+                            setShowSettingsMenu(false);
+                            setActiveSettingsSection(null);
+                          }}
+                          className="w-full flex items-center justify-between px-4 py-3 text-sm text-slate-200 border-t border-slate-700 hover:bg-slate-800 transition-colors"
+                        >
+                          <span>{t("dataImport.title")}</span>
+                          <span className="text-slate-500">›</span>
+                        </button>
+                      )}
                     </>
                   ) : activeSettingsSection === "theme" ? (
                     <>
@@ -5295,6 +5379,19 @@ export default function Home() {
                 <>
                   <button type="button" onClick={() => setActiveSettingsSection("theme")} className="w-full flex items-center justify-between px-4 py-3 text-sm text-slate-200 hover:bg-slate-800 transition-colors"><span>{t("common.theme")}</span><span className="text-slate-500">›</span></button>
                   <button type="button" onClick={() => setActiveSettingsSection("language")} className="w-full flex items-center justify-between px-4 py-3 text-sm text-slate-200 border-t border-slate-700 hover:bg-slate-800 transition-colors"><span>{t("common.language")}</span><span className="text-slate-500">›</span></button>
+                  {canOpenDataImportCenter && (
+                    <button
+                      type="button"
+                      onClick={() => {
+                        setPage("dataImport");
+                        setShowSettingsMenu(false);
+                        setActiveSettingsSection(null);
+                      }}
+                      className="w-full flex items-center justify-between px-4 py-3 text-sm text-slate-200 border-t border-slate-700 hover:bg-slate-800 transition-colors"
+                    >
+                      <span>{t("dataImport.title")}</span><span className="text-slate-500">›</span>
+                    </button>
+                  )}
                 </>
               ) : activeSettingsSection === "theme" ? (
                 <>

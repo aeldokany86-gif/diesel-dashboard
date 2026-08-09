@@ -39,6 +39,19 @@ export async function updateCompanyStatus(companyId, isActive) {
   return response.data;
 }
 
+export async function updateCompanyDataImportAccess(companyId, enabled) {
+  if (!companyId) {
+    throw new Error("Company backend ID is required.");
+  }
+
+  const response = await api.patch(`/companies/${companyId}/data-import-access`, {
+    enabled: Boolean(enabled),
+  });
+
+  return response.data;
+}
+
+
 
 export async function fetchCompaniesMasterReport(params = {}) {
   const response = await api.get("/companies/reports/master", {

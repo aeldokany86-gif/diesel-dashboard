@@ -41,6 +41,7 @@ import {
   createCompanyRecord,
   updateCompanyRecord,
   updateCompanyStatus,
+  updateCompanyDataImportAccess,
 } from "../../services/companiesService";
 
 const COMPANY_CONTEXT_STORAGE_KEY = "fleetfuelpro_company_context";
@@ -127,7 +128,9 @@ function useOutsideClick(ref, callback) {
 }
 
 export default function CompaniesPage({ companies = [], setCompanies, currentUser, contextCompanyId = "", showToast }) {
+  const { t } = useLanguage();
   const [search, setSearch] = useState("");
+  const [updatingDataImportCompanyId, setUpdatingDataImportCompanyId] = useState("");
   const [settingsOpen, setSettingsOpen] = useState(false);
   const [selectedCompanyId, setSelectedCompanyId] = useState(() => {
     if (typeof window === "undefined") return "";
@@ -382,6 +385,83 @@ export default function CompaniesPage({ companies = [], setCompanies, currentUse
         error?.response?.data?.message || "Failed to update company status."
       );
     }
+  };
+
+  const executeDataImportAccessChange = async (company, enabled) => {
+    if (!company?.id || company.isPlatformContext) return;
+
+    setUpdatingDataImportCompanyId(company.id);
+
+    try {
+      const updatedCompanyData = await updateCompanyDataImportAccess(
+        company.id,
+        enabled,
+      );
+      const updatedCompany = normalizeCompanyForState(updatedCompanyData);
+
+      setCompanies((prev) =>
+        mergePlatformConsoleWithCompanies(
+          prev
+            .filter((item) => !item.isPlatformContext)
+            .map((item) =>
+              item.id === updatedCompany.id ? updatedCompany : item,
+            ),
+        )
+          .map(normalizeCompanyForState)
+          .filter((item) => item.id),
+      );
+
+      notifyUser(
+        showToast,
+        "success",
+        enabled
+          ? t("dataImport.messages.accessEnabled")
+          : t("dataImport.messages.accessDisabled"),
+      );
+    } catch (error) {
+      logHandledApiIssue("Failed to update Data Import access", error);
+      notifyUser(
+        showToast,
+        "warning",
+        error?.response?.data?.message ||
+          t("dataImport.messages.accessUpdateFailed"),
+      );
+    } finally {
+      setUpdatingDataImportCompanyId("");
+    }
+  };
+
+  const handleToggleDataImportAccess = (company) => {
+    if (!canManageCompanies) {
+      notifyUser(
+        showToast,
+        "warning",
+        t("dataImport.messages.platformOnlyAccessControl"),
+      );
+      return;
+    }
+
+    if (!company || company.isPlatformContext) return;
+
+    const nextEnabled = !Boolean(company.dataImportEnabled);
+    const companyName = company.name || company.id;
+
+    setCompanyConfirmModal({
+      open: true,
+      title: nextEnabled
+        ? t("dataImport.confirm.enableTitle")
+        : t("dataImport.confirm.disableTitle"),
+      message: nextEnabled
+        ? t("dataImport.confirm.enableMessage", { company: companyName })
+        : t("dataImport.confirm.disableMessage", { company: companyName }),
+      confirmLabel: nextEnabled
+        ? t("dataImport.actions.enable")
+        : t("dataImport.actions.disable"),
+      confirmTone: nextEnabled ? "emerald" : "red",
+      onConfirm: async () => {
+        await executeDataImportAccessChange(company, nextEnabled);
+      },
+    });
   };
 
   const closeCompanyConfirmModal = () => {
@@ -679,6 +759,7 @@ export default function CompaniesPage({ companies = [], setCompanies, currentUse
                 <th className="text-left p-3">Timezone</th>
                 <th className="text-left p-3">Language</th>
                 <th className="text-left p-3">Status</th>
+                <th className="text-left p-3">{t("dataImport.accessLabel")}</th>
               </tr>
             </thead>
             <tbody>
@@ -733,13 +814,39 @@ export default function CompaniesPage({ companies = [], setCompanies, currentUse
                         {isActive ? "Active" : "Inactive"}
                       </button>
                     </td>
+                    <td className="p-3">
+                      {company.isPlatformContext ? (
+                        <span className="text-xs font-bold text-slate-500">—</span>
+                      ) : (
+                        <button
+                          type="button"
+                          disabled={updatingDataImportCompanyId === company.id}
+                          onClick={(event) => {
+                            event.stopPropagation();
+                            handleToggleDataImportAccess(company);
+                          }}
+                          className={`rounded-full px-3 py-1 text-xs font-black border transition disabled:cursor-wait disabled:opacity-60 ${
+                            company.dataImportEnabled
+                              ? "bg-emerald-500/10 text-emerald-300 border-emerald-500/30 hover:bg-emerald-500/20"
+                              : "bg-slate-500/10 text-slate-300 border-slate-500/30 hover:bg-slate-500/20"
+                          }`}
+                          title={t("dataImport.accessToggleHelp")}
+                        >
+                          {updatingDataImportCompanyId === company.id
+                            ? t("common.saving")
+                            : company.dataImportEnabled
+                              ? t("dataImport.enabled")
+                              : t("dataImport.disabled")}
+                        </button>
+                      )}
+                    </td>
                   </tr>
                 );
               })}
 
               {!visibleCompanies.length && (
                 <tr>
-                  <td colSpan={7} className="p-8 text-center text-slate-500">
+                  <td colSpan={8} className="p-8 text-center text-slate-500">
                     No companies found. Add companies from Settings using the backend Companies API.
                   </td>
                 </tr>
