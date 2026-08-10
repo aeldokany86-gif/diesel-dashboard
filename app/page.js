@@ -4469,6 +4469,7 @@ export default function Home() {
           companies={companies}
           contextCompanyId={selectedCompanyId}
           showToast={showToast}
+          onProjectsImported={() => refreshBackendProjects()}
         />
       );
     }
