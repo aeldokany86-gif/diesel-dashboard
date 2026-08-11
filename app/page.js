@@ -4500,6 +4500,8 @@ export default function Home() {
           onEmployeesImported={(companyId) =>
             refreshBackendEmployees(companyId, currentUser?.id || "")
           }
+          onAssetsImported={() => refreshBackendAssets()}
+          onStationsImported={() => refreshBackendStations()}
         />
       );
     }

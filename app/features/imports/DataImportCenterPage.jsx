@@ -8,12 +8,16 @@ import {
   isPlatformContextValue,
 } from "../../lib/companyHelpers";
 import {
+  downloadAssetsImportTemplate,
   downloadEmployeesImportTemplate,
   downloadProjectsImportTemplate,
+  downloadStationsImportTemplate,
   fetchDataImportAccess,
   fetchImportPreview,
+  uploadAssetsImport,
   uploadEmployeesImport,
   uploadProjectsImport,
+  uploadStationsImport,
   validateImportBatch,
 } from "../../services/importsService";
 import ImportPreviewPage from "./ImportPreviewPage";
@@ -33,10 +37,14 @@ export default function DataImportCenterPage({
   showToast,
   onProjectsImported,
   onEmployeesImported,
+  onAssetsImported,
+  onStationsImported,
 }) {
   const { t } = useLanguage();
   const projectsFileInputRef = useRef(null);
   const employeesFileInputRef = useRef(null);
+  const assetsFileInputRef = useRef(null);
+  const stationsFileInputRef = useRef(null);
   const isPlatformUser = isPlatformAdminUser(currentUser);
 
   const availableCompanies = useMemo(
@@ -65,6 +73,8 @@ export default function DataImportCenterPage({
   const [workflows, setWorkflows] = useState({
     projects: { batch: null, fileName: "" },
     employees: { batch: null, fileName: "" },
+    assets: { batch: null, fileName: "" },
+    stations: { batch: null, fileName: "" },
   });
   const [preview, setPreview] = useState(null);
   const [previewModule, setPreviewModule] = useState("");
@@ -84,6 +94,8 @@ export default function DataImportCenterPage({
   const refs = {
     projects: projectsFileInputRef,
     employees: employeesFileInputRef,
+    assets: assetsFileInputRef,
+    stations: stationsFileInputRef,
   };
 
   function resetWorkflow(moduleKey = "") {
@@ -92,6 +104,8 @@ export default function DataImportCenterPage({
         return {
           projects: { batch: null, fileName: "" },
           employees: { batch: null, fileName: "" },
+          assets: { batch: null, fileName: "" },
+          stations: { batch: null, fileName: "" },
         };
       }
 
@@ -108,6 +122,8 @@ export default function DataImportCenterPage({
     if (!moduleKey) {
       if (projectsFileInputRef.current) projectsFileInputRef.current.value = "";
       if (employeesFileInputRef.current) employeesFileInputRef.current.value = "";
+      if (assetsFileInputRef.current) assetsFileInputRef.current.value = "";
+      if (stationsFileInputRef.current) stationsFileInputRef.current.value = "";
     } else if (refs[moduleKey]?.current) {
       refs[moduleKey].current.value = "";
     }
@@ -132,6 +148,10 @@ export default function DataImportCenterPage({
         await onProjectsImported?.(importedCompanyId);
       } else if (moduleKey === "employees") {
         await onEmployeesImported?.(importedCompanyId);
+      } else if (moduleKey === "assets") {
+        await onAssetsImported?.(importedCompanyId);
+      } else if (moduleKey === "stations") {
+        await onStationsImported?.(importedCompanyId);
       }
     } catch (error) {
       console.warn(`Failed to refresh ${moduleKey} after import.`, error);
@@ -188,14 +208,25 @@ export default function DataImportCenterPage({
       const downloader =
         moduleKey === "employees"
           ? downloadEmployeesImportTemplate
-          : downloadProjectsImportTemplate;
+          : moduleKey === "assets"
+            ? downloadAssetsImportTemplate
+            : moduleKey === "stations"
+              ? downloadStationsImportTemplate
+              : downloadProjectsImportTemplate;
 
       const blob = await downloader(targetCompanyId, currentLanguage);
       const objectUrl = window.URL.createObjectURL(blob);
       const anchor = document.createElement("a");
       anchor.href = objectUrl;
 
-      const prefix = moduleKey === "employees" ? "Employees" : "Projects";
+      const prefix =
+        moduleKey === "employees"
+          ? "Employees"
+          : moduleKey === "assets"
+            ? "Assets"
+            : moduleKey === "stations"
+              ? "Stations"
+              : "Projects";
       anchor.download =
         currentLanguage === "ar"
           ? `${prefix}-Import-Template-Arabic.xlsx`
@@ -210,13 +241,21 @@ export default function DataImportCenterPage({
         "success",
         moduleKey === "employees"
           ? t("dataImport.messages.employeesTemplateDownloaded")
-          : t("dataImport.messages.templateDownloaded"),
+          : moduleKey === "assets"
+            ? t("dataImport.messages.assetsTemplateDownloaded")
+            : moduleKey === "stations"
+              ? t("dataImport.messages.stationsTemplateDownloaded")
+              : t("dataImport.messages.templateDownloaded"),
       );
     } catch (error) {
       const fallback =
         moduleKey === "employees"
           ? t("dataImport.messages.employeesTemplateDownloadFailed")
-          : t("dataImport.messages.templateDownloadFailed");
+          : moduleKey === "assets"
+            ? t("dataImport.messages.assetsTemplateDownloadFailed")
+            : moduleKey === "stations"
+              ? t("dataImport.messages.stationsTemplateDownloadFailed")
+              : t("dataImport.messages.templateDownloadFailed");
 
       const message = getApiErrorMessage(error, fallback);
       setWorkflowError(message);
@@ -243,7 +282,13 @@ export default function DataImportCenterPage({
 
     try {
       const uploader =
-        moduleKey === "employees" ? uploadEmployeesImport : uploadProjectsImport;
+        moduleKey === "employees"
+          ? uploadEmployeesImport
+          : moduleKey === "assets"
+            ? uploadAssetsImport
+            : moduleKey === "stations"
+              ? uploadStationsImport
+              : uploadProjectsImport;
 
       const result = await uploader(file, targetCompanyId);
       updateWorkflow(moduleKey, {
@@ -320,8 +365,8 @@ export default function DataImportCenterPage({
   const moduleRows = [
     { key: "projects", label: t("dataImport.modules.projects"), ready: true },
     { key: "employees", label: t("dataImport.modules.employees"), ready: true },
-    { key: "assets", label: t("dataImport.modules.assets"), ready: false },
-    { key: "stations", label: t("dataImport.modules.stations"), ready: false },
+    { key: "assets", label: t("dataImport.modules.assets"), ready: true },
+    { key: "stations", label: t("dataImport.modules.stations"), ready: true },
   ];
 
   return (
@@ -456,7 +501,7 @@ export default function DataImportCenterPage({
           </div>
         </div>
 
-        {["projects", "employees"].map((moduleKey) => {
+        {["projects", "employees", "assets", "stations"].map((moduleKey) => {
           const batch = workflows[moduleKey]?.batch;
           if (!batch?.id) return null;
 
@@ -501,6 +546,22 @@ export default function DataImportCenterPage({
           type="file"
           accept=".xlsx,application/vnd.openxmlformats-officedocument.spreadsheetml.sheet"
           onChange={(event) => handleFileSelected("employees", event)}
+          className="hidden"
+        />
+
+        <input
+          ref={assetsFileInputRef}
+          type="file"
+          accept=".xlsx,application/vnd.openxmlformats-officedocument.spreadsheetml.sheet"
+          onChange={(event) => handleFileSelected("assets", event)}
+          className="hidden"
+        />
+
+        <input
+          ref={stationsFileInputRef}
+          type="file"
+          accept=".xlsx,application/vnd.openxmlformats-officedocument.spreadsheetml.sheet"
+          onChange={(event) => handleFileSelected("stations", event)}
           className="hidden"
         />
       </div>

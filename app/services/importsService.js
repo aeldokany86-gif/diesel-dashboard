@@ -110,6 +110,74 @@ export async function uploadEmployeesImport(file, companyId = "") {
   return response.data;
 }
 
+export async function downloadAssetsImportTemplate(
+  companyId = "",
+  language = "en",
+) {
+  const params = {
+    language: language === "ar" ? "ar" : "en",
+    ...(companyId ? { companyId } : {}),
+  };
+
+  const response = await api.get("/imports/templates/assets", {
+    params,
+    responseType: "blob",
+  });
+
+  return response.data;
+}
+
+export async function uploadAssetsImport(file, companyId = "") {
+  if (!file) {
+    throw new Error("Excel file is required.");
+  }
+
+  const formData = new FormData();
+  formData.append("file", file);
+
+  const params = companyId ? { companyId } : {};
+
+  const response = await api.post("/imports/assets/upload", formData, {
+    params,
+  });
+
+  return response.data;
+}
+
+export async function downloadStationsImportTemplate(
+  companyId = "",
+  language = "en",
+) {
+  const params = {
+    language: language === "ar" ? "ar" : "en",
+    ...(companyId ? { companyId } : {}),
+  };
+
+  const response = await api.get("/imports/templates/stations", {
+    params,
+    responseType: "blob",
+  });
+
+  return response.data;
+}
+
+export async function uploadStationsImport(file, companyId = "") {
+  if (!file) {
+    throw new Error("Excel file is required.");
+  }
+
+  const formData = new FormData();
+  formData.append("file", file);
+
+  const params = companyId ? { companyId } : {};
+
+  const response = await api.post("/imports/stations/upload", formData, {
+    params,
+  });
+
+  return response.data;
+}
+
 export async function validateImportBatch(batchId) {
   if (!batchId) {
     throw new Error("Import batch ID is required.");

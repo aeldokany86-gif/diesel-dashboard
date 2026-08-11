@@ -17,6 +17,69 @@ function getApiErrorMessage(error, fallback) {
   return fallback;
 }
 
+const VALIDATION_ISSUE_TRANSLATION_KEYS = {
+  // Projects
+  EMPTY_PROJECT_CODE: "emptyProjectCode",
+  EMPTY_PROJECT_NAME: "emptyProjectName",
+  PROJECT_CODE_TOO_LONG: "projectCodeTooLong",
+  PROJECT_NAME_TOO_LONG: "projectNameTooLong",
+  LOCATION_TOO_LONG: "locationTooLong",
+  DESCRIPTION_TOO_LONG: "descriptionTooLong",
+  INVALID_PROJECT_STATUS: "invalidProjectStatus",
+  INVALID_PROJECT_START_DATE: "invalidProjectStartDate",
+  PROJECT_START_DATE_IN_FUTURE: "projectStartDateInFuture",
+  INVALID_BASE_PRICE: "invalidBasePrice",
+  INVALID_TRANSPORT_COST: "invalidTransportCost",
+  INVALID_VAT_RATE: "invalidVatRate",
+  DUPLICATE_PROJECT_CODE_IN_FILE: "duplicateProjectCodeInFile",
+  PROJECT_CODE_ALREADY_EXISTS: "projectCodeAlreadyExists",
+  PROJECT_CODE_PREVIOUSLY_USED: "projectCodePreviouslyUsed",
+
+  // Employees
+  EMPTY_EMPLOYEE_ID: "emptyEmployeeId",
+  EMPTY_EMPLOYEE_NAME: "emptyEmployeeName",
+  DUPLICATE_EMPLOYEE_ID_IN_FILE: "duplicateEmployeeIdInFile",
+  EMPLOYEE_ID_ALREADY_EXISTS: "employeeIdAlreadyExists",
+  EMPLOYEE_ID_PREVIOUSLY_USED: "employeeIdPreviouslyUsed",
+
+  // Shared project assignment validation
+  PROJECT_CODE_NOT_FOUND: "projectCodeNotFound",
+  PROJECT_INACTIVE: "projectInactive",
+
+  // Assets
+  EMPTY_ASSET_ID: "emptyAssetId",
+  EMPTY_ASSET_TYPE: "emptyAssetType",
+  DUPLICATE_ASSET_ID_IN_FILE: "duplicateAssetIdInFile",
+  ASSET_ID_ALREADY_EXISTS: "assetIdAlreadyExists",
+  ASSET_ID_PREVIOUSLY_USED: "assetIdPreviouslyUsed",
+  INVALID_FUEL_TANK_CAPACITY: "invalidFuelTankCapacity",
+  NEGATIVE_FUEL_TANK_CAPACITY: "negativeFuelTankCapacity",
+  INVALID_CURRENT_ODOMETER: "invalidCurrentOdometer",
+  NEGATIVE_CURRENT_ODOMETER: "negativeCurrentOdometer",
+
+  // Stations
+  EMPTY_STATION_ID: "emptyStationId",
+  DUPLICATE_STATION_ID_IN_FILE: "duplicateStationIdInFile",
+  STATION_ID_ALREADY_EXISTS: "stationIdAlreadyExists",
+  STATION_ID_PREVIOUSLY_USED: "stationIdPreviouslyUsed",
+  INVALID_CAPACITY: "invalidCapacity",
+  INVALID_OPENING_BALANCE: "invalidOpeningBalance",
+  NEGATIVE_OPENING_BALANCE: "negativeOpeningBalance",
+  INVALID_CURRENT_COUNTER: "invalidCurrentCounter",
+  NEGATIVE_CURRENT_COUNTER: "negativeCurrentCounter",
+};
+
+function getTranslatedIssue(issue, t) {
+  const code = String(issue?.code || "").trim();
+  const translationKey = VALIDATION_ISSUE_TRANSLATION_KEYS[code];
+
+  if (translationKey) {
+    return t(`dataImport.validationIssues.${translationKey}`);
+  }
+
+  return issue?.message || code || t("dataImport.issue");
+}
+
 function ResultCell({ row, t }) {
   const errors = Array.isArray(row.errors) ? row.errors : [];
   const warnings = Array.isArray(row.warnings) ? row.warnings : [];
@@ -33,14 +96,12 @@ function ResultCell({ row, t }) {
     <div className="space-y-1">
       {errors.map((issue, index) => (
         <div key={`error-${issue.code || index}-${index}`} className="text-red-700">
-          <strong>{issue.code || t("dataImport.issue")}</strong>
-          {issue.message ? ` — ${issue.message}` : ""}
+          {getTranslatedIssue(issue, t)}
         </div>
       ))}
       {warnings.map((issue, index) => (
         <div key={`warning-${issue.code || index}-${index}`} className="text-amber-700">
-          <strong>{issue.code || t("dataImport.issue")}</strong>
-          {issue.message ? ` — ${issue.message}` : ""}
+          {getTranslatedIssue(issue, t)}
         </div>
       ))}
     </div>
@@ -58,6 +119,8 @@ export default function ImportPreviewPage({
   const rows = Array.isArray(preview?.rows) ? preview.rows : [];
   const importType = String(preview?.importType || "PROJECTS").toUpperCase();
   const isEmployees = importType === "EMPLOYEES";
+  const isAssets = importType === "ASSETS";
+  const isStations = importType === "STATIONS";
 
   const [confirming, setConfirming] = useState(false);
   const [confirmError, setConfirmError] = useState("");
@@ -68,23 +131,43 @@ export default function ImportPreviewPage({
 
   const previewTitle = isEmployees
     ? t("dataImport.previewReport.employeesTitle")
-    : t("dataImport.previewReport.title");
+    : isAssets
+      ? t("dataImport.previewReport.assetsTitle")
+      : isStations
+        ? t("dataImport.previewReport.stationsTitle")
+        : t("dataImport.previewReport.title");
 
   const listTitle = isEmployees
     ? t("dataImport.previewReport.employeesList")
-    : t("dataImport.previewReport.projectsList");
+    : isAssets
+      ? t("dataImport.previewReport.assetsList")
+      : isStations
+        ? t("dataImport.previewReport.stationsList")
+        : t("dataImport.previewReport.projectsList");
 
   const confirmTitle = isEmployees
     ? t("dataImport.confirmImport.employeesTitle")
-    : t("dataImport.confirmImport.title");
+    : isAssets
+      ? t("dataImport.confirmImport.assetsTitle")
+      : isStations
+        ? t("dataImport.confirmImport.stationsTitle")
+        : t("dataImport.confirmImport.title");
 
   const confirmMessage = isEmployees
     ? t("dataImport.confirmImport.employeesMessage")
-    : t("dataImport.confirmImport.message");
+    : isAssets
+      ? t("dataImport.confirmImport.assetsMessage")
+      : isStations
+        ? t("dataImport.confirmImport.stationsMessage")
+        : t("dataImport.confirmImport.message");
 
   const successMessage = isEmployees
     ? t("dataImport.successDialog.employeesMessage")
-    : t("dataImport.successDialog.message");
+    : isAssets
+      ? t("dataImport.successDialog.assetsMessage")
+      : isStations
+        ? t("dataImport.successDialog.stationsMessage")
+        : t("dataImport.successDialog.message");
 
   const formatEmployeeStatus = (value) =>
     String(value || "").toUpperCase() === "ON_DUTY"
@@ -206,6 +289,94 @@ export default function ImportPreviewPage({
                       <td className="border-b border-e border-slate-200 px-2 py-2 align-top">{valueOrDash(data.jobTitle)}</td>
                       <td className="border-b border-e border-slate-200 px-2 py-2 align-top">{formatEmployeeStatus(computed.status || data.status)}</td>
                       <td className="border-b border-e border-slate-200 px-2 py-2 align-top">{formatLinkedUserStatus(computed.linkedUserStatus)}</td>
+                      <td className="border-b border-slate-200 px-2 py-2 align-top">
+                        <ResultCell row={row} t={t} />
+                      </td>
+                    </tr>
+                  );
+                })}
+              </tbody>
+            </table>
+          </div>
+        ) : isAssets ? (
+          <div className="overflow-x-auto border border-slate-300">
+            <table className="min-w-[1200px] w-full border-collapse text-xs">
+              <thead className="bg-slate-100">
+                <tr>
+                  <th className="border-b border-e border-slate-300 px-2 py-2 text-start">#</th>
+                  <th className="border-b border-e border-slate-300 px-2 py-2 text-start">{t("dataImport.fields.assetId")}</th>
+                  <th className="border-b border-e border-slate-300 px-2 py-2 text-start">{t("dataImport.fields.assetType")}</th>
+                  <th className="border-b border-e border-slate-300 px-2 py-2 text-start">{t("dataImport.fields.category")}</th>
+                  <th className="border-b border-e border-slate-300 px-2 py-2 text-start">{t("dataImport.fields.fuelTankCapacity")}</th>
+                  <th className="border-b border-e border-slate-300 px-2 py-2 text-start">{t("dataImport.fields.projectCode")}</th>
+                  <th className="border-b border-e border-slate-300 px-2 py-2 text-start">{t("dataImport.fields.projectName")}</th>
+                  <th className="border-b border-e border-slate-300 px-2 py-2 text-start">{t("dataImport.fields.currentOdometer")}</th>
+                  <th className="border-b border-e border-slate-300 px-2 py-2 text-start">{t("dataImport.fields.lifetimeOdometer")}</th>
+                  <th className="border-b border-slate-300 px-2 py-2 text-start">{t("dataImport.result")}</th>
+                </tr>
+              </thead>
+              <tbody>
+                {rows.map((row) => {
+                  const data = row.normalizedData || row.sourceData || {};
+                  const computed = row.computedData || {};
+
+                  return (
+                    <tr key={row.rowId || row.id || row.rowNumber}>
+                      <td className="border-b border-e border-slate-200 px-2 py-2 align-top">{row.rowNumber}</td>
+                      <td className="border-b border-e border-slate-200 px-2 py-2 align-top">{valueOrDash(data.assetId)}</td>
+                      <td className="border-b border-e border-slate-200 px-2 py-2 align-top">{valueOrDash(data.assetType)}</td>
+                      <td className="border-b border-e border-slate-200 px-2 py-2 align-top">{valueOrDash(data.category)}</td>
+                      <td className="border-b border-e border-slate-200 px-2 py-2 align-top">{valueOrDash(data.fuelTankCapacity)}</td>
+                      <td className="border-b border-e border-slate-200 px-2 py-2 align-top">{valueOrDash(data.projectCode)}</td>
+                      <td className="border-b border-e border-slate-200 px-2 py-2 align-top">{valueOrDash(computed.projectName)}</td>
+                      <td className="border-b border-e border-slate-200 px-2 py-2 align-top">{valueOrDash(data.currentOdometer)}</td>
+                      <td className="border-b border-e border-slate-200 px-2 py-2 align-top">{valueOrDash(computed.currentLifetimeOdometer)}</td>
+                      <td className="border-b border-slate-200 px-2 py-2 align-top">
+                        <ResultCell row={row} t={t} />
+                      </td>
+                    </tr>
+                  );
+                })}
+              </tbody>
+            </table>
+          </div>
+        ) : isStations ? (
+          <div className="overflow-x-auto border border-slate-300">
+            <table className="min-w-[1250px] w-full border-collapse text-xs">
+              <thead className="bg-slate-100">
+                <tr>
+                  <th className="border-b border-e border-slate-300 px-2 py-2 text-start">#</th>
+                  <th className="border-b border-e border-slate-300 px-2 py-2 text-start">{t("dataImport.fields.stationId")}</th>
+                  <th className="border-b border-e border-slate-300 px-2 py-2 text-start">{t("dataImport.fields.stationName")}</th>
+                  <th className="border-b border-e border-slate-300 px-2 py-2 text-start">{t("dataImport.fields.stationType")}</th>
+                  <th className="border-b border-e border-slate-300 px-2 py-2 text-start">{t("dataImport.fields.capacity")}</th>
+                  <th className="border-b border-e border-slate-300 px-2 py-2 text-start">{t("dataImport.fields.projectCode")}</th>
+                  <th className="border-b border-e border-slate-300 px-2 py-2 text-start">{t("dataImport.fields.projectName")}</th>
+                  <th className="border-b border-e border-slate-300 px-2 py-2 text-start">{t("dataImport.fields.openingBalance")}</th>
+                  <th className="border-b border-e border-slate-300 px-2 py-2 text-start">{t("dataImport.fields.currentCounter")}</th>
+                  <th className="border-b border-e border-slate-300 px-2 py-2 text-start">{t("dataImport.fields.currentStock")}</th>
+                  <th className="border-b border-e border-slate-300 px-2 py-2 text-start">{t("dataImport.fields.lifetimeCounter")}</th>
+                  <th className="border-b border-slate-300 px-2 py-2 text-start">{t("dataImport.result")}</th>
+                </tr>
+              </thead>
+              <tbody>
+                {rows.map((row) => {
+                  const data = row.normalizedData || row.sourceData || {};
+                  const computed = row.computedData || {};
+
+                  return (
+                    <tr key={row.rowId || row.id || row.rowNumber}>
+                      <td className="border-b border-e border-slate-200 px-2 py-2 align-top">{row.rowNumber}</td>
+                      <td className="border-b border-e border-slate-200 px-2 py-2 align-top">{valueOrDash(data.stationId)}</td>
+                      <td className="border-b border-e border-slate-200 px-2 py-2 align-top">{valueOrDash(data.stationName)}</td>
+                      <td className="border-b border-e border-slate-200 px-2 py-2 align-top">{valueOrDash(data.stationType)}</td>
+                      <td className="border-b border-e border-slate-200 px-2 py-2 align-top">{valueOrDash(data.capacity)}</td>
+                      <td className="border-b border-e border-slate-200 px-2 py-2 align-top">{valueOrDash(data.projectCode)}</td>
+                      <td className="border-b border-e border-slate-200 px-2 py-2 align-top">{valueOrDash(computed.projectName)}</td>
+                      <td className="border-b border-e border-slate-200 px-2 py-2 align-top">{valueOrDash(data.openingBalance)}</td>
+                      <td className="border-b border-e border-slate-200 px-2 py-2 align-top">{valueOrDash(data.currentCounter)}</td>
+                      <td className="border-b border-e border-slate-200 px-2 py-2 align-top">{valueOrDash(computed.currentStock)}</td>
+                      <td className="border-b border-e border-slate-200 px-2 py-2 align-top">{valueOrDash(computed.currentLifetimeCounter)}</td>
                       <td className="border-b border-slate-200 px-2 py-2 align-top">
                         <ResultCell row={row} t={t} />
                       </td>
