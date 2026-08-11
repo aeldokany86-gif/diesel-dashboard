@@ -8,11 +8,13 @@ import {
   isPlatformContextValue,
 } from "../../lib/companyHelpers";
 import {
+  downloadEmployeesImportTemplate,
   downloadProjectsImportTemplate,
   fetchDataImportAccess,
-  fetchProjectsImportPreview,
+  fetchImportPreview,
+  uploadEmployeesImport,
   uploadProjectsImport,
-  validateProjectsImportBatch,
+  validateImportBatch,
 } from "../../services/importsService";
 import ImportPreviewPage from "./ImportPreviewPage";
 
@@ -30,9 +32,11 @@ export default function DataImportCenterPage({
   contextCompanyId = "",
   showToast,
   onProjectsImported,
+  onEmployeesImported,
 }) {
   const { t } = useLanguage();
   const projectsFileInputRef = useRef(null);
+  const employeesFileInputRef = useRef(null);
   const isPlatformUser = isPlatformAdminUser(currentUser);
 
   const availableCompanies = useMemo(
@@ -58,9 +62,12 @@ export default function DataImportCenterPage({
   const [access, setAccess] = useState(null);
   const [loadingAccess, setLoadingAccess] = useState(false);
   const [accessError, setAccessError] = useState("");
-  const [projectsBatch, setProjectsBatch] = useState(null);
-  const [projectsFileName, setProjectsFileName] = useState("");
+  const [workflows, setWorkflows] = useState({
+    projects: { batch: null, fileName: "" },
+    employees: { batch: null, fileName: "" },
+  });
   const [preview, setPreview] = useState(null);
+  const [previewModule, setPreviewModule] = useState("");
   const [busyAction, setBusyAction] = useState("");
   const [workflowError, setWorkflowError] = useState("");
 
@@ -74,25 +81,61 @@ export default function DataImportCenterPage({
       ? "ar"
       : "en";
 
-  function resetProjectsWorkflow() {
-    setProjectsBatch(null);
-    setProjectsFileName("");
+  const refs = {
+    projects: projectsFileInputRef,
+    employees: employeesFileInputRef,
+  };
+
+  function resetWorkflow(moduleKey = "") {
+    setWorkflows((current) => {
+      if (!moduleKey) {
+        return {
+          projects: { batch: null, fileName: "" },
+          employees: { batch: null, fileName: "" },
+        };
+      }
+
+      return {
+        ...current,
+        [moduleKey]: { batch: null, fileName: "" },
+      };
+    });
+
     setPreview(null);
+    setPreviewModule("");
     setWorkflowError("");
-    if (projectsFileInputRef.current) {
-      projectsFileInputRef.current.value = "";
+
+    if (!moduleKey) {
+      if (projectsFileInputRef.current) projectsFileInputRef.current.value = "";
+      if (employeesFileInputRef.current) employeesFileInputRef.current.value = "";
+    } else if (refs[moduleKey]?.current) {
+      refs[moduleKey].current.value = "";
     }
   }
 
-  function handleProjectsImportConfirmed() {
-    // Return the user to the clean Import Center immediately.
-    resetProjectsWorkflow();
+  function updateWorkflow(moduleKey, patch) {
+    setWorkflows((current) => ({
+      ...current,
+      [moduleKey]: {
+        ...current[moduleKey],
+        ...patch,
+      },
+    }));
+  }
 
-    // Refresh the shared projects state in the parent so Projects / Sites and
-    // every other project consumer sees the imported projects without reload.
-    Promise.resolve(onProjectsImported?.()).catch((error) => {
-      console.warn("Failed to refresh projects after import.", error);
-    });
+  async function handleImportConfirmed(moduleKey) {
+    const importedCompanyId = targetCompany?.id || targetCompanyId || "";
+    resetWorkflow(moduleKey);
+
+    try {
+      if (moduleKey === "projects") {
+        await onProjectsImported?.(importedCompanyId);
+      } else if (moduleKey === "employees") {
+        await onEmployeesImported?.(importedCompanyId);
+      }
+    } catch (error) {
+      console.warn(`Failed to refresh ${moduleKey} after import.`, error);
+    }
   }
 
   useEffect(() => {
@@ -102,13 +145,13 @@ export default function DataImportCenterPage({
       if (isPlatformUser && !selectedCompanyId) {
         setAccess(null);
         setAccessError("");
-        resetProjectsWorkflow();
+        resetWorkflow();
         return;
       }
 
       setLoadingAccess(true);
       setAccessError("");
-      resetProjectsWorkflow();
+      resetWorkflow();
 
       try {
         const result = await fetchDataImportAccess(
@@ -135,33 +178,47 @@ export default function DataImportCenterPage({
     };
   }, [isPlatformUser, selectedCompanyId, currentUser?.id]);
 
-  async function handleDownloadProjectsTemplate() {
+  async function handleDownloadTemplate(moduleKey) {
     if (!targetCompany) return;
-    setBusyAction("projects-download");
+
+    setBusyAction(`${moduleKey}-download`);
     setWorkflowError("");
 
     try {
-      const blob = await downloadProjectsImportTemplate(
-        targetCompanyId,
-        currentLanguage,
-      );
+      const downloader =
+        moduleKey === "employees"
+          ? downloadEmployeesImportTemplate
+          : downloadProjectsImportTemplate;
+
+      const blob = await downloader(targetCompanyId, currentLanguage);
       const objectUrl = window.URL.createObjectURL(blob);
       const anchor = document.createElement("a");
       anchor.href = objectUrl;
+
+      const prefix = moduleKey === "employees" ? "Employees" : "Projects";
       anchor.download =
         currentLanguage === "ar"
-          ? "Projects-Import-Template-Arabic.xlsx"
-          : "Projects-Import-Template-English.xlsx";
+          ? `${prefix}-Import-Template-Arabic.xlsx`
+          : `${prefix}-Import-Template-English.xlsx`;
+
       document.body.appendChild(anchor);
       anchor.click();
       anchor.remove();
       window.URL.revokeObjectURL(objectUrl);
-      showToast?.("success", t("dataImport.messages.templateDownloaded"));
-    } catch (error) {
-      const message = getApiErrorMessage(
-        error,
-        t("dataImport.messages.templateDownloadFailed"),
+
+      showToast?.(
+        "success",
+        moduleKey === "employees"
+          ? t("dataImport.messages.employeesTemplateDownloaded")
+          : t("dataImport.messages.templateDownloaded"),
       );
+    } catch (error) {
+      const fallback =
+        moduleKey === "employees"
+          ? t("dataImport.messages.employeesTemplateDownloadFailed")
+          : t("dataImport.messages.templateDownloadFailed");
+
+      const message = getApiErrorMessage(error, fallback);
       setWorkflowError(message);
       showToast?.("error", message);
     } finally {
@@ -169,30 +226,36 @@ export default function DataImportCenterPage({
     }
   }
 
-  function openProjectsFilePicker() {
+  function openFilePicker(moduleKey) {
     if (!targetCompany || isBusy) return;
-    projectsFileInputRef.current?.click();
+    refs[moduleKey]?.current?.click();
   }
 
-  async function handleProjectsFileSelected(event) {
+  async function handleFileSelected(moduleKey, event) {
     const file = event.target.files?.[0] || null;
     if (!file || !targetCompany) return;
 
-    setBusyAction("projects-upload");
+    setBusyAction(`${moduleKey}-upload`);
     setWorkflowError("");
-    setProjectsBatch(null);
+    updateWorkflow(moduleKey, { batch: null, fileName: file.name });
     setPreview(null);
-    setProjectsFileName(file.name);
+    setPreviewModule("");
 
     try {
-      const result = await uploadProjectsImport(file, targetCompanyId);
-      setProjectsBatch(result?.batch || null);
+      const uploader =
+        moduleKey === "employees" ? uploadEmployeesImport : uploadProjectsImport;
+
+      const result = await uploader(file, targetCompanyId);
+      updateWorkflow(moduleKey, {
+        batch: result?.batch || null,
+        fileName: file.name,
+      });
+
       showToast?.("success", t("dataImport.messages.uploadSucceeded"));
     } catch (error) {
-      setProjectsFileName("");
-      if (projectsFileInputRef.current) {
-        projectsFileInputRef.current.value = "";
-      }
+      updateWorkflow(moduleKey, { batch: null, fileName: "" });
+      if (refs[moduleKey]?.current) refs[moduleKey].current.value = "";
+
       const message = getApiErrorMessage(
         error,
         t("dataImport.messages.uploadFailed"),
@@ -204,17 +267,18 @@ export default function DataImportCenterPage({
     }
   }
 
-  async function handleValidateProjects() {
-    const batchId = projectsBatch?.id;
+  async function handleValidate(moduleKey) {
+    const batchId = workflows[moduleKey]?.batch?.id;
     if (!batchId) return;
 
-    setBusyAction("projects-validate");
+    setBusyAction(`${moduleKey}-validate`);
     setWorkflowError("");
 
     try {
-      await validateProjectsImportBatch(batchId);
-      const result = await fetchProjectsImportPreview(batchId);
+      await validateImportBatch(batchId);
+      const result = await fetchImportPreview(batchId);
       setPreview(result);
+      setPreviewModule(moduleKey);
 
       if ((result?.summary?.invalidRows || 0) > 0) {
         showToast?.(
@@ -243,16 +307,19 @@ export default function DataImportCenterPage({
     return (
       <ImportPreviewPage
         preview={preview}
-        fileName={projectsFileName}
-        onBack={() => setPreview(null)}
-        onConfirmSuccess={handleProjectsImportConfirmed}
+        fileName={workflows[previewModule]?.fileName || ""}
+        onBack={() => {
+          setPreview(null);
+          setPreviewModule("");
+        }}
+        onConfirmSuccess={() => handleImportConfirmed(previewModule)}
       />
     );
   }
 
   const moduleRows = [
     { key: "projects", label: t("dataImport.modules.projects"), ready: true },
-    { key: "employees", label: t("dataImport.modules.employees"), ready: false },
+    { key: "employees", label: t("dataImport.modules.employees"), ready: true },
     { key: "assets", label: t("dataImport.modules.assets"), ready: false },
     { key: "stations", label: t("dataImport.modules.stations"), ready: false },
   ];
@@ -322,9 +389,9 @@ export default function DataImportCenterPage({
 
           <div className="divide-y divide-slate-800">
             {moduleRows.map((module) => {
-              const isProjects = module.key === "projects";
-              const canUseProjects = isProjects && Boolean(targetCompany);
-              const uploaded = isProjects && Boolean(projectsBatch?.id);
+              const active = module.ready && Boolean(targetCompany);
+              const workflow = workflows[module.key] || {};
+              const uploaded = Boolean(workflow.batch?.id);
 
               return (
                 <div
@@ -335,11 +402,13 @@ export default function DataImportCenterPage({
                     <p className="text-base font-black text-slate-100">
                       {module.label}
                     </p>
-                    {isProjects && projectsFileName && (
+
+                    {module.ready && workflow.fileName && (
                       <p className="mt-1 truncate text-xs text-slate-500">
-                        {t("dataImport.selectedFile")}: {projectsFileName}
+                        {t("dataImport.selectedFile")}: {workflow.fileName}
                       </p>
                     )}
+
                     {!module.ready && (
                       <p className="mt-1 text-xs text-slate-600">
                         {t("dataImport.modules.comingLater")}
@@ -349,22 +418,22 @@ export default function DataImportCenterPage({
 
                   <button
                     type="button"
-                    onClick={canUseProjects ? handleDownloadProjectsTemplate : undefined}
-                    disabled={!canUseProjects || isBusy}
+                    onClick={active ? () => handleDownloadTemplate(module.key) : undefined}
+                    disabled={!active || isBusy}
                     className="rounded-xl border border-amber-400/30 bg-amber-400/10 px-4 py-2.5 text-sm font-black text-amber-200 hover:bg-amber-400/20 disabled:cursor-not-allowed disabled:border-slate-800 disabled:bg-slate-950/40 disabled:text-slate-600"
                   >
-                    {busyAction === "projects-download"
+                    {busyAction === `${module.key}-download`
                       ? t("dataImport.actions.downloading")
                       : t("dataImport.actions.downloadTemplate")}
                   </button>
 
                   <button
                     type="button"
-                    onClick={canUseProjects ? openProjectsFilePicker : undefined}
-                    disabled={!canUseProjects || isBusy}
+                    onClick={active ? () => openFilePicker(module.key) : undefined}
+                    disabled={!active || isBusy}
                     className="rounded-xl border border-emerald-500/30 bg-emerald-500/10 px-4 py-2.5 text-sm font-black text-emerald-300 hover:bg-emerald-500/20 disabled:cursor-not-allowed disabled:border-slate-800 disabled:bg-slate-950/40 disabled:text-slate-600"
                   >
-                    {busyAction === "projects-upload"
+                    {busyAction === `${module.key}-upload`
                       ? t("dataImport.actions.uploading")
                       : uploaded
                         ? t("dataImport.actions.replaceExcel")
@@ -373,11 +442,11 @@ export default function DataImportCenterPage({
 
                   <button
                     type="button"
-                    onClick={uploaded ? handleValidateProjects : undefined}
+                    onClick={uploaded ? () => handleValidate(module.key) : undefined}
                     disabled={!uploaded || isBusy}
                     className="rounded-xl border border-sky-400/30 bg-sky-400/10 px-4 py-2.5 text-sm font-black text-sky-200 hover:bg-sky-400/20 disabled:cursor-not-allowed disabled:border-slate-800 disabled:bg-slate-950/40 disabled:text-slate-600"
                   >
-                    {busyAction === "projects-validate"
+                    {busyAction === `${module.key}-validate`
                       ? t("dataImport.actions.validating")
                       : t("dataImport.actions.validatePreview")}
                   </button>
@@ -387,19 +456,31 @@ export default function DataImportCenterPage({
           </div>
         </div>
 
-        {projectsBatch?.id && (
-          <div className="rounded-xl border border-slate-800 bg-slate-950/40 px-4 py-3 text-xs text-slate-400">
-            <span className="font-black text-slate-300">
-              {t("dataImport.batchId")}:
-            </span>{" "}
-            {projectsBatch.id}
-            <span className="mx-2 text-slate-700">•</span>
-            <span className="font-black text-slate-300">
-              {t("dataImport.totalRows")}:
-            </span>{" "}
-            {projectsBatch.totalRows}
-          </div>
-        )}
+        {["projects", "employees"].map((moduleKey) => {
+          const batch = workflows[moduleKey]?.batch;
+          if (!batch?.id) return null;
+
+          return (
+            <div
+              key={moduleKey}
+              className="rounded-xl border border-slate-800 bg-slate-950/40 px-4 py-3 text-xs text-slate-400"
+            >
+              <span className="font-black text-slate-300">
+                {t(`dataImport.modules.${moduleKey}`)}
+              </span>
+              <span className="mx-2 text-slate-700">•</span>
+              <span className="font-black text-slate-300">
+                {t("dataImport.batchId")}:
+              </span>{" "}
+              {batch.id}
+              <span className="mx-2 text-slate-700">•</span>
+              <span className="font-black text-slate-300">
+                {t("dataImport.totalRows")}:
+              </span>{" "}
+              {batch.totalRows}
+            </div>
+          );
+        })}
 
         {workflowError && (
           <div className="rounded-xl border border-red-500/30 bg-red-500/10 px-4 py-3 text-sm text-red-300">
@@ -411,7 +492,15 @@ export default function DataImportCenterPage({
           ref={projectsFileInputRef}
           type="file"
           accept=".xlsx,application/vnd.openxmlformats-officedocument.spreadsheetml.sheet"
-          onChange={handleProjectsFileSelected}
+          onChange={(event) => handleFileSelected("projects", event)}
+          className="hidden"
+        />
+
+        <input
+          ref={employeesFileInputRef}
+          type="file"
+          accept=".xlsx,application/vnd.openxmlformats-officedocument.spreadsheetml.sheet"
+          onChange={(event) => handleFileSelected("employees", event)}
           className="hidden"
         />
       </div>

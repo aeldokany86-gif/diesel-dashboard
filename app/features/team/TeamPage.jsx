@@ -3581,7 +3581,7 @@ export default function TeamPage({
                     value={newFueler.projectId}
                     onChange={(e) => {
                       const projectId = e.target.value;
-                      const selectedProject = filterActiveProjects(transferProjects).find((project) =>
+                      const selectedProject = filterActiveProjects(projects).find((project) =>
                         normalizeText(project.backendId || project.id) === normalizeText(projectId)
                       );
 
@@ -3594,7 +3594,7 @@ export default function TeamPage({
                     dir={isRtl ? "rtl" : "ltr"} className={`w-full mt-2 rounded-lg border border-slate-700 bg-slate-900 p-3 text-white ${isRtl ? "text-right" : "text-left"} outline-none focus:border-amber-400 focus:ring-2 focus:ring-amber-400/20`}
                   >
                     <option value="">{t("team.project.selectProject")}</option>
-                    {filterActiveProjects(transferProjects).map((project) => (
+                    {filterActiveProjects(projects).map((project) => (
                       <option key={makeTenantEntityKey(project, project.name)} value={project.backendId || project.id}>
                         {project.name || project.id}
                       </option>

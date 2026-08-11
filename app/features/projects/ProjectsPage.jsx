@@ -2611,11 +2611,6 @@ export default function ProjectsPage({
                     </p>
                   </div>
 
-                  <div className="rounded-2xl border border-amber-400/40 bg-amber-400/10 p-4 text-sm text-amber-100">
-                    Only Admin can change the Project Manager. This change will
-                    be applied immediately after confirmation and does not
-                    require approval workflow.
-                  </div>
                 </div>
 
                 <div className="flex flex-col justify-end gap-3 border-t border-slate-700 bg-slate-950 p-5 sm:flex-row">

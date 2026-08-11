@@ -75,3 +75,64 @@ export async function confirmProjectsImportBatch(batchId) {
   const response = await api.post(`/imports/batches/${batchId}/confirm`);
   return response.data;
 }
+
+export async function downloadEmployeesImportTemplate(
+  companyId = "",
+  language = "en",
+) {
+  const params = {
+    language: language === "ar" ? "ar" : "en",
+    ...(companyId ? { companyId } : {}),
+  };
+
+  const response = await api.get("/imports/templates/employees", {
+    params,
+    responseType: "blob",
+  });
+
+  return response.data;
+}
+
+export async function uploadEmployeesImport(file, companyId = "") {
+  if (!file) {
+    throw new Error("Excel file is required.");
+  }
+
+  const formData = new FormData();
+  formData.append("file", file);
+
+  const params = companyId ? { companyId } : {};
+
+  const response = await api.post("/imports/employees/upload", formData, {
+    params,
+  });
+
+  return response.data;
+}
+
+export async function validateImportBatch(batchId) {
+  if (!batchId) {
+    throw new Error("Import batch ID is required.");
+  }
+
+  const response = await api.post(`/imports/batches/${batchId}/validate`);
+  return response.data;
+}
+
+export async function fetchImportPreview(batchId) {
+  if (!batchId) {
+    throw new Error("Import batch ID is required.");
+  }
+
+  const response = await api.get(`/imports/batches/${batchId}/preview`);
+  return response.data;
+}
+
+export async function confirmImportBatch(batchId) {
+  if (!batchId) {
+    throw new Error("Import batch ID is required.");
+  }
+
+  const response = await api.post(`/imports/batches/${batchId}/confirm`);
+  return response.data;
+}

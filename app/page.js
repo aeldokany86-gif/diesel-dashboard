@@ -1953,6 +1953,33 @@ export default function Home() {
       ),
     );
 
+    // Backend synchronizes User.fullName when a linked employee name changes.
+    // Refresh the Users state immediately so Users & Roles and project-manager
+    // selectors show the new name without a browser reload.
+    if (
+      updatedEmployee?.linkedUserId ||
+      employee?.linkedUserId ||
+      employee?.userId
+    ) {
+      const targetCompanyId =
+        updatedEmployee?.companyId ||
+        employee?.companyId ||
+        currentCompanyId ||
+        "";
+
+      try {
+        await refreshBackendUsers(targetCompanyId, {
+          force: true,
+          silent: true,
+        });
+      } catch (error) {
+        console.warn(
+          "Employee was updated, but users could not be refreshed automatically.",
+          error,
+        );
+      }
+    }
+
     return updatedEmployee;
   };
 
@@ -4469,7 +4496,10 @@ export default function Home() {
           companies={companies}
           contextCompanyId={selectedCompanyId}
           showToast={showToast}
-          onProjectsImported={() => refreshBackendProjects()}
+          onProjectsImported={(companyId) => refreshBackendProjects(companyId)}
+          onEmployeesImported={(companyId) =>
+            refreshBackendEmployees(companyId, currentUser?.id || "")
+          }
         />
       );
     }
