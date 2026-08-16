@@ -89,3 +89,18 @@ export async function updateStationNegativeTolerance(percent) {
   );
   return response.data || {};
 }
+
+
+export async function fetchMobileApplicationSettings() {
+  const response = await api.get("/companies/settings/mobile-application");
+  return response.data || {};
+}
+
+export async function updateMobileApplicationSettings(payload = {}) {
+  const response = await api.patch(
+    "/companies/settings/mobile-application",
+    payload,
+  );
+
+  return response.data || {};
+}

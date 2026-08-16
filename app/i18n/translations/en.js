@@ -69,6 +69,22 @@ const en = {
     noProjectAssigned: "No Project Assigned",
     logout: "Logout",
   },
+  mobileApplicationSettings: {
+    menuLabel: "Mobile Application Settings",
+    title: "Mobile Application Settings",
+    loading: "Loading mobile application settings...",
+    photoSourceTitle: "Operation Photo Source",
+    photoSourceHelp: "Choose whether the mobile app allows direct camera capture only or both camera capture and gallery selection.",
+    cameraOnly: "Camera Only",
+    cameraAndGallery: "Camera + Gallery",
+    saveToGalleryTitle: "Save Captured Photos to Device Gallery",
+    saveToGalleryHelp: "When enabled, the mobile app keeps a copy of photos captured with the camera in the device gallery.",
+    save: "Save Mobile Settings",
+    saved: "Mobile application settings updated successfully.",
+    loadFailed: "Failed to load mobile application settings.",
+    saveFailed: "Failed to save mobile application settings.",
+  },
+
   stationTolerance: {
     menuLabel: "Station Balance Tolerance",
     title: "Station Negative Balance Tolerance",

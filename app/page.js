@@ -86,6 +86,8 @@ import {
   fetchPublicCompanies,
   fetchStationNegativeTolerance,
   updateStationNegativeTolerance,
+  fetchMobileApplicationSettings,
+  updateMobileApplicationSettings,
 } from "./services/companiesService";
 import { fetchDataImportAccess } from "./services/importsService";
 
@@ -722,6 +724,14 @@ export default function Home() {
   const [showSettingsMenu, setShowSettingsMenu] = useState(false);
   const [activeSettingsSection, setActiveSettingsSection] = useState(null);
   const [stationNegativeTolerancePercent, setStationNegativeTolerancePercent] = useState("2");
+  const [mobileApplicationSettings, setMobileApplicationSettings] = useState({
+    mobilePhotoSourcePolicy: "CAMERA_ONLY",
+    saveCapturedPhotosToDeviceGallery: false,
+  });
+  const [mobileApplicationSettingsLoading, setMobileApplicationSettingsLoading] =
+    useState(false);
+  const [mobileApplicationSettingsSaving, setMobileApplicationSettingsSaving] =
+    useState(false);
   const [stationNegativeToleranceLoading, setStationNegativeToleranceLoading] = useState(false);
   const [stationNegativeToleranceSaving, setStationNegativeToleranceSaving] = useState(false);
   const [sidebarCollapsed, setSidebarCollapsed] = useState(false);
@@ -4911,6 +4921,200 @@ export default function Home() {
   };
 
   const canManageStationNegativeTolerance = currentUser?.role === "Admin";
+  const canManageMobileApplicationSettings = currentUser?.role === "Admin";
+
+  const openMobileApplicationSettings = async () => {
+    if (!canManageMobileApplicationSettings) return;
+
+    setActiveSettingsSection("mobileApplication");
+    setMobileApplicationSettingsLoading(true);
+
+    try {
+      const result = await fetchMobileApplicationSettings();
+      setMobileApplicationSettings({
+        mobilePhotoSourcePolicy:
+          result?.mobilePhotoSourcePolicy === "CAMERA_AND_GALLERY"
+            ? "CAMERA_AND_GALLERY"
+            : "CAMERA_ONLY",
+        saveCapturedPhotosToDeviceGallery: Boolean(
+          result?.saveCapturedPhotosToDeviceGallery,
+        ),
+      });
+    } catch (error) {
+      showToast(
+        "error",
+        getFriendlyApiErrorMessage(
+          error,
+          t("mobileApplicationSettings.loadFailed"),
+        ),
+      );
+    } finally {
+      setMobileApplicationSettingsLoading(false);
+    }
+  };
+
+  const saveMobileApplicationSettings = async () => {
+    if (!canManageMobileApplicationSettings) return;
+
+    setMobileApplicationSettingsSaving(true);
+
+    try {
+      const result = await updateMobileApplicationSettings({
+        mobilePhotoSourcePolicy:
+          mobileApplicationSettings.mobilePhotoSourcePolicy,
+        saveCapturedPhotosToDeviceGallery: Boolean(
+          mobileApplicationSettings.saveCapturedPhotosToDeviceGallery,
+        ),
+      });
+
+      setMobileApplicationSettings({
+        mobilePhotoSourcePolicy:
+          result?.mobilePhotoSourcePolicy === "CAMERA_AND_GALLERY"
+            ? "CAMERA_AND_GALLERY"
+            : "CAMERA_ONLY",
+        saveCapturedPhotosToDeviceGallery: Boolean(
+          result?.saveCapturedPhotosToDeviceGallery,
+        ),
+      });
+
+      showToast("success", t("mobileApplicationSettings.saved"));
+    } catch (error) {
+      showToast(
+        "error",
+        getFriendlyApiErrorMessage(
+          error,
+          t("mobileApplicationSettings.saveFailed"),
+        ),
+      );
+    } finally {
+      setMobileApplicationSettingsSaving(false);
+    }
+  };
+
+  const renderMobileApplicationSettings = () => (
+    <>
+      <button
+        type="button"
+        onClick={() => setActiveSettingsSection(null)}
+        className="w-full flex items-center gap-2 px-4 py-2 text-[11px] font-bold uppercase tracking-[0.14em] text-slate-500 hover:bg-slate-900"
+      >
+        <span>‹</span>
+        <span>{t("mobileApplicationSettings.title")}</span>
+      </button>
+
+      <div className="border-t border-slate-800 px-4 py-3">
+        {mobileApplicationSettingsLoading ? (
+          <p className="py-4 text-center text-xs text-slate-400">
+            {t("mobileApplicationSettings.loading")}
+          </p>
+        ) : (
+          <>
+            <div>
+              <p className="text-xs font-black text-slate-200">
+                {t("mobileApplicationSettings.photoSourceTitle")}
+              </p>
+              <p className="mt-1 text-[11px] leading-4 text-slate-500">
+                {t("mobileApplicationSettings.photoSourceHelp")}
+              </p>
+
+              <div className="mt-3 grid gap-2">
+                <button
+                  type="button"
+                  disabled={mobileApplicationSettingsSaving}
+                  onClick={() =>
+                    setMobileApplicationSettings((prev) => ({
+                      ...prev,
+                      mobilePhotoSourcePolicy: "CAMERA_ONLY",
+                    }))
+                  }
+                  className={`w-full rounded-xl border px-3 py-2.5 text-start text-xs font-bold transition disabled:cursor-wait disabled:opacity-60 ${
+                    mobileApplicationSettings.mobilePhotoSourcePolicy ===
+                    "CAMERA_ONLY"
+                      ? "border-amber-400 bg-amber-400/10 text-amber-300"
+                      : "border-slate-700 bg-slate-900 text-slate-300 hover:border-slate-600"
+                  }`}
+                >
+                  {t("mobileApplicationSettings.cameraOnly")}
+                </button>
+
+                <button
+                  type="button"
+                  disabled={mobileApplicationSettingsSaving}
+                  onClick={() =>
+                    setMobileApplicationSettings((prev) => ({
+                      ...prev,
+                      mobilePhotoSourcePolicy: "CAMERA_AND_GALLERY",
+                    }))
+                  }
+                  className={`w-full rounded-xl border px-3 py-2.5 text-start text-xs font-bold transition disabled:cursor-wait disabled:opacity-60 ${
+                    mobileApplicationSettings.mobilePhotoSourcePolicy ===
+                    "CAMERA_AND_GALLERY"
+                      ? "border-amber-400 bg-amber-400/10 text-amber-300"
+                      : "border-slate-700 bg-slate-900 text-slate-300 hover:border-slate-600"
+                  }`}
+                >
+                  {t("mobileApplicationSettings.cameraAndGallery")}
+                </button>
+              </div>
+            </div>
+
+            <div className="mt-4 border-t border-slate-800 pt-4">
+              <div className="flex items-start justify-between gap-3">
+                <div className="min-w-0">
+                  <p className="text-xs font-black text-slate-200">
+                    {t("mobileApplicationSettings.saveToGalleryTitle")}
+                  </p>
+                  <p className="mt-1 text-[11px] leading-4 text-slate-500">
+                    {t("mobileApplicationSettings.saveToGalleryHelp")}
+                  </p>
+                </div>
+
+                <button
+                  type="button"
+                  role="switch"
+                  aria-checked={
+                    mobileApplicationSettings.saveCapturedPhotosToDeviceGallery
+                  }
+                  disabled={mobileApplicationSettingsSaving}
+                  onClick={() =>
+                    setMobileApplicationSettings((prev) => ({
+                      ...prev,
+                      saveCapturedPhotosToDeviceGallery:
+                        !prev.saveCapturedPhotosToDeviceGallery,
+                    }))
+                  }
+                  className={`relative mt-0.5 h-6 w-11 shrink-0 rounded-full transition disabled:cursor-wait disabled:opacity-60 ${
+                    mobileApplicationSettings.saveCapturedPhotosToDeviceGallery
+                      ? "bg-amber-400"
+                      : "bg-slate-700"
+                  }`}
+                >
+                  <span
+                    className={`absolute top-1 h-4 w-4 rounded-full bg-white shadow transition-all ${
+                      mobileApplicationSettings.saveCapturedPhotosToDeviceGallery
+                        ? "end-1"
+                        : "start-1"
+                    }`}
+                  />
+                </button>
+              </div>
+            </div>
+
+            <button
+              type="button"
+              onClick={saveMobileApplicationSettings}
+              disabled={mobileApplicationSettingsSaving}
+              className="mt-4 w-full rounded-lg bg-amber-400 px-3 py-2 text-sm font-black text-slate-950 transition hover:bg-amber-300 disabled:cursor-wait disabled:opacity-60"
+            >
+              {mobileApplicationSettingsSaving
+                ? t("common.saving")
+                : t("mobileApplicationSettings.save")}
+            </button>
+          </>
+        )}
+      </div>
+    </>
+  );
 
   const openStationNegativeToleranceSettings = async () => {
     if (!canManageStationNegativeTolerance) return;
@@ -5707,6 +5911,11 @@ export default function Home() {
                       <button type="button" onClick={() => setActiveSettingsSection("language")} className="w-full flex items-center justify-between px-4 py-3 text-sm text-slate-200 border-t border-slate-700 hover:bg-slate-800 transition-colors">
                         <span>{t("common.language")}</span><span className="text-slate-500">›</span>
                       </button>
+                      {canManageMobileApplicationSettings && (
+                        <button type="button" onClick={openMobileApplicationSettings} className="w-full flex items-center justify-between px-4 py-3 text-sm text-slate-200 border-t border-slate-700 hover:bg-slate-800 transition-colors">
+                          <span className="text-start leading-5">{t("mobileApplicationSettings.menuLabel")}</span><span className="shrink-0 text-slate-500">›</span>
+                        </button>
+                      )}
                       {canManageStationNegativeTolerance && (
                         <button type="button" onClick={openStationNegativeToleranceSettings} className="w-full flex items-center justify-between px-4 py-3 text-sm text-slate-200 border-t border-slate-700 hover:bg-slate-800 transition-colors">
                           <span className="text-start leading-5">{t("stationTolerance.menuLabel")}</span><span className="shrink-0 text-slate-500">›</span>
@@ -5739,6 +5948,8 @@ export default function Home() {
                       <button type="button" disabled={isUpdatingLanguage} onClick={async () => { try { await setLanguage("en"); setShowSettingsMenu(false); setActiveSettingsSection(null); } catch (error) { showToast?.("error", getFriendlyApiErrorMessage(error, t("common.languageSaveFailed"))); } }} className={`w-full text-start px-4 py-3 text-sm transition-colors disabled:cursor-wait disabled:opacity-60 ${language === "en" ? "bg-amber-400 text-slate-950 font-bold" : "text-slate-200 hover:bg-slate-800"}`}>{isUpdatingLanguage && language !== "en" ? t("common.saving") : t("common.english")}</button>
                       <button type="button" disabled={isUpdatingLanguage} onClick={async () => { try { await setLanguage("ar"); setShowSettingsMenu(false); setActiveSettingsSection(null); } catch (error) { showToast?.("error", getFriendlyApiErrorMessage(error, t("common.languageSaveFailed"))); } }} className={`w-full text-start px-4 py-3 text-sm border-t border-slate-700 transition-colors disabled:cursor-wait disabled:opacity-60 ${language === "ar" ? "bg-amber-400 text-slate-950 font-bold" : "text-slate-200 hover:bg-slate-800"}`}>{isUpdatingLanguage && language !== "ar" ? t("common.saving") : t("common.arabic")}</button>
                     </>
+                  ) : activeSettingsSection === "mobileApplication" ? (
+                    renderMobileApplicationSettings()
                   ) : (
                     renderStationNegativeToleranceSettings()
                   )}
@@ -5799,6 +6010,11 @@ export default function Home() {
                 <>
                   <button type="button" onClick={() => setActiveSettingsSection("theme")} className="w-full flex items-center justify-between px-4 py-3 text-sm text-slate-200 hover:bg-slate-800 transition-colors"><span>{t("common.theme")}</span><span className="text-slate-500">›</span></button>
                   <button type="button" onClick={() => setActiveSettingsSection("language")} className="w-full flex items-center justify-between px-4 py-3 text-sm text-slate-200 border-t border-slate-700 hover:bg-slate-800 transition-colors"><span>{t("common.language")}</span><span className="text-slate-500">›</span></button>
+                  {canManageMobileApplicationSettings && (
+                    <button type="button" onClick={openMobileApplicationSettings} className="w-full flex items-center justify-between px-4 py-3 text-sm text-slate-200 border-t border-slate-700 hover:bg-slate-800 transition-colors">
+                      <span className="text-start leading-5">{t("mobileApplicationSettings.menuLabel")}</span><span className="shrink-0 text-slate-500">›</span>
+                    </button>
+                  )}
                   {canManageStationNegativeTolerance && (
                     <button type="button" onClick={openStationNegativeToleranceSettings} className="w-full flex items-center justify-between px-4 py-3 text-sm text-slate-200 border-t border-slate-700 hover:bg-slate-800 transition-colors">
                       <span className="text-start leading-5">{t("stationTolerance.menuLabel")}</span><span className="shrink-0 text-slate-500">›</span>
@@ -5830,6 +6046,8 @@ export default function Home() {
                   <button type="button" disabled={isUpdatingLanguage} onClick={async () => { try { await setLanguage("en"); setShowSettingsMenu(false); setActiveSettingsSection(null); } catch (error) { showToast?.("error", getFriendlyApiErrorMessage(error, t("common.languageSaveFailed"))); } }} className={`w-full text-start px-4 py-3 text-sm transition-colors disabled:cursor-wait disabled:opacity-60 ${language === "en" ? "bg-amber-400 text-slate-950 font-bold" : "text-slate-200 hover:bg-slate-800"}`}>{isUpdatingLanguage && language !== "en" ? t("common.saving") : t("common.english")}</button>
                   <button type="button" disabled={isUpdatingLanguage} onClick={async () => { try { await setLanguage("ar"); setShowSettingsMenu(false); setActiveSettingsSection(null); } catch (error) { showToast?.("error", getFriendlyApiErrorMessage(error, t("common.languageSaveFailed"))); } }} className={`w-full text-start px-4 py-3 text-sm border-t border-slate-700 transition-colors disabled:cursor-wait disabled:opacity-60 ${language === "ar" ? "bg-amber-400 text-slate-950 font-bold" : "text-slate-200 hover:bg-slate-800"}`}>{isUpdatingLanguage && language !== "ar" ? t("common.saving") : t("common.arabic")}</button>
                 </>
+              ) : activeSettingsSection === "mobileApplication" ? (
+                renderMobileApplicationSettings()
               ) : (
                 renderStationNegativeToleranceSettings()
               )}
