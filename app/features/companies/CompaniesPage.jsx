@@ -42,6 +42,7 @@ import {
   updateCompanyRecord,
   updateCompanyStatus,
   updateCompanyDataImportAccess,
+  updateCompanyMultiProjectAccess,
 } from "../../services/companiesService";
 
 const COMPANY_CONTEXT_STORAGE_KEY = "fleetfuelpro_company_context";
@@ -131,6 +132,7 @@ export default function CompaniesPage({ companies = [], setCompanies, currentUse
   const { t } = useLanguage();
   const [search, setSearch] = useState("");
   const [updatingDataImportCompanyId, setUpdatingDataImportCompanyId] = useState("");
+  const [updatingMultiProjectCompanyId, setUpdatingMultiProjectCompanyId] = useState("");
   const [settingsOpen, setSettingsOpen] = useState(false);
   const [selectedCompanyId, setSelectedCompanyId] = useState(() => {
     if (typeof window === "undefined") return "";
@@ -464,6 +466,83 @@ export default function CompaniesPage({ companies = [], setCompanies, currentUse
     });
   };
 
+  const executeMultiProjectAccessChange = async (company, enabled) => {
+    if (!company?.id || company.isPlatformContext) return;
+
+    setUpdatingMultiProjectCompanyId(company.id);
+
+    try {
+      const updatedCompanyData = await updateCompanyMultiProjectAccess(
+        company.id,
+        enabled,
+      );
+      const updatedCompany = normalizeCompanyForState(updatedCompanyData);
+
+      setCompanies((prev) =>
+        mergePlatformConsoleWithCompanies(
+          prev
+            .filter((item) => !item.isPlatformContext)
+            .map((item) =>
+              item.id === updatedCompany.id ? updatedCompany : item,
+            ),
+        )
+          .map(normalizeCompanyForState)
+          .filter((item) => item.id),
+      );
+
+      notifyUser(
+        showToast,
+        "success",
+        enabled
+          ? t("multiProject.messages.accessEnabled")
+          : t("multiProject.messages.accessDisabled"),
+      );
+    } catch (error) {
+      logHandledApiIssue("Failed to update Multi-Project access", error);
+      notifyUser(
+        showToast,
+        "warning",
+        error?.response?.data?.message ||
+          t("multiProject.messages.accessUpdateFailed"),
+      );
+    } finally {
+      setUpdatingMultiProjectCompanyId("");
+    }
+  };
+
+  const handleToggleMultiProjectAccess = (company) => {
+    if (!canManageCompanies) {
+      notifyUser(
+        showToast,
+        "warning",
+        t("multiProject.messages.platformOnlyAccessControl"),
+      );
+      return;
+    }
+
+    if (!company || company.isPlatformContext) return;
+
+    const nextEnabled = !Boolean(company.multiProjectEnabled);
+    const companyName = company.name || company.id;
+
+    setCompanyConfirmModal({
+      open: true,
+      title: nextEnabled
+        ? t("multiProject.confirm.enableTitle")
+        : t("multiProject.confirm.disableTitle"),
+      message: nextEnabled
+        ? t("multiProject.confirm.enableMessage", { company: companyName })
+        : t("multiProject.confirm.disableMessage", { company: companyName }),
+      confirmLabel: nextEnabled
+        ? t("multiProject.actions.enable")
+        : t("multiProject.actions.disable"),
+      confirmTone: nextEnabled ? "emerald" : "red",
+      onConfirm: async () => {
+        await executeMultiProjectAccessChange(company, nextEnabled);
+      },
+    });
+  };
+
   const closeCompanyConfirmModal = () => {
     setCompanyConfirmModal({
       open: false,
@@ -760,6 +839,7 @@ export default function CompaniesPage({ companies = [], setCompanies, currentUse
                 <th className="text-left p-3">Language</th>
                 <th className="text-left p-3">Status</th>
                 <th className="text-left p-3">{t("dataImport.accessLabel")}</th>
+                <th className="text-left p-3">{t("multiProject.accessLabel")}</th>
               </tr>
             </thead>
             <tbody>
@@ -840,13 +920,39 @@ export default function CompaniesPage({ companies = [], setCompanies, currentUse
                         </button>
                       )}
                     </td>
+                    <td className="p-3">
+                      {company.isPlatformContext ? (
+                        <span className="text-xs font-bold text-slate-500">—</span>
+                      ) : (
+                        <button
+                          type="button"
+                          disabled={updatingMultiProjectCompanyId === company.id}
+                          onClick={(event) => {
+                            event.stopPropagation();
+                            handleToggleMultiProjectAccess(company);
+                          }}
+                          className={`rounded-full px-3 py-1 text-xs font-black border transition disabled:cursor-wait disabled:opacity-60 ${
+                            company.multiProjectEnabled
+                              ? "bg-emerald-500/10 text-emerald-300 border-emerald-500/30 hover:bg-emerald-500/20"
+                              : "bg-slate-500/10 text-slate-300 border-slate-500/30 hover:bg-slate-500/20"
+                          }`}
+                          title={t("multiProject.accessToggleHelp")}
+                        >
+                          {updatingMultiProjectCompanyId === company.id
+                            ? t("common.saving")
+                            : company.multiProjectEnabled
+                              ? t("multiProject.enabled")
+                              : t("multiProject.disabled")}
+                        </button>
+                      )}
+                    </td>
                   </tr>
                 );
               })}
 
               {!visibleCompanies.length && (
                 <tr>
-                  <td colSpan={8} className="p-8 text-center text-slate-500">
+                  <td colSpan={9} className="p-8 text-center text-slate-500">
                     No companies found. Add companies from Settings using the backend Companies API.
                   </td>
                 </tr>

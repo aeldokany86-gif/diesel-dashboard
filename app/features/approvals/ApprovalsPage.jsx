@@ -220,6 +220,8 @@ export default function ApprovalsPage({
   showToast,
   onApproveEmployeeTransfer,
   onRejectEmployeeTransfer,
+  onApproveEmployeeProjectRemoval,
+  onRejectEmployeeProjectRemoval,
   onApproveAssetTransfer,
   onRejectAssetTransfer,
   onApproveStationTransfer,
@@ -433,6 +435,31 @@ export default function ApprovalsPage({
 
     if (fullyApproved && request.type === "operation_external_supply" && request.payload?.row) {
       setData?.((prev) => [...prev, request.payload.row]);
+    }
+
+    if (request.type === "employee_project_removal") {
+      try {
+        const reviewerUserId = currentUser?.id || "";
+        if (!reviewerUserId) {
+          showToast?.("warning", t("approvals.validation.approverIdRequired"));
+          return;
+        }
+
+        await onApproveEmployeeProjectRemoval?.(
+          request.payload?.projectRemovalRequest || request.payload,
+          reviewerUserId
+        );
+
+        setSelectedApprovalGroup(null);
+        showToast?.("success", t("approvals.projectRemoval.approved"));
+      } catch (error) {
+        const message =
+          error?.response?.data?.message ||
+          error?.message ||
+          t("approvals.messages.employeeTransferApplyFailed");
+        showToast?.("warning", message);
+      }
+      return;
     }
 
     if (request.type === "employee_transfer") {
@@ -871,6 +898,32 @@ export default function ApprovalsPage({
         showToast?.("success", t("approvals.messages.operationRejected"));
       } catch (error) {
         showToast?.("warning", getFriendlyApiErrorMessage(error, t("approvals.messages.operationRejectFailed")));
+      }
+      return;
+    }
+
+    if (request.type === "employee_project_removal") {
+      try {
+        const reviewerUserId = currentUser?.id || "";
+        if (!reviewerUserId) {
+          showToast?.("warning", t("approvals.validation.approverIdRequired"));
+          return;
+        }
+
+        await onRejectEmployeeProjectRemoval?.(
+          request.payload?.projectRemovalRequest || request.payload,
+          note,
+          reviewerUserId
+        );
+
+        setSelectedApprovalGroup(null);
+        showToast?.("success", t("approvals.projectRemoval.rejected"));
+      } catch (error) {
+        const message =
+          error?.response?.data?.message ||
+          error?.message ||
+          t("approvals.messages.employeeTransferRejectFailed");
+        showToast?.("warning", message);
       }
       return;
     }

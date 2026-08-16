@@ -53,6 +53,19 @@ export async function updateCompanyDataImportAccess(companyId, enabled) {
 
 
 
+
+export async function updateCompanyMultiProjectAccess(companyId, enabled) {
+  if (!companyId) {
+    throw new Error("Company backend ID is required.");
+  }
+
+  const response = await api.patch(`/companies/${companyId}/multi-project-access`, {
+    enabled: Boolean(enabled),
+  });
+
+  return response.data;
+}
+
 export async function fetchCompaniesMasterReport(params = {}) {
   const response = await api.get("/companies/reports/master", {
     params,
@@ -62,4 +75,17 @@ export async function fetchCompaniesMasterReport(params = {}) {
     summary: response.data?.summary || {},
     rows: Array.isArray(response.data?.rows) ? response.data.rows : [],
   };
+}
+
+export async function fetchStationNegativeTolerance() {
+  const response = await api.get("/companies/settings/station-negative-tolerance");
+  return response.data || {};
+}
+
+export async function updateStationNegativeTolerance(percent) {
+  const response = await api.patch(
+    "/companies/settings/station-negative-tolerance",
+    { percent: Number(percent) },
+  );
+  return response.data || {};
 }

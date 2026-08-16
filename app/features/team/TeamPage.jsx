@@ -175,6 +175,9 @@ export default function TeamPage({
   onCreateEmployee,
   onCheckEmployeeIdAvailability,
   onUpdateEmployee,
+  onLoadEmployeeProjectAssignments,
+  onAddEmployeeProjectAssignment,
+  onRemoveEmployeeProjectAssignments,
   onCreateEmployeeTransfer,
   onCreateBulkEmployeeTransfer,
   onCreateUserFromEmployee,
@@ -247,6 +250,12 @@ export default function TeamPage({
   const [bulkTransferModalOpen, setBulkTransferModalOpen] = useState(false);
   const [bulkTransferProjectId, setBulkTransferProjectId] = useState("");
   const [savingBulkTransfer, setSavingBulkTransfer] = useState(false);
+  const [bulkKeepLinkedProjects, setBulkKeepLinkedProjects] = useState(true);
+  const [projectAssignmentsModal, setProjectAssignmentsModal] = useState(null);
+  const [projectAssignmentsLoading, setProjectAssignmentsLoading] = useState(false);
+  const [projectAssignmentsSaving, setProjectAssignmentsSaving] = useState(false);
+  const [projectAssignmentToAdd, setProjectAssignmentToAdd] = useState("");
+  const [selectedAdditionalProjectIds, setSelectedAdditionalProjectIds] = useState([]);
 
   const fuelersSettingsRef = useRef(null);
 
@@ -377,6 +386,17 @@ export default function TeamPage({
   const normalizeText = (value) => String(value || "").trim().toLowerCase();
 
   const platformBootstrapMode = isPlatformAdminUser(currentUser);
+  const currentCompanyMultiProjectEnabled = Boolean(
+    currentUser?.multiProjectEnabled ||
+      companies.find(
+        (company) =>
+          normalizeScopeValue(company?.id) ===
+          normalizeScopeValue(currentUser?.companyId)
+      )?.multiProjectEnabled
+  );
+  const showAssignedProjectsColumn = platformBootstrapMode
+    ? companies.some((company) => Boolean(company?.multiProjectEnabled))
+    : currentCompanyMultiProjectEnabled;
 
   const selectableCompanies = companies.filter((company) => {
     const normalizedId = normalizeText(company?.id);
@@ -1112,6 +1132,7 @@ export default function TeamPage({
     }
 
     setBulkTransferProjectId("");
+    setBulkKeepLinkedProjects(true);
     setBulkTransferModalOpen(true);
   };
 
@@ -1119,6 +1140,7 @@ export default function TeamPage({
     if (savingBulkTransfer) return;
     setBulkTransferModalOpen(false);
     setBulkTransferProjectId("");
+    setBulkKeepLinkedProjects(true);
   };
 
   const confirmBulkTransfer = async () => {
@@ -1150,7 +1172,8 @@ export default function TeamPage({
       );
       const bulkResult = await onCreateBulkEmployeeTransfer(
         eligibleFuelers,
-        bulkTransferProjectId
+        bulkTransferProjectId,
+        bulkKeepLinkedProjects
       );
       const transfers = Array.isArray(bulkResult?.transfers)
         ? bulkResult.transfers
@@ -1651,8 +1674,235 @@ export default function TeamPage({
     );
   };
 
+  const getFuelerEffectiveSystemRole = (fueler) => {
+    const linkedRole = getFuelerLinkedSystemRole(fueler);
+    if (linkedRole) return linkedRole;
+
+    // Fallback for employee list rows where the linked user role was not
+    // preserved during a frontend refresh. The backend remains the final
+    // authority for permission checks when the modal/API is used.
+    const jobTitleRole = normalizeBackendRoleName(
+      fueler?.jobTitle || fueler?.role || ""
+    );
+
+    if (["Officer", "Supervisor", "Operator"].includes(jobTitleRole)) {
+      return jobTitleRole;
+    }
+
+    const matchedUser = users.find((user) => {
+      const linkedUserId = normalizeText(
+        fueler?.linkedUserId || fueler?.userId || ""
+      );
+      const employeeBackendId = normalizeText(
+        fueler?.backendId || fueler?.employeeBackendId || ""
+      );
+      const employeeId = normalizeText(fueler?.employeeId || fueler?.id || "");
+      const email = normalizeText(fueler?.email || "");
+
+      return (
+        (linkedUserId && normalizeText(user?.id || "") === linkedUserId) ||
+        (employeeBackendId &&
+          normalizeText(user?.linkedEmployeeId || "") === employeeBackendId) ||
+        (employeeId &&
+          normalizeText(user?.employeeId || "") === employeeId) ||
+        (email && normalizeText(user?.email || "") === email)
+      );
+    });
+
+    const matchedRole = normalizeBackendRoleName(
+      matchedUser?.role ||
+        matchedUser?.roleName ||
+        matchedUser?.normalizedRole ||
+        ""
+    );
+
+    if (matchedRole) return matchedRole;
+
+    return "";
+  };
+
   const isFuelerManagerSystemRole = (fueler) =>
-    ["Manager", "TopManagement"].includes(getFuelerLinkedSystemRole(fueler));
+    ["Manager", "TopManagement"].includes(getFuelerEffectiveSystemRole(fueler));
+
+  const isFuelerMultiProjectEligible = (fueler) =>
+    ["Officer", "Supervisor", "Operator"].includes(
+      getFuelerEffectiveSystemRole(fueler)
+    );
+
+  const getFuelerCompany = (fueler) =>
+    companies.find(
+      (company) =>
+        normalizeScopeValue(company?.id) ===
+        normalizeScopeValue(fueler?.companyId || currentUser?.companyId)
+    ) || null;
+
+  const isMultiProjectEnabledForFueler = (fueler) => {
+    // For a normal company user, the authenticated user context is authoritative.
+    // The shared `companies` state is loaded from /companies/public for non-platform
+    // users, and that public payload does not carry platform-only feature flags.
+    // Treating its missing flag as false was the reason the column stayed visible
+    // while every employee row rendered as "—".
+    if (!isPlatformAdminUser(currentUser)) {
+      return Boolean(
+        currentUser?.multiProjectEnabled ?? fueler?.multiProjectEnabled
+      );
+    }
+
+    // Platform Admin can view many companies, so resolve the flag per employee company.
+    const company = getFuelerCompany(fueler);
+    if (company && typeof company.multiProjectEnabled === "boolean") {
+      return company.multiProjectEnabled;
+    }
+
+    return Boolean(fueler?.multiProjectEnabled);
+  };
+
+  const getFuelerAssignedProjectsCount = (fueler) => {
+    if (isFuelerManagerSystemRole(fueler)) {
+      const managedProjects =
+        fueler?.managedProjects ||
+        users.find(
+          (user) =>
+            normalizeScopeValue(user?.id) ===
+            normalizeScopeValue(fueler?.linkedUserId)
+        )?.managedProjects;
+      return Array.isArray(managedProjects) && managedProjects.length
+        ? new Set(
+            managedProjects
+              .map((project) =>
+                normalizeScopeValue(project?.id || project?.code || project?.name || project)
+              )
+              .filter(Boolean)
+          ).size
+        : Number(fueler?.totalProjects) || 1;
+    }
+
+    return (
+      Number(fueler?.totalProjects) ||
+      (fueler?.projectId ? 1 : 0) +
+        (Array.isArray(fueler?.additionalProjects)
+          ? fueler.additionalProjects.length
+          : 0)
+    );
+  };
+
+  const openProjectAssignmentsModal = async (fueler) => {
+    if (!fueler) return;
+
+    const employeeBackendId =
+      fueler.backendId || fueler.employeeBackendId || fueler.id || "";
+
+    if (!employeeBackendId || typeof onLoadEmployeeProjectAssignments !== "function") {
+      showToast?.("warning", t("team.multiProject.loadFailed"));
+      return;
+    }
+
+    setProjectAssignmentsModal({
+      fueler,
+      employeeBackendId,
+      data: null,
+    });
+    setProjectAssignmentsLoading(true);
+    setProjectAssignmentToAdd("");
+    setSelectedAdditionalProjectIds([]);
+
+    try {
+      const data = await onLoadEmployeeProjectAssignments(employeeBackendId);
+      setProjectAssignmentsModal({
+        fueler,
+        employeeBackendId,
+        data,
+      });
+    } catch (error) {
+      showToast?.(
+        "warning",
+        error?.response?.data?.message ||
+          error?.message ||
+          t("team.multiProject.loadFailed")
+      );
+      setProjectAssignmentsModal(null);
+    } finally {
+      setProjectAssignmentsLoading(false);
+    }
+  };
+
+  const closeProjectAssignmentsModal = () => {
+    if (projectAssignmentsSaving) return;
+    setProjectAssignmentsModal(null);
+    setProjectAssignmentToAdd("");
+    setSelectedAdditionalProjectIds([]);
+  };
+
+  const refreshProjectAssignmentsModal = async () => {
+    const employeeBackendId = projectAssignmentsModal?.employeeBackendId;
+    if (!employeeBackendId || typeof onLoadEmployeeProjectAssignments !== "function") return null;
+    const data = await onLoadEmployeeProjectAssignments(employeeBackendId);
+    setProjectAssignmentsModal((prev) => (prev ? { ...prev, data } : prev));
+    return data;
+  };
+
+  const handleAddProjectAssignment = async () => {
+    const employeeBackendId = projectAssignmentsModal?.employeeBackendId;
+    if (
+      !employeeBackendId ||
+      !projectAssignmentToAdd ||
+      typeof onAddEmployeeProjectAssignment !== "function"
+    ) {
+      return;
+    }
+
+    setProjectAssignmentsSaving(true);
+    try {
+      const data = await onAddEmployeeProjectAssignment(
+        employeeBackendId,
+        projectAssignmentToAdd
+      );
+      setProjectAssignmentsModal((prev) => (prev ? { ...prev, data } : prev));
+      setProjectAssignmentToAdd("");
+      setSelectedAdditionalProjectIds([]);
+      showToast?.("success", t("team.multiProject.assignmentAdded"));
+    } catch (error) {
+      showToast?.(
+        "warning",
+        error?.response?.data?.message ||
+          error?.message ||
+          t("team.multiProject.updateFailed")
+      );
+    } finally {
+      setProjectAssignmentsSaving(false);
+    }
+  };
+
+  const handleRemoveSelectedProjectAssignments = async () => {
+    const employeeBackendId = projectAssignmentsModal?.employeeBackendId;
+    if (
+      !employeeBackendId ||
+      !selectedAdditionalProjectIds.length ||
+      typeof onRemoveEmployeeProjectAssignments !== "function"
+    ) {
+      return;
+    }
+
+    setProjectAssignmentsSaving(true);
+    try {
+      const data = await onRemoveEmployeeProjectAssignments(
+        employeeBackendId,
+        selectedAdditionalProjectIds
+      );
+      setProjectAssignmentsModal((prev) => (prev ? { ...prev, data } : prev));
+      setSelectedAdditionalProjectIds([]);
+      showToast?.("success", t("team.multiProject.assignmentsRemoved"));
+    } catch (error) {
+      showToast?.(
+        "warning",
+        error?.response?.data?.message ||
+          error?.message ||
+          t("team.multiProject.updateFailed")
+      );
+    } finally {
+      setProjectAssignmentsSaving(false);
+    }
+  };
 
   const canRequestTeamProjectTransfer = (fueler) => {
     if (!currentUser || currentUser.status !== "Active") return false;
@@ -2107,6 +2357,7 @@ export default function TeamPage({
       newValue,
       oldDisplayValue,
       newDisplayValue,
+      keepLinkedProjects: true,
       message:
         field === "project" && isFuelerManagerSystemRole(fueler)
           ? t("team.confirm.managerTransfer", { fromProject: oldDisplayValue || "-", toProject: newDisplayValue || "-" })
@@ -2257,7 +2508,11 @@ export default function TeamPage({
           throw new Error(t("team.validation.transferApiMissing"));
         }
 
-        const transferResult = await onCreateEmployeeTransfer(fueler, newValue);
+        const transferResult = await onCreateEmployeeTransfer(
+          fueler,
+          newValue,
+          pendingTeamChange.keepLinkedProjects !== false
+        );
         const transferApplied = shouldApplyEmployeeTransfer(
           transferResult,
           fueler,
@@ -2557,6 +2812,11 @@ export default function TeamPage({
                   <Th className={isRtl ? "text-right" : "text-left"}>{t("team.table.jobTitle")}</Th>
                   <Th className={isRtl ? "text-right" : "text-left"}>{t("team.table.userStatus")}</Th>
                   <Th className={isRtl ? "text-right" : "text-left"}>{t("team.table.projectName")}</Th>
+                  {showAssignedProjectsColumn && (
+                    <Th className={isRtl ? "text-right" : "text-left"}>
+                      {t("team.table.assignedProjects")}
+                    </Th>
+                  )}
                   <Th className={isRtl ? "text-right" : "text-left"}>{t("team.table.workStatus")}</Th>
                 </tr>
               </thead>
@@ -2762,7 +3022,7 @@ export default function TeamPage({
                           <select
                             value={fueler.projectId || ""}
                             onChange={(e) => requestTeamChange({ fueler, field: "project", newValue: e.target.value })}
-                            className="max-w-[220px] rounded-lg border border-slate-700 bg-slate-950 px-2 py-1 text-blue-200 outline-none hover:border-amber-400 cursor-pointer"
+                            className="w-[180px] max-w-[220px] rounded-lg border border-slate-700 bg-slate-950 px-2 py-1 text-blue-200 outline-none hover:border-amber-400 cursor-pointer"
                           >
                             <option value={fueler.projectId || ""}>{fueler.projectName || t("team.project.currentProject")}</option>
                             {filterActiveProjects(transferProjects)
@@ -2774,7 +3034,12 @@ export default function TeamPage({
                               ))}
                           </select>
                         ) : (
-                          <span>{fueler.projectName || "-"}</span>
+                          <div
+                            className="w-[180px] max-w-[220px] rounded-lg border border-slate-700 bg-slate-950 px-2 py-1 text-blue-200"
+                            title={fueler.projectName || "-"}
+                          >
+                            <span className="block truncate">{fueler.projectName || "-"}</span>
+                          </div>
                         )}
 
                         {fueler.pendingTransfer && (
@@ -2789,6 +3054,25 @@ export default function TeamPage({
                         )}
                       </div>
                     </Td>
+
+                    {showAssignedProjectsColumn && (
+                      <Td>
+                        {isMultiProjectEnabledForFueler(fueler) &&
+                        (isFuelerMultiProjectEligible(fueler) ||
+                          isFuelerManagerSystemRole(fueler)) ? (
+                          <button
+                            type="button"
+                            onClick={() => openProjectAssignmentsModal(fueler)}
+                            className="inline-flex min-w-[72px] items-center justify-center rounded-lg border border-slate-600 bg-slate-900 px-2 py-1 text-xs font-bold text-blue-200 transition hover:border-amber-400 hover:text-amber-300"
+                            title={t("team.multiProject.modalTitle")}
+                          >
+                            {getFuelerAssignedProjectsCount(fueler)}
+                          </button>
+                        ) : (
+                          <span className="text-slate-500">—</span>
+                        )}
+                      </Td>
+                    )}
 
                     <Td>
                       {hasPermission("team", "edit") ? (
@@ -2821,7 +3105,7 @@ export default function TeamPage({
 
                 {visibleTeamFuelers.length === 0 && (
                   <tr>
-                    <Td colSpan={platformBootstrapMode ? 11 : 10}>
+                    <Td colSpan={(platformBootstrapMode ? 11 : 10) + (showAssignedProjectsColumn ? 1 : 0)}>
                       {t("team.list.noneFound")}
                     </Td>
                   </tr>
@@ -3098,6 +3382,42 @@ export default function TeamPage({
                       ))}
                     </select>
                   </div>
+
+                  {selectedTeamFuelers.some(
+                    (fueler) =>
+                      isFuelerMultiProjectEligible(fueler) &&
+                      isMultiProjectEnabledForFueler(fueler)
+                  ) && (
+                    <div className="rounded-2xl border border-amber-400/25 bg-amber-500/10 p-4">
+                      <div className="mb-3 text-sm font-bold text-amber-200">
+                        {t("team.multiProject.keepLinkedQuestion")}
+                      </div>
+                      <div className="flex flex-col gap-2">
+                        <label className="flex cursor-pointer items-center gap-2 text-sm text-slate-200">
+                          <input
+                            type="radio"
+                            name="bulkKeepLinkedProjects"
+                            checked={bulkKeepLinkedProjects}
+                            onChange={() => setBulkKeepLinkedProjects(true)}
+                            disabled={savingBulkTransfer}
+                            className="accent-amber-400"
+                          />
+                          {t("team.multiProject.keepLinkedYes")}
+                        </label>
+                        <label className="flex cursor-pointer items-center gap-2 text-sm text-slate-200">
+                          <input
+                            type="radio"
+                            name="bulkKeepLinkedProjects"
+                            checked={!bulkKeepLinkedProjects}
+                            onChange={() => setBulkKeepLinkedProjects(false)}
+                            disabled={savingBulkTransfer}
+                            className="accent-amber-400"
+                          />
+                          {t("team.multiProject.keepLinkedNo")}
+                        </label>
+                      </div>
+                    </div>
+                  )}
 
                   <div className="rounded-2xl border border-slate-700 bg-slate-900/70 p-4">
                     <div className="mb-3 flex items-center justify-between gap-3">
@@ -3635,6 +3955,244 @@ export default function TeamPage({
           </div>
         )}
 
+        {projectAssignmentsModal && (
+          <ModalPortal>
+            <div
+              dir={isRtl ? "rtl" : "ltr"}
+              className="fixed inset-0 z-[10000] flex items-center justify-center bg-black/75 p-3 backdrop-blur-sm"
+            >
+              <div className="w-[min(560px,calc(100vw-2rem))] max-h-[82vh] overflow-hidden rounded-2xl border border-slate-700 bg-slate-950 text-white shadow-2xl">
+                <div className="flex items-start justify-between gap-4 border-b border-slate-700 px-5 py-4">
+                  <div>
+                    <h2 className="text-xl font-bold text-amber-300">
+                      {t("team.multiProject.modalTitle")}
+                    </h2>
+                    <p className="mt-1 text-sm text-slate-400">
+                      {projectAssignmentsModal.fueler?.id} -{" "}
+                      {projectAssignmentsModal.fueler?.name || t("team.member")}
+                    </p>
+                  </div>
+                  <button
+                    type="button"
+                    onClick={closeProjectAssignmentsModal}
+                    disabled={projectAssignmentsSaving}
+                    className="rounded-lg border border-slate-700 px-3 py-1 text-slate-300 hover:bg-slate-800 disabled:opacity-50"
+                  >
+                    ×
+                  </button>
+                </div>
+
+                <div className="max-h-[62vh] overflow-auto px-5 py-4">
+                  {projectAssignmentsLoading ? (
+                    <div className="py-6 text-center text-sm text-slate-400">
+                      {t("team.multiProject.loading")}
+                    </div>
+                  ) : (
+                    <>
+                      <div className="flex items-center justify-between gap-3 border-b border-slate-800 pb-3">
+                        <span className="text-sm text-slate-400">
+                          {t("team.multiProject.primaryProject")}
+                        </span>
+                        <span className="font-bold text-emerald-300">
+                          {projectAssignmentsModal.data?.primaryProject?.name ||
+                            projectAssignmentsModal.data?.primaryProject?.code ||
+                            "-"}
+                        </span>
+                      </div>
+
+                      <div className="pt-3">
+                        <div className="mb-2 flex items-center justify-between gap-3">
+                          <h3 className="text-sm font-semibold text-slate-300">
+                            {t("team.multiProject.additionalProjects")}
+                          </h3>
+                          <span className="text-xs text-slate-500">
+                            {t("team.multiProject.totalProjects", {
+                              count: (
+                                projectAssignmentsModal.data?.additionalProjects || []
+                              ).filter(
+                                (project) =>
+                                  normalizeScopeValue(project?.id) !==
+                                  normalizeScopeValue(
+                                    projectAssignmentsModal.data?.primaryProject?.id
+                                  )
+                              ).length,
+                            })}
+                          </span>
+                        </div>
+
+                        {(projectAssignmentsModal.data?.additionalProjects || []).filter(
+                          (project) =>
+                            normalizeScopeValue(project?.id) !==
+                            normalizeScopeValue(
+                              projectAssignmentsModal.data?.primaryProject?.id
+                            )
+                        ).length ? (
+                          <div className="overflow-hidden rounded-lg border border-slate-800">
+                            {(projectAssignmentsModal.data?.additionalProjects || [])
+                              .filter(
+                                (project) =>
+                                  normalizeScopeValue(project?.id) !==
+                                  normalizeScopeValue(
+                                    projectAssignmentsModal.data?.primaryProject?.id
+                                  )
+                              )
+                              .map(
+                              (project, index) => {
+                                const selected = selectedAdditionalProjectIds.includes(
+                                  project.id
+                                );
+                                const canManage =
+                                  projectAssignmentsModal.data?.canManage === true &&
+                                  projectAssignmentsModal.data?.readOnly !== true;
+
+                                return (
+                                  <label
+                                    key={project.id}
+                                    className={`flex items-center gap-3 bg-slate-900/40 px-3 py-2 ${
+                                      index > 0 ? "border-t border-slate-800" : ""
+                                    }`}
+                                  >
+                                    {canManage && (
+                                      <input
+                                        type="checkbox"
+                                        checked={selected}
+                                        onChange={() =>
+                                          setSelectedAdditionalProjectIds((prev) =>
+                                            selected
+                                              ? prev.filter((id) => id !== project.id)
+                                              : [...prev, project.id]
+                                          )
+                                        }
+                                        className="accent-amber-400"
+                                      />
+                                    )}
+                                    <span className="min-w-0 flex-1 truncate text-sm font-medium text-slate-100">
+                                      {project.name || project.code || project.id}
+                                    </span>
+                                    {project.code && project.code !== project.name && (
+                                      <span className="shrink-0 text-xs text-slate-500">
+                                        {project.code}
+                                      </span>
+                                    )}
+                                  </label>
+                                );
+                              }
+                            )}
+                          </div>
+                        ) : (
+                          <div className="rounded-lg border border-dashed border-slate-800 px-3 py-3 text-sm text-slate-500">
+                            {t("team.multiProject.noAdditionalProjects")}
+                          </div>
+                        )}
+                      </div>
+
+                      {projectAssignmentsModal.data?.canManage === true &&
+                      projectAssignmentsModal.data?.readOnly !== true ? (
+                        <div className="mt-4 border-t border-slate-800 pt-4">
+                          <div className="flex flex-col gap-2 sm:flex-row">
+                            <select
+                              value={projectAssignmentToAdd}
+                              onChange={(event) =>
+                                setProjectAssignmentToAdd(event.target.value)
+                              }
+                              disabled={projectAssignmentsSaving}
+                              className="min-w-0 flex-1 rounded-lg border border-slate-700 bg-slate-900 px-3 py-2 text-sm text-white outline-none focus:border-amber-400"
+                            >
+                              <option value="">
+                                {t("team.multiProject.selectProject")}
+                              </option>
+                              {filterActiveProjects(transferProjects)
+                                .filter((project) => {
+                                  const projectId = project.backendId || project.id;
+                                  const primaryId =
+                                    projectAssignmentsModal.data?.primaryProject?.id;
+                                  const additionalIds = (
+                                    projectAssignmentsModal.data?.additionalProjects || []
+                                  ).map((item) => item.id);
+
+                                  if (
+                                    normalizeScopeValue(projectId) ===
+                                    normalizeScopeValue(primaryId)
+                                  ) {
+                                    return false;
+                                  }
+
+                                  if (
+                                    additionalIds.some(
+                                      (id) =>
+                                        normalizeScopeValue(id) ===
+                                        normalizeScopeValue(projectId)
+                                    )
+                                  ) {
+                                    return false;
+                                  }
+
+                                  if (
+                                    normalizeBackendRoleName(
+                                      currentUser?.role || currentUser?.roleName || ""
+                                    ) === "Manager"
+                                  ) {
+                                    const managerId =
+                                      project.projectManagerId ||
+                                      project.managerUserId ||
+                                      project.managerId ||
+                                      project.projectManager?.id ||
+                                      "";
+                                    return (
+                                      normalizeScopeValue(managerId) ===
+                                      normalizeScopeValue(currentUser?.id)
+                                    );
+                                  }
+
+                                  return true;
+                                })
+                                .map((project) => (
+                                  <option
+                                    key={makeTenantEntityKey(project, project.name)}
+                                    value={project.backendId || project.id}
+                                  >
+                                    {project.name || project.code || project.id}
+                                  </option>
+                                ))}
+                            </select>
+
+                            <button
+                              type="button"
+                              onClick={handleAddProjectAssignment}
+                              disabled={
+                                projectAssignmentsSaving || !projectAssignmentToAdd
+                              }
+                              className="rounded-lg bg-emerald-600 px-4 py-2 text-sm font-bold text-white hover:bg-emerald-500 disabled:cursor-not-allowed disabled:opacity-50"
+                            >
+                              {t("team.multiProject.addProject")}
+                            </button>
+
+                            <button
+                              type="button"
+                              onClick={handleRemoveSelectedProjectAssignments}
+                              disabled={
+                                projectAssignmentsSaving ||
+                                !selectedAdditionalProjectIds.length
+                              }
+                              className="rounded-lg border border-red-500/40 px-4 py-2 text-sm font-bold text-red-300 hover:bg-red-500/10 disabled:cursor-not-allowed disabled:opacity-40"
+                            >
+                              {t("team.multiProject.removeSelected")}
+                            </button>
+                          </div>
+                        </div>
+                      ) : (
+                        <div className="mt-4 border-t border-slate-800 pt-3 text-xs text-slate-500">
+                          {t("team.multiProject.readOnly")}
+                        </div>
+                      )}
+                    </>
+                  )}
+                </div>
+              </div>
+            </div>
+          </ModalPortal>
+        )}
+
         {pendingTeamChange && (
           <div dir={isRtl ? "rtl" : "ltr"} className="fixed inset-0 bg-black/75 backdrop-blur-sm flex items-center justify-center z-[10000] p-3">
             <div className="w-[min(520px,calc(100vw-2rem))] rounded-2xl border border-slate-700 bg-slate-950 text-white shadow-2xl overflow-hidden">
@@ -3651,7 +4209,9 @@ export default function TeamPage({
               </div>
 
               <div className="px-6 py-5 space-y-4">
-                <p className="text-sm text-slate-200">{pendingTeamChange.message}</p>
+                {pendingTeamChange.field !== "project" && (
+                  <p className="text-sm text-slate-200">{pendingTeamChange.message}</p>
+                )}
 
                 <div className="grid grid-cols-1 sm:grid-cols-2 gap-3 text-sm">
                   <div className="rounded-xl border border-red-400/30 bg-red-500/10 p-3">
@@ -3665,9 +4225,46 @@ export default function TeamPage({
                 </div>
 
                 {pendingTeamChange.field === "project" && (
-                  <p className="rounded-xl border border-amber-400/30 bg-amber-500/10 p-3 text-xs text-amber-100">
-                    {t("team.confirm.transferNotice")}
-                  </p>
+                  <>
+                    {isFuelerMultiProjectEligible(pendingTeamChange.fueler) &&
+                      isMultiProjectEnabledForFueler(pendingTeamChange.fueler) && (
+                        <div className="rounded-xl border border-slate-700 bg-slate-900/70 p-3">
+                          <div className="mb-2 text-sm font-bold text-slate-200">
+                            {t("team.multiProject.keepLinkedQuestion")}
+                          </div>
+                          <div className="flex flex-col gap-2 text-sm">
+                            <label className="flex cursor-pointer items-center gap-2">
+                              <input
+                                type="radio"
+                                name="keepLinkedProjects"
+                                checked={pendingTeamChange.keepLinkedProjects !== false}
+                                onChange={() =>
+                                  setPendingTeamChange((prev) =>
+                                    prev ? { ...prev, keepLinkedProjects: true } : prev
+                                  )
+                                }
+                                className="accent-amber-400"
+                              />
+                              {t("team.multiProject.keepLinkedYes")}
+                            </label>
+                            <label className="flex cursor-pointer items-center gap-2">
+                              <input
+                                type="radio"
+                                name="keepLinkedProjects"
+                                checked={pendingTeamChange.keepLinkedProjects === false}
+                                onChange={() =>
+                                  setPendingTeamChange((prev) =>
+                                    prev ? { ...prev, keepLinkedProjects: false } : prev
+                                  )
+                                }
+                                className="accent-amber-400"
+                              />
+                              {t("team.multiProject.keepLinkedNo")}
+                            </label>
+                          </div>
+                        </div>
+                      )}
+                  </>
                 )}
               </div>
 

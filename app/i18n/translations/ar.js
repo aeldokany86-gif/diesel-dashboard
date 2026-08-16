@@ -69,6 +69,19 @@ const ar = {
     noProjectAssigned: "لا يوجد مشروع مسند",
     logout: "تسجيل الخروج",
   },
+  stationTolerance: {
+    menuLabel: "هامش رصيد المحطات",
+    title: "هامش الرصيد السالب للمحطات",
+    help: "حدد أقصى رصيد سالب مسموح للمحطات كنسبة من سعة كل محطة. يطبق الإعداد على العمليات الجديدة فقط.",
+    rangeHelp: "القيمة المسموحة من 0% إلى 5%. القيمة 0% تمنع أي رصيد سالب.",
+    save: "حفظ الهامش",
+    loading: "جارٍ تحميل القيمة...",
+    saved: "تم تحديث هامش الرصيد السالب للمحطات بنجاح.",
+    loadFailed: "تعذر تحميل هامش الرصيد السالب للمحطات.",
+    saveFailed: "تعذر حفظ هامش الرصيد السالب للمحطات.",
+    validation: "يجب أن تكون النسبة بين 0% و5%.",
+  },
+
   dataImport: {
     eyebrow: "تهيئة محكومة",
     title: "مركز استيراد البيانات",
@@ -990,6 +1003,29 @@ const ar = {
     print: { reportTitle: "تقرير المحطات" },
   },
 
+  multiProject: {
+    accessLabel: "تعدد المشاريع",
+    enabled: "مفعّل",
+    disabled: "غير مفعّل",
+    accessToggleHelp: "تفعيل أو تعطيل إتاحة الموظف للعمل على أكثر من مشروع داخل الشركة",
+    actions: {
+      enable: "تفعيل",
+      disable: "تعطيل",
+    },
+    messages: {
+      accessEnabled: "تم تفعيل تعدد المشاريع لهذه الشركة.",
+      accessDisabled: "تم تعطيل تعدد المشاريع لهذه الشركة.",
+      accessUpdateFailed: "تعذر تحديث إعداد تعدد المشاريع.",
+      platformOnlyAccessControl: "يمكن لمسؤول المنصة فقط تغيير إعداد تعدد المشاريع.",
+    },
+    confirm: {
+      enableTitle: "تفعيل تعدد المشاريع",
+      disableTitle: "تعطيل تعدد المشاريع",
+      enableMessage: "هل تريد تفعيل تعدد المشاريع لموظفي شركة {{company}}؟",
+      disableMessage: "هل تريد تعطيل تعدد المشاريع لشركة {{company}}؟ ستظل السجلات التاريخية محفوظة.",
+    },
+  },
+
   team: {
     title: "إدارة فريق العمل",
     subtitle: "متابعة فريق العمل ومؤشرات تعبئة المعدات وقياس الأداء",
@@ -1030,6 +1066,7 @@ const ar = {
       jobTitle: "المسمى الوظيفي",
       userStatus: "حالة المستخدم",
       projectName: "اسم المشروع",
+      assignedProjects: "المشاريع المرتبطة",
       workStatus: "حالة العمل",
     },
     userStatus: {
@@ -1049,6 +1086,25 @@ const ar = {
     transfer: {
       inProgress: "النقل قيد التنفيذ",
       requestedTo: "طلب نقل إلى {{project}}",
+    },
+    multiProject: {
+      modalTitle: "المشاريع المرتبطة",
+      primaryProject: "المشروع الأساسي",
+      additionalProjects: "المشاريع الإضافية",
+      noAdditionalProjects: "لا توجد مشاريع إضافية مرتبطة.",
+      addProject: "+ إضافة مشروع",
+      selectProject: "اختر المشروع",
+      removeSelected: "إزالة المحدد",
+      loading: "جارٍ تحميل المشاريع المرتبطة...",
+      totalProjects: "{{count}} مشروع",
+      keepLinkedQuestion: "هل تريد الإبقاء على المشاريع المرتبطة بالموظف؟",
+      keepLinkedYes: "نعم، الإبقاء على المشاريع المرتبطة",
+      keepLinkedNo: "لا، طلب إزالة المشاريع المرتبطة",
+      readOnly: "المشاريع المرتبطة بهذا الموظف للعرض فقط.",
+      assignmentAdded: "تم ربط المشروع بنجاح.",
+      assignmentsRemoved: "تمت إزالة روابط المشاريع المحددة بنجاح.",
+      loadFailed: "تعذر تحميل المشاريع المرتبطة.",
+      updateFailed: "تعذر تحديث المشاريع المرتبطة.",
     },
     chart: {
       title: "كمية الديزل لكل مشغّل",

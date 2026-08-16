@@ -105,3 +105,54 @@ export async function fetchEmployeeTransferReport({ companyId, ...filters } = {}
     summary: response.data?.summary || {},
   };
 }
+
+
+export async function fetchEmployeeProjectAssignments(employeeId) {
+  if (!employeeId) throw new Error("Employee backend ID is required.");
+  const response = await api.get(`/employees/${employeeId}/project-assignments`);
+  return response.data;
+}
+
+export async function addEmployeeProjectAssignment(employeeId, projectId) {
+  if (!employeeId) throw new Error("Employee backend ID is required.");
+  if (!projectId) throw new Error("Project ID is required.");
+  const response = await api.post(`/employees/${employeeId}/project-assignments`, {
+    projectId,
+  });
+  return response.data;
+}
+
+export async function removeEmployeeProjectAssignments(employeeId, projectIds = []) {
+  if (!employeeId) throw new Error("Employee backend ID is required.");
+  const normalizedProjectIds = Array.from(
+    new Set((Array.isArray(projectIds) ? projectIds : []).filter(Boolean))
+  );
+  if (!normalizedProjectIds.length) {
+    throw new Error("Select at least one additional project to remove.");
+  }
+
+  const response = await api.delete(`/employees/${employeeId}/project-assignments`, {
+    data: {
+      projectIds: normalizedProjectIds,
+    },
+  });
+  return response.data;
+}
+
+export async function fetchPendingEmployeeProjectRemovalRequests(approverUserId) {
+  if (!approverUserId) return [];
+  const response = await api.get(
+    "/employee-transfers/project-removal-requests/pending",
+    { params: { approverUserId } }
+  );
+  return Array.isArray(response.data) ? response.data : [];
+}
+
+export async function reviewEmployeeProjectRemovalRequest(requestId, payload) {
+  if (!requestId) throw new Error("Project removal request ID is required.");
+  const response = await api.patch(
+    `/employee-transfers/project-removal-requests/${requestId}/review`,
+    payload
+  );
+  return response.data;
+}

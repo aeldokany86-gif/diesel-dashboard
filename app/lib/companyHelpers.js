@@ -106,6 +106,7 @@ export const PLATFORM_COMPANY_OPTION = {
   language: "EN-AR",
   status: "Active",
   dataImportEnabled: false,
+  multiProjectEnabled: false,
   isPlatformContext: true,
 };
 
@@ -189,6 +190,7 @@ export function normalizeCompanyForState(company = {}) {
     status: isActive ? "Active" : "Inactive",
     isActive,
     dataImportEnabled: Boolean(company.dataImportEnabled),
+    multiProjectEnabled: Boolean(company.multiProjectEnabled),
     isPlatformContext: Boolean(company.isPlatformContext) || isPlatformCompany(company),
     createdAt: company.createdAt || "",
     updatedAt: company.updatedAt || "",

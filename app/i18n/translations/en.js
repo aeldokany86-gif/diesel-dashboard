@@ -69,6 +69,19 @@ const en = {
     noProjectAssigned: "No Project Assigned",
     logout: "Logout",
   },
+  stationTolerance: {
+    menuLabel: "Station Balance Tolerance",
+    title: "Station Negative Balance Tolerance",
+    help: "Set the maximum allowed negative station balance as a percentage of each station capacity. The setting applies to new operations only.",
+    rangeHelp: "Allowed range is 0% to 5%. A value of 0% prevents any negative balance.",
+    save: "Save Tolerance",
+    loading: "Loading value...",
+    saved: "Station negative balance tolerance updated successfully.",
+    loadFailed: "Failed to load station negative balance tolerance.",
+    saveFailed: "Failed to save station negative balance tolerance.",
+    validation: "Tolerance must be between 0% and 5%.",
+  },
+
   dataImport: {
     eyebrow: "Controlled Onboarding",
     title: "Data Import Center",
@@ -990,6 +1003,29 @@ const en = {
     print: { reportTitle: "Stations Report" },
   },
 
+  multiProject: {
+    accessLabel: "Multi-Project",
+    enabled: "Enabled",
+    disabled: "Disabled",
+    accessToggleHelp: "Enable or disable multi-project employee access for this company",
+    actions: {
+      enable: "Enable",
+      disable: "Disable",
+    },
+    messages: {
+      accessEnabled: "Multi-Project access enabled for this company.",
+      accessDisabled: "Multi-Project access disabled for this company.",
+      accessUpdateFailed: "Failed to update Multi-Project access.",
+      platformOnlyAccessControl: "Only Platform Admin can change Multi-Project access.",
+    },
+    confirm: {
+      enableTitle: "Enable Multi-Project",
+      disableTitle: "Disable Multi-Project",
+      enableMessage: "Enable Multi-Project employee access for {{company}}?",
+      disableMessage: "Disable Multi-Project employee access for {{company}}? Existing historical records will remain unchanged.",
+    },
+  },
+
   team: {
     title: "Team Management",
     subtitle: "Team monitoring, equipment refuel KPI and performance tracking",
@@ -1030,6 +1066,7 @@ const en = {
       jobTitle: "Job Title",
       userStatus: "User Status",
       projectName: "Project Name",
+      assignedProjects: "Assigned Projects",
       workStatus: "Work Status",
     },
     userStatus: {
@@ -1049,6 +1086,25 @@ const en = {
     transfer: {
       inProgress: "Transfer in progress",
       requestedTo: "Requested → {{project}}",
+    },
+    multiProject: {
+      modalTitle: "Assigned Projects",
+      primaryProject: "Primary Project",
+      additionalProjects: "Additional Projects",
+      noAdditionalProjects: "No additional projects linked.",
+      addProject: "+ Add Project",
+      selectProject: "Select project",
+      removeSelected: "Remove Selected",
+      loading: "Loading assigned projects...",
+      totalProjects: "{{count}} project(s)",
+      keepLinkedQuestion: "Do you want to keep the projects linked to this employee?",
+      keepLinkedYes: "Yes, keep linked projects",
+      keepLinkedNo: "No, request removal of linked projects",
+      readOnly: "Project assignments are read-only for this employee.",
+      assignmentAdded: "Project linked successfully.",
+      assignmentsRemoved: "Selected project links removed successfully.",
+      loadFailed: "Failed to load assigned projects.",
+      updateFailed: "Failed to update assigned projects.",
     },
     chart: {
       title: "Diesel Quantity Per Operator",
@@ -1443,6 +1499,12 @@ const en = {
       sourceProjectManager: "Source Project Manager",
       destinationProjectManager: "Destination Project Manager",
       projectManager: "Project Manager",
+    },
+    projectRemoval: {
+      title: "Linked Project Removal: {{employeeName}}",
+      details: "Remove {{project}} from the projects linked to {{employeeName}}.",
+      approved: "Project link removal approved.",
+      rejected: "Project link removal rejected.",
     },
     employeeTransfer: {
       title: "Team Transfer: {{employeeName}}",

@@ -54,6 +54,7 @@ import {
   mapBackendAssetTransferForState,
   mapBackendStationTransferForState,
   mapBackendEmployeeTransferForState,
+  mapBackendEmployeeProjectRemovalRequestForState,
   getStationTransferWorkflowMessageDescriptor,
   getEmployeeTransferWorkflowMessageDescriptor,
 } from "./lib/transferHelpers";
@@ -83,6 +84,8 @@ import {
 import {
   fetchCompanies,
   fetchPublicCompanies,
+  fetchStationNegativeTolerance,
+  updateStationNegativeTolerance,
 } from "./services/companiesService";
 import { fetchDataImportAccess } from "./services/importsService";
 
@@ -118,6 +121,11 @@ import {
   createEmployeeTransfer,
   createBulkEmployeeTransfer,
   reviewEmployeeTransfer,
+  fetchEmployeeProjectAssignments,
+  addEmployeeProjectAssignment,
+  removeEmployeeProjectAssignments,
+  fetchPendingEmployeeProjectRemovalRequests,
+  reviewEmployeeProjectRemovalRequest,
 } from "./services/employeesService";
 
 import {
@@ -321,7 +329,11 @@ function buildLegacyUserFromAuthUser(authUser) {
     linkedEmployeeId: authUser.linkedEmployeeId || linkedEmployee?.id || "",
     employeeId: authUser.employeeId || linkedEmployee?.employeeId || "",
     linkedEmployee,
+    multiProjectEnabled: Boolean(authUser.multiProjectEnabled),
     assignedProjects,
+    assignedProjectDetails: Array.isArray(authUser.assignedProjectDetails)
+      ? authUser.assignedProjectDetails
+      : [],
     managedProjects,
     reportingManagerId: authUser.reportingManagerId || "",
     mobile: authUser.phone || "",
@@ -709,6 +721,9 @@ export default function Home() {
   const [theme, setTheme] = useState("light");
   const [showSettingsMenu, setShowSettingsMenu] = useState(false);
   const [activeSettingsSection, setActiveSettingsSection] = useState(null);
+  const [stationNegativeTolerancePercent, setStationNegativeTolerancePercent] = useState("2");
+  const [stationNegativeToleranceLoading, setStationNegativeToleranceLoading] = useState(false);
+  const [stationNegativeToleranceSaving, setStationNegativeToleranceSaving] = useState(false);
   const [sidebarCollapsed, setSidebarCollapsed] = useState(false);
   const [mobileSidebarOpen, setMobileSidebarOpen] = useState(false);
 
@@ -750,6 +765,7 @@ export default function Home() {
   const [backendOperationCorrections, setBackendOperationCorrections] =
     useState([]);
   const [employeeTransferRequests, setEmployeeTransferRequests] = useState([]);
+  const [employeeProjectRemovalRequests, setEmployeeProjectRemovalRequests] = useState([]);
   const [assetTransferRequests, setAssetTransferRequests] = useState([]);
   const [stationTransferRequests, setStationTransferRequests] = useState([]);
   const [approvedStationStockAdjustments, setApprovedStationStockAdjustments] =
@@ -1507,6 +1523,117 @@ export default function Home() {
     }
   };
 
+  const refreshBackendEmployeeProjectRemovalRequests = async () => {
+    const approverUserId = backendAuthUser?.id || currentUser?.id || "";
+
+    if (!approverUserId) {
+      setEmployeeProjectRemovalRequests([]);
+      return [];
+    }
+
+    try {
+      const backendRequests =
+        await fetchPendingEmployeeProjectRemovalRequests(approverUserId);
+      const mappedRequests = backendRequests
+        .map(mapBackendEmployeeProjectRemovalRequestForState)
+        .filter((request) => request.id);
+
+      setEmployeeProjectRemovalRequests(mappedRequests);
+      return mappedRequests;
+    } catch (error) {
+      console.warn("Employee project removal requests API is not available.", error);
+      setEmployeeProjectRemovalRequests([]);
+      return [];
+    }
+  };
+
+  const handleLoadEmployeeProjectAssignments = async (employeeBackendId) => {
+    return fetchEmployeeProjectAssignments(employeeBackendId);
+  };
+
+  const handleAddEmployeeProjectAssignment = async (
+    employeeBackendId,
+    projectId,
+  ) => {
+    const result = await addEmployeeProjectAssignment(
+      employeeBackendId,
+      projectId,
+    );
+    void refreshBackendEmployees(currentCompanyId, currentUser?.id);
+    return result;
+  };
+
+  const handleRemoveEmployeeProjectAssignments = async (
+    employeeBackendId,
+    projectIds,
+  ) => {
+    const result = await removeEmployeeProjectAssignments(
+      employeeBackendId,
+      projectIds,
+    );
+    void refreshBackendEmployees(currentCompanyId, currentUser?.id);
+    return result;
+  };
+
+  const handleApproveEmployeeProjectRemoval = async (
+    request,
+    reviewerUserId = "",
+  ) => {
+    const requestId = request?.backendId || request?.id || "";
+    const actorUserId =
+      reviewerUserId || backendAuthUser?.id || currentUser?.id || "";
+
+    if (!requestId) throw new Error("Project removal request ID is required.");
+    if (!actorUserId) throw new Error("Reviewer user ID is required.");
+
+    const result = await reviewEmployeeProjectRemovalRequest(requestId, {
+      reviewerUserId: actorUserId,
+      approve: true,
+    });
+
+    setEmployeeProjectRemovalRequests((prev) =>
+      prev.filter(
+        (item) =>
+          normalizeScopeValue(item.id) !== normalizeScopeValue(requestId),
+      ),
+    );
+
+    await refreshBackendEmployees(currentCompanyId, currentUser?.id);
+    await refreshBackendEmployeeProjectRemovalRequests();
+
+    return mapBackendEmployeeProjectRemovalRequestForState(result);
+  };
+
+  const handleRejectEmployeeProjectRemoval = async (
+    request,
+    reason = "",
+    reviewerUserId = "",
+  ) => {
+    const requestId = request?.backendId || request?.id || "";
+    const actorUserId =
+      reviewerUserId || backendAuthUser?.id || currentUser?.id || "";
+
+    if (!requestId) throw new Error("Project removal request ID is required.");
+    if (!actorUserId) throw new Error("Reviewer user ID is required.");
+
+    const result = await reviewEmployeeProjectRemovalRequest(requestId, {
+      reviewerUserId: actorUserId,
+      approve: false,
+      rejectionReason: reason || "Rejected",
+    });
+
+    setEmployeeProjectRemovalRequests((prev) =>
+      prev.filter(
+        (item) =>
+          normalizeScopeValue(item.id) !== normalizeScopeValue(requestId),
+      ),
+    );
+
+    await refreshBackendEmployeeProjectRemovalRequests();
+
+    return mapBackendEmployeeProjectRemovalRequestForState(result);
+  };
+
   const upsertAssetTransferRequest = (transfer) => {
     const mappedTransfer = {
       ...mapBackendAssetTransferForState(transfer),
@@ -1983,7 +2110,11 @@ export default function Home() {
     return updatedEmployee;
   };
 
-  const handleCreateEmployeeTransfer = async (employee, toProjectId) => {
+  const handleCreateEmployeeTransfer = async (
+    employee,
+    toProjectId,
+    keepLinkedProjects = true,
+  ) => {
     const employeeBackendId =
       employee?.backendId || employee?.employeeBackendId || employee?.id;
     const requestedByUserId = backendAuthUser?.id || currentUser?.id || "";
@@ -2004,6 +2135,7 @@ export default function Home() {
       employeeId: employeeBackendId,
       toProjectId,
       requestedByUserId,
+      keepLinkedProjects: keepLinkedProjects !== false,
     });
 
     const createdTransfer =
@@ -2035,10 +2167,18 @@ export default function Home() {
 
     await refreshBackendEmployeeTransfers();
 
+    if (transferApproved && createdTransfer.keepLinkedProjects === false) {
+      await refreshBackendEmployeeProjectRemovalRequests();
+    }
+
     return createdTransfer;
   };
 
-  const handleCreateBulkEmployeeTransfer = async (employees, toProjectId) => {
+  const handleCreateBulkEmployeeTransfer = async (
+    employees,
+    toProjectId,
+    keepLinkedProjects = true,
+  ) => {
     const employeeIds = Array.from(
       new Set(
         (Array.isArray(employees) ? employees : [])
@@ -2063,6 +2203,7 @@ export default function Home() {
       employeeIds,
       toProjectId,
       requestedByUserId,
+      keepLinkedProjects: keepLinkedProjects !== false,
     });
     const mappedTransfers = (
       Array.isArray(result?.transfers) ? result.transfers : []
@@ -2105,6 +2246,12 @@ export default function Home() {
       backgroundSyncTasks.push(
         refreshBackendEmployees(currentCompanyId, currentUser?.id),
       );
+
+      if (keepLinkedProjects === false) {
+        backgroundSyncTasks.push(
+          refreshBackendEmployeeProjectRemovalRequests(),
+        );
+      }
     }
 
     void Promise.allSettled(backgroundSyncTasks);
@@ -2187,6 +2334,13 @@ export default function Home() {
 
     await refreshBackendEmployees(currentCompanyId, currentUser?.id);
     await refreshBackendEmployeeTransfers();
+
+    if (
+      String(reviewedTransfer.status || "").toUpperCase() === "APPROVED" &&
+      reviewedTransfer.keepLinkedProjects === false
+    ) {
+      await refreshBackendEmployeeProjectRemovalRequests();
+    }
 
     return reviewedTransfer;
   };
@@ -3085,7 +3239,19 @@ export default function Home() {
 
         const fetchBackendEmployees = async () => {
           try {
-            return await fetchEmployees();
+            // Employee multi-project counts/flags are company-aware in the backend.
+            // When a real company context is selected, always request employees with
+            // that companyId so projectAssignments and assignedProjectsCount are
+            // calculated against the correct company's multiProjectEnabled flag.
+            const employeeCompanyId =
+              selectedCompanyId && !isPlatformContextValue(selectedCompanyId)
+                ? selectedCompanyId
+                : "";
+
+            return await fetchEmployees({
+              companyId: employeeCompanyId,
+              viewerUserId: currentUser?.id || "",
+            });
           } catch (error) {
             console.warn("Employees backend API is not available.", error);
             showToast?.("warning", "Employees backend API is not available.");
@@ -3234,6 +3400,7 @@ export default function Home() {
                 : company.status || "Active",
             isActive: company.isActive !== false,
             dataImportEnabled: Boolean(company.dataImportEnabled),
+            multiProjectEnabled: Boolean(company.multiProjectEnabled),
             isPlatformContext:
               Boolean(company.isPlatformContext) || isPlatformCompany(company),
             createdAt: company.createdAt || "",
@@ -3413,6 +3580,7 @@ export default function Home() {
       currentUser?.id || backendAuthUser?.id || "",
     );
     refreshBackendEmployeeTransfers();
+    refreshBackendEmployeeProjectRemovalRequests();
     refreshBackendAssetTransfers();
     refreshBackendStationTransfers();
     refreshBackendAssetActions();
@@ -3508,6 +3676,12 @@ export default function Home() {
       return Array.from(values).filter(Boolean);
     }
 
+    (currentUser.assignedProjects || [])
+      .filter((value) => normalizeScopeValue(value) !== "all")
+      .forEach((value) => values.add(normalizeScopeValue(value)));
+
+    (currentUser.assignedProjectDetails || []).forEach(addProjectValues);
+
     companyFuelers
       .filter(
         (employee) =>
@@ -3524,6 +3698,8 @@ export default function Home() {
         [employee.projectId, employee.projectName, employee.project]
           .filter(Boolean)
           .forEach((value) => values.add(normalizeScopeValue(value)));
+
+        (employee.additionalProjects || []).forEach(addProjectValues);
       });
 
     return Array.from(values).filter(Boolean);
@@ -3558,7 +3734,7 @@ export default function Home() {
         ...companyProjects
           .filter((project) => project?.id)
           .map((project) => ({
-            value: project.id || project.backendId || project.name,
+            value: project.backendId || project.id || project.name,
             label: project.name || project.code || project.id,
             project,
           })),
@@ -3581,7 +3757,7 @@ export default function Home() {
     });
 
     const individualProjectOptions = allowedProjects.map((project) => ({
-      value: project.id || project.backendId || project.name,
+      value: project.backendId || project.id || project.name,
       label: project.name || project.code || project.id,
       project,
     }));
@@ -3666,6 +3842,13 @@ export default function Home() {
     selectedProjectScopeOption?.project?.name ||
     selectedProjectScopeOption?.project?.code ||
     "All Projects";
+
+  const activeOperationProjectId =
+    selectedProjectScopeOption?.project?.backendId ||
+    selectedProjectScopeOption?.project?.id ||
+    (["Officer", "Supervisor", "Operator"].includes(currentUser?.role)
+      ? selectedProjectScopeOption?.value || ""
+      : "");
 
   const currentUserCanAccessAllOperationalProjects =
     currentUserProjectScopeValues.includes("all");
@@ -4092,6 +4275,102 @@ export default function Home() {
       };
     });
 
+  const employeeProjectRemovalApprovals = employeeProjectRemovalRequests
+    .filter(
+      (request) =>
+        String(request.status || "").toUpperCase() === "PENDING",
+    )
+    .map((request) => {
+      const requestedBy =
+        companyUsers.find((user) => user.id === request.requestedByUserId) ||
+        currentUser;
+      const approverUser = companyUsers.find(
+        (user) => user.id === request.approverUserId,
+      );
+      const employeeDisplayId =
+        request.employeeId || request.employeeBackendId || "-";
+      const employeeDisplayName =
+        request.employeeName || employeeDisplayId;
+      const projectDisplay =
+        request.projectName || request.projectId || "-";
+
+      return {
+        id: `EMP-PROJECT-REMOVAL-${request.id}`,
+        type: "employee_project_removal",
+        module: "team",
+        title: t("approvals.projectRemoval.title", {
+          employeeName: employeeDisplayName,
+        }),
+        titleKey: "approvals.projectRemoval.title",
+        titleParams: { employeeName: employeeDisplayName },
+        titleFallback: `Linked Project Removal: ${employeeDisplayName}`,
+        payload: {
+          projectRemovalRequest: request,
+          employeeId: employeeDisplayId,
+          employeeName: employeeDisplayName,
+          projectId: request.projectId,
+          projectName: projectDisplay,
+          transferRequestId: request.transferRequestId,
+        },
+        details: t("approvals.projectRemoval.details", {
+          project: projectDisplay,
+          employeeName: employeeDisplayName,
+        }),
+        detailsKey: "approvals.projectRemoval.details",
+        detailsParams: {
+          project: projectDisplay,
+          employeeName: employeeDisplayName,
+        },
+        detailsFallback: `Remove ${projectDisplay} from the projects linked to ${employeeDisplayName}.`,
+        status: "Pending",
+        changedFields: [
+          {
+            field: "project",
+            label: "Linked Project",
+            labelFallback: "Linked Project",
+            oldValue: projectDisplay,
+            newValue: "Removed",
+            sensitive: true,
+          },
+        ],
+        entityType: "Team Member",
+        entityId: employeeDisplayId,
+        sensitivity: "Sensitive",
+        riskLevel: "High",
+        approvalRoute: {
+          routeType: "employee_project_removal",
+          sourceProject: projectDisplay,
+          destinationProject: "-",
+          requiredApprovers: [
+            {
+              userId: request.approverUserId,
+              userName:
+                approverUser?.fullName ||
+                approverUser?.email ||
+                request.approverUserId,
+              role: "Manager",
+              projectId: request.projectId || "-",
+              approvalStage: "Project Manager",
+              status: "Pending",
+              reviewedAt: "",
+              reviewNote: "",
+            },
+          ],
+          routeStatus: "Pending",
+        },
+        requestedById:
+          requestedBy?.id || request.requestedByUserId || "System",
+        requestedByName:
+          requestedBy?.fullName || requestedBy?.name || "System",
+        requestedByRole: requestedBy?.role || "System",
+        requestedAt:
+          request.requestedAt || new Date().toISOString(),
+        reviewedBy: "",
+        reviewedAt: "",
+        reviewNote: "",
+      };
+    });
+
   const assetTransferApprovals = assetTransferRequests
     .filter((transfer) =>
       ["PENDING", "PARTIALLY_APPROVED"].includes(
@@ -4307,6 +4586,7 @@ export default function Home() {
     ...backendOperationApprovalRequests,
     ...backendOperationCorrectionRequests,
     ...employeeTransferApprovals,
+    ...employeeProjectRemovalApprovals,
     ...assetTransferApprovals,
     ...stationTransferApprovals,
   ];
@@ -4360,6 +4640,7 @@ export default function Home() {
           currentUser={currentUser}
           activeProjectScopeLabel={activeOperationProjectScopeLabel}
           activeProjectScopeValues={currentUserProjectScopeValues}
+          activeProjectId={activeOperationProjectId}
           hasPermission={hasPermission}
           trackActivity={trackActivity}
           submitApprovalRequest={submitApprovalRequest}
@@ -4438,6 +4719,9 @@ export default function Home() {
           onCreateEmployee={handleCreateEmployee}
           onCheckEmployeeIdAvailability={handleCheckEmployeeIdAvailability}
           onUpdateEmployee={handleUpdateEmployee}
+          onLoadEmployeeProjectAssignments={handleLoadEmployeeProjectAssignments}
+          onAddEmployeeProjectAssignment={handleAddEmployeeProjectAssignment}
+          onRemoveEmployeeProjectAssignments={handleRemoveEmployeeProjectAssignments}
           onCreateEmployeeTransfer={handleCreateEmployeeTransfer}
           onCreateBulkEmployeeTransfer={handleCreateBulkEmployeeTransfer}
           onCreateUserFromEmployee={handleCreateUserFromEmployee}
@@ -4557,6 +4841,8 @@ export default function Home() {
           showToast={showToast}
           onApproveEmployeeTransfer={handleApproveEmployeeTransfer}
           onRejectEmployeeTransfer={handleRejectEmployeeTransfer}
+          onApproveEmployeeProjectRemoval={handleApproveEmployeeProjectRemoval}
+          onRejectEmployeeProjectRemoval={handleRejectEmployeeProjectRemoval}
           onApproveAssetTransfer={handleApproveAssetTransfer}
           onRejectAssetTransfer={handleRejectAssetTransfer}
           onApproveStationTransfer={handleApproveStationTransfer}
@@ -4623,6 +4909,100 @@ export default function Home() {
       setToast(null);
     }, 3000);
   };
+
+  const canManageStationNegativeTolerance = currentUser?.role === "Admin";
+
+  const openStationNegativeToleranceSettings = async () => {
+    if (!canManageStationNegativeTolerance) return;
+
+    setActiveSettingsSection("stationNegativeTolerance");
+    setStationNegativeToleranceLoading(true);
+
+    try {
+      const result = await fetchStationNegativeTolerance();
+      setStationNegativeTolerancePercent(String(result?.percent ?? 2));
+    } catch (error) {
+      showToast(
+        "error",
+        getFriendlyApiErrorMessage(error, t("stationTolerance.loadFailed")),
+      );
+    } finally {
+      setStationNegativeToleranceLoading(false);
+    }
+  };
+
+  const saveStationNegativeTolerance = async () => {
+    if (!canManageStationNegativeTolerance) return;
+
+    const percent = Number(stationNegativeTolerancePercent);
+
+    if (!Number.isFinite(percent) || percent < 0 || percent > 5) {
+      showToast("warning", t("stationTolerance.validation"));
+      return;
+    }
+
+    setStationNegativeToleranceSaving(true);
+
+    try {
+      const result = await updateStationNegativeTolerance(percent);
+      setStationNegativeTolerancePercent(String(result?.percent ?? percent));
+      showToast("success", t("stationTolerance.saved"));
+    } catch (error) {
+      showToast(
+        "error",
+        getFriendlyApiErrorMessage(error, t("stationTolerance.saveFailed")),
+      );
+    } finally {
+      setStationNegativeToleranceSaving(false);
+    }
+  };
+
+  const renderStationNegativeToleranceSettings = () => (
+    <>
+      <button
+        type="button"
+        onClick={() => setActiveSettingsSection(null)}
+        className="w-full flex items-center gap-2 px-4 py-2 text-[11px] font-bold uppercase tracking-[0.14em] text-slate-500 hover:bg-slate-900"
+      >
+        <span>‹</span>
+        <span>{t("stationTolerance.title")}</span>
+      </button>
+      <div className="border-t border-slate-800 px-4 py-3">
+        <p className="mb-3 text-xs leading-5 text-slate-400">
+          {t("stationTolerance.help")}
+        </p>
+        <div className="flex items-center gap-2">
+          <input
+            type="number"
+            min="0"
+            max="5"
+            step="0.1"
+            value={stationNegativeTolerancePercent}
+            onChange={(event) => setStationNegativeTolerancePercent(event.target.value)}
+            disabled={stationNegativeToleranceLoading || stationNegativeToleranceSaving}
+            className="min-w-0 flex-1 rounded-lg border border-slate-700 bg-slate-900 px-3 py-2 text-sm font-bold text-slate-100 outline-none focus:border-amber-400 disabled:cursor-wait disabled:opacity-60"
+            aria-label={t("stationTolerance.title")}
+          />
+          <span className="text-sm font-black text-amber-300">%</span>
+        </div>
+        <p className="mt-2 text-[11px] leading-4 text-slate-500">
+          {t("stationTolerance.rangeHelp")}
+        </p>
+        <button
+          type="button"
+          onClick={saveStationNegativeTolerance}
+          disabled={stationNegativeToleranceLoading || stationNegativeToleranceSaving}
+          className="mt-3 w-full rounded-lg bg-amber-400 px-3 py-2 text-sm font-black text-slate-950 transition hover:bg-amber-300 disabled:cursor-wait disabled:opacity-60"
+        >
+          {stationNegativeToleranceLoading
+            ? t("stationTolerance.loading")
+            : stationNegativeToleranceSaving
+              ? t("common.saving")
+              : t("stationTolerance.save")}
+        </button>
+      </div>
+    </>
+  );
 
   const [isOnline, setIsOnline] = useState(() =>
     typeof navigator === "undefined" ? true : navigator.onLine,
@@ -5318,7 +5698,7 @@ export default function Home() {
               </button>
 
               {showSettingsMenu && (
-                <div className="absolute left-0 bottom-full mb-2 w-full bg-slate-950 border border-slate-700 rounded-2xl shadow-2xl overflow-hidden z-[999999]">
+                <div className="absolute left-0 bottom-full mb-2 w-[240px] max-w-[calc(100vw-1.5rem)] bg-slate-950 border border-slate-700 rounded-2xl shadow-2xl overflow-hidden z-[999999]">
                   {!activeSettingsSection ? (
                     <>
                       <button type="button" onClick={() => setActiveSettingsSection("theme")} className="w-full flex items-center justify-between px-4 py-3 text-sm text-slate-200 hover:bg-slate-800 transition-colors">
@@ -5327,6 +5707,11 @@ export default function Home() {
                       <button type="button" onClick={() => setActiveSettingsSection("language")} className="w-full flex items-center justify-between px-4 py-3 text-sm text-slate-200 border-t border-slate-700 hover:bg-slate-800 transition-colors">
                         <span>{t("common.language")}</span><span className="text-slate-500">›</span>
                       </button>
+                      {canManageStationNegativeTolerance && (
+                        <button type="button" onClick={openStationNegativeToleranceSettings} className="w-full flex items-center justify-between px-4 py-3 text-sm text-slate-200 border-t border-slate-700 hover:bg-slate-800 transition-colors">
+                          <span className="text-start leading-5">{t("stationTolerance.menuLabel")}</span><span className="shrink-0 text-slate-500">›</span>
+                        </button>
+                      )}
                       {canOpenDataImportCenter && (
                         <button
                           type="button"
@@ -5348,12 +5733,14 @@ export default function Home() {
                       <button onClick={() => { setTheme("dark"); setShowSettingsMenu(false); setActiveSettingsSection(null); }} className={`w-full text-start px-4 py-3 text-sm transition-colors ${theme === "dark" ? "bg-amber-400 text-slate-950 font-bold" : "text-slate-200 hover:bg-slate-800"}`}>{t("common.darkTheme")}</button>
                       <button onClick={() => { setTheme("light"); setShowSettingsMenu(false); setActiveSettingsSection(null); }} className={`w-full text-start px-4 py-3 text-sm border-t border-slate-700 transition-colors ${theme === "light" ? "bg-amber-400 text-slate-950 font-bold" : "text-slate-200 hover:bg-slate-800"}`}>{t("common.lightTheme")}</button>
                     </>
-                  ) : (
+                  ) : activeSettingsSection === "language" ? (
                     <>
                       <button type="button" onClick={() => setActiveSettingsSection(null)} className="w-full flex items-center gap-2 px-4 py-2 text-[11px] font-bold uppercase tracking-[0.14em] text-slate-500 hover:bg-slate-900"><span>‹</span><span>{t("common.language")}</span></button>
                       <button type="button" disabled={isUpdatingLanguage} onClick={async () => { try { await setLanguage("en"); setShowSettingsMenu(false); setActiveSettingsSection(null); } catch (error) { showToast?.("error", getFriendlyApiErrorMessage(error, t("common.languageSaveFailed"))); } }} className={`w-full text-start px-4 py-3 text-sm transition-colors disabled:cursor-wait disabled:opacity-60 ${language === "en" ? "bg-amber-400 text-slate-950 font-bold" : "text-slate-200 hover:bg-slate-800"}`}>{isUpdatingLanguage && language !== "en" ? t("common.saving") : t("common.english")}</button>
                       <button type="button" disabled={isUpdatingLanguage} onClick={async () => { try { await setLanguage("ar"); setShowSettingsMenu(false); setActiveSettingsSection(null); } catch (error) { showToast?.("error", getFriendlyApiErrorMessage(error, t("common.languageSaveFailed"))); } }} className={`w-full text-start px-4 py-3 text-sm border-t border-slate-700 transition-colors disabled:cursor-wait disabled:opacity-60 ${language === "ar" ? "bg-amber-400 text-slate-950 font-bold" : "text-slate-200 hover:bg-slate-800"}`}>{isUpdatingLanguage && language !== "ar" ? t("common.saving") : t("common.arabic")}</button>
                     </>
+                  ) : (
+                    renderStationNegativeToleranceSettings()
                   )}
                 </div>
               )}
@@ -5407,11 +5794,16 @@ export default function Home() {
           </div>
 
           {showSettingsMenu && (
-            <div className="lg:hidden fixed end-3 top-[62px] z-[10020] w-52 bg-slate-950 border border-slate-700 rounded-2xl shadow-2xl overflow-hidden">
+            <div className="lg:hidden fixed end-3 top-[62px] z-[10020] w-60 max-w-[calc(100vw-1.5rem)] bg-slate-950 border border-slate-700 rounded-2xl shadow-2xl overflow-hidden">
               {!activeSettingsSection ? (
                 <>
                   <button type="button" onClick={() => setActiveSettingsSection("theme")} className="w-full flex items-center justify-between px-4 py-3 text-sm text-slate-200 hover:bg-slate-800 transition-colors"><span>{t("common.theme")}</span><span className="text-slate-500">›</span></button>
                   <button type="button" onClick={() => setActiveSettingsSection("language")} className="w-full flex items-center justify-between px-4 py-3 text-sm text-slate-200 border-t border-slate-700 hover:bg-slate-800 transition-colors"><span>{t("common.language")}</span><span className="text-slate-500">›</span></button>
+                  {canManageStationNegativeTolerance && (
+                    <button type="button" onClick={openStationNegativeToleranceSettings} className="w-full flex items-center justify-between px-4 py-3 text-sm text-slate-200 border-t border-slate-700 hover:bg-slate-800 transition-colors">
+                      <span className="text-start leading-5">{t("stationTolerance.menuLabel")}</span><span className="shrink-0 text-slate-500">›</span>
+                    </button>
+                  )}
                   {canOpenDataImportCenter && (
                     <button
                       type="button"
@@ -5432,12 +5824,14 @@ export default function Home() {
                   <button onClick={() => { setTheme("dark"); setShowSettingsMenu(false); setActiveSettingsSection(null); }} className={`w-full text-start px-4 py-3 text-sm transition-colors ${theme === "dark" ? "bg-amber-400 text-slate-950 font-bold" : "text-slate-200 hover:bg-slate-800"}`}>{t("common.darkTheme")}</button>
                   <button onClick={() => { setTheme("light"); setShowSettingsMenu(false); setActiveSettingsSection(null); }} className={`w-full text-start px-4 py-3 text-sm border-t border-slate-700 transition-colors ${theme === "light" ? "bg-amber-400 text-slate-950 font-bold" : "text-slate-200 hover:bg-slate-800"}`}>{t("common.lightTheme")}</button>
                 </>
-              ) : (
+              ) : activeSettingsSection === "language" ? (
                 <>
                   <button type="button" onClick={() => setActiveSettingsSection(null)} className="w-full flex items-center gap-2 px-4 py-2 text-[11px] font-bold uppercase tracking-[0.14em] text-slate-500 hover:bg-slate-900"><span>‹</span><span>{t("common.language")}</span></button>
                   <button type="button" disabled={isUpdatingLanguage} onClick={async () => { try { await setLanguage("en"); setShowSettingsMenu(false); setActiveSettingsSection(null); } catch (error) { showToast?.("error", getFriendlyApiErrorMessage(error, t("common.languageSaveFailed"))); } }} className={`w-full text-start px-4 py-3 text-sm transition-colors disabled:cursor-wait disabled:opacity-60 ${language === "en" ? "bg-amber-400 text-slate-950 font-bold" : "text-slate-200 hover:bg-slate-800"}`}>{isUpdatingLanguage && language !== "en" ? t("common.saving") : t("common.english")}</button>
                   <button type="button" disabled={isUpdatingLanguage} onClick={async () => { try { await setLanguage("ar"); setShowSettingsMenu(false); setActiveSettingsSection(null); } catch (error) { showToast?.("error", getFriendlyApiErrorMessage(error, t("common.languageSaveFailed"))); } }} className={`w-full text-start px-4 py-3 text-sm border-t border-slate-700 transition-colors disabled:cursor-wait disabled:opacity-60 ${language === "ar" ? "bg-amber-400 text-slate-950 font-bold" : "text-slate-200 hover:bg-slate-800"}`}>{isUpdatingLanguage && language !== "ar" ? t("common.saving") : t("common.arabic")}</button>
                 </>
+              ) : (
+                renderStationNegativeToleranceSettings()
               )}
             </div>
           )}

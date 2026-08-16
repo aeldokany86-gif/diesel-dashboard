@@ -134,6 +134,10 @@ export function mapBackendEmployeeTransferForState(transfer = {}) {
     approvedAt: transfer.approvedAt || "",
     appliedAt: transfer.appliedAt || "",
     effectiveDate: transfer.effectiveDate || "",
+    keepLinkedProjects: transfer.keepLinkedProjects !== false,
+    projectRemovalRequests: Array.isArray(transfer.projectRemovalRequests)
+      ? transfer.projectRemovalRequests
+      : [],
     approvals: mapTransferApprovals(transfer.approvals),
   };
 }
@@ -310,4 +314,43 @@ export function getEmployeeTransferWorkflowMessageDescriptor(
     params,
     `Team member ${employeeName} (${employeeId}) transfer from ${params.fromProject} to ${params.toProject} is pending approval.`,
   );
+}
+
+
+export function mapBackendEmployeeProjectRemovalRequestForState(request = {}) {
+  const project = request.project || {};
+  const employee = request.employee || {};
+  const transferRequest = request.transferRequest || {};
+
+  return {
+    id: request.id || "",
+    backendId: request.id || "",
+    companyId: request.companyId || employee.companyId || "",
+    employeeBackendId: request.employeeId || employee.id || "",
+    employeeId: employee.employeeId || request.employeeId || "",
+    employeeName: employee.name || "",
+    projectId: request.projectId || project.id || "",
+    projectName: project.name || project.code || request.projectId || "-",
+    transferRequestId: request.transferRequestId || transferRequest.id || "",
+    requestedByUserId: request.requestedByUserId || "",
+    approverUserId: request.approverUserId || "",
+    reviewedByUserId: request.reviewedByUserId || "",
+    status: normalizeBackendTransferStatusForState(request.status),
+    reason: request.reason || "",
+    rejectionReason: request.rejectionReason || "",
+    requestedAt: request.requestedAt || request.createdAt || "",
+    reviewedAt: request.reviewedAt || "",
+    fromProjectId: transferRequest.fromProjectId || transferRequest.fromProject?.id || "",
+    fromProjectName:
+      transferRequest.fromProject?.name ||
+      transferRequest.fromProject?.code ||
+      transferRequest.fromProjectId ||
+      "-",
+    toProjectId: transferRequest.toProjectId || transferRequest.toProject?.id || "",
+    toProjectName:
+      transferRequest.toProject?.name ||
+      transferRequest.toProject?.code ||
+      transferRequest.toProjectId ||
+      "-",
+  };
 }

@@ -152,6 +152,7 @@ export default function AddOperationModal({
   currentUser,
   activeProjectScopeLabel = "",
   activeProjectScopeValues = [],
+  activeProjectId = "",
   transactionType,
   setTransactionType,
   stationMeterPhoto,
@@ -774,6 +775,7 @@ export default function AddOperationModal({
     onSaveOperation?.({
       operationId,
       transactionDate: new Date().toISOString(),
+      currentProjectId: activeProjectId || "",
       transactionType,
       sourceStation: isExternalSource ? "" : sourceStation,
       fuelerId: currentUser?.id || createdByName,

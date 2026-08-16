@@ -192,6 +192,7 @@ export default function OperationsPage({
   currentUser,
   activeProjectScopeLabel = "",
   activeProjectScopeValues = [],
+  activeProjectId = "",
   hasPermission = () => false,
   trackActivity = () => {},
   projects = [],
@@ -799,6 +800,7 @@ const selectedAsset = assets.find(
 
 const payload = mapFrontendOperationToBackendPayload({
   ...operation,
+  currentProjectId: operation.currentProjectId || activeProjectId || "",
   sourceStation:
     selectedSourceStation?.backendId ||
     selectedSourceStation?.id ||
@@ -3358,6 +3360,7 @@ const payload = mapFrontendOperationToBackendPayload({
           currentUser={currentUser}
           activeProjectScopeLabel={activeProjectScopeLabel}
           activeProjectScopeValues={activeProjectScopeValues}
+          activeProjectId={activeProjectId}
           transactionType={transactionType}
           setTransactionType={setTransactionType}
           stationMeterPhoto={stationMeterPhoto}

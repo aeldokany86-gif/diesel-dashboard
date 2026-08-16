@@ -355,6 +355,50 @@ export const mapBackendEmployeeForState = (employee = {}) => {
       employee.projectId ||
       "-",
     project: employee.project?.name || employee.projectId || "-",
+    primaryProject: employee.project
+      ? {
+          id: employee.project.id || employee.projectId || "",
+          name: employee.project.name || employee.project.code || employee.projectId || "",
+          code: employee.project.code || "",
+        }
+      : employee.projectId
+        ? { id: employee.projectId, name: employee.projectId, code: "" }
+        : null,
+    additionalProjects: Array.isArray(employee.projectAssignments)
+      ? employee.projectAssignments
+          .map((assignment) => assignment?.project || assignment)
+          .filter(Boolean)
+          .map((project) => ({
+            id: project.id || "",
+            name: project.name || project.code || project.id || "",
+            code: project.code || "",
+          }))
+      : Array.isArray(employee.additionalProjects)
+        ? employee.additionalProjects
+        : [],
+    totalProjects: (() => {
+      const primaryCount = employee.projectId || employee.project?.id ? 1 : 0;
+
+      if (Array.isArray(employee.projectAssignments)) {
+        const activeAssignments = employee.projectAssignments.filter((assignment) => {
+          const project = assignment?.project || assignment;
+          return project && project.deletedAt == null && project.isActive !== false;
+        });
+        return primaryCount + activeAssignments.length;
+      }
+
+      if (Array.isArray(employee.additionalProjects)) {
+        return primaryCount + employee.additionalProjects.length;
+      }
+
+      return (
+        Number(employee.assignedProjectsCount ?? employee.totalProjects) ||
+        primaryCount
+      );
+    })(),
+    multiProjectEnabled: Boolean(
+      employee.multiProjectEnabled ?? employee.company?.multiProjectEnabled
+    ),
     companyId: employee.companyId || employee.company?.id || "",
     linkedUserId: employee.linkedUserId || employee.linkedUser?.id || "",
     linkedUserName: employee.linkedUser?.fullName || "",
@@ -362,6 +406,9 @@ export const mapBackendEmployeeForState = (employee = {}) => {
     linkedUserRole,
     linkedUserRoleName:
       employee.linkedUser?.role?.name || employee.linkedUser?.roleName || "",
+    managedProjects: Array.isArray(employee.linkedUser?.managedProjects)
+      ? employee.linkedUser.managedProjects
+      : [],
     systemRole: linkedUserRole,
     role: employee.jobTitle || "Operator",
     jobTitle: employee.jobTitle || "Operator",

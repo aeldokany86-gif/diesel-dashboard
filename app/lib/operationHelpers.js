@@ -9,6 +9,7 @@ export function mapFrontendOperationToBackendPayload(operation = {}) {
 
   const payload = {
     type: normalizedType,
+    currentProjectId: operation.currentProjectId || undefined,
     quantity: Number(operation.dieselQuantity || 0),
     notes: operation.notes || undefined,
     externalStationName: operation.externalStationName || undefined,
