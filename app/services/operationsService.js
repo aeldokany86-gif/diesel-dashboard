@@ -25,9 +25,17 @@ export async function uploadOperationPhotoFile({
     "http://localhost:4000";
 
   const baseUrl = String(rawBaseUrl).replace(/\/+$/, "");
+  const token =
+    typeof window !== "undefined"
+      ? window.localStorage.getItem("fleetfuelpro_token")
+      : null;
+
   const response = await fetch(`${baseUrl}/uploads/operation-photo`, {
     method: "POST",
-    headers: buildOperationRequestHeaders(currentUser),
+    headers: {
+      ...buildOperationRequestHeaders(currentUser),
+      ...(token ? { Authorization: `Bearer ${token}` } : {}),
+    },
     body: formData,
   });
 
@@ -57,9 +65,17 @@ export async function getUploadSignedUrl(path, currentUser, expiresIn = 300) {
   const baseUrl = String(rawBaseUrl).replace(/\/+$/, "");
   const url = `${baseUrl}/uploads/signed-url?path=${encodeURIComponent(path)}&expiresIn=${encodeURIComponent(expiresIn)}`;
 
+  const token =
+    typeof window !== "undefined"
+      ? window.localStorage.getItem("fleetfuelpro_token")
+      : null;
+
   const response = await fetch(url, {
     method: "GET",
-    headers: buildOperationRequestHeaders(currentUser),
+    headers: {
+      ...buildOperationRequestHeaders(currentUser),
+      ...(token ? { Authorization: `Bearer ${token}` } : {}),
+    },
   });
 
   const contentType = response.headers.get("content-type") || "";
