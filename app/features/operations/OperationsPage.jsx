@@ -3268,8 +3268,12 @@ const payload = mapFrontendOperationToBackendPayload({
       )}
 
       {operationPhotoViewer && (
-        <div className="fixed inset-0 bg-black/80 backdrop-blur-sm flex items-center justify-center z-[10020] p-3">
-          <div className="bg-slate-950 text-white w-full max-w-[min(980px,calc(100vw-2rem))] max-h-[92vh] rounded-3xl shadow-2xl border border-slate-700 overflow-hidden">
+        <ModalPortal>
+          <div
+            dir={language === "ar" ? "rtl" : "ltr"}
+            className="fleet-portal-modal-backdrop fixed inset-0 z-[10020] bg-black/80 backdrop-blur-sm flex items-center justify-center p-3"
+          >
+          <div className="fleet-portal-modal-panel bg-slate-950 text-white w-full max-w-[min(980px,calc(100vw-2rem))] max-h-[92vh] rounded-3xl shadow-2xl border border-slate-700 overflow-hidden">
             <div className="p-4 border-b border-slate-700 flex items-start justify-between gap-3">
               <div>
                 <h2 className="text-xl font-bold text-yellow-400 italic underline">
@@ -3328,6 +3332,7 @@ const payload = mapFrontendOperationToBackendPayload({
             </div>
           </div>
         </div>
+        </ModalPortal>
       )}
 
       <OperationCorrectionModal

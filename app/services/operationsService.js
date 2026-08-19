@@ -111,6 +111,107 @@ export async function fetchOperations(currentUser = {}) {
   return Array.isArray(response.data) ? response.data : [];
 }
 
+export async function subscribeToOperationEvents({
+  currentUser = {},
+  signal,
+  onEvent,
+} = {}) {
+  const rawBaseUrl =
+    process.env.NEXT_PUBLIC_API_URL ||
+    api?.defaults?.baseURL ||
+    "http://localhost:4000";
+
+  const baseUrl = String(rawBaseUrl).replace(/\/+$/, "");
+  const token =
+    typeof window !== "undefined"
+      ? window.localStorage.getItem("fleetfuelpro_token")
+      : null;
+
+  if (!token) {
+    throw new Error("Authenticated token is required for realtime operation updates.");
+  }
+
+  const response = await fetch(`${baseUrl}/operations/events/stream`, {
+    method: "GET",
+    headers: {
+      Accept: "text/event-stream",
+      ...buildOperationRequestHeaders(currentUser),
+      Authorization: `Bearer ${token}`,
+    },
+    cache: "no-store",
+    signal,
+  });
+
+  if (!response.ok) {
+    const contentType = response.headers.get("content-type") || "";
+    const body = contentType.includes("application/json")
+      ? await response.json()
+      : await response.text();
+    const message =
+      typeof body === "string"
+        ? body
+        : body?.message || body?.error || `HTTP_${response.status}`;
+    throw new Error(String(message));
+  }
+
+  if (!response.body) {
+    throw new Error("Realtime operation stream is unavailable in this browser.");
+  }
+
+  const reader = response.body.getReader();
+  const decoder = new TextDecoder();
+  let buffer = "";
+
+  const dispatchBlock = (block) => {
+    const lines = block.split("\n");
+    let eventName = "message";
+    const dataLines = [];
+
+    for (const line of lines) {
+      if (!line || line.startsWith(":")) continue;
+      if (line.startsWith("event:")) {
+        eventName = line.slice(6).trim();
+      } else if (line.startsWith("data:")) {
+        dataLines.push(line.slice(5).trimStart());
+      }
+    }
+
+    if (!dataLines.length || eventName === "connected") return;
+
+    const rawData = dataLines.join("\n");
+    let payload = rawData;
+    try {
+      payload = JSON.parse(rawData);
+    } catch {
+      // Keep non-JSON SSE payloads readable for forward compatibility.
+    }
+
+    onEvent?.({
+      event: eventName,
+      data: payload,
+    });
+  };
+
+  try {
+    while (true) {
+      const { value, done } = await reader.read();
+      if (done) break;
+
+      buffer += decoder.decode(value, { stream: true }).replace(/\r\n/g, "\n");
+
+      let separatorIndex = buffer.indexOf("\n\n");
+      while (separatorIndex !== -1) {
+        const block = buffer.slice(0, separatorIndex);
+        buffer = buffer.slice(separatorIndex + 2);
+        dispatchBlock(block);
+        separatorIndex = buffer.indexOf("\n\n");
+      }
+    }
+  } finally {
+    reader.releaseLock();
+  }
+}
+
 export async function fetchOperationsSummaryReport(
   filters = {},
   currentUser = {}

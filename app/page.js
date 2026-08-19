@@ -67,6 +67,7 @@ import {
 import {
   fetchOperations,
   fetchPendingOperationApprovals,
+  subscribeToOperationEvents,
 } from "./services/operationsService";
 
 import { fetchPendingOperationCorrections } from "./services/operationCorrectionsService";
@@ -4122,6 +4123,8 @@ export default function Home() {
     loadPendingBackendOperationCorrections();
   }, [currentUser?.id, currentUser?.role, currentUser?.status]);
 
+  const operationsRealtimeRefreshRef = useRef(null);
+
   const refreshOperationsWorkspace = async () => {
     if (!currentUser?.id || currentUser.status !== "Active") return;
 
@@ -4151,6 +4154,61 @@ export default function Home() {
       loadPendingBackendOperationCorrections(),
     ]);
   };
+
+  operationsRealtimeRefreshRef.current = refreshOperationsWorkspace;
+
+  useEffect(() => {
+    if (!currentUser?.id || currentUser.status !== "Active") return undefined;
+
+    let stopped = false;
+    let streamController = null;
+    let reconnectTimer = null;
+    let refreshTimer = null;
+
+    const scheduleWorkspaceRefresh = () => {
+      if (refreshTimer) clearTimeout(refreshTimer);
+      refreshTimer = setTimeout(() => {
+        void operationsRealtimeRefreshRef.current?.();
+      }, 250);
+    };
+
+    const connect = async () => {
+      if (stopped) return;
+
+      streamController = new AbortController();
+
+      try {
+        await subscribeToOperationEvents({
+          currentUser,
+          signal: streamController.signal,
+          onEvent: ({ event }) => {
+            if (event === "operation.created" || event === "operation.updated") {
+              scheduleWorkspaceRefresh();
+            }
+          },
+        });
+      } catch (error) {
+        if (!stopped && error?.name !== "AbortError") {
+          console.warn("Operation realtime stream disconnected; retrying.", error);
+        }
+      }
+
+      if (!stopped) {
+        reconnectTimer = setTimeout(() => {
+          void connect();
+        }, 3000);
+      }
+    };
+
+    void connect();
+
+    return () => {
+      stopped = true;
+      if (reconnectTimer) clearTimeout(reconnectTimer);
+      if (refreshTimer) clearTimeout(refreshTimer);
+      streamController?.abort();
+    };
+  }, [currentUser?.id, currentUser?.companyId, currentUser?.status]);
 
   const backendOperationApprovalRequests = backendOperationApprovals
     .map((item) =>
