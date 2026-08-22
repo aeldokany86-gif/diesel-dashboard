@@ -447,11 +447,23 @@ export default function AddOperationModal({
     setDestinationId(value);
 
     if (isAssetRefuel) {
-      const lastReading = getLastOdometerForEquipment?.(value) || 0;
-      setOdometer(lastReading ? String(lastReading) : "");
+      const lastReading = getLastOdometerForEquipment?.(value);
+      setOdometer(
+        lastReading !== null &&
+        lastReading !== undefined &&
+        Number.isFinite(Number(lastReading))
+          ? String(lastReading)
+          : ""
+      );
     } else {
-      const lastCounter = getLastStationCounter?.(value) || 0;
-      setOdometer(lastCounter ? String(lastCounter) : "");
+      const lastCounter = getLastStationCounter?.(value);
+      setOdometer(
+        lastCounter !== null &&
+        lastCounter !== undefined &&
+        Number.isFinite(Number(lastCounter))
+          ? String(lastCounter)
+          : ""
+      );
     }
   };
 
@@ -646,13 +658,32 @@ export default function AddOperationModal({
 
     const newReading = Number(odometer);
 
-    if (needsReading && (!newReading || newReading <= 0)) {
+    if (
+      needsReading &&
+      isAssetRefuel &&
+      (
+        odometer === "" ||
+        !Number.isFinite(newReading) ||
+        newReading < 0
+      )
+    ) {
       notifyUser(
         showToast,
         "warning",
-        isAssetRefuel
-          ? t("addOperation.validation.validOdometer")
-          : t("addOperation.validation.validStationCounter")
+        t("addOperation.validation.validOdometer")
+      );
+      return false;
+    }
+
+    if (
+      needsReading &&
+      !isAssetRefuel &&
+      (!Number.isFinite(newReading) || newReading <= 0)
+    ) {
+      notifyUser(
+        showToast,
+        "warning",
+        t("addOperation.validation.validStationCounter")
       );
       return false;
     }
@@ -772,9 +803,12 @@ export default function AddOperationModal({
       return;
     }
 
+    const occurredAt = new Date().toISOString();
+
     onSaveOperation?.({
       operationId,
-      transactionDate: new Date().toISOString(),
+      occurredAt,
+      transactionDate: occurredAt,
       currentProjectId: activeProjectId || "",
       transactionType,
       sourceStation: isExternalSource ? "" : sourceStation,
@@ -809,8 +843,15 @@ export default function AddOperationModal({
     (!needsExternalSourceDetails || Boolean(externalStationName.trim())) &&
     (!needsInvoiceNumber || Boolean(invoiceNumber.trim())) &&
     (!isExternalDirectRefuel || Number(externalInvoiceAmount) > 0) &&
-    Boolean(odometer) &&
-    Number(odometer) > 0 &&
+    (
+      isAssetRefuel
+        ? odometer !== "" &&
+          Number.isFinite(Number(odometer)) &&
+          Number(odometer) >= 0
+        : Boolean(odometer) &&
+          Number.isFinite(Number(odometer)) &&
+          Number(odometer) > 0
+    ) &&
     !requiredPhotosUploading &&
     requiredPhotosComplete;
 

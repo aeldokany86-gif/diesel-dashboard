@@ -39,6 +39,7 @@ import {
   getOperationApprovalSuccessMessage,
   isAssetRefuelTransactionType,
   isExternalDirectRefuelTransactionType,
+  isStationCounterTransactionType,
 } from "../../lib/operationHelpers";
 
 import {
@@ -1717,27 +1718,67 @@ const payload = mapFrontendOperationToBackendPayload({
   ) => getEffectiveLastAssetReading(equipmentNo, excludeOriginalIndex);
 
   const getLastStationCounter = (stationId) => {
-    if (!stationId || odometerIndex === -1 || dateIndex === -1) return 0;
+    if (!stationId) return 0;
 
-    const readings = workingData
-      .filter((item) => {
-        const row = item.row;
-        const sourceStation = sourceIndex !== -1 ? row[sourceIndex] : "";
-        const destination = destinationIndex !== -1 ? row[destinationIndex] : "";
+    const station = getStation(stationId);
+    const stationCompanyId = station?.companyId || currentUser?.companyId || "";
+    const latestReset = getLatestResetRecordForEntity(
+      stationCounterResetHistory,
+      station,
+      stationId,
+      stationCompanyId
+    );
+    const resetTime = getResetEffectiveTime(latestReset);
+    const stationKeys = getEntityLookupKeys(station, stationId);
 
-        return (
-          isSameText(sourceStation, stationId) ||
-          isSameText(destination, stationId)
-        );
-      })
-      .map((item) => ({
-        date: parseOperationDate(item.row[dateIndex]),
-        reading: parseFloat(item.row[odometerIndex]) || 0,
-      }))
-      .filter((item) => item.date && item.reading > 0)
-      .sort((a, b) => b.date - a.date);
+    if (
+      typeIndex !== -1 &&
+      destinationIndex !== -1 &&
+      odometerIndex !== -1 &&
+      dateIndex !== -1
+    ) {
+      const readings = workingData
+        .filter((item) => {
+          const row = item.row;
+          const operationType =
+            row?.__operation?.type ||
+            (typeIndex !== -1 ? row[typeIndex] : "");
+          const destination =
+            destinationIndex !== -1 ? row[destinationIndex] : "";
+          const destinationKey = normalizeScopeValue(destination);
+          const rowTime =
+            parseOperationDate(row[dateIndex])?.getTime?.() || 0;
 
-    return readings[0]?.reading || 0;
+          return (
+            rowTime >= resetTime &&
+            isStationCounterTransactionType(operationType) &&
+            stationKeys.includes(destinationKey)
+          );
+        })
+        .map((item) => ({
+          date: parseOperationDate(item.row[dateIndex]),
+          reading: parseFloat(item.row[odometerIndex]) || 0,
+        }))
+        .filter((item) => item.date && item.reading > 0)
+        .sort((a, b) => b.date - a.date);
+
+      if (readings[0]?.reading) {
+        return readings[0].reading;
+      }
+    }
+
+    if (latestReset) {
+      return (
+        Number(
+          latestReset.newCounter ??
+            latestReset.newReading ??
+            latestReset.resetReading ??
+            latestReset.currentCounter
+        ) || 0
+      );
+    }
+
+    return Number(station?.currentCounter ?? station?.counter ?? 0) || 0;
   };
 
   const openCellEdit = async (item, field) => {

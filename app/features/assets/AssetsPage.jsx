@@ -326,22 +326,72 @@ export default function AssetsPage({
 
 
   
-  const getLatestAssetResetRecord = (assetId, companyId = "") => {
+  const getLatestAssetResetRecord = (asset, companyId = "") => {
+    if (!asset) return undefined;
+
+    /*
+      Asset/reset records may use either the display asset code or the backend
+      database id depending on whether the row came from immediate local state
+      or a backend refresh. Match across the known identifiers without changing
+      the existing reset chronology or company scoping rules.
+    */
+    const assetCandidates = [
+      asset.id,
+      asset.assetId,
+      asset.backendId,
+      asset.assetBackendId,
+      asset.databaseId,
+    ]
+      .filter(Boolean)
+      .map(normalizeScopeValue);
+
     return (assetOdometerHistory || [])
       .filter((item) => {
-        const sameAsset = isSameText(item.assetId || item.entityId, assetId);
-        const sameCompany = !companyId || !item.companyId || companyMatches(item.companyId, companyId);
+        const resetCandidates = [
+          item.assetId,
+          item.entityId,
+          item.backendAssetId,
+          item.assetBackendId,
+          item.databaseId,
+        ]
+          .filter(Boolean)
+          .map(normalizeScopeValue);
+
+        const sameAsset = resetCandidates.some((candidate) =>
+          assetCandidates.includes(candidate),
+        );
+
+        const sameCompany =
+          !companyId ||
+          !item.companyId ||
+          companyMatches(item.companyId, companyId);
+
         return sameAsset && sameCompany;
       })
       .sort((a, b) => {
-        const da = new Date(a.effectiveFrom || a.createdAt).getTime() || 0;
-        const db = new Date(b.effectiveFrom || b.createdAt).getTime() || 0;
+        const da =
+          new Date(
+            a.effectiveFrom ||
+              a.effectiveAt ||
+              a.effectiveDate ||
+              a.createdAt,
+          ).getTime() || 0;
+        const db =
+          new Date(
+            b.effectiveFrom ||
+              b.effectiveAt ||
+              b.effectiveDate ||
+              b.createdAt,
+          ).getTime() || 0;
         return db - da;
       })[0];
   };
 
   const getEffectiveAssetOdometer = (asset) => {
-    const latestReset = getLatestAssetResetRecord(asset.id, asset.companyId || currentUser?.companyId || "");
+    const latestReset = getLatestAssetResetRecord(
+      asset,
+      asset.companyId || currentUser?.companyId || "",
+    );
     const latestOperationEntry = assetCurrentOdometerMap?.get?.(normalizeScopeValue(asset.id));
     const latestOperationTime = latestOperationEntry?.operationTime || 0;
     const latestResetTime = latestReset ? new Date(latestReset.effectiveFrom || latestReset.createdAt).getTime() || 0 : 0;
@@ -1412,6 +1462,24 @@ export default function AssetsPage({
       return;
     }
 
+    const currentReading = Number(
+      getEffectiveAssetOdometer(odometerTargetAsset) ?? 0
+    );
+
+    if (Number.isFinite(currentReading) && oldReading < currentReading) {
+      const message = t("addOperation.validation.odometerBelowLast", {
+        reading: formatNumber(currentReading),
+      });
+      showToast
+        ? showToast("warning", message)
+        : notifyUser(
+            typeof showToast !== "undefined" ? showToast : null,
+            inferToastTypeFromMessage(message),
+            message
+          );
+      return;
+    }
+
     if (newOdometer === "" || Number.isNaN(newReading) || newReading < 0) {
       showToast
         ? showToast("warning", t("assetWorkflows.validation.validNewOdometer"))
@@ -1548,6 +1616,7 @@ export default function AssetsPage({
         const resetResult = await runWithActionLoading(t("assetWorkflows.loading.resettingOdometer"), async () =>
           resetAssetOdometer(backendAssetId, {
             newOdometer: newReading,
+            oldOdometer: oldReading,
             reason: odometerReason,
             effectiveAt: odometerEffectiveDate || undefined,
             createdByUserId: currentUser?.id || undefined,
@@ -1612,6 +1681,7 @@ export default function AssetsPage({
             requestedByUserId: currentUser?.id,
             reason: odometerReason,
             newOdometer: newReading,
+            oldOdometer: oldReading,
             effectiveAt: odometerEffectiveDate || undefined,
           }),
       );
@@ -2411,7 +2481,7 @@ export default function AssetsPage({
                       <button
                         onClick={() => {
                           setOdometerTargetAsset(selectedAsset);
-                          setOldOdometerBeforeReset(String(getEffectiveAssetOdometer(selectedAsset) || ""));
+                          setOldOdometerBeforeReset(String(getEffectiveAssetOdometer(selectedAsset) ?? 0));
                           setNewOdometer("0");
                           setOdometerEffectiveDate("");
                           setOdometerReason("");
@@ -2732,12 +2802,12 @@ export default function AssetsPage({
             </label>
             <input
               type="number"
+              min="0"
               value={oldOdometerBeforeReset}
-              readOnly
-              aria-readonly="true"
+              onChange={(e) => setOldOdometerBeforeReset(e.target.value)}
               title={t("assetWorkflows.odometer.oldReadingHelp")}
               placeholder={t("assetWorkflows.odometer.oldReadingPlaceholder")}
-              className="border rounded-xl p-3 w-full mb-4 bg-gray-100 text-gray-700 cursor-not-allowed"
+              className="border rounded-xl p-3 w-full mb-4"
             />
 
             <label className="block text-sm font-medium text-gray-700 mb-2">

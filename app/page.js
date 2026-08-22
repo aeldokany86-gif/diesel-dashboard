@@ -100,6 +100,7 @@ import {
   fetchPendingAssetTransfers,
   reviewAssetTransfer,
   resetAssetOdometer,
+  fetchAssetMeterHistory,
   fetchAssetActionRequests,
   reviewAssetActionRequest,
 } from "./services/assetsService";
@@ -3291,6 +3292,59 @@ export default function Home() {
           }
         };
 
+        const fetchBackendAssetOdometerHistory = async () => {
+          const companyId =
+            currentUser?.companyId ||
+            backendAuthUser?.companyId ||
+            "";
+
+          if (!companyId || isPlatformContextValue(companyId)) {
+            return [];
+          }
+
+          try {
+            if (!canUseNetwork(showToast)) return [];
+
+            const history = await fetchAssetMeterHistory({
+              companyId,
+            });
+
+            /*
+              The report endpoint returns normalized reset rows. AssetsPage keeps
+              its legacy reset-state shape because direct resets and approval
+              flows already append records in that format. Normalize only at
+              this boundary so existing reset/operation UI logic is untouched.
+            */
+            return (history || []).map((record) => ({
+              id: record.id,
+              assetId: record.assetId,
+              entityId: record.assetId,
+              backendAssetId: record.assetBackendId,
+              assetBackendId: record.assetBackendId,
+              companyId: record.companyId,
+              oldOdometerBeforeReset: record.previousReading,
+              newOdometerAfterReset: record.currentReading,
+              newReading: record.currentReading,
+              actualOdometerAfterReset: record.currentReading,
+              historicalDistanceBase: record.previousReading,
+              resetMeterStart: record.currentReading,
+              effectiveDate: record.eventDate,
+              effectiveFrom: record.eventDate,
+              effectiveAt: record.eventDate,
+              createdAt: record.createdAt,
+              reason: record.reason,
+              requestedBy: record.performedBy || "System",
+              status: "Approved",
+            }));
+          } catch (error) {
+            logHandledApiIssue(
+              "Asset odometer history backend API is not available",
+              error,
+            );
+            return [];
+          }
+        };
+
         const fetchBackendStations = async () => {
           try {
             return await fetchStations();
@@ -3331,6 +3385,7 @@ export default function Home() {
           backendProjects,
           backendEmployees,
           backendAssets,
+          backendAssetOdometerHistory,
           backendStations,
         ] = await Promise.all([
           fetchBackendOperations(),
@@ -3338,6 +3393,7 @@ export default function Home() {
           fetchBackendProjects(),
           fetchBackendEmployees(),
           fetchBackendAssets(),
+          fetchBackendAssetOdometerHistory(),
           fetchBackendStations(),
         ]);
 
@@ -3368,6 +3424,10 @@ export default function Home() {
             })
             .filter((asset) => asset.id),
         );
+
+        // ASSET ODOMETER RESET HISTORY - hydrate from backend on every fresh load.
+        // This preserves reset-vs-operation chronology after browser reload.
+        setAssetOdometerHistory(backendAssetOdometerHistory);
 
         // STATIONS - backend only. No CSV fallback.
         setStations(

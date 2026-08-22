@@ -520,7 +520,7 @@ export function mapBackendOperationForState(operation = {}) {
 
   const row = [
     operation.operationNo || operation.id || "",
-    operation.completedAt || operation.createdAt || "",
+    operation.occurredAt || operation.completedAt || operation.createdAt || "",
     type,
     sourceStationDisplay,
     requestedByDisplay,

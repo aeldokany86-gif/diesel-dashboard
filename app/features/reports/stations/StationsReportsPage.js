@@ -220,20 +220,16 @@ function StationCounterMeterHistoryReport({
   const [selectedRow, setSelectedRow] = useState(null);
 
   const availableStations = useMemo(() => {
-    if (draftFilters.projectId === "all") return stations;
-
-    return stations.filter(
-      (station) =>
-        normalizeValue(getStationProjectId(station)) ===
-        normalizeValue(draftFilters.projectId)
-    );
-  }, [stations, draftFilters.projectId]);
+    // Historical report: current assignment must not hide a station that
+    // belonged to the selected project at the time of an older counter event.
+    return stations;
+  }, [stations]);
 
   const rows = useMemo(
     () =>
       (events || []).map((event, index) => {
         const station = event?.station || {};
-        const project = station?.project || event?.project || {};
+        const project = event?.project || station?.project || {};
 
         return {
           ...event,

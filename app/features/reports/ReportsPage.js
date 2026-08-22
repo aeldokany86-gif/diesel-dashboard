@@ -750,7 +750,8 @@ function mapSummaryOperation(operation, index) {
   return {
     key: operation?.id || `${operation?.operationNo || "operation"}-${index}`,
     operationNo: operation?.operationNo || "-",
-    transactionDate: operation?.operationDate || operation?.createdAt,
+    transactionDate:
+      operation?.occurredAt || operation?.operationDate || operation?.createdAt,
     operationType: operation?.type || "-",
     fuelerEmployeeId: operation?.fuelerEmployeeId || "-",
     fuelerName: operation?.fuelerName || "-",
@@ -971,12 +972,14 @@ function FuelSuppliersReport({
           row,
           headers,
           [
+            "occurredAt",
             "transactionDateTime",
             "transactionDate",
             "operationDate",
             "createdAt",
           ],
           [
+            "occurred_at",
             "transaction_datetime",
             "transaction date",
             "operation_date",
@@ -4432,16 +4435,10 @@ function AssetMeterHistoryReport({
   const [error, setError] = useState("");
 
   const availableAssets = useMemo(() => {
-    if (draftFilters.projectId === "all") return assets;
-
-    return assets.filter((asset) => {
-      const projectId =
-        asset?.projectId || asset?.project?.id || asset?.projectBackendId || "";
-      return (
-        normalizeValue(projectId) === normalizeValue(draftFilters.projectId)
-      );
-    });
-  }, [assets, draftFilters.projectId]);
+    // Historical report: current assignment must not hide an asset that
+    // belonged to the selected project at the time of an older meter event.
+    return assets;
+  }, [assets]);
 
   const operationEvents = useMemo(() => {
     return (data || [])
@@ -4476,10 +4473,12 @@ function AssetMeterHistoryReport({
         if (!hasReading) return null;
 
         const eventDate =
+          operation?.occurredAt ||
           operation?.transactionDateTime ||
           operation?.transactionDate ||
           operation?.createdAt ||
           getRowValue(row, headers, [
+            "occurred_at",
             "transaction_datetime",
             "transaction_date",
             "operation_date",
@@ -4490,21 +4489,20 @@ function AssetMeterHistoryReport({
         const assetBackendId = getOperationAssetBackendId(operation);
         const assetCode = getOperationAssetCode(operation, row, headers);
         const projectId =
+          operation?.projectIdAtOperation ||
+          operation?.projectSnapshotId ||
+          operation?.projectId ||
           operation?.asset?.projectId ||
           operation?.asset?.project?.id ||
-          operation?.projectId ||
           "";
-        const projectName =
-          operation?.asset?.project?.name ||
-          operation?.asset?.project?.code ||
-          operation?.project?.name ||
-          resolveProjectLabel({
-            source: "",
-            destination: assetCode,
-            projects,
-            assets,
-            stations: [],
-          });
+        const projectName = resolveOperationProjectLabel({
+          embeddedOperation: operation,
+          source: "",
+          destination: assetCode,
+          projects,
+          assets,
+          stations: [],
+        });
 
         const previousReading = getNumericValue(
           operation?.previousOdometer,
@@ -4685,11 +4683,20 @@ function AssetMeterHistoryReport({
             lastOperationalReading = operationalCurrentReading;
           }
         } else if (event.eventType === "RESET") {
+          /*
+            Reset history owns its explicit oldOdometer value. This is especially
+            important when the user intentionally overrides the last recorded
+            reading before reset (for example, last system reading = 0 but the
+            physical meter reached 5 before replacement/reset).
+
+            Fall back to the operational chain only for legacy/reset rows that do
+            not carry a valid stored previous reading.
+          */
           nextEvent.previousReading =
-            lastOperationalReading !== null
-              ? lastOperationalReading
-              : Number.isFinite(storedPreviousReading)
-                ? storedPreviousReading
+            Number.isFinite(storedPreviousReading)
+              ? storedPreviousReading
+              : lastOperationalReading !== null
+                ? lastOperationalReading
                 : 0;
 
           if (Number.isFinite(displayedCurrentReading)) {

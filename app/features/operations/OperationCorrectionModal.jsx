@@ -5,6 +5,7 @@ import React from "react";
 import { isSameText } from "../../lib/helpers";
 import { makeTenantEntityKey } from "../../lib/companyHelpers";
 import { useLanguage } from "../../context/LanguageContext";
+import ModalPortal from "../../components/ui/ModalPortal";
 
 function formatContextDate(value, language = "en") {
   if (!value) return "-";
@@ -104,7 +105,8 @@ export default function OperationCorrectionModal({
   };
 
   return (
-    <div className="fixed inset-0 bg-black/75 backdrop-blur-sm flex items-center justify-center z-[10010] p-3" dir={isRtl ? "rtl" : "ltr"}>
+    <ModalPortal>
+      <div className="fixed inset-0 bg-black/75 backdrop-blur-sm flex items-center justify-center z-[100100] p-3" dir={isRtl ? "rtl" : "ltr"}>
       <div className={`bg-white text-black w-[min(560px,calc(100vw-2rem))] rounded-2xl shadow-2xl overflow-hidden ${isRtl ? "text-right" : "text-left"}`}>
         <div className="p-6 pb-0">
           <div className="flex justify-between items-center mb-5 border-b pb-3">
@@ -330,5 +332,6 @@ export default function OperationCorrectionModal({
         </div>
       </div>
     </div>
+    </ModalPortal>
   );
 }
