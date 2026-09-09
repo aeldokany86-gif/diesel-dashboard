@@ -199,6 +199,7 @@ export default function OperationsPage({
   projects = [],
   showToast,
   onOperationsWorkspaceRefresh,
+  allCompanyData = [],
 
   assetOdometerHistory,
   stationCounterResetHistory,}) {
@@ -324,7 +325,10 @@ export default function OperationsPage({
       "date",
     ]);
 
-    const latestOperation = data
+    const assetReadingSource =
+      allCompanyData?.length > 0 ? allCompanyData : data;
+
+    const latestOperation = assetReadingSource
       .map((row, originalIndex) => ({ row, originalIndex }))
       .filter(({ row, originalIndex }) => {
         if (originalIndex === excludeOriginalIndex) return false;
@@ -960,7 +964,7 @@ const payload = mapFrontendOperationToBackendPayload({
         "Fuel Consumption",
         "Total Cost",
         "Distance",
-        "Efficiency",
+        "Lifetime Efficiency",
       ],
       equipmentSummary.map((item, i) => [
         i + 1,
@@ -1498,6 +1502,88 @@ const payload = mapFrontendOperationToBackendPayload({
     }, {})
   ).sort((a, b) => b.qtyLiters - a.qtyLiters);
 
+  // Dashboard equipment performance has two intentional scopes:
+  // 1) Fuel Consumption / Total Cost follow the current dashboard filters and project scope.
+  // 2) Last Odometer / Distance / Efficiency are lifetime asset KPIs calculated
+  //    from all completed company refuel operations, regardless of project transfers
+  //    or the current dashboard date/project filters.
+  //
+  // This is read-only reporting logic. It does not alter operation snapshots,
+  // transfer history, odometer history, or correction behavior.
+  const lifetimeEquipmentMetrics = useMemo(() => {
+    const metrics = new Map();
+
+    (allCompanyData || []).forEach((row, originalIndex) => {
+      if (typeIndex === -1 || destinationIndex === -1 || odometerIndex === -1) {
+        return;
+      }
+
+      const operationType = row?.[typeIndex];
+      if (!isAssetRefuelTransactionType(operationType)) return;
+
+      const equipmentNo = row?.[destinationIndex];
+      if (!equipmentNo) return;
+
+      const asset = getAsset(equipmentNo);
+      const equipmentKey = normalizeScopeValue(
+        asset?.backendId || asset?.assetBackendId || asset?.id || equipmentNo
+      );
+      if (!equipmentKey) return;
+
+      const diesel = dieselIndex !== -1 ? Number(row?.[dieselIndex]) || 0 : 0;
+      const rawOdometer = Number(row?.[odometerIndex]);
+      if (!Number.isFinite(rawOdometer)) return;
+
+      const operationDate = dateIndex !== -1 ? row?.[dateIndex] : null;
+      const operationTime =
+        parseOperationDate(operationDate)?.getTime() || originalIndex;
+      const lifetimeOdometer = getStoredOperationLifetimeReading(
+        row,
+        equipmentNo,
+        rawOdometer,
+        operationDate
+      );
+
+      if (!metrics.has(equipmentKey)) {
+        metrics.set(equipmentKey, {
+          lifetimeFuelConsumption: 0,
+          firstLifetimeOdometer: lifetimeOdometer,
+          lastLifetimeOdometer: lifetimeOdometer,
+          latestRecordedOdometer: rawOdometer,
+          latestOperationTime: operationTime,
+        });
+      }
+
+      const metric = metrics.get(equipmentKey);
+      metric.lifetimeFuelConsumption += diesel;
+      metric.firstLifetimeOdometer = Math.min(
+        metric.firstLifetimeOdometer,
+        lifetimeOdometer
+      );
+      metric.lastLifetimeOdometer = Math.max(
+        metric.lastLifetimeOdometer,
+        lifetimeOdometer
+      );
+
+      if (operationTime >= metric.latestOperationTime) {
+        metric.latestOperationTime = operationTime;
+        metric.latestRecordedOdometer = rawOdometer;
+      }
+    });
+
+    return metrics;
+  }, [
+    allCompanyData,
+    typeIndex,
+    destinationIndex,
+    odometerIndex,
+    dieselIndex,
+    dateIndex,
+    assetOdometerHistory,
+    assets,
+    currentUser?.companyId,
+  ]);
+
   const equipmentSummary = Object.values(
     filteredDirectRefuelData.reduce((acc, item) => {
       const row = item.row;
@@ -1509,20 +1595,13 @@ const payload = mapFrontendOperationToBackendPayload({
       const assetDisplayCode = getAssetDisplayCode(equipmentNo);
       const operationProject = getOperationProjectName(item);
       const diesel = parseFloat(row[dieselIndex]) || 0;
-      const odometer = parseFloat(row[odometerIndex]) || 0;
-      const operationDate = dateIndex !== -1 ? row[dateIndex] : null;
-      const lifetimeOdometer = getStoredOperationLifetimeReading(
-        row,
-        equipmentNo,
-        odometer,
-        operationDate
-      );
       const equipmentKey = normalizeScopeValue(
         asset?.backendId || asset?.assetBackendId || asset?.id || equipmentNo
       );
 
       if (!acc[equipmentKey]) {
         acc[equipmentKey] = {
+          equipmentKey,
           equipmentNo: assetDisplayCode,
           equipmentBackendId: equipmentNo,
           project: operationProject,
@@ -1530,10 +1609,6 @@ const payload = mapFrontendOperationToBackendPayload({
           equipmentType: asset?.type || "-",
           fuelConsumption: 0,
           totalCost: 0,
-          firstLifetimeOdometer: lifetimeOdometer,
-          lastLifetimeOdometer: lifetimeOdometer,
-          lastOdometer: odometer,
-          lastOperationTime: parseOperationDate(operationDate)?.getTime() || 0,
         };
       }
 
@@ -1541,40 +1616,49 @@ const payload = mapFrontendOperationToBackendPayload({
         acc[equipmentKey].projectsSet.add(operationProject);
       }
 
+      // These two values intentionally remain project/filter scoped.
       acc[equipmentKey].fuelConsumption += diesel;
       acc[equipmentKey].totalCost += getOperationTotalCost(item);
-
-      if (lifetimeOdometer < acc[equipmentKey].firstLifetimeOdometer) {
-        acc[equipmentKey].firstLifetimeOdometer = lifetimeOdometer;
-      }
-
-      if (lifetimeOdometer > acc[equipmentKey].lastLifetimeOdometer) {
-        acc[equipmentKey].lastLifetimeOdometer = lifetimeOdometer;
-      }
-
-      const operationTime = parseOperationDate(operationDate)?.getTime() || 0;
-      if (operationTime >= acc[equipmentKey].lastOperationTime) {
-        acc[equipmentKey].lastOperationTime = operationTime;
-        acc[equipmentKey].lastOdometer = odometer;
-      }
 
       return acc;
     }, {})
   ).map((item) => {
-    const distance = Math.max(
-      0,
-      item.lastLifetimeOdometer - item.firstLifetimeOdometer
+    const lifetimeMetric = lifetimeEquipmentMetrics.get(item.equipmentKey);
+    const asset = getAsset(item.equipmentBackendId);
+
+    const lifetimeDistance = lifetimeMetric
+      ? Math.max(
+          0,
+          Number(lifetimeMetric.lastLifetimeOdometer || 0) -
+            Number(lifetimeMetric.firstLifetimeOdometer || 0)
+        )
+      : 0;
+
+    const lifetimeFuelConsumption = Number(
+      lifetimeMetric?.lifetimeFuelConsumption || 0
     );
 
+    const authoritativeCurrentOdometer = Number(
+      asset?.currentOdometer ?? asset?.odometer
+    );
+    const lastOdometer = Number.isFinite(authoritativeCurrentOdometer)
+      ? authoritativeCurrentOdometer
+      : Number(lifetimeMetric?.latestRecordedOdometer || 0);
+
     const efficiency =
-      distance > 0 ? (item.fuelConsumption / distance).toFixed(2) : "-";
+      lifetimeDistance > 0
+        ? (lifetimeFuelConsumption / lifetimeDistance).toFixed(2)
+        : "-";
+
+    const { equipmentKey, ...displayItem } = item;
 
     return {
-      ...item,
+      ...displayItem,
       project: item.projectsSet?.size
         ? Array.from(item.projectsSet).join(", ")
         : item.project,
-      distance,
+      lastOdometer,
+      distance: lifetimeDistance,
       efficiency,
       totalCost: item.totalCost,
     };
@@ -1737,7 +1821,14 @@ const payload = mapFrontendOperationToBackendPayload({
       odometerIndex !== -1 &&
       dateIndex !== -1
     ) {
-      const readings = workingData
+      const stationReadingSource = (
+        allCompanyData?.length > 0 ? allCompanyData : data
+      ).map((row, originalIndex) => ({
+        row,
+        originalIndex,
+      }));
+
+      const readings = stationReadingSource
         .filter((item) => {
           const row = item.row;
           const operationType =

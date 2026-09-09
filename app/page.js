@@ -4762,7 +4762,7 @@ export default function Home() {
           literPrice={literPrice}
           getLiterPriceByDate={getLiterPriceByDate}
           currency={currency}
-          assetProjectHistory={assetProjectHistory}
+          allCompanyData={companyData}
           assetOdometerHistory={assetOdometerHistory}
           stationCounterResetHistory={stationCounterResetHistory}
           currentUser={currentUser}

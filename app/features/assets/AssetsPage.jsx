@@ -388,19 +388,21 @@ export default function AssetsPage({
   };
 
   const getEffectiveAssetOdometer = (asset) => {
-    const latestReset = getLatestAssetResetRecord(
-      asset,
-      asset.companyId || currentUser?.companyId || "",
+    if (!asset) return 0;
+
+    /*
+      Assets page must display the backend asset current state, not a
+      project-scoped reconstruction from the currently visible operations.
+      The backend already persists Asset.currentOdometer as the company-wide
+      current reading, including operations completed in another project.
+    */
+    const backendCurrentOdometer = Number(
+      asset.currentOdometer ?? asset.odometer ?? 0
     );
-    const latestOperationEntry = assetCurrentOdometerMap?.get?.(normalizeScopeValue(asset.id));
-    const latestOperationTime = latestOperationEntry?.operationTime || 0;
-    const latestResetTime = latestReset ? new Date(latestReset.effectiveFrom || latestReset.createdAt).getTime() || 0 : 0;
 
-    if (latestReset && latestResetTime > latestOperationTime) {
-      return parseFloat(latestReset.newReading ?? latestReset.resetReading ?? latestReset.reading) || 0;
-    }
-
-    return latestOperationEntry?.value ?? parseFloat(asset.odometer) ?? 0;
+    return Number.isFinite(backendCurrentOdometer)
+      ? backendCurrentOdometer
+      : 0;
   };
 
   const assetCurrentOdometerMap = useMemo(() => {
