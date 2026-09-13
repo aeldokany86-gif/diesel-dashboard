@@ -992,6 +992,9 @@ export default function StationsPage({
           (isSameText(type, "Internal_Transfer") &&
             (isSameText(source, stationId) ||
               isSameText(destination, stationId))) ||
+          (isSameText(type, "External_Transfer") &&
+            (isSameText(source, stationId) ||
+              isSameText(destination, stationId))) ||
           (isSameText(type, "External_Supply") &&
             isSameText(destination, stationId))
         );
@@ -1018,6 +1021,17 @@ export default function StationsPage({
 
     if (
       isSameText(type, "Internal_Transfer") &&
+      isSameText(destination, stationId)
+    ) {
+      return "In";
+    }
+
+    if (isSameText(type, "External_Transfer") && isSameText(source, stationId)) {
+      return "Out";
+    }
+
+    if (
+      isSameText(type, "External_Transfer") &&
       isSameText(destination, stationId)
     ) {
       return "In";
