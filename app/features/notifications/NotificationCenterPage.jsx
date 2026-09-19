@@ -14,35 +14,52 @@ function NotificationCenterPage({
 }) {
   const { language, t } = useLanguage();
   const isRtl = language === "ar";
-  const [filter, setFilter] = useState("All");
+  const [filter, setFilter] = useState("Unread");
   const [selectedNotification, setSelectedNotification] = useState(null);
+
+  const isApprovalNotification = (item) =>
+    item?.type === "approval" ||
+    String(item?.category || "").toUpperCase().startsWith("APPROVAL");
+
+  const isHighPriority = (item) =>
+    String(item?.priority || "").trim().toUpperCase() === "HIGH";
 
   const counts = {
     all: notifications.length,
     unread: notifications.filter((item) => !item.read).length,
-    approvals: notifications.filter((item) => item.type === "approval").length,
-    high: notifications.filter((item) => item.priority === "High").length,
+    approvals: notifications.filter(isApprovalNotification).length,
+    high: notifications.filter(isHighPriority).length,
   };
 
   const filteredNotifications = notifications.filter((item) => {
     if (filter === "Unread") return !item.read;
-    if (filter === "Approvals") return item.type === "approval";
-    if (filter === "High Priority") return item.priority === "High";
+    if (filter === "Read") return Boolean(item.read);
+    if (filter === "Approvals") return isApprovalNotification(item);
+    if (filter === "High Priority") return isHighPriority(item);
     return true;
   });
 
   const openNotification = (item) => {
-    markNotificationRead(item.id);
-    setSelectedNotification(item);
+    void markNotificationRead(item.id);
+    setSelectedNotification({ ...item, read: true });
   };
 
   const goToSource = (item) => {
-    markNotificationRead(item.id);
-    if (item.route === "approvals" && ["Admin", "Manager"].includes(currentUser?.role)) {
+    void markNotificationRead(item.id);
+    if (
+      item.route === "approvals" &&
+      ["Admin", "Manager", "PlatformAdmin"].includes(currentUser?.role)
+    ) {
+      setSelectedNotification(null);
       setPage("approvals");
       return;
     }
-    if (["operations", "assets", "stations", "team", "projects", "reports"].includes(item.route)) {
+    if (
+      ["operations", "assets", "stations", "team", "projects", "reports", "notifications"].includes(
+        item.route
+      )
+    ) {
+      setSelectedNotification(null);
       setPage(item.route);
     }
   };
@@ -187,7 +204,18 @@ function NotificationCenterPage({
     const persistentMessage = getPersistentApprovalMessage(item);
     if (persistentMessage) return persistentMessage;
 
-    return resolveRecordMessage(t, item, "message", item?.message || "");
+    const messageParams = resolveNestedMessageParams(item?.messageParams || {});
+
+    return resolveI18nMessage(
+      t,
+      {
+        key: item?.messageKey || "",
+        params: messageParams,
+        enumParams: item?.messageEnumParams || {},
+        fallback: item?.messageFallback || item?.message || "",
+      },
+      item?.message || "",
+    );
   };
 
   const getNotificationCategory = (item) =>
@@ -203,6 +231,7 @@ function NotificationCenterPage({
     const map = {
       All: "notifications.filters.all",
       Unread: "notifications.filters.unread",
+      Read: "notifications.filters.read",
       Approvals: "notifications.filters.approvals",
       "High Priority": "notifications.filters.highPriority",
     };
@@ -234,8 +263,9 @@ function NotificationCenterPage({
   };
 
   const getPriorityClass = (priority) => {
-    if (priority === "High") return "bg-red-500/15 text-red-300 border-red-500/30";
-    if (priority === "Medium") return "bg-yellow-500/15 text-yellow-300 border-yellow-500/30";
+    const normalized = String(priority || "").trim().toUpperCase();
+    if (normalized === "HIGH") return "bg-red-500/15 text-red-300 border-red-500/30";
+    if (normalized === "MEDIUM") return "bg-yellow-500/15 text-yellow-300 border-yellow-500/30";
     return "bg-slate-800 text-slate-300 border-slate-700";
   };
 
@@ -276,7 +306,7 @@ function NotificationCenterPage({
         </div>
 
         <div className="flex flex-wrap gap-2 mb-4">
-          {["All", "Unread", "Approvals", "High Priority"].map((item) => (
+          {["Unread", "Read", "All", "Approvals", "High Priority"].map((item) => (
             <button
               key={item}
               onClick={() => setFilter(item)}

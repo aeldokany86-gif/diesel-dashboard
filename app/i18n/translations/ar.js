@@ -393,6 +393,9 @@ const ar = {
       liters: "اللترات",
       cost: "التكلفة",
       odometer: "العداد",
+      location: "الموقع",
+      viewLocation: "عرض الموقع",
+      locationNotRecorded: "لم يتم تسجيل الموقع لهذه العملية.",
       photos: "الصور",
     },
     photos: {
@@ -882,6 +885,9 @@ const ar = {
       destination: "الوجهة",
       fueler: "مسؤول التعبئة",
       qtyLiters: "الكمية باللتر",
+      location: "الموقع",
+      viewLocation: "عرض الموقع",
+      locationNotRecorded: "لم يتم تسجيل الموقع لهذه العملية.",
       in: "وارد",
       out: "صادر",
     },
@@ -1677,6 +1683,22 @@ const ar = {
   notifications: {
     title: "مركز الإشعارات",
     subtitle: "تنبيهات التشغيل وتحديثات الموافقات وإشعارات الأنشطة",
+    operationApproval: {
+      requiredTitle: "مطلوب اعتماد العملية",
+      requiredMessage: "العملية {{operationNo}} من نوع {{operationType}} تحتاج إلى اعتمادك.",
+      approvedTitle: "تم اعتماد العملية",
+      approvedMessage: "تم اعتماد العملية {{operationNo}} من نوع {{operationType}}.",
+      rejectedTitle: "تم رفض العملية",
+      rejectedMessage: "تم رفض العملية {{operationNo}} من نوع {{operationType}}.",
+    },
+    workflowApproval: {
+      requiredTitle: "مطلوب اعتماد الطلب",
+      requiredMessage: "{{workflowType}} — {{reference}} يحتاج إلى اعتمادك.",
+      approvedTitle: "تم اعتماد الطلب",
+      approvedMessage: "تم اعتماد {{workflowType}} — {{reference}}.",
+      rejectedTitle: "تم رفض الطلب",
+      rejectedMessage: "تم رفض {{workflowType}} — {{reference}}.",
+    },
     actions: {
       markAllRead: "تحديد الكل كمقروء",
       openApproval: "فتح الموافقة",
@@ -1691,6 +1713,7 @@ const ar = {
     filters: {
       all: "الكل",
       unread: "غير المقروءة",
+      read: "المقروءة",
       approvals: "الموافقات",
       highPriority: "أولوية مرتفعة",
     },

@@ -151,7 +151,12 @@ import {
   canUserViewApproval,
 } from "./lib/permissionHelpers";
 
-import { buildNotificationItems } from "./lib/notificationHelpers";
+import {
+  fetchNotifications,
+  fetchUnreadNotificationCount,
+  markNotificationReadRequest,
+  markAllNotificationsReadRequest,
+} from "./services/notificationsService";
 
 import {
   isPlatformContextValue,
@@ -782,7 +787,8 @@ export default function Home() {
   const [stationTransferRequests, setStationTransferRequests] = useState([]);
   const [approvedStationStockAdjustments, setApprovedStationStockAdjustments] =
     useState([]);
-  const [notificationReadMap, setNotificationReadMap] = useState({});
+  const [notifications, setNotifications] = useState([]);
+  const [unreadNotificationCount, setUnreadNotificationCount] = useState(0);
   const [loginPassword, setLoginPassword] = useState("");
   const [forcePasswordChangeOpen, setForcePasswordChangeOpen] = useState(false);
   const [forceCurrentPassword, setForceCurrentPassword] = useState("");
@@ -887,15 +893,92 @@ export default function Home() {
   const currentUserRef = useRef(null);
   currentUserRef.current = currentUser;
 
+  const refreshWebNotifications = async () => {
+    if (!currentUser?.id || currentUser.status !== "Active") {
+      setNotifications([]);
+      setUnreadNotificationCount(0);
+      return;
+    }
+
+    try {
+      const [notificationResult, unreadCount] = await Promise.all([
+        fetchNotifications(),
+        fetchUnreadNotificationCount(),
+      ]);
+
+      setNotifications(notificationResult.items);
+      setUnreadNotificationCount(unreadCount);
+    } catch (error) {
+      logHandledApiIssue("Failed to load notifications", error);
+    }
+  };
+
+  useEffect(() => {
+    if (!currentUser?.id || currentUser.status !== "Active") {
+      setNotifications([]);
+      setUnreadNotificationCount(0);
+      return undefined;
+    }
+
+    let cancelled = false;
+
+    const load = async () => {
+      try {
+        const [notificationResult, unreadCount] = await Promise.all([
+          fetchNotifications(),
+          fetchUnreadNotificationCount(),
+        ]);
+
+        if (cancelled) return;
+        setNotifications(notificationResult.items);
+        setUnreadNotificationCount(unreadCount);
+      } catch (error) {
+        if (!cancelled) {
+          logHandledApiIssue("Failed to load notifications", error);
+        }
+      }
+    };
+
+    void load();
+
+    const intervalId = window.setInterval(() => {
+      void load();
+    }, 30000);
+
+    const handleFocus = () => {
+      void load();
+    };
+
+    window.addEventListener("focus", handleFocus);
+
+    return () => {
+      cancelled = true;
+      window.clearInterval(intervalId);
+      window.removeEventListener("focus", handleFocus);
+    };
+  }, [currentUser?.id, currentUser?.companyId, currentUser?.status]);
+
+  useEffect(() => {
+    if (page === "notifications") {
+      void refreshWebNotifications();
+    }
+  }, [page, currentUser?.id, currentUser?.companyId, currentUser?.status]);
+
   useEffect(() => {
     const requestInterceptor = api.interceptors.request.use((config) => {
       const method = String(config.method || "GET").toUpperCase();
       const explicitLabel = config?.headers?.["X-Action-Loading-Label"];
+      const skipActionLoading =
+        String(config?.headers?.["X-Skip-Action-Loading"] || "").toLowerCase() ===
+        "true";
       const shouldTrackActionLoading =
-        Boolean(explicitLabel) || method !== "GET";
+        !skipActionLoading && (Boolean(explicitLabel) || method !== "GET");
 
       if (explicitLabel) {
         delete config.headers["X-Action-Loading-Label"];
+      }
+      if (config?.headers?.["X-Skip-Action-Loading"]) {
+        delete config.headers["X-Skip-Action-Loading"];
       }
 
       if (shouldTrackActionLoading) {
@@ -4719,33 +4802,52 @@ export default function Home() {
     ...stationTransferApprovals,
   ];
 
-  const notifications = buildNotificationItems({
-    approvals: allApprovalRequests,
-    activityLog,
-    currentUser,
-    readMap: notificationReadMap,
-  });
-
-  const unreadNotificationCount = notifications.filter(
-    (item) => !item.read,
-  ).length;
   const routedPendingApprovalCount = allApprovalRequests.filter(
     (item) =>
       item.status === "Pending" && canUserViewApproval(currentUser, item),
   ).length;
 
-  const markNotificationRead = (notificationId) => {
-    setNotificationReadMap((prev) => ({ ...prev, [notificationId]: true }));
+  const markNotificationRead = async (notificationId) => {
+    if (!notificationId) return;
+
+    const target = notifications.find((item) => item.id === notificationId);
+    const wasUnread = Boolean(target && !target.read);
+
+    setNotifications((prev) =>
+      prev.map((item) =>
+        item.id === notificationId ? { ...item, read: true } : item
+      )
+    );
+
+    if (wasUnread) {
+      setUnreadNotificationCount((prev) => Math.max(0, prev - 1));
+    }
+
+    try {
+      await markNotificationReadRequest(notificationId);
+    } catch (error) {
+      logHandledApiIssue("Failed to mark notification as read", error);
+      await refreshWebNotifications();
+    }
   };
 
-  const markAllNotificationsRead = () => {
-    setNotificationReadMap((prev) => {
-      const next = { ...prev };
-      notifications.forEach((item) => {
-        next[item.id] = true;
-      });
-      return next;
-    });
+  const markAllNotificationsRead = async () => {
+    const previousNotifications = notifications;
+    const previousUnreadCount = unreadNotificationCount;
+
+    setNotifications((prev) =>
+      prev.map((item) => ({ ...item, read: true }))
+    );
+    setUnreadNotificationCount(0);
+
+    try {
+      await markAllNotificationsReadRequest();
+    } catch (error) {
+      setNotifications(previousNotifications);
+      setUnreadNotificationCount(previousUnreadCount);
+      logHandledApiIssue("Failed to mark all notifications as read", error);
+      await refreshWebNotifications();
+    }
   };
 
   const renderPage = () => {

@@ -161,6 +161,41 @@ function userCanAccessAllProjects(user) {
 
 
 
+function getOperationLocationUrl(row) {
+  const operation = row?.__operation || {};
+  const rawLatitude = operation.locationLatitude;
+  const rawLongitude = operation.locationLongitude;
+
+  if (
+    rawLatitude === null ||
+    rawLatitude === undefined ||
+    rawLatitude === "" ||
+    rawLongitude === null ||
+    rawLongitude === undefined ||
+    rawLongitude === ""
+  ) {
+    return "";
+  }
+
+  const latitude = Number(rawLatitude);
+  const longitude = Number(rawLongitude);
+
+  if (
+    !Number.isFinite(latitude) ||
+    latitude < -90 ||
+    latitude > 90 ||
+    !Number.isFinite(longitude) ||
+    longitude < -180 ||
+    longitude > 180
+  ) {
+    return "";
+  }
+
+  return `https://www.google.com/maps?q=${encodeURIComponent(
+    `${latitude},${longitude}`
+  )}`;
+}
+
 function useOutsideClick(ref, handler) {
   useEffect(() => {
     function listener(event) {
@@ -511,6 +546,7 @@ export default function OperationsPage({
 
   // Operation review / edit
   const [selectedEquipmentHistory, setSelectedEquipmentHistory] = useState(null);
+  const [showLocationNotRecordedModal, setShowLocationNotRecordedModal] = useState(false);
   const [operationPhotoViewer, setOperationPhotoViewer] = useState(null);
   const [operationPhotoViewerLoading, setOperationPhotoViewerLoading] = useState(false);
   const [auditLog, setAuditLog] = useState([]);
@@ -3162,7 +3198,7 @@ const payload = mapFrontendOperationToBackendPayload({
             </div>
 
             <div className="max-h-[66vh] overflow-x-scroll overflow-y-auto [scrollbar-gutter:stable_both-edges] overscroll-contain">
-              <table className="min-w-[1160px] lg:min-w-[1280px] xl:min-w-[1420px] 2xl:min-w-[1500px] w-full border-separate border-spacing-0 text-[11px] sm:text-xs lg:text-sm">
+              <table className="min-w-[1240px] lg:min-w-[1360px] xl:min-w-[1500px] 2xl:min-w-[1580px] w-full border-separate border-spacing-0 text-[11px] sm:text-xs lg:text-sm">
                 <thead className="relative z-30 shadow-sm">
                   <tr>
                     <Th
@@ -3231,6 +3267,12 @@ const payload = mapFrontendOperationToBackendPayload({
                     language === "ar" ? "text-right" : "text-left"
                   }`}
                 >{t("operations.history.odometer")}</Th>
+                    <Th
+                  dir={language === "ar" ? "rtl" : "ltr"}
+                  className={`sticky top-0 z-40 bg-slate-800 align-middle ${
+                    language === "ar" ? "text-right" : "text-left"
+                  }`}
+                >{t("operations.history.location")}</Th>
                     <Th
                   dir={language === "ar" ? "rtl" : "ltr"}
                   className={`sticky top-0 z-40 bg-slate-800 align-middle ${
@@ -3335,6 +3377,29 @@ const payload = mapFrontendOperationToBackendPayload({
                               className="text-blue-300 hover:text-yellow-400 font-semibold cursor-pointer"
                             >
                               {formatNumber(row[odometerIndex])}
+                            </button>
+                          </Td>
+
+                          <Td>
+                            <button
+                              type="button"
+                              onClick={() => {
+                                const locationUrl = getOperationLocationUrl(row);
+
+                                if (locationUrl) {
+                                  window.open(
+                                    locationUrl,
+                                    "_blank",
+                                    "noopener,noreferrer"
+                                  );
+                                  return;
+                                }
+
+                                setShowLocationNotRecordedModal(true);
+                              }}
+                              className="inline-flex items-center justify-center rounded-lg border border-sky-500/40 bg-sky-500/10 px-3 py-1 text-[11px] font-bold text-sky-300 transition hover:bg-sky-500/20 hover:text-sky-200 whitespace-nowrap"
+                            >
+                              {t("operations.history.viewLocation")}
                             </button>
                           </Td>
 
@@ -3464,6 +3529,41 @@ const payload = mapFrontendOperationToBackendPayload({
             </div>
           </div>
         </div>
+        </ModalPortal>
+      )}
+
+      {showLocationNotRecordedModal && (
+        <ModalPortal>
+          <div
+            dir={language === "ar" ? "rtl" : "ltr"}
+            className="fleet-portal-modal-backdrop bg-black/80 backdrop-blur-[3px] flex items-center justify-center p-4"
+          >
+            <div
+              className={`fleet-portal-modal-panel w-full max-w-[440px] overflow-hidden rounded-2xl border border-slate-700 bg-slate-950 text-slate-100 shadow-2xl ${
+                language === "ar" ? "text-right" : "text-left"
+              }`}
+            >
+              <div className="border-b border-slate-800 px-5 py-4">
+                <h3 className="text-base font-black text-amber-300">
+                  {t("operations.history.location")}
+                </h3>
+              </div>
+
+              <div className="px-5 py-6 text-sm text-slate-200">
+                {t("operations.history.locationNotRecorded")}
+              </div>
+
+              <div className="flex justify-end border-t border-slate-800 px-5 py-4">
+                <button
+                  type="button"
+                  onClick={() => setShowLocationNotRecordedModal(false)}
+                  className="rounded-lg bg-amber-400 px-5 py-2 font-bold text-slate-950 transition hover:bg-amber-300"
+                >
+                  {t("common.ok")}
+                </button>
+              </div>
+            </div>
+          </div>
         </ModalPortal>
       )}
 

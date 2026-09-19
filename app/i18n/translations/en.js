@@ -393,6 +393,9 @@ const en = {
       liters: "Liters",
       cost: "Cost",
       odometer: "Odometer",
+      location: "Location",
+      viewLocation: "View Location",
+      locationNotRecorded: "Location was not recorded for this operation.",
       photos: "Photos",
     },
     photos: {
@@ -882,6 +885,9 @@ const en = {
       destination: "Destination",
       fueler: "Fueler",
       qtyLiters: "Qty Liters",
+      location: "Location",
+      viewLocation: "View Location",
+      locationNotRecorded: "Location was not recorded for this operation.",
       in: "In",
       out: "Out",
     },
@@ -1691,6 +1697,22 @@ const en = {
   notifications: {
     title: "Notification Center",
     subtitle: "Operational alerts, approval updates, and activity notifications",
+    operationApproval: {
+      requiredTitle: "Approval Required",
+      requiredMessage: "{{operationType}} {{operationNo}} requires your approval.",
+      approvedTitle: "Operation Approved",
+      approvedMessage: "{{operationType}} {{operationNo}} was approved.",
+      rejectedTitle: "Operation Rejected",
+      rejectedMessage: "{{operationType}} {{operationNo}} was rejected.",
+    },
+    workflowApproval: {
+      requiredTitle: "Approval Required",
+      requiredMessage: "{{workflowType}} — {{reference}} requires your approval.",
+      approvedTitle: "Request Approved",
+      approvedMessage: "{{workflowType}} — {{reference}} was approved.",
+      rejectedTitle: "Request Rejected",
+      rejectedMessage: "{{workflowType}} — {{reference}} was rejected.",
+    },
     actions: {
       markAllRead: "Mark all as read",
       openApproval: "Open Approval",
@@ -1705,6 +1727,7 @@ const en = {
     filters: {
       all: "All",
       unread: "Unread",
+      read: "Read",
       approvals: "Approvals",
       highPriority: "High Priority",
     },

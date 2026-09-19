@@ -136,6 +136,22 @@ function canUseNetwork(showToastFn) {
   return false;
 }
 
+function localDateTimeInputToIso(value) {
+  const raw = String(value || "").trim();
+  if (!raw) return new Date().toISOString();
+
+  // datetime-local has no timezone information. In the browser, Date(raw)
+  // correctly interprets it as the user's local wall-clock time, then
+  // toISOString() converts that instant to UTC for the backend.
+  const parsed = new Date(raw);
+
+  if (Number.isNaN(parsed.getTime())) {
+    return raw;
+  }
+
+  return parsed.toISOString();
+}
+
 function isOfficerUser(user) {
   return user?.role === "Officer";
 }
@@ -198,6 +214,41 @@ function useSmartDropdownPosition(ref, isOpen, menuWidth = 260) {
 
 function getSmartDropdownClass(menuAlign, widthClass = "w-64") {
   return `absolute ${menuAlign === "right" ? "right-0" : "left-0"} mt-3 ${widthClass} max-w-[calc(100vw-1.5rem)]`;
+}
+
+function getOperationLocationUrl(row) {
+  const operation = row?.__operation || {};
+  const rawLatitude = operation.locationLatitude;
+  const rawLongitude = operation.locationLongitude;
+
+  if (
+    rawLatitude === null ||
+    rawLatitude === undefined ||
+    rawLatitude === "" ||
+    rawLongitude === null ||
+    rawLongitude === undefined ||
+    rawLongitude === ""
+  ) {
+    return "";
+  }
+
+  const latitude = Number(rawLatitude);
+  const longitude = Number(rawLongitude);
+
+  if (
+    !Number.isFinite(latitude) ||
+    latitude < -90 ||
+    latitude > 90 ||
+    !Number.isFinite(longitude) ||
+    longitude < -180 ||
+    longitude > 180
+  ) {
+    return "";
+  }
+
+  return `https://www.google.com/maps?q=${encodeURIComponent(
+    `${latitude},${longitude}`
+  )}`;
 }
 
 function unwrapStationTransferResult(result) {
@@ -454,6 +505,8 @@ export default function StationsPage({
 
     setStationCounterResetLoading(true);
 
+    const effectiveAtIso = localDateTimeInputToIso(effectiveFrom);
+
     try {
       if (isOfficerUser(currentUser)) {
         const createdRequest = await createStationActionRequest(backendId, {
@@ -461,7 +514,7 @@ export default function StationsPage({
           requestedByUserId: currentUser?.id,
           reason: cleanReason,
           newCounter: parsedNewReading,
-          effectiveAt: effectiveFrom || new Date().toISOString(),
+          effectiveAt: effectiveAtIso,
         });
 
         await onStationActionRequestCreated?.(createdRequest);
@@ -478,7 +531,7 @@ export default function StationsPage({
       const result = await resetStationCounter(backendId, {
         newCounter: parsedNewReading,
         reason: cleanReason,
-        effectiveAt: effectiveFrom || new Date().toISOString(),
+        effectiveAt: effectiveAtIso,
         createdByUserId: currentUser?.id || undefined,
       });
 
@@ -588,6 +641,7 @@ export default function StationsPage({
   const [selectedStation, setSelectedStation] = useState(null);
   const [zeroBalanceReason, setZeroBalanceReason] = useState(t("stationWorkflows.zero.defaultReason"));
   const [selectedStationHistory, setSelectedStationHistory] = useState(null);
+  const [showLocationNotRecordedModal, setShowLocationNotRecordedModal] = useState(false);
   const [editingProjectStation, setEditingProjectStation] = useState(null);
   const [stationTransferStockConfirmation, setStationTransferStockConfirmation] = useState(null);
   const [newStationProject, setNewStationProject] = useState("");
@@ -2657,7 +2711,7 @@ export default function StationsPage({
             </div>
 
             <div className="max-h-[68vh] overflow-x-scroll overflow-y-auto [scrollbar-gutter:stable_both-edges] overscroll-contain">
-              <table className="min-w-[820px] lg:min-w-[960px] xl:min-w-[1050px] w-full border-separate border-spacing-0 text-[11px] sm:text-xs lg:text-sm">
+              <table className="min-w-[920px] lg:min-w-[1060px] xl:min-w-[1160px] w-full border-separate border-spacing-0 text-[11px] sm:text-xs lg:text-sm">
                 <thead className="relative z-30 shadow-sm">
                   <tr>
                     <Th className="sticky top-0 z-40 bg-slate-800">#</Th>
@@ -2669,13 +2723,14 @@ export default function StationsPage({
                     <Th className={`sticky top-0 z-40 bg-slate-800 ${isRtl ? "text-right" : "text-left"}`}>{t("stations.history.destination")}</Th>
                     <Th className={`sticky top-0 z-40 bg-slate-800 ${isRtl ? "text-right" : "text-left"}`}>{t("stations.history.fueler")}</Th>
                     <Th className={`sticky top-0 z-40 bg-slate-800 ${isRtl ? "text-right" : "text-left"}`}>{t("stations.history.qtyLiters")}</Th>
+                    <Th className={`sticky top-0 z-40 bg-slate-800 ${isRtl ? "text-right" : "text-left"}`}>{t("stations.history.location")}</Th>
                   </tr>
                 </thead>
 
                 <tbody>
                   {getStationOperations(selectedStationHistory.id).length === 0 ? (
                     <tr>
-                      <Td colSpan={9}>
+                      <Td colSpan={10}>
                         <span className="text-gray-400">
                           {t("stations.history.noOperations")}
                         </span>
@@ -2723,6 +2778,28 @@ export default function StationsPage({
                           <Td>{row[destinationIndex] || "-"}</Td>
                           <Td>{fuelerIndex !== -1 ? row[fuelerIndex] || "-" : "-"}</Td>
                           <Td>{formatNumber(row[dieselIndex])}</Td>
+                          <Td>
+                            <button
+                              type="button"
+                              onClick={() => {
+                                const locationUrl = getOperationLocationUrl(row);
+
+                                if (locationUrl) {
+                                  window.open(
+                                    locationUrl,
+                                    "_blank",
+                                    "noopener,noreferrer"
+                                  );
+                                  return;
+                                }
+
+                                setShowLocationNotRecordedModal(true);
+                              }}
+                              className="inline-flex items-center justify-center rounded-lg border border-sky-500/40 bg-sky-500/10 px-3 py-1 text-[11px] font-bold text-sky-300 transition hover:bg-sky-500/20 hover:text-sky-200 whitespace-nowrap"
+                            >
+                              {t("stations.history.viewLocation")}
+                            </button>
+                          </Td>
                         </tr>
                       );
                     })
@@ -2734,6 +2811,41 @@ export default function StationsPage({
         </div>
       )}
 
+
+      {showLocationNotRecordedModal && (
+        <ModalPortal>
+          <div
+            dir={isRtl ? "rtl" : "ltr"}
+            className="fleet-portal-modal-backdrop bg-black/80 backdrop-blur-[3px] flex items-center justify-center p-4"
+          >
+            <div
+              className={`fleet-portal-modal-panel w-full max-w-[440px] overflow-hidden rounded-2xl border border-slate-700 bg-slate-950 text-slate-100 shadow-2xl ${
+                isRtl ? "text-right" : "text-left"
+              }`}
+            >
+              <div className="border-b border-slate-800 px-5 py-4">
+                <h3 className="text-base font-black text-amber-300">
+                  {t("stations.history.location")}
+                </h3>
+              </div>
+
+              <div className="px-5 py-6 text-sm text-slate-200">
+                {t("stations.history.locationNotRecorded")}
+              </div>
+
+              <div className="flex justify-end border-t border-slate-800 px-5 py-4">
+                <button
+                  type="button"
+                  onClick={() => setShowLocationNotRecordedModal(false)}
+                  className="rounded-lg bg-amber-400 px-5 py-2 font-bold text-slate-950 transition hover:bg-amber-300"
+                >
+                  {t("common.ok")}
+                </button>
+              </div>
+            </div>
+          </div>
+        </ModalPortal>
+      )}
 
       {editingProjectStation && (
         <ModalPortal>
