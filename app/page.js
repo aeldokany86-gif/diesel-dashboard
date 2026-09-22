@@ -1291,6 +1291,13 @@ export default function Home() {
       return true;
     }
 
+    // Supervisor needs read-only access to the Reports page so they can
+    // review operational reports within their existing project/company scope.
+    // ReportsPage itself restricts Supervisor to the Operations module only.
+    if (pageKey === "reports" && currentUser?.role === "Supervisor") {
+      return true;
+    }
+
     if (backendIsLoggedIn) {
       const requiredPermission = BACKEND_PAGE_PERMISSION_MAP[pageKey];
       if (!requiredPermission) return true;

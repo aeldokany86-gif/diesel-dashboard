@@ -151,7 +151,7 @@ export default function CompaniesPage({ companies = [], setCompanies, currentUse
   const settingsRef = useRef(null);
 
   const selectedCompany = companies.find((company) => company.id === selectedCompanyId) || null;
-  const selectedCompanyIsEditable = selectedCompany && !selectedCompany.isPlatformContext;
+  const selectedCompanyIsEditable = Boolean(selectedCompany);
   const canManageCompanies = currentUser?.role === "PlatformAdmin";
 
   const emptyCompanyForm = {
@@ -236,8 +236,8 @@ export default function CompaniesPage({ companies = [], setCompanies, currentUse
       return;
     }
 
-    if (!companyToEdit || companyToEdit.isPlatformContext) {
-      notifyUser(showToast, "warning", "Platform Console cannot be edited. Click a real customer company name.");
+    if (!companyToEdit) {
+      notifyUser(showToast, "warning", "Please select a company to edit.");
       return;
     }
 
@@ -287,9 +287,14 @@ export default function CompaniesPage({ companies = [], setCompanies, currentUse
   const handleSaveCompany = async (event) => {
     event?.preventDefault?.();
 
+    const editingPlatformCompany =
+      companyModalMode === "edit" && Boolean(selectedCompany?.isPlatformContext);
+
     const payload = {
       name: companyForm.name.trim(),
-      code: companyForm.code.trim(),
+      code: editingPlatformCompany
+        ? String(selectedCompany?.code || "PLATFORM").trim() || "PLATFORM"
+        : companyForm.code.trim(),
       country: companyForm.country.trim(),
       currency: normalizeCurrencyForCountry(companyForm.country, companyForm.currency.trim()),
       timezone: companyForm.timezone.trim() || getTimezoneByCountry(companyForm.country),
@@ -330,9 +335,9 @@ export default function CompaniesPage({ companies = [], setCompanies, currentUse
 
         setCompanies((prev) =>
           mergePlatformConsoleWithCompanies(
-            prev
-              .filter((company) => !company.isPlatformContext)
-              .map((company) => (company.id === savedCompany.id ? savedCompany : company))
+            prev.map((company) =>
+              company.id === savedCompany.id ? savedCompany : company
+            )
           )
             .map(normalizeCompanyForState)
             .filter((company) => company.id)
@@ -733,7 +738,7 @@ export default function CompaniesPage({ companies = [], setCompanies, currentUse
         <div className="flex flex-col lg:flex-row lg:items-center justify-between gap-4">
           <div>
             <p className="text-[11px] uppercase tracking-[0.22em] text-amber-300 font-bold">
-              Platform Console
+              Fleet Fuel PRO Platform
             </p>
             <h1 className="text-2xl sm:text-3xl font-black text-white mt-1">Companies</h1>
             <p className="text-sm text-slate-400 mt-2 max-w-3xl">
@@ -855,18 +860,18 @@ export default function CompaniesPage({ companies = [], setCompanies, currentUse
                     }`}
                   >
                     <td className="p-3 font-bold text-slate-100">
-                      {company.isPlatformContext ? (
-                        <span title="Platform Console cannot be edited">{company.name || company.id}</span>
-                      ) : (
-                        <button
-                          type="button"
-                          onClick={() => openEditCompanyModal(company)}
-                          className="font-black text-slate-100 cursor-pointer hover:text-amber-300 transition"
-                          title="Click to edit this company"
-                        >
-                          {company.name || company.id}
-                        </button>
-                      )}
+                      <button
+                        type="button"
+                        onClick={() => openEditCompanyModal(company)}
+                        className="font-black text-slate-100 cursor-pointer hover:text-amber-300 transition"
+                        title={
+                          company.isPlatformContext
+                            ? "Edit Fleet Fuel PRO platform company name/settings"
+                            : "Click to edit this company"
+                        }
+                      >
+                        {company.name || company.id}
+                      </button>
                     </td>
                     <td className="p-3 text-slate-300">{company.code || "-"}</td>
                     <td className="p-3 text-slate-300">{company.country || "-"}</td>
@@ -1053,9 +1058,19 @@ export default function CompaniesPage({ companies = [], setCompanies, currentUse
                   <input
                     value={companyForm.code}
                     onChange={(e) => handleCompanyFormChange("code", e.target.value)}
-                    className="mt-2 w-full rounded-2xl border border-slate-700 bg-slate-900 px-4 py-3 text-sm text-white outline-none focus:border-amber-400"
+                    disabled={
+                      companyModalMode === "edit" &&
+                      Boolean(selectedCompany?.isPlatformContext)
+                    }
+                    className="mt-2 w-full rounded-2xl border border-slate-700 bg-slate-900 px-4 py-3 text-sm text-white outline-none focus:border-amber-400 disabled:cursor-not-allowed disabled:opacity-60"
                     placeholder="ABC"
                   />
+                  {companyModalMode === "edit" &&
+                    selectedCompany?.isPlatformContext && (
+                      <p className="mt-2 text-[11px] text-amber-300">
+                        PLATFORM is the fixed internal code for the Fleet Fuel PRO platform company.
+                      </p>
+                    )}
                 </label>
 
                 <label className="block">

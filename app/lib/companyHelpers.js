@@ -94,7 +94,7 @@ export function getProjectLocationOptionsByCountry(country) {
 export const PLATFORM_CONTEXT_ID = "PLATFORM";
 export const PLATFORM_REAL_COMPANY_ID = "cmph898d701k6cm1g9sjttcoe";
 export const PLATFORM_CONTEXT_CODE = "PLATFORM";
-export const PLATFORM_CONTEXT_NAME = "Platform Console";
+export const PLATFORM_CONTEXT_NAME = "Fleet Fuel PRO";
 
 export const PLATFORM_COMPANY_OPTION = {
   id: PLATFORM_CONTEXT_ID,

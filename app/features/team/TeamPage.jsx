@@ -34,6 +34,7 @@ import {
 
 import {
   companyMatches,
+  isPlatformCompany,
   makeTenantEntityKey,
 } from "../../lib/companyHelpers";
 
@@ -280,10 +281,23 @@ export default function TeamPage({
   };
 
   const getGeneratedUsernameForFueler = (fueler = {}) => {
+    const matchedCompany = companies.find((company) =>
+      companyMatches(company.id, fueler.companyId || currentUser?.companyId)
+    );
+
+    if (matchedCompany && isPlatformCompany(matchedCompany)) {
+      const email = String(fueler.email || "").trim().toLowerCase();
+      return email && email !== "-" ? email : "-";
+    }
+
     const employeeId = String(fueler.employeeId || fueler.id || "").trim();
     const companyCode = getCompanyCodeForFueler(fueler);
 
-    return companyCode && employeeId ? `${companyCode}.${employeeId}` : employeeId ? `company.${employeeId}` : "-";
+    return companyCode && employeeId
+      ? `${companyCode}.${employeeId}`
+      : employeeId
+        ? `company.${employeeId}`
+        : "-";
   };
 
   const [newFueler, setNewFueler] = useState({
@@ -405,6 +419,13 @@ export default function TeamPage({
 
     if (actorRole !== "PlatformAdmin") return false;
 
+    // Platform User can correct:
+    // 1) bootstrap Company Admin employee IDs for customer companies, and
+    // 2) employee IDs of Fleet Fuel PRO / PLATFORM staff.
+    if (isPlatformCompanyEmployee(fueler)) {
+      return true;
+    }
+
     const linkedRole = normalizeBackendRoleName(
       fueler?.linkedUserRole ||
         fueler?.linkedUserRoleName ||
@@ -431,25 +452,32 @@ export default function TeamPage({
     ? companies.some((company) => Boolean(company?.multiProjectEnabled))
     : currentCompanyMultiProjectEnabled;
 
-  const selectableCompanies = companies.filter((company) => {
-    const normalizedId = normalizeText(company?.id);
-    const normalizedCode = normalizeText(company?.code);
-    const normalizedName = normalizeText(company?.name);
-
-    return (
+  const selectableCompanies = companies.filter(
+    (company) =>
       company?.id &&
       !company?.deletedAt &&
-      company?.isActive !== false &&
-      normalizedId !== "platform" &&
-      normalizedCode !== "platform" &&
-      normalizedName !== "platform console"
-    );
-  });
+      company?.isActive !== false
+  );
 
   const selectedBootstrapCompany = selectableCompanies.find(
     (company) =>
       normalizeText(company.id) === normalizeText(newFueler.companyId)
   );
+
+  const selectedNewEmployeeIsPlatformCompany =
+    Boolean(selectedBootstrapCompany) &&
+    isPlatformCompany(selectedBootstrapCompany);
+
+  const isPlatformCompanyEmployee = (fueler = {}) => {
+    const employeeCompany = companies.find((company) =>
+      companyMatches(
+        company.id,
+        fueler?.companyId || currentUser?.companyId || ""
+      )
+    );
+
+    return Boolean(employeeCompany && isPlatformCompany(employeeCompany));
+  };
 
   const isPlatformBootstrapEmployee = (fueler = {}) =>
     platformBootstrapMode &&
@@ -458,6 +486,7 @@ export default function TeamPage({
 
   const canManageFuelerUserStatus = (fueler = {}) =>
     hasPermission("team", "edit") ||
+    (isPlatformAdminUser(currentUser) && isPlatformCompanyEmployee(fueler)) ||
     (isPlatformBootstrapEmployee(fueler) && fueler.userStatus !== "Linked");
 
   const formatDisplayDate = (rawDate) => {
@@ -607,6 +636,9 @@ export default function TeamPage({
         ? localUpdate.linkedUserId
         : fueler.linkedUserId || "";
 
+    const fuelerCompanyId =
+      fueler.companyId || currentUser?.companyId || "";
+
     const explicitlyLinkedUser = users.find((user) => {
       const userId = normalizeText(user.id);
       const userLinkedEmployeeId = normalizeText(user.linkedEmployeeId);
@@ -617,19 +649,30 @@ export default function TeamPage({
       const fuelerEmployeeId = normalizeText(fueler.employeeId || fueler.id);
       const fuelerEmail = normalizeText(fueler.email);
       const userEmail = normalizeText(user.email);
+      const sameCompany =
+        !fuelerCompanyId || companyMatches(user.companyId, fuelerCompanyId);
 
       return (
-        (effectiveLinkedUserId && userId === normalizeText(effectiveLinkedUserId)) ||
-        (fuelerBackendId && userLinkedEmployeeId === fuelerBackendId) ||
-        (fuelerEmployeeId && userEmployeeId === fuelerEmployeeId) ||
-        (fuelerEmail && userEmail === fuelerEmail)
+        (effectiveLinkedUserId &&
+          userId === normalizeText(effectiveLinkedUserId)) ||
+        (sameCompany &&
+          (
+            (fuelerBackendId && userLinkedEmployeeId === fuelerBackendId) ||
+            (fuelerEmployeeId && userEmployeeId === fuelerEmployeeId) ||
+            (fuelerEmail && userEmail === fuelerEmail)
+          ))
       );
     });
 
     const matchedEmailUser = !explicitlyLinkedUser
       ? users.find((user) => {
           const userEmail = normalizeText(user.email);
-          return userEmail && userEmail === normalizeText(fueler.email);
+          return (
+            Boolean(userEmail) &&
+            userEmail === normalizeText(fueler.email) &&
+            (!fuelerCompanyId ||
+              companyMatches(user.companyId, fuelerCompanyId))
+          );
         })
       : null;
 
@@ -646,7 +689,12 @@ export default function TeamPage({
     const linkedUserIsActive =
       localUpdate.linkedUserIsActive !== undefined
         ? Boolean(localUpdate.linkedUserIsActive)
-        : explicitlyLinkedUser?.status === "Active" || explicitlyLinkedUser?.isActive === true;
+        : explicitlyLinkedUser
+          ? explicitlyLinkedUser.status === "Active" ||
+            explicitlyLinkedUser.isActive === true
+          : fueler.linkedUserIsActive !== undefined
+            ? Boolean(fueler.linkedUserIsActive)
+            : fueler.userStatus === "Linked";
 
     const pendingTransfer = pendingEmployeeTransfers.find((transfer) => {
       const status = String(transfer.status || "").toUpperCase();
@@ -976,8 +1024,15 @@ export default function TeamPage({
         const linkedRole = normalizeBackendRoleName(
           fueler.linkedUserRole || fueler.role || ""
         );
+
+        // Platform company staff must always be visible to Platform User,
+        // whether linked or not. They are managed from the same Team page
+        // but use the Platform User role only when linked to a user account.
+        const isPlatformStaff = isPlatformCompanyEmployee(fueler);
+
         const isLinkedCompanyAdmin =
           fueler.userStatus === "Linked" && linkedRole === "Admin";
+
         const isUnlinkedBootstrapAdmin =
           fueler.userStatus !== "Linked" &&
           normalizeText(fueler.jobTitle) === "company admin" &&
@@ -985,7 +1040,7 @@ export default function TeamPage({
 
         return Boolean(
           fueler.companyId &&
-          (isLinkedCompanyAdmin || isUnlinkedBootstrapAdmin)
+          (isPlatformStaff || isLinkedCompanyAdmin || isUnlinkedBootstrapAdmin)
         );
       })
     : activeTeamFuelers;
@@ -1536,9 +1591,12 @@ export default function TeamPage({
     const fuelerName = newFueler.name.trim();
     const mobile = newFueler.mobile.trim();
     const email = newFueler.email.trim();
-    const jobTitle = platformBootstrapMode
-      ? "Company Admin"
-      : String(newFueler.jobTitle || "Operator").trim() || "Operator";
+    const jobTitle =
+      platformBootstrapMode && selectedNewEmployeeIsPlatformCompany
+        ? String(newFueler.jobTitle || "Platform Staff").trim() || "Platform Staff"
+        : platformBootstrapMode
+          ? "Company Admin"
+          : String(newFueler.jobTitle || "Operator").trim() || "Operator";
     const projectId = newFueler.projectId || newFueler.projectName || "";
     const selectedProject = transferProjects.find((project) =>
       normalizeText(project.backendId || project.id) === normalizeText(projectId) ||
@@ -1560,6 +1618,19 @@ export default function TeamPage({
 
     if (!mobile) {
       notifyUser(typeof showToast !== "undefined" ? showToast : null, "warning", t("team.validation.enterMobile"));
+      return;
+    }
+
+    if (
+      platformBootstrapMode &&
+      selectedNewEmployeeIsPlatformCompany &&
+      !email
+    ) {
+      notifyUser(
+        typeof showToast !== "undefined" ? showToast : null,
+        "warning",
+        "Email is required for Fleet Fuel PRO platform employees because their user account signs in by email."
+      );
       return;
     }
 
@@ -1773,17 +1844,25 @@ export default function TeamPage({
     const employeeId = normalizeText(fueler.employeeId || fueler.id || "");
     const employeeEmail = normalizeText(fueler.email || "");
 
+    const fuelerCompanyId =
+      fueler?.companyId || currentUser?.companyId || "";
+
     const matchedUser = users.find((user) => {
       const userId = normalizeText(user.id || "");
       const userLinkedEmployeeId = normalizeText(user.linkedEmployeeId || "");
       const userEmployeeId = normalizeText(user.employeeId || "");
       const userEmail = normalizeText(user.email || "");
+      const sameCompany =
+        !fuelerCompanyId || companyMatches(user.companyId, fuelerCompanyId);
 
       return (
         (linkedUserId && userId === linkedUserId) ||
-        (employeeBackendId && userLinkedEmployeeId === employeeBackendId) ||
-        (employeeId && userEmployeeId === employeeId) ||
-        (employeeEmail && userEmail === employeeEmail)
+        (sameCompany &&
+          (
+            (employeeBackendId && userLinkedEmployeeId === employeeBackendId) ||
+            (employeeId && userEmployeeId === employeeId) ||
+            (employeeEmail && userEmail === employeeEmail)
+          ))
       );
     });
 
@@ -1810,6 +1889,9 @@ export default function TeamPage({
       return jobTitleRole;
     }
 
+    const fuelerCompanyId =
+      fueler?.companyId || currentUser?.companyId || "";
+
     const matchedUser = users.find((user) => {
       const linkedUserId = normalizeText(
         fueler?.linkedUserId || fueler?.userId || ""
@@ -1819,14 +1901,19 @@ export default function TeamPage({
       );
       const employeeId = normalizeText(fueler?.employeeId || fueler?.id || "");
       const email = normalizeText(fueler?.email || "");
+      const sameCompany =
+        !fuelerCompanyId || companyMatches(user?.companyId, fuelerCompanyId);
 
       return (
         (linkedUserId && normalizeText(user?.id || "") === linkedUserId) ||
-        (employeeBackendId &&
-          normalizeText(user?.linkedEmployeeId || "") === employeeBackendId) ||
-        (employeeId &&
-          normalizeText(user?.employeeId || "") === employeeId) ||
-        (email && normalizeText(user?.email || "") === email)
+        (sameCompany &&
+          (
+            (employeeBackendId &&
+              normalizeText(user?.linkedEmployeeId || "") === employeeBackendId) ||
+            (employeeId &&
+              normalizeText(user?.employeeId || "") === employeeId) ||
+            (email && normalizeText(user?.email || "") === email)
+          ))
       );
     });
 
@@ -2071,16 +2158,37 @@ export default function TeamPage({
 
     if (explicitUser) return explicitUser;
 
-    return users.find((user) => {
-      const userEmail = normalizeText(user.email);
-      return userEmail && userEmail === normalizeText(fueler.email);
-    });
+    const fuelerCompanyId =
+      fueler?.companyId || currentUser?.companyId || "";
+    const fuelerEmail = normalizeText(fueler?.email);
+
+    if (!fuelerEmail) return null;
+
+    return (
+      users.find((user) => {
+        const userEmail = normalizeText(user.email);
+
+        return (
+          userEmail === fuelerEmail &&
+          (!fuelerCompanyId ||
+            companyMatches(user.companyId, fuelerCompanyId))
+        );
+      }) || null
+    );
   };
 
-  const normalizeBackendTeamRoles = (roles = []) => {
+  const normalizeBackendTeamRoles = (roles = [], companyId = "") => {
+    const targetCompany = companies.find((company) =>
+      companyMatches(company.id, companyId)
+    );
+    const targetIsPlatformCompany =
+      Boolean(targetCompany) && isPlatformCompany(targetCompany);
+
     const allowedRoleNames = new Set(
       (isPlatformAdminUser(currentUser)
-        ? ["Admin"]
+        ? targetIsPlatformCompany
+          ? ["Platform User"]
+          : ["Admin"]
         : TEAM_CREATE_USER_ROLE_NAMES
       ).map((roleName) => normalizeBackendRoleName(roleName))
     );
@@ -2123,7 +2231,7 @@ export default function TeamPage({
         fallbackToGlobal: false,
       });
 
-      const normalizedRoles = normalizeBackendTeamRoles(backendRoles);
+      const normalizedRoles = normalizeBackendTeamRoles(backendRoles, targetCompanyId);
       setTeamRoleOptions(normalizedRoles);
       return normalizedRoles;
     } finally {
@@ -2157,6 +2265,10 @@ export default function TeamPage({
   const getDefaultTeamRoleId = (roles = []) => {
     if (isPlatformAdminUser(currentUser)) {
       return (
+        roles.find(
+          (role) =>
+            role.normalizedName === normalizeBackendRoleName("Platform User")
+        )?.id ||
         roles.find((role) => role.normalizedName === "Admin")?.id ||
         roles[0]?.id ||
         ""
@@ -2340,20 +2452,30 @@ export default function TeamPage({
         selectedTeamRole?.normalizedName || selectedTeamRoleName
       );
 
-      if (
-        isPlatformAdminUser(currentUser) &&
-        selectedTeamNormalizedRole !== "Admin"
-      ) {
-        showToast?.(
-          "warning",
-          t("team.validation.platformFirstUserAdminOnly")
+      if (isPlatformAdminUser(currentUser)) {
+        const targetCompany = companies.find((company) =>
+          companyMatches(company.id, roleCompanyId)
         );
-        setSavingLinkedUser(false);
-        setUpdatingUserStatusByFuelerId((prev) => ({
-          ...prev,
-          [fuelerId]: false,
-        }));
-        return;
+        const targetIsPlatformCompany =
+          Boolean(targetCompany) && isPlatformCompany(targetCompany);
+        const expectedRole = targetIsPlatformCompany
+          ? normalizeBackendRoleName("Platform User")
+          : "Admin";
+
+        if (selectedTeamNormalizedRole !== expectedRole) {
+          showToast?.(
+            "warning",
+            targetIsPlatformCompany
+              ? "Platform company employees can be linked only as Platform User."
+              : t("team.validation.platformFirstUserAdminOnly")
+          );
+          setSavingLinkedUser(false);
+          setUpdatingUserStatusByFuelerId((prev) => ({
+            ...prev,
+            [fuelerId]: false,
+          }));
+          return;
+        }
       }
 
       const createdUser = await onCreateUserFromEmployee({
@@ -2970,7 +3092,15 @@ export default function TeamPage({
                   const isSelected = selectedTeamMemberIds.includes(selectionKey);
 
                   return (
-                  <tr key={makeTenantEntityKey(fueler)} className={`odd:bg-slate-900/20 even:bg-slate-800/20 hover:bg-amber-400/10 transition-colors duration-200 ${isSelected ? "bg-amber-400/10 ring-1 ring-amber-400/30" : ""}`}>
+                  <tr
+                    key={`${normalizeScopeValue(
+                      fueler.backendId ||
+                        fueler.employeeBackendId ||
+                        fueler.linkedUserId ||
+                        fueler.id
+                    )}::${normalizeScopeValue(fueler.companyId)} `}
+                    className={`odd:bg-slate-900/20 even:bg-slate-800/20 hover:bg-amber-400/10 transition-colors duration-200 ${isSelected ? "bg-amber-400/10 ring-1 ring-amber-400/30" : ""}`}
+                  >
                     <Td>
                       <input
                         type="checkbox"
@@ -4087,15 +4217,24 @@ export default function TeamPage({
                     </label>
                     <select
                       value={newFueler.companyId}
-                      onChange={(e) =>
+                      onChange={(e) => {
+                        const nextCompanyId = e.target.value;
+                        const nextCompany = selectableCompanies.find((company) =>
+                          companyMatches(company.id, nextCompanyId)
+                        );
+                        const nextIsPlatform =
+                          Boolean(nextCompany) && isPlatformCompany(nextCompany);
+
                         setNewFueler({
                           ...newFueler,
-                          companyId: e.target.value,
+                          companyId: nextCompanyId,
                           projectId: "",
                           projectName: "",
-                          jobTitle: "Company Admin",
-                        })
-                      }
+                          jobTitle: nextIsPlatform
+                            ? "Platform Staff"
+                            : "Company Admin",
+                        });
+                      }}
                       dir={isRtl ? "rtl" : "ltr"} className={`w-full mt-2 rounded-lg border border-slate-700 bg-slate-900 p-3 text-white ${isRtl ? "text-right" : "text-left"} outline-none focus:border-amber-400 focus:ring-2 focus:ring-amber-400/20`}
                     >
                       <option value="">{t("team.add.selectCompany")}</option>
@@ -4106,11 +4245,16 @@ export default function TeamPage({
                         </option>
                       ))}
                     </select>
-                    {selectedBootstrapCompany && (
-                      <p className="mt-2 text-xs text-amber-300">
-                        {t("team.add.firstAdminNotice")}
-                      </p>
-                    )}
+                    {selectedBootstrapCompany &&
+                      (selectedNewEmployeeIsPlatformCompany ? (
+                        <p className="mt-2 text-xs text-amber-300">
+                          Fleet Fuel PRO platform employees do not require a customer project. When linked to a user account, only the Platform User role is available.
+                        </p>
+                      ) : (
+                        <p className="mt-2 text-xs text-amber-300">
+                          {t("team.add.firstAdminNotice")}
+                        </p>
+                      ))}
                   </div>
                 )}
 
@@ -4181,11 +4325,17 @@ export default function TeamPage({
                   <label className="font-medium text-slate-300">{t("team.table.jobTitle")}</label>
                   <input
                     type="text"
-                    value={platformBootstrapMode ? "Company Admin" : newFueler.jobTitle}
+                    value={
+                      platformBootstrapMode && !selectedNewEmployeeIsPlatformCompany
+                        ? "Company Admin"
+                        : newFueler.jobTitle
+                    }
                     onChange={(e) =>
                       setNewFueler({ ...newFueler, jobTitle: e.target.value })
                     }
-                    disabled={platformBootstrapMode}
+                    disabled={
+                      platformBootstrapMode && !selectedNewEmployeeIsPlatformCompany
+                    }
                     dir={isRtl ? "rtl" : "ltr"} className={`w-full mt-2 rounded-lg border border-slate-700 bg-slate-900 p-3 text-white ${isRtl ? "text-right" : "text-left"} placeholder:text-slate-500 outline-none focus:border-amber-400 focus:ring-2 focus:ring-amber-400/20 disabled:cursor-not-allowed disabled:opacity-70`}
                     placeholder={t("team.add.jobTitlePlaceholder")}
                   />

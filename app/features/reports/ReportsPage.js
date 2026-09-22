@@ -6270,9 +6270,13 @@ export default function ReportsPage({
   const [operationsReportError, setOperationsReportError] = useState("");
 
   const isPlatformUser = isPlatformReportsUser(currentUser);
+  const isSupervisor = currentUser?.role === "Supervisor";
+
   const visibleReportModules = isPlatformUser
     ? REPORT_MODULES.filter((module) => module.id === "companies")
-    : REPORT_MODULES.filter((module) => !module.platformOnly);
+    : isSupervisor
+      ? REPORT_MODULES.filter((module) => module.id === "operations")
+      : REPORT_MODULES.filter((module) => !module.platformOnly);
 
   const availableAssets = useMemo(() => {
     if (draftFilters.project === "all") return assets;
