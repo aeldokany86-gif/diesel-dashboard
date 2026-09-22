@@ -2,6 +2,8 @@
 
 import { useMemo, useState } from "react";
 import ReportToolbar from "../components/ReportToolbar";
+import { useLanguage } from "../../../context/LanguageContext";
+import { ReportLocalizationBoundary, reportText } from "../utils/reportI18n";
 import { printReport } from "../utils/printReport";
 import { exportReportToExcel } from "../utils/exportReportToExcel";
 import {
@@ -155,9 +157,13 @@ function getEventCycle(event) {
 }
 
 function CounterHistoryDetailsModal({ row, onClose }) {
+  const { language, t } = useLanguage();
+  const tr = (value, params) => reportText(t, value, params);
+
   if (!row) return null;
 
   return (
+    <ReportLocalizationBoundary t={t} language={language}>
     <div className="fixed inset-0 z-[140] flex items-center justify-center bg-black/75 p-4 backdrop-blur-sm">
       <button type="button" aria-label="Close event details" onClick={onClose} className="absolute inset-0 h-full w-full" />
 
@@ -199,6 +205,8 @@ function CounterHistoryDetailsModal({ row, onClose }) {
         </div>
       </section>
     </div>
+  
+    </ReportLocalizationBoundary>
   );
 }
 
@@ -210,6 +218,9 @@ function StationCounterMeterHistoryReport({
   stations = [],
   onBack,
 }) {
+  const { language, t } = useLanguage();
+  const tr = (value, params) => reportText(t, value, params);
+
   const [filtersOpen, setFiltersOpen] = useState(true);
   const [reportGenerated, setReportGenerated] = useState(false);
   const [draftFilters, setDraftFilters] = useState(COUNTER_HISTORY_FILTERS);
@@ -304,6 +315,8 @@ function StationCounterMeterHistoryReport({
   }, [appliedFilters, projects, stations]);
 
   const reportMeta = {
+    translate: tr,
+    language,
     title: selectedReport?.title || "Station Counter Meter History Report",
     companyName: currentCompany?.name || "Fleet Fuel PRO",
     generatedBy: getUserDisplayName(currentUser),
@@ -423,6 +436,7 @@ function StationCounterMeterHistoryReport({
   };
 
   return (
+    <ReportLocalizationBoundary t={t} language={language}>
     <div className="min-h-full bg-slate-950 px-4 py-5 text-slate-100 sm:px-6 lg:px-8">
       <div className="mx-auto max-w-[1900px] space-y-5">
         <section className="rounded-2xl border border-slate-800 bg-slate-900/80 p-5 shadow-xl shadow-black/10">
@@ -575,6 +589,8 @@ function StationCounterMeterHistoryReport({
         <CounterHistoryDetailsModal row={selectedRow} onClose={() => setSelectedRow(null)} />
       </div>
     </div>
+  
+    </ReportLocalizationBoundary>
   );
 }
 
@@ -582,9 +598,9 @@ function StationCounterMeterHistoryReport({
 
 const STATION_MASTER_FILTERS = {
   projectId: "all",
+  stationId: "all",
   status: "all",
   type: "all",
-  search: "",
 };
 
 const STATION_MASTER_HEADERS = [
@@ -662,8 +678,12 @@ function StationMasterReport({
   currentUser,
   currentCompany,
   projects = [],
+  stations: stationOptionsSource = [],
   onBack,
 }) {
+  const { language, t } = useLanguage();
+  const tr = (value, params) => reportText(t, value, params);
+
   const [filtersOpen, setFiltersOpen] = useState(true);
   const [reportGenerated, setReportGenerated] = useState(false);
   const [stations, setStations] = useState([]);
@@ -676,6 +696,7 @@ function StationMasterReport({
     () =>
       (stations || []).map((station, index) => ({
         key: getStationBackendId(station) || `station-${index}`,
+        backendId: getStationBackendId(station),
         stationId: station?.stationId || station?.code || station?.id || "-",
         stationName: station?.name || station?.stationName || "-",
         projectId: getStationProjectId(station),
@@ -691,18 +712,47 @@ function StationMasterReport({
     [stations, projects]
   );
 
+  const stationOptions = useMemo(() => {
+    const source =
+      stationOptionsSource.length > 0 ? stationOptionsSource : stations;
+
+    return source
+      .filter((station) => {
+        if (draftFilters.projectId === "all") return true;
+
+        return (
+          normalizeValue(getStationProjectId(station)) ===
+          normalizeValue(draftFilters.projectId)
+        );
+      })
+      .map((station) => ({
+        value: getStationBackendId(station),
+        label: getStationLabel(station),
+      }))
+      .filter((option) => option.value && option.label)
+      .sort((a, b) =>
+        String(a.label).localeCompare(String(b.label), undefined, {
+          numeric: true,
+          sensitivity: "base",
+        }),
+      );
+  }, [stationOptionsSource, stations, draftFilters.projectId]);
+
   const typeOptions = useMemo(
     () => [...new Set(rows.map((row) => row.type).filter((value) => value && value !== "-"))].sort(),
     [rows]
   );
 
   const filteredRows = useMemo(() => {
-    const search = normalizeValue(appliedFilters.search);
-
     return rows.filter((row) => {
       if (
         appliedFilters.projectId !== "all" &&
         normalizeValue(row.projectId) !== normalizeValue(appliedFilters.projectId)
+      ) return false;
+
+      if (
+        appliedFilters.stationId !== "all" &&
+        normalizeValue(row.backendId) !== normalizeValue(appliedFilters.stationId)
       ) return false;
 
       if (
@@ -713,12 +763,6 @@ function StationMasterReport({
       if (
         appliedFilters.type !== "all" &&
         normalizeValue(row.type) !== normalizeValue(appliedFilters.type)
-      ) return false;
-
-      if (
-        search &&
-        ![row.stationId, row.stationName, row.project, row.type, row.status]
-          .some((value) => normalizeValue(value).includes(search))
       ) return false;
 
       return true;
@@ -743,6 +787,12 @@ function StationMasterReport({
       normalizeValue(appliedFilters.projectId)
   );
 
+  const selectedStation = [...stationOptionsSource, ...stations].find(
+    (station) =>
+      normalizeValue(getStationBackendId(station)) ===
+      normalizeValue(appliedFilters.stationId)
+  );
+
   const filterSummary = [
     {
       label: "Project",
@@ -757,12 +807,17 @@ function StationMasterReport({
       value: appliedFilters.type === "all" ? "All Types" : appliedFilters.type,
     },
     {
-      label: "Search",
-      value: appliedFilters.search || "No search text",
+      label: "Station",
+      value:
+        appliedFilters.stationId === "all"
+          ? "All Stations"
+          : getStationLabel(selectedStation),
     },
   ];
 
   const reportMeta = {
+    translate: tr,
+    language,
     title: selectedReport?.title || "Station Master Report",
     companyName: currentCompany?.name || "Fleet Fuel PRO",
     generatedBy: getUserDisplayName(currentUser),
@@ -861,6 +916,7 @@ function StationMasterReport({
   };
 
   return (
+    <ReportLocalizationBoundary t={t} language={language}>
     <div className="min-h-full bg-slate-950 px-4 py-5 text-slate-100 sm:px-6 lg:px-8">
       <div className="mx-auto max-w-[1900px] space-y-5">
         <section className="rounded-2xl border border-slate-800 bg-slate-900/80 p-5 shadow-xl shadow-black/10">
@@ -972,13 +1028,32 @@ function StationMasterReport({
               </div>
 
               <div className="flex-1 space-y-4 overflow-y-auto px-5 py-5">
-                <label className="block"><span className="mb-2 block text-sm font-bold text-slate-300">Project</span><select value={draftFilters.projectId} onChange={(event) => setDraftFilters((previous) => ({ ...previous, projectId: event.target.value }))} className="w-full rounded-xl border border-slate-700 bg-slate-950 px-3 py-2.5 text-sm text-white outline-none focus:border-amber-500"><option value="all">All Projects</option>{projects.map((project) => <option key={getProjectBackendId(project) || getProjectLabel(project)} value={getProjectBackendId(project)}>{getProjectLabel(project)}</option>)}</select></label>
+                <label className="block"><span className="mb-2 block text-sm font-bold text-slate-300">Project</span><select value={draftFilters.projectId} onChange={(event) => setDraftFilters((previous) => ({ ...previous, projectId: event.target.value, stationId: "all" }))} className="w-full rounded-xl border border-slate-700 bg-slate-950 px-3 py-2.5 text-sm text-white outline-none focus:border-amber-500"><option value="all">All Projects</option>{projects.map((project) => <option key={getProjectBackendId(project) || getProjectLabel(project)} value={getProjectBackendId(project)}>{getProjectLabel(project)}</option>)}</select></label>
 
                 <label className="block"><span className="mb-2 block text-sm font-bold text-slate-300">Status</span><select value={draftFilters.status} onChange={(event) => setDraftFilters((previous) => ({ ...previous, status: event.target.value }))} className="w-full rounded-xl border border-slate-700 bg-slate-950 px-3 py-2.5 text-sm text-white outline-none focus:border-amber-500"><option value="all">All Statuses</option><option value="ACTIVE">Active</option><option value="INACTIVE">Inactive</option><option value="DELETED">Deleted</option></select></label>
 
                 <label className="block"><span className="mb-2 block text-sm font-bold text-slate-300">Station Type</span><select value={draftFilters.type} onChange={(event) => setDraftFilters((previous) => ({ ...previous, type: event.target.value }))} className="w-full rounded-xl border border-slate-700 bg-slate-950 px-3 py-2.5 text-sm text-white outline-none focus:border-amber-500"><option value="all">All Types</option>{typeOptions.map((type) => <option key={type} value={type}>{type}</option>)}</select></label>
 
-                <label className="block"><span className="mb-2 block text-sm font-bold text-slate-300">Search</span><input type="text" value={draftFilters.search} onChange={(event) => setDraftFilters((previous) => ({ ...previous, search: event.target.value }))} placeholder="Station ID or name" className="w-full rounded-xl border border-slate-700 bg-slate-950 px-3 py-2.5 text-sm text-white outline-none focus:border-amber-500" /></label>
+                <label className="block">
+                  <span className="mb-2 block text-sm font-bold text-slate-300">Station</span>
+                  <select
+                    value={draftFilters.stationId}
+                    onChange={(event) =>
+                      setDraftFilters((previous) => ({
+                        ...previous,
+                        stationId: event.target.value,
+                      }))
+                    }
+                    className="w-full rounded-xl border border-slate-700 bg-slate-950 px-3 py-2.5 text-sm text-white outline-none focus:border-amber-500"
+                  >
+                    <option value="all">All Stations</option>
+                    {stationOptions.map((station) => (
+                      <option key={station.value} value={station.value}>
+                        {station.label}
+                      </option>
+                    ))}
+                  </select>
+                </label>
               </div>
 
               <div className="grid grid-cols-2 gap-3 border-t border-slate-800 px-5 py-4">
@@ -990,6 +1065,8 @@ function StationMasterReport({
         ) : null}
       </div>
     </div>
+  
+    </ReportLocalizationBoundary>
   );
 }
 
@@ -1064,6 +1141,9 @@ function StationTransferReport({
   stations = [],
   onBack,
 }) {
+  const { language, t } = useLanguage();
+  const tr = (value, params) => reportText(t, value, params);
+
   const [filtersOpen, setFiltersOpen] = useState(true);
   const [reportGenerated, setReportGenerated] = useState(false);
   const [draftFilters, setDraftFilters] = useState(TRANSFER_REPORT_FILTERS);
@@ -1172,6 +1252,8 @@ function StationTransferReport({
   );
 
   const reportMeta = {
+    translate: tr,
+    language,
     title: selectedReport?.title || "Station Transfer Report",
     companyName: currentCompany?.name || "Fleet Fuel PRO",
     generatedBy: getUserDisplayName(currentUser),
@@ -1286,6 +1368,7 @@ function StationTransferReport({
   };
 
   return (
+    <ReportLocalizationBoundary t={t} language={language}>
     <div className="min-h-full bg-slate-950 px-4 py-5 text-slate-100 sm:px-6 lg:px-8">
       <div className="mx-auto max-w-[1900px] space-y-5">
         <section className="rounded-2xl border border-slate-800 bg-slate-900/80 p-5 shadow-xl shadow-black/10">
@@ -1433,6 +1516,8 @@ function StationTransferReport({
         ) : null}
       </div>
     </div>
+  
+    </ReportLocalizationBoundary>
   );
 }
 

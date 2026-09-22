@@ -2162,6 +2162,30 @@ export default function Home() {
       throw new Error("Employee backend ID is required.");
     }
 
+    const previousEmployeeId = String(
+      employee?.employeeId || employee?.id || ""
+    )
+      .trim()
+      .toUpperCase();
+    const requestedEmployeeId =
+      payload?.employeeId !== undefined
+        ? String(payload.employeeId || "").trim().toUpperCase()
+        : "";
+    const employeeIdChanged =
+      Boolean(requestedEmployeeId) &&
+      requestedEmployeeId !== previousEmployeeId;
+
+    const currentLinkedEmployeeBackendId =
+      backendAuthUser?.linkedEmployeeId ||
+      currentUser?.linkedEmployeeId ||
+      "";
+    const changingCurrentUserEmployeeId =
+      employeeIdChanged &&
+      (normalizeScopeValue(currentLinkedEmployeeBackendId) ===
+        normalizeScopeValue(backendId) ||
+        normalizeScopeValue(currentUser?.employeeId) ===
+          normalizeScopeValue(previousEmployeeId));
+
     const updatedEmployeeData = await updateEmployeeRecord(backendId, payload);
     const updatedEmployee = mapBackendEmployeeForState(updatedEmployeeData);
 
@@ -2200,6 +2224,25 @@ export default function Home() {
           error,
         );
       }
+    }
+
+    if (changingCurrentUserEmployeeId) {
+      const nextUsername = String(
+        updatedEmployeeData?.linkedUser?.username ||
+          updatedEmployee?.linkedUser?.username ||
+          ""
+      ).trim();
+
+      showToast?.(
+        "success",
+        language === "ar"
+          ? `تم تصحيح رقم الموظف بنجاح${nextUsername ? ` وأصبح اسم الدخول ${nextUsername}` : ""}. سيتم تسجيل الخروج الآن، واستخدم نفس كلمة المرور عند الدخول مرة أخرى.`
+          : `Employee ID corrected successfully${nextUsername ? `. Your new username is ${nextUsername}` : ""}. You will be signed out now; use the same password to sign in again.`,
+      );
+
+      window.setTimeout(() => {
+        handleLogout();
+      }, 1400);
     }
 
     return updatedEmployee;

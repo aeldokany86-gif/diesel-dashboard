@@ -2,6 +2,8 @@
 
 import { useEffect, useMemo, useState } from "react";
 import ReportToolbar from "../components/ReportToolbar";
+import { useLanguage } from "../../../context/LanguageContext";
+import { ReportLocalizationBoundary, reportText } from "../utils/reportI18n";
 import { printReport } from "../utils/printReport";
 import { exportReportToExcel } from "../utils/exportReportToExcel";
 import {
@@ -67,6 +69,9 @@ export default function ProjectsReportsPage({
   projects = [],
   onBack,
 }) {
+  const { language, t } = useLanguage();
+  const tr = (value, params) => reportText(t, value, params);
+
   const isMaster = selectedReport?.id === "projects-master";
   const [filtersOpen, setFiltersOpen] = useState(false);
   const [loading, setLoading] = useState(false);
@@ -304,6 +309,8 @@ export default function ProjectsReportsPage({
       ]);
 
   const reportMeta = {
+    translate: tr,
+    language,
     title: selectedReport?.title,
     companyName: currentCompany?.name || "Fleet Fuel PRO",
     generatedBy: userName(currentUser),
@@ -361,7 +368,11 @@ export default function ProjectsReportsPage({
     });
 
   return (
-    <div className="min-h-full bg-slate-950 px-4 py-5 text-slate-100 sm:px-6 lg:px-8">
+    <ReportLocalizationBoundary t={t} language={language}>
+    <div
+      dir={language === "ar" ? "rtl" : "ltr"}
+      className="min-h-full bg-slate-950 px-4 py-5 text-slate-100 sm:px-6 lg:px-8"
+    >
       <div className="mx-auto max-w-[1800px] space-y-4">
         <section className="rounded-2xl border border-slate-700 bg-slate-900/90 p-5">
           <div className="flex flex-wrap items-start justify-between gap-4">
@@ -377,10 +388,10 @@ export default function ProjectsReportsPage({
                 Projects Reports
               </div>
               <h1 className="mt-1 text-2xl font-black text-white">
-                {selectedReport?.title}
+                {tr(selectedReport?.title)}
               </h1>
               <p className="mt-2 text-sm text-slate-400">
-                {selectedReport?.description}
+                {tr(selectedReport?.description)}
               </p>
             </div>
             <ReportToolbar
@@ -394,7 +405,7 @@ export default function ProjectsReportsPage({
 
         {error ? (
           <div className="rounded-xl border border-rose-500/40 bg-rose-500/10 p-4 text-rose-200">
-            {error}
+            {tr(error)}
           </div>
         ) : null}
 
@@ -403,32 +414,32 @@ export default function ProjectsReportsPage({
             {isMaster ? (
               <section className="grid gap-3 sm:grid-cols-2 xl:grid-cols-6">
                 <Stat
-                  label="Total Projects"
+                  label={tr("Total Projects")}
                   value={summary.totalProjects || 0}
                   tone="text-amber-300"
                 />
                 <Stat
-                  label="Active"
+                  label={tr("Active")}
                   value={summary.activeProjects || 0}
                   tone="text-emerald-300"
                 />
                 <Stat
-                  label="Inactive"
+                  label={tr("Inactive")}
                   value={summary.inactiveProjects || 0}
                   tone="text-rose-300"
                 />
                 <Stat
-                  label="Ended"
+                  label={tr("Ended")}
                   value={summary.endedProjects || 0}
                   tone="text-violet-300"
                 />
                 <Stat
-                  label="Consumed Quantity"
+                  label={tr("Consumed Quantity")}
                   value={`${number(summary.consumedQuantity)} L`}
                   tone="text-sky-300"
                 />
                 <Stat
-                  label={`Total Cost (${currency})`}
+                  label={`${tr("Total Cost")} (${currency})`}
                   value={number(summary.totalCost)}
                   tone="text-emerald-300"
                 />
@@ -436,17 +447,17 @@ export default function ProjectsReportsPage({
             ) : (
               <section className="grid gap-3 sm:grid-cols-3">
                 <Stat
-                  label="Price Changes"
+                  label={tr("Price Changes")}
                   value={summary.priceChanges || 0}
                   tone="text-amber-300"
                 />
                 <Stat
-                  label="Affected Projects"
+                  label={tr("Affected Projects")}
                   value={summary.affectedProjects || 0}
                   tone="text-sky-300"
                 />
                 <Stat
-                  label="Priced Operations"
+                  label={tr("Priced Operations")}
                   value={summary.pricedOperations || 0}
                   tone="text-emerald-300"
                 />
@@ -457,12 +468,12 @@ export default function ProjectsReportsPage({
               <div className="flex items-center justify-between border-b border-slate-700 px-5 py-4">
                 <div>
                   <h2 className="font-black text-white">
-                    {isMaster ? "Projects Register" : "Fuel Price Changes"}
+                    {tr(isMaster ? "Projects Register" : "Fuel Price Changes")}
                   </h2>
                   <p className="text-xs text-slate-400">
                     {loading
-                      ? "Loading..."
-                      : `${rows.length} record${rows.length === 1 ? "" : "s"}`}
+                      ? tr("Loading...")
+                      : tr(`${rows.length} record${rows.length === 1 ? "" : "s"}`)}
                   </p>
                 </div>
               </div>
@@ -476,7 +487,7 @@ export default function ProjectsReportsPage({
                             key={column}
                             className="whitespace-nowrap px-3 py-3"
                           >
-                            {column}
+                            {tr(column)}
                           </th>
                         ),
                       )}
@@ -513,8 +524,9 @@ export default function ProjectsReportsPage({
               Select report filters first
             </div>
             <p className="mt-2 max-w-xl text-sm text-slate-400">
-              Choose the required filters, then generate the report. No report
-              data is loaded before confirmation.
+              {tr(
+                "Choose the required filters, then generate the report. No report data is loaded before confirmation.",
+              )}
             </p>
             <button
               type="button"
@@ -533,7 +545,9 @@ export default function ProjectsReportsPage({
           onClick={() => setFiltersOpen(false)}
         >
           <aside
-            className="ml-auto flex h-full w-full max-w-sm flex-col border-l border-slate-700 bg-slate-900"
+            className={`flex h-full w-full max-w-sm flex-col border-slate-700 bg-slate-900 ${
+              language === "ar" ? "mr-auto border-r" : "ml-auto border-l"
+            }`}
             onClick={(event) => event.stopPropagation()}
           >
             <div className="flex items-start justify-between border-b border-slate-700 p-5">
@@ -542,7 +556,7 @@ export default function ProjectsReportsPage({
                   Report Filters
                 </div>
                 <h2 className="mt-1 text-xl font-black text-white">
-                  {selectedReport?.title}
+                  {tr(selectedReport?.title)}
                 </h2>
               </div>
               <button
@@ -556,7 +570,7 @@ export default function ProjectsReportsPage({
             <div className="flex-1 space-y-5 overflow-y-auto p-5">
               {error ? (
                 <div className="rounded-xl border border-rose-500/40 bg-rose-500/10 p-3 text-sm text-rose-200">
-                  {error}
+                  {tr(error)}
                 </div>
               ) : null}
               <label className="block text-sm font-bold text-slate-300">
@@ -571,7 +585,7 @@ export default function ProjectsReportsPage({
                   }
                   className="mt-2 w-full rounded-xl border border-slate-600 bg-slate-950 px-3 py-3 text-white"
                 >
-                  <option value="all">All Projects</option>
+                  <option value="all">{tr("All Projects")}</option>
                   {projects.map((project) => (
                     <option key={projectId(project)} value={projectId(project)}>
                       {project.code || project.projectCode} —{" "}
@@ -594,10 +608,10 @@ export default function ProjectsReportsPage({
                       }
                       className="mt-2 w-full rounded-xl border border-slate-600 bg-slate-950 px-3 py-3 text-white"
                     >
-                      <option value="all">All Statuses</option>
-                      <option value="ACTIVE">Active</option>
-                      <option value="INACTIVE">Inactive</option>
-                      <option value="ENDED">Ended</option>
+                      <option value="all">{tr("All Statuses")}</option>
+                      <option value="ACTIVE">{tr("Active")}</option>
+                      <option value="INACTIVE">{tr("Inactive")}</option>
+                      <option value="ENDED">{tr("Ended")}</option>
                     </select>
                   </label>
                   <label className="block text-sm font-bold text-slate-300">
@@ -612,7 +626,7 @@ export default function ProjectsReportsPage({
                       }
                       className="mt-2 w-full rounded-xl border border-slate-600 bg-slate-950 px-3 py-3 text-white"
                     >
-                      <option value="all">All Locations</option>
+                      <option value="all">{tr("All Locations")}</option>
                       {locations.map((location) => (
                         <option key={location} value={location}>
                           {location}
@@ -632,7 +646,7 @@ export default function ProjectsReportsPage({
                       }
                       className="mt-2 w-full rounded-xl border border-slate-600 bg-slate-950 px-3 py-3 text-white"
                     >
-                      <option value="all">All Project Managers</option>
+                      <option value="all">{tr("All Project Managers")}</option>
                       {managers.map((manager) => (
                         <option key={manager.id} value={manager.id}>
                           {manager.name}
@@ -697,12 +711,14 @@ export default function ProjectsReportsPage({
                 disabled={loading}
                 className="rounded-xl bg-amber-500 px-4 py-3 font-black text-slate-950 disabled:opacity-50"
               >
-                {loading ? "Generating..." : "Generate Report"}
+                {loading ? tr("Generating...") : tr("Generate Report")}
               </button>
             </div>
           </aside>
         </div>
       ) : null}
     </div>
+  
+    </ReportLocalizationBoundary>
   );
 }

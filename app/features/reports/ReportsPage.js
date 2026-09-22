@@ -2,6 +2,8 @@
 
 import { useEffect, useMemo, useState } from "react";
 import ReportToolbar from "./components/ReportToolbar";
+import { useLanguage } from "../../context/LanguageContext";
+import { ReportLocalizationBoundary, reportText } from "./utils/reportI18n";
 import { printReport } from "./utils/printReport";
 import { exportReportToExcel } from "./utils/exportReportToExcel";
 import { fetchStationStockMovements } from "../../services/stationsService";
@@ -197,15 +199,6 @@ const REPORT_MODULES = [
     available: true,
     platformOnly: true,
   },
-  {
-    id: "users",
-    title: "Users",
-    description:
-      "User access, roles, account activity and administration reports.",
-    icon: "👤",
-    reports: [],
-    available: false,
-  },
 ];
 
 const TABLE_HEADERS = [
@@ -217,6 +210,7 @@ const TABLE_HEADERS = [
   "Employee Name",
   "Source",
   "Destination",
+  "Destination Meter",
   "Quantity",
   "Cost",
   "Status",
@@ -227,6 +221,7 @@ const EMPTY_FILTERS = {
   dateTo: "",
   project: "all",
   asset: "all",
+  station: "all",
   operationType: "all",
   fuelerEmployeeId: "",
   status: "all",
@@ -410,6 +405,9 @@ function useReportPagination(
 }
 
 function ReportPagination({ pagination, itemLabel = "records" }) {
+  const { language, t } = useLanguage();
+  const tr = (value, params) => reportText(t, value, params);
+
   if (!pagination || pagination.totalItems <= 0) return null;
 
   const {
@@ -424,6 +422,7 @@ function ReportPagination({ pagination, itemLabel = "records" }) {
   } = pagination;
 
   return (
+    <ReportLocalizationBoundary t={t} language={language}>
     <div className="flex flex-col gap-3 border-t border-slate-800 bg-slate-950/40 px-5 py-4 sm:flex-row sm:items-center sm:justify-between">
       <div className="flex flex-wrap items-center gap-3 text-sm text-slate-400">
         <span>
@@ -468,6 +467,8 @@ function ReportPagination({ pagination, itemLabel = "records" }) {
         </button>
       </div>
     </div>
+  
+    </ReportLocalizationBoundary>
   );
 }
 
@@ -525,6 +526,36 @@ function getAssetCandidates(asset) {
     asset?.equipment_no,
     asset?.equipment_number,
     asset?.name,
+  ]
+    .filter(Boolean)
+    .map(normalizeValue);
+}
+
+function getStationFilterValue(station) {
+  return (
+    station?.backendId ||
+    station?.stationBackendId ||
+    station?.databaseId ||
+    station?.id ||
+    station?.stationId ||
+    station?.stationCode ||
+    station?.code ||
+    station?.name ||
+    ""
+  );
+}
+
+function getStationCandidates(station) {
+  return [
+    station?.backendId,
+    station?.stationBackendId,
+    station?.databaseId,
+    station?.id,
+    station?.stationId,
+    station?.stationCode,
+    station?.code,
+    station?.name,
+    station?.stationName,
   ]
     .filter(Boolean)
     .map(normalizeValue);
@@ -684,6 +715,13 @@ function getActiveFilterSummary(filters) {
           : filters.assetLabel || filters.asset,
     },
     {
+      label: "Station",
+      value:
+        filters.station === "all"
+          ? "All Stations"
+          : filters.stationLabel || filters.station,
+    },
+    {
       label: "Operation Type",
       value:
         filters.operationType === "all"
@@ -709,6 +747,62 @@ function getOperationEntityLabel(entity, preferredCodeFields = []) {
     if (entity?.[field]) return entity[field];
   }
   return entity?.name || entity?.id || "";
+}
+
+function getDestinationMeterReading(operation) {
+  const type = String(operation?.type || "").toUpperCase();
+
+  // Asset destination: use the odometer / equipment meter captured on the operation.
+  if (["DIRECT_REFUEL", "EXTERNAL_DIRECT_REFUEL"].includes(type)) {
+    const assetMeter =
+      operation?.odometer ??
+      operation?.currentOdometer ??
+      operation?.odometerReading ??
+      operation?.meterReading ??
+      operation?.assetOdometer ??
+      operation?.assetMeterReading;
+
+    return assetMeter !== undefined && assetMeter !== null && assetMeter !== ""
+      ? assetMeter
+      : null;
+  }
+
+  // Station destination: use the destination station counter captured on the operation.
+  if (
+    [
+      "INTERNAL_TRANSFER",
+      "EXTERNAL_TRANSFER",
+      "EXTERNAL_SUPPLY",
+    ].includes(type)
+  ) {
+    const stationMeter =
+      operation?.destinationStationCounter ??
+      operation?.destinationCounter ??
+      operation?.destinationCounterReading ??
+      operation?.stationCounter ??
+      operation?.stationCounterReading ??
+      operation?.counterReading ??
+      operation?.destinationMeterReading;
+
+    return stationMeter !== undefined &&
+      stationMeter !== null &&
+      stationMeter !== ""
+      ? stationMeter
+      : null;
+  }
+
+  // Generic fallback in case the backend already exposes a unified meter field.
+  const genericMeter =
+    operation?.destinationMeter ??
+    operation?.destinationMeterReading ??
+    operation?.meterReading ??
+    operation?.odometer;
+
+  return genericMeter !== undefined &&
+    genericMeter !== null &&
+    genericMeter !== ""
+    ? genericMeter
+    : null;
 }
 
 function mapSummaryOperation(operation, index) {
@@ -757,6 +851,23 @@ function mapSummaryOperation(operation, index) {
     fuelerName: operation?.fuelerName || "-",
     source,
     destination,
+    destinationMeter: getDestinationMeterReading(operation),
+    sourceStationRaw:
+      operation?.sourceStationId ||
+      operation?.sourceStation?.id ||
+      operation?.sourceStation?.backendId ||
+      operation?.sourceStation?.stationId ||
+      operation?.sourceStation?.stationCode ||
+      sourceStation ||
+      "",
+    destinationStationRaw:
+      operation?.destinationStationId ||
+      operation?.destinationStation?.id ||
+      operation?.destinationStation?.backendId ||
+      operation?.destinationStation?.stationId ||
+      operation?.destinationStation?.stationCode ||
+      destinationStation ||
+      "",
     destinationRaw:
       operation?.assetId ||
       operation?.asset?.id ||
@@ -939,6 +1050,9 @@ function FuelSuppliersReport({
   currency = "SAR",
   onBack,
 }) {
+  const { language, t } = useLanguage();
+  const tr = (value, params) => reportText(t, value, params);
+
   const [filtersOpen, setFiltersOpen] = useState(true);
   const [reportGenerated, setReportGenerated] = useState(false);
   const [draftFilters, setDraftFilters] = useState(FUEL_SUPPLIER_FILTERS);
@@ -1236,6 +1350,8 @@ function FuelSuppliersReport({
   );
 
   const reportMeta = {
+    translate: tr,
+    language,
     title: selectedReport?.title || "Fuel Suppliers Report",
     companyName: currentCompany?.name || "Fleet Fuel PRO",
     generatedBy: getUserDisplayName(currentUser),
@@ -1334,6 +1450,7 @@ function FuelSuppliersReport({
   };
 
   return (
+    <ReportLocalizationBoundary t={t} language={language}>
     <div className="min-h-full bg-slate-950 px-4 py-5 text-slate-100 sm:px-6 lg:px-8">
       <div className="mx-auto max-w-[1800px] space-y-5">
         <section className="rounded-2xl border border-slate-800 bg-slate-900/80 p-5 shadow-xl shadow-black/10">
@@ -1605,7 +1722,8 @@ function FuelSuppliersReport({
               onClick={() => setFiltersOpen(false)}
               className="absolute inset-0 h-full w-full"
             />
-            <aside className="absolute right-0 top-0 z-10 flex h-full w-full max-w-md flex-col border-l border-slate-800 bg-slate-900 shadow-2xl shadow-black/50">
+            <aside
+              className={`absolute top-0 z-10 flex h-full w-full max-w-md flex-col border-slate-800 bg-slate-900 shadow-2xl shadow-black/50 ${language === "ar" ? "left-0 border-r" : "right-0 border-l"}`}>
               <div className="flex items-start justify-between border-b border-slate-800 px-5 py-4">
                 <div>
                   <p className="text-xs font-bold uppercase tracking-[0.2em] text-amber-400">
@@ -1756,6 +1874,8 @@ function FuelSuppliersReport({
         ) : null}
       </div>
     </div>
+  
+    </ReportLocalizationBoundary>
   );
 }
 
@@ -1767,6 +1887,9 @@ function StationMovementsReport({
   stations = [],
   onBack,
 }) {
+  const { language, t } = useLanguage();
+  const tr = (value, params) => reportText(t, value, params);
+
   const [filtersOpen, setFiltersOpen] = useState(true);
   const [reportGenerated, setReportGenerated] = useState(false);
   const [draftFilters, setDraftFilters] = useState(STATION_MOVEMENT_FILTERS);
@@ -1919,6 +2042,8 @@ function StationMovementsReport({
   }, [appliedFilters, projects, stations]);
 
   const reportMeta = {
+    translate: tr,
+    language,
     title: selectedReport?.title || "Station Movements Report",
     companyName: currentCompany?.name || "Fleet Fuel PRO",
     generatedBy: getUserDisplayName(currentUser),
@@ -2051,6 +2176,7 @@ function StationMovementsReport({
   };
 
   return (
+    <ReportLocalizationBoundary t={t} language={language}>
     <div className="min-h-full bg-slate-950 px-4 py-5 text-slate-100 sm:px-6 lg:px-8">
       <div className="mx-auto max-w-[1800px] space-y-5">
         <section className="rounded-2xl border border-slate-800 bg-slate-900/80 p-5 shadow-xl shadow-black/10">
@@ -2273,7 +2399,8 @@ function StationMovementsReport({
               className="absolute inset-0 h-full w-full"
             />
 
-            <aside className="absolute right-0 top-0 z-10 flex h-full w-full max-w-md flex-col border-l border-slate-800 bg-slate-900 shadow-2xl shadow-black/50">
+            <aside
+              className={`absolute top-0 z-10 flex h-full w-full max-w-md flex-col border-slate-800 bg-slate-900 shadow-2xl shadow-black/50 ${language === "ar" ? "left-0 border-r" : "right-0 border-l"}`}>
               <div className="flex items-start justify-between border-b border-slate-800 px-5 py-4">
                 <div>
                   <p className="text-xs font-bold uppercase tracking-[0.2em] text-amber-400">
@@ -2458,15 +2585,17 @@ function StationMovementsReport({
         ) : null}
       </div>
     </div>
+  
+    </ReportLocalizationBoundary>
   );
 }
 
 const ASSETS_MASTER_FILTERS = {
   project: "all",
+  asset: "all",
   assetType: "all",
   category: "all",
   status: "all",
-  search: "",
 };
 
 const ASSETS_MASTER_HEADERS = [
@@ -2626,6 +2755,9 @@ function AssetsMasterReport({
   assets = [],
   onBack,
 }) {
+  const { language, t } = useLanguage();
+  const tr = (value, params) => reportText(t, value, params);
+
   const [filtersOpen, setFiltersOpen] = useState(true);
   const [reportGenerated, setReportGenerated] = useState(false);
   const [draftFilters, setDraftFilters] = useState(ASSETS_MASTER_FILTERS);
@@ -2657,6 +2789,30 @@ function AssetsMasterReport({
     [rows],
   );
 
+  const assetOptions = useMemo(() => {
+    const scopedRows =
+      draftFilters.project === "all"
+        ? rows
+        : rows.filter(
+            (row) =>
+              normalizeValue(row.project) ===
+              normalizeValue(draftFilters.project),
+          );
+
+    return scopedRows
+      .map((row) => ({
+        value: row.key,
+        label: row.assetId,
+      }))
+      .filter((option) => option.value && option.label)
+      .sort((a, b) =>
+        String(a.label).localeCompare(String(b.label), undefined, {
+          numeric: true,
+          sensitivity: "base",
+        }),
+      );
+  }, [rows, draftFilters.project]);
+
   const assetTypeOptions = useMemo(
     () =>
       [
@@ -2687,12 +2843,16 @@ function AssetsMasterReport({
   );
 
   const filteredRows = useMemo(() => {
-    const search = normalizeValue(appliedFilters.search);
-
     return rows.filter((row) => {
       if (
         appliedFilters.project !== "all" &&
         normalizeValue(row.project) !== normalizeValue(appliedFilters.project)
+      )
+        return false;
+
+      if (
+        appliedFilters.asset !== "all" &&
+        normalizeValue(row.key) !== normalizeValue(appliedFilters.asset)
       )
         return false;
 
@@ -2712,18 +2872,6 @@ function AssetsMasterReport({
       if (
         appliedFilters.status !== "all" &&
         normalizeValue(row.status) !== normalizeValue(appliedFilters.status)
-      )
-        return false;
-
-      if (
-        search &&
-        ![
-          row.assetId,
-          row.assetType,
-          row.category,
-          row.project,
-          row.status,
-        ].some((value) => normalizeValue(value).includes(search))
       )
         return false;
 
@@ -2780,12 +2928,24 @@ function AssetsMasterReport({
             ? "All Statuses"
             : formatOperationType(appliedFilters.status),
       },
-      { label: "Search", value: appliedFilters.search || "No search text" },
+      {
+        label: "Asset",
+        value:
+          appliedFilters.asset === "all"
+            ? "All Assets"
+            : rows.find(
+                (row) =>
+                  normalizeValue(row.key) ===
+                  normalizeValue(appliedFilters.asset),
+              )?.assetId || appliedFilters.asset,
+      },
     ],
-    [appliedFilters],
+    [appliedFilters, rows],
   );
 
   const reportMeta = {
+    translate: tr,
+    language,
     title: selectedReport?.title || "Assets Master Report",
     companyName: currentCompany?.name || "Fleet Fuel PRO",
     generatedBy: getUserDisplayName(currentUser),
@@ -2862,6 +3022,7 @@ function AssetsMasterReport({
   };
 
   return (
+    <ReportLocalizationBoundary t={t} language={language}>
     <div className="min-h-full bg-slate-950 px-4 py-5 text-slate-100 sm:px-6 lg:px-8">
       <div className="mx-auto max-w-[1800px] space-y-5">
         <section className="rounded-2xl border border-slate-800 bg-slate-900/80 p-5 shadow-xl shadow-black/10">
@@ -3062,7 +3223,8 @@ function AssetsMasterReport({
               onClick={() => setFiltersOpen(false)}
               className="absolute inset-0 h-full w-full"
             />
-            <aside className="absolute right-0 top-0 z-10 flex h-full w-full max-w-md flex-col border-l border-slate-800 bg-slate-900 shadow-2xl shadow-black/50">
+            <aside
+              className={`absolute top-0 z-10 flex h-full w-full max-w-md flex-col border-slate-800 bg-slate-900 shadow-2xl shadow-black/50 ${language === "ar" ? "left-0 border-r" : "right-0 border-l"}`}>
               <div className="flex items-start justify-between border-b border-slate-800 px-5 py-4">
                 <div>
                   <p className="text-xs font-bold uppercase tracking-[0.2em] text-amber-400">
@@ -3085,20 +3247,25 @@ function AssetsMasterReport({
               <div className="flex-1 space-y-4 overflow-y-auto px-5 py-5">
                 <label className="block">
                   <span className="mb-2 block text-sm font-bold text-slate-300">
-                    Asset Search
+                    Asset
                   </span>
-                  <input
-                    type="text"
-                    value={draftFilters.search}
+                  <select
+                    value={draftFilters.asset}
                     onChange={(event) =>
                       setDraftFilters((previous) => ({
                         ...previous,
-                        search: event.target.value,
+                        asset: event.target.value,
                       }))
                     }
-                    placeholder="Asset ID, type, category or project"
                     className="w-full rounded-xl border border-slate-700 bg-slate-950 px-3 py-2.5 text-sm text-white outline-none focus:border-amber-500"
-                  />
+                  >
+                    <option value="all">All Assets</option>
+                    {assetOptions.map((asset) => (
+                      <option key={asset.value} value={asset.value}>
+                        {asset.label}
+                      </option>
+                    ))}
+                  </select>
                 </label>
                 <label className="block">
                   <span className="mb-2 block text-sm font-bold text-slate-300">
@@ -3110,6 +3277,7 @@ function AssetsMasterReport({
                       setDraftFilters((previous) => ({
                         ...previous,
                         project: event.target.value,
+                        asset: "all",
                       }))
                     }
                     className="w-full rounded-xl border border-slate-700 bg-slate-950 px-3 py-2.5 text-sm text-white outline-none focus:border-amber-500"
@@ -3211,6 +3379,8 @@ function AssetsMasterReport({
         ) : null}
       </div>
     </div>
+  
+    </ReportLocalizationBoundary>
   );
 }
 
@@ -3344,6 +3514,9 @@ function AssetTransferHistoryReport({
   assets = [],
   onBack,
 }) {
+  const { language, t } = useLanguage();
+  const tr = (value, params) => reportText(t, value, params);
+
   const [filtersOpen, setFiltersOpen] = useState(true);
   const [reportGenerated, setReportGenerated] = useState(false);
   const [draftFilters, setDraftFilters] = useState(ASSET_TRANSFER_FILTERS);
@@ -3645,6 +3818,8 @@ function AssetTransferHistoryReport({
   }, [appliedFilters, assets, projects, requesterOptions]);
 
   const reportMeta = {
+    translate: tr,
+    language,
     title: selectedReport?.title || "Asset Transfer History",
     companyName: currentCompany?.name || "Fleet Fuel PRO",
     generatedBy: getUserDisplayName(currentUser),
@@ -3747,6 +3922,7 @@ function AssetTransferHistoryReport({
   };
 
   return (
+    <ReportLocalizationBoundary t={t} language={language}>
     <div className="min-h-full bg-slate-950 px-4 py-5 text-slate-100 sm:px-6 lg:px-8">
       <div className="mx-auto max-w-[1900px] space-y-5">
         <section className="rounded-2xl border border-slate-800 bg-slate-900/80 p-5 shadow-xl shadow-black/10">
@@ -4110,7 +4286,8 @@ function AssetTransferHistoryReport({
               className="absolute inset-0 h-full w-full"
             />
 
-            <aside className="absolute right-0 top-0 z-10 flex h-full w-full max-w-md flex-col border-l border-slate-800 bg-slate-900 shadow-2xl shadow-black/50">
+            <aside
+              className={`absolute top-0 z-10 flex h-full w-full max-w-md flex-col border-slate-800 bg-slate-900 shadow-2xl shadow-black/50 ${language === "ar" ? "left-0 border-r" : "right-0 border-l"}`}>
               <div className="flex items-start justify-between border-b border-slate-800 px-5 py-4">
                 <div>
                   <p className="text-xs font-bold uppercase tracking-[0.2em] text-amber-400">
@@ -4343,6 +4520,8 @@ function AssetTransferHistoryReport({
         ) : null}
       </div>
     </div>
+  
+    </ReportLocalizationBoundary>
   );
 }
 
@@ -4423,6 +4602,9 @@ function AssetMeterHistoryReport({
   headers = [],
   onBack,
 }) {
+  const { language, t } = useLanguage();
+  const tr = (value, params) => reportText(t, value, params);
+
   const [filtersOpen, setFiltersOpen] = useState(true);
   const [reportGenerated, setReportGenerated] = useState(false);
   const [draftFilters, setDraftFilters] = useState(ASSET_METER_HISTORY_FILTERS);
@@ -4868,6 +5050,8 @@ function AssetMeterHistoryReport({
   }, [appliedFilters, projects, assets]);
 
   const reportMeta = {
+    translate: tr,
+    language,
     title: selectedReport?.title || "Asset Meter History Report",
     companyName: currentCompany?.name || "Fleet Fuel PRO",
     generatedBy: getUserDisplayName(currentUser),
@@ -4986,6 +5170,7 @@ function AssetMeterHistoryReport({
   };
 
   return (
+    <ReportLocalizationBoundary t={t} language={language}>
     <div className="min-h-full bg-slate-950 px-4 py-5 text-slate-100 sm:px-6 lg:px-8">
       <div className="mx-auto max-w-[1800px] space-y-5">
         <section className="rounded-2xl border border-slate-800 bg-slate-900/80 p-5 shadow-xl shadow-black/10">
@@ -5002,10 +5187,10 @@ function AssetMeterHistoryReport({
                 Assets Reports
               </p>
               <h1 className="mt-1 text-2xl font-black text-white sm:text-3xl">
-                {selectedReport?.title}
+                {tr(selectedReport?.title)}
               </h1>
               <p className="mt-2 max-w-4xl text-sm leading-6 text-slate-400">
-                {selectedReport?.description}
+                {tr(selectedReport?.description)}
               </p>
             </div>
             <ReportToolbar
@@ -5122,10 +5307,10 @@ function AssetMeterHistoryReport({
                             ? "border-sky-400/40 bg-sky-500/10 text-sky-300"
                             : "border-emerald-400/40 bg-emerald-500/10 text-emerald-300";
                         const badgeLabel = isReset
-                          ? "🔄 Odometer Reset"
+                          ? `🔄 ${tr("Odometer Reset")}`
                           : isCorrection
-                            ? "✏️ Odometer Correction"
-                            : "⛽ Refuel Operation";
+                            ? `✏️ ${tr("Odometer Correction")}`
+                            : `⛽ ${tr("Refuel Operation")}`;
                         return (
                           <tr
                             key={`${row.eventType}-${row.id}`}
@@ -5197,7 +5382,8 @@ function AssetMeterHistoryReport({
               onClick={() => setFiltersOpen(false)}
               className="absolute inset-0 h-full w-full"
             />
-            <aside className="absolute right-0 top-0 z-10 flex h-full w-full max-w-md flex-col border-l border-slate-800 bg-slate-900 shadow-2xl shadow-black/50">
+            <aside
+              className={`absolute top-0 z-10 flex h-full w-full max-w-md flex-col border-slate-800 bg-slate-900 shadow-2xl shadow-black/50 ${language === "ar" ? "left-0 border-r" : "right-0 border-l"}`}>
               <div className="flex items-start justify-between border-b border-slate-800 px-5 py-4">
                 <div>
                   <p className="text-xs font-bold uppercase tracking-[0.2em] text-amber-400">
@@ -5356,6 +5542,7 @@ function AssetMeterHistoryReport({
         ) : null}
       </div>
     </div>
+    </ReportLocalizationBoundary>
   );
 }
 
@@ -5427,6 +5614,9 @@ function OperationCorrectionsReport({
   projects = [],
   onBack,
 }) {
+  const { language, t } = useLanguage();
+  const tr = (value, params) => reportText(t, value, params);
+
   const [filtersOpen, setFiltersOpen] = useState(true);
   const [reportGenerated, setReportGenerated] = useState(false);
   const [draftFilters, setDraftFilters] = useState(
@@ -5493,6 +5683,8 @@ function OperationCorrectionsReport({
   }, [appliedFilters, projects]);
 
   const reportMeta = {
+    translate: tr,
+    language,
     title: selectedReport?.title || "Operation Corrections Report",
     companyName: currentCompany?.name || "Fleet Fuel PRO",
     generatedBy: getUserDisplayName(currentUser),
@@ -5628,6 +5820,7 @@ function OperationCorrectionsReport({
   };
 
   return (
+    <ReportLocalizationBoundary t={t} language={language}>
     <div className="min-h-full bg-slate-950 px-4 py-5 text-slate-100 sm:px-6 lg:px-8">
       <div className="mx-auto max-w-[1900px] space-y-5">
         <section className="rounded-2xl border border-slate-800 bg-slate-900/80 p-5 shadow-xl shadow-black/10">
@@ -5828,7 +6021,8 @@ function OperationCorrectionsReport({
               onClick={() => setFiltersOpen(false)}
               className="absolute inset-0 h-full w-full"
             />
-            <aside className="absolute right-0 top-0 z-10 flex h-full w-full max-w-md flex-col border-l border-slate-800 bg-slate-900 shadow-2xl shadow-black/50">
+            <aside
+              className={`absolute top-0 z-10 flex h-full w-full max-w-md flex-col border-slate-800 bg-slate-900 shadow-2xl shadow-black/50 ${language === "ar" ? "left-0 border-r" : "right-0 border-l"}`}>
               <div className="flex items-start justify-between border-b border-slate-800 px-5 py-4">
                 <div>
                   <p className="text-xs font-bold uppercase tracking-[0.2em] text-amber-400">
@@ -6025,6 +6219,8 @@ function OperationCorrectionsReport({
         ) : null}
       </div>
     </div>
+  
+    </ReportLocalizationBoundary>
   );
 }
 
@@ -6060,6 +6256,9 @@ export default function ReportsPage({
   headers = [],
   currency = "SAR",
 }) {
+  const { language, t } = useLanguage();
+  const tr = (value, params) => reportText(t, value, params);
+
   const [selectedReportModule, setSelectedReportModule] = useState(null);
   const [selectedReport, setSelectedReport] = useState(null);
   const [filtersOpen, setFiltersOpen] = useState(false);
@@ -6091,6 +6290,23 @@ export default function ReportsPage({
       );
     });
   }, [assets, draftFilters.project]);
+
+  const availableStations = useMemo(() => {
+    if (draftFilters.project === "all") return stations;
+
+    return stations.filter((station) => {
+      const stationProject =
+        station?.projectName ||
+        station?.project ||
+        station?.projectId ||
+        station?.projectCode ||
+        "";
+
+      return (
+        normalizeValue(stationProject) === normalizeValue(draftFilters.project)
+      );
+    });
+  }, [stations, draftFilters.project]);
 
   const reportRows = useMemo(() => {
     return operationsReportRows.map(mapSummaryOperation);
@@ -6140,6 +6356,30 @@ export default function ReportsPage({
         }
       }
 
+      if (appliedFilters.station !== "all") {
+        const selectedStation = stations.find(
+          (station) =>
+            normalizeValue(getStationFilterValue(station)) ===
+            normalizeValue(appliedFilters.station),
+        );
+
+        if (!selectedStation) {
+          return false;
+        }
+
+        const stationCandidates = getStationCandidates(selectedStation);
+        const sourceMatches = stationCandidates.includes(
+          normalizeValue(row.sourceStationRaw),
+        );
+        const destinationMatches = stationCandidates.includes(
+          normalizeValue(row.destinationStationRaw),
+        );
+
+        if (!sourceMatches && !destinationMatches) {
+          return false;
+        }
+      }
+
       if (
         appliedFilters.operationType !== "all" &&
         normalizeValue(row.operationType) !==
@@ -6165,7 +6405,7 @@ export default function ReportsPage({
 
       return true;
     });
-  }, [reportRows, appliedFilters, assets]);
+  }, [reportRows, appliedFilters, assets, stations]);
 
   const operationsPagination = useReportPagination(filteredRows);
   const paginatedOperationRows = operationsPagination.paginatedItems;
@@ -6189,6 +6429,11 @@ export default function ReportsPage({
         normalizeValue(getAssetFilterValue(asset)) ===
         normalizeValue(appliedFilters.asset),
     );
+    const selectedStation = stations.find(
+      (station) =>
+        normalizeValue(getStationFilterValue(station)) ===
+        normalizeValue(appliedFilters.station),
+    );
 
     return getActiveFilterSummary({
       ...appliedFilters,
@@ -6196,8 +6441,12 @@ export default function ReportsPage({
         appliedFilters.asset === "all"
           ? "All Assets"
           : getAssetLabel(selectedAsset),
+      stationLabel:
+        appliedFilters.station === "all"
+          ? "All Stations"
+          : getStationLabel(selectedStation),
     });
-  }, [appliedFilters, assets]);
+  }, [appliedFilters, assets, stations]);
 
   const exportRows = useMemo(
     () =>
@@ -6210,6 +6459,10 @@ export default function ReportsPage({
         "Employee Name": row.fuelerName,
         Source: row.source,
         Destination: row.destination,
+        "Destination Meter":
+          row.destinationMeter === null
+            ? "-"
+            : formatNumber(row.destinationMeter),
         Quantity: row.quantity,
         [`Cost (${currency})`]: row.cost,
         Status: String(row.status || "COMPLETED").replaceAll("_", " "),
@@ -6218,6 +6471,8 @@ export default function ReportsPage({
   );
 
   const reportMeta = {
+    translate: tr,
+    language,
     title: selectedReport?.title || "Operations Summary Report",
     companyName: currentCompany?.name || "Fleet Fuel PRO",
     generatedBy: getUserDisplayName(currentUser),
@@ -6243,12 +6498,16 @@ export default function ReportsPage({
         row.fuelerName,
         row.source,
         row.destination,
+        row.destinationMeter === null
+          ? "-"
+          : formatNumber(row.destinationMeter),
         formatNumber(row.quantity),
         formatMoney(row.cost, currency),
         String(row.status || "COMPLETED").replaceAll("_", " "),
       ]),
       footerRow: [
         "Grand Total",
+        "",
         "",
         "",
         "",
@@ -6268,6 +6527,8 @@ export default function ReportsPage({
       fileName: "Operations_Summary_Report",
       sheetName: "Operations Summary",
       title: reportMeta.title,
+      translate: tr,
+      language,
       companyName: reportMeta.companyName,
       generatedBy: reportMeta.generatedBy,
       generatedAt: reportMeta.generatedAt,
@@ -6285,7 +6546,11 @@ export default function ReportsPage({
   const handleOpenReport = (report) => {
     if (!report.available) return;
 
-    setSelectedReport(report);
+    setSelectedReport({
+      ...report,
+      title: tr(report.title),
+      description: tr(report.description),
+    });
     setDraftFilters(EMPTY_FILTERS);
     setAppliedFilters(EMPTY_FILTERS);
     operationsPagination.resetPage();
@@ -6315,6 +6580,7 @@ export default function ReportsPage({
 
       if (field === "project") {
         next.asset = "all";
+        next.station = "all";
       }
 
       return next;
@@ -6513,6 +6779,7 @@ export default function ReportsPage({
 
   if (selectedReport) {
     return (
+      <ReportLocalizationBoundary t={t} language={language}>
       <div className="min-h-full bg-slate-950 px-4 py-5 text-slate-100 sm:px-6 lg:px-8">
         <div className="mx-auto max-w-[1700px] space-y-5">
           <section className="rounded-2xl border border-slate-800 bg-slate-900/80 p-5 shadow-xl shadow-black/10">
@@ -6618,7 +6885,7 @@ export default function ReportsPage({
                 </div>
 
                 <div className="overflow-x-auto">
-                  <table className="min-w-[1550px] w-full border-collapse text-left text-sm">
+                  <table className="min-w-[1700px] w-full border-collapse text-left text-sm">
                     <thead className="bg-slate-950/80">
                       <tr>
                         {TABLE_HEADERS.map((header) => (
@@ -6664,7 +6931,12 @@ export default function ReportsPage({
                               <td className="whitespace-nowrap px-4 py-3 text-slate-300">
                                 {row.destination}
                               </td>
-                              <td className="whitespace-nowrap px-4 py-3 text-right font-bold text-white">
+                              <td className="whitespace-nowrap px-4 py-3 text-center font-bold text-cyan-300">
+                                {row.destinationMeter === null
+                                  ? "-"
+                                  : formatNumber(row.destinationMeter)}
+                              </td>
+                              <td className="whitespace-nowrap px-4 py-3 text-center font-bold text-white">
                                 {formatNumber(row.quantity)}
                               </td>
                               <td className="whitespace-nowrap px-4 py-3 text-right font-bold text-emerald-300">
@@ -6683,7 +6955,7 @@ export default function ReportsPage({
 
                           <tr className="bg-slate-950/70">
                             <td
-                              colSpan={8}
+                              colSpan={9}
                               className="px-4 py-4 text-right text-sm font-black uppercase tracking-wider text-amber-300"
                             >
                               Grand Total
@@ -6837,6 +7109,29 @@ export default function ReportsPage({
 
                 <label className="block">
                   <span className="mb-2 block text-sm font-bold text-slate-300">
+                    Station
+                  </span>
+                  <select
+                    value={draftFilters.station}
+                    onChange={(event) =>
+                      handleFilterChange("station", event.target.value)
+                    }
+                    className="w-full rounded-xl border border-slate-700 bg-slate-950 px-3 py-2.5 text-sm text-white outline-none transition focus:border-amber-500"
+                  >
+                    <option value="all">All Stations</option>
+                    {availableStations.map((station) => (
+                      <option
+                        key={getStationFilterValue(station) || getStationLabel(station)}
+                        value={getStationFilterValue(station)}
+                      >
+                        {getStationLabel(station)}
+                      </option>
+                    ))}
+                  </select>
+                </label>
+
+                <label className="block">
+                  <span className="mb-2 block text-sm font-bold text-slate-300">
                     Operation Type
                   </span>
                   <select
@@ -6922,6 +7217,7 @@ export default function ReportsPage({
           </div>
         )}
       </div>
+      </ReportLocalizationBoundary>
     );
   }
 
@@ -6931,6 +7227,7 @@ export default function ReportsPage({
 
   if (!selectedReportModule) {
     return (
+      <ReportLocalizationBoundary t={t} language={language}>
       <div className="min-h-full bg-slate-950 px-4 py-5 text-slate-100 sm:px-6 lg:px-8">
         <div className="mx-auto max-w-[1800px] space-y-5">
           <section className="rounded-2xl border border-amber-500/30 bg-slate-900/80 p-5 shadow-xl shadow-black/10">
@@ -7003,8 +7300,8 @@ export default function ReportsPage({
                       </p>
                       <p className="mt-1 text-sm font-extrabold text-slate-200">
                         {totalReports
-                          ? `${totalReports} Report${totalReports === 1 ? "" : "s"}`
-                          : "Not added yet"}
+                          ? tr(`${totalReports} Report${totalReports === 1 ? "" : "s"}`)
+                          : tr("Not added yet")}
                       </p>
                     </div>
 
@@ -7025,10 +7322,12 @@ export default function ReportsPage({
           </section>
         </div>
       </div>
+      </ReportLocalizationBoundary>
     );
   }
 
   return (
+    <ReportLocalizationBoundary t={t} language={language}>
     <div className="min-h-full bg-slate-950 px-4 py-5 text-slate-100 sm:px-6 lg:px-8">
       <div className="mx-auto max-w-[1800px] space-y-5">
         <section className="rounded-2xl border border-amber-500/30 bg-slate-900/80 p-5 shadow-xl shadow-black/10">
@@ -7051,7 +7350,7 @@ export default function ReportsPage({
                 Report Module
               </p>
               <h1 className="mt-1 text-2xl font-black text-white sm:text-3xl">
-                {activeModule?.title} Reports
+                {tr(`${activeModule?.title} Reports`)}
               </h1>
               <p className="mt-2 max-w-4xl text-sm leading-6 text-slate-400">
                 {activeModule?.description}
@@ -7123,5 +7422,7 @@ export default function ReportsPage({
         </section>
       </div>
     </div>
+  
+    </ReportLocalizationBoundary>
   );
 }

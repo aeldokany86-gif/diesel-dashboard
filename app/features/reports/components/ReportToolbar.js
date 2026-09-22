@@ -1,4 +1,6 @@
 "use client";
+import { useLanguage } from "../../../context/LanguageContext";
+import { ReportLocalizationBoundary, reportText } from "../utils/reportI18n";
 
 export default function ReportToolbar({
   onOpenFilters,
@@ -6,7 +8,11 @@ export default function ReportToolbar({
   onExport,
   disabled = false,
 }) {
+  const { language, t } = useLanguage();
+  const tr = (value, params) => reportText(t, value, params);
+
   return (
+    <ReportLocalizationBoundary t={t} language={language}>
     <div className="flex flex-wrap gap-2">
       <button
         type="button"
@@ -42,5 +48,7 @@ export default function ReportToolbar({
         Export Excel
       </button>
     </div>
+  
+    </ReportLocalizationBoundary>
   );
 }

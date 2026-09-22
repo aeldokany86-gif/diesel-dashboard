@@ -19,12 +19,12 @@ import Card from "../../components/ui/Card";
 import { useLanguage } from "../../context/LanguageContext";
 import { resolveEnumValue } from "../../lib/i18nMessageHelpers";
 import { checkEmployeeIdAvailability } from "../../services/employeesService";
+import { resetUserPassword } from "../../services/usersService";
 
 import {
   cleanCsvCell,
   filterActiveProjects,
   formatNumber,
-  getDuplicateIdError,
   getHeaderIndex,
   isSameText,
   mapFrontendEmployeeStatusForBackend,
@@ -238,6 +238,9 @@ export default function TeamPage({
   const [updatingUserStatusByFuelerId, setUpdatingUserStatusByFuelerId] = useState({});
   const [linkUserModal, setLinkUserModal] = useState(null);
   const [savingLinkedUser, setSavingLinkedUser] = useState(false);
+  const [platformPasswordResetTarget, setPlatformPasswordResetTarget] = useState(null);
+  const [platformPasswordResetResult, setPlatformPasswordResetResult] = useState(null);
+  const [resettingPlatformPassword, setResettingPlatformPassword] = useState(false);
   const [showAddFueler, setShowAddFueler] = useState(false);
   const [selectedFuelerHistory, setSelectedFuelerHistory] = useState(null);
   const [operationPhotoViewer, setOperationPhotoViewer] = useState(null);
@@ -386,6 +389,36 @@ export default function TeamPage({
   const normalizeText = (value) => String(value || "").trim().toLowerCase();
 
   const platformBootstrapMode = isPlatformAdminUser(currentUser);
+
+  const canCorrectEmployeeId = (fueler = {}) => {
+    const actorRole = normalizeBackendRoleName(
+      currentUser?.role || currentUser?.roleName || ""
+    );
+
+    if (actorRole === "Admin") {
+      return (
+        !fueler?.companyId ||
+        !currentUser?.companyId ||
+        companyMatches(fueler.companyId, currentUser.companyId)
+      );
+    }
+
+    if (actorRole !== "PlatformAdmin") return false;
+
+    const linkedRole = normalizeBackendRoleName(
+      fueler?.linkedUserRole ||
+        fueler?.linkedUserRoleName ||
+        fueler?.role ||
+        fueler?.roleName ||
+        ""
+    );
+
+    return (
+      linkedRole === "Admin" ||
+      normalizeText(fueler?.jobTitle) === "company admin"
+    );
+  };
+
   const currentCompanyMultiProjectEnabled = Boolean(
     currentUser?.multiProjectEnabled ||
       companies.find(
@@ -442,11 +475,6 @@ export default function TeamPage({
   };
 
   const masterFuelers = [...fuelers, ...localFuelers];
-  const localTeamMemberIdDuplicateError = getDuplicateIdError(
-    newFueler.id,
-    masterFuelers,
-    t("team.table.memberId")
-  );
 
   const normalizedNewEmployeeId = String(newFueler.id || "")
     .trim()
@@ -455,6 +483,31 @@ export default function TeamPage({
   const employeeIdValidationCompanyId = platformBootstrapMode
     ? newFueler.companyId
     : currentUser?.companyId || "";
+
+  // Employee IDs are unique per company, not globally across Fleet Fuel PRO.
+  // Platform users can see employees from multiple companies in masterFuelers,
+  // so local duplicate validation must be scoped to the selected company.
+  const localTeamMemberIdDuplicateError = Boolean(
+    normalizedNewEmployeeId &&
+      employeeIdValidationCompanyId &&
+      masterFuelers.some((fueler) => {
+        const fuelerEmployeeId = String(
+          fueler?.employeeId || fueler?.id || ""
+        )
+          .trim()
+          .toUpperCase();
+
+        const fuelerCompanyId = platformBootstrapMode
+          ? fueler?.companyId || ""
+          : fueler?.companyId || currentUser?.companyId || "";
+
+        return (
+          fuelerEmployeeId === normalizedNewEmployeeId &&
+          normalizeScopeValue(fuelerCompanyId) ===
+            normalizeScopeValue(employeeIdValidationCompanyId)
+        );
+      })
+  );
 
   const remoteEmployeeIdStatus =
     employeeIdRemoteValidation.checkedValue === normalizedNewEmployeeId
@@ -1524,15 +1577,6 @@ export default function TeamPage({
       return;
     }
 
-    const idExists = masterFuelers.some(
-      (fueler) => normalizeText(fueler.id) === normalizeText(fuelerId)
-    );
-
-    if (idExists) {
-      showToast?.("warning", t("team.validation.duplicateMemberId"));
-      return;
-    }
-
     try {
       if (typeof onCreateEmployee === "function") {
         await onCreateEmployee({
@@ -1595,7 +1639,83 @@ export default function TeamPage({
     }
   };
 
+  const openPlatformAdminPasswordReset = (fueler) => {
+    if (!platformBootstrapMode || fueler?.userStatus !== "Linked") return;
+
+    const existingUser = getExistingUserForFueler(fueler);
+    const userId = existingUser?.id || fueler?.linkedUserId || "";
+
+    if (!userId) {
+      showToast?.(
+        "warning",
+        language === "ar"
+          ? "تعذر تحديد حساب الأدمن المرتبط بهذا الموظف."
+          : "The linked Admin user account could not be identified."
+      );
+      return;
+    }
+
+    setPlatformPasswordResetTarget({
+      fueler,
+      userId,
+      userName:
+        existingUser?.username ||
+        fueler?.linkedUserName ||
+        getGeneratedUsernameForFueler(fueler),
+    });
+  };
+
+  const confirmPlatformAdminPasswordReset = async () => {
+    if (!platformPasswordResetTarget?.userId || resettingPlatformPassword) return;
+
+    setResettingPlatformPassword(true);
+
+    try {
+      const resetResult = await resetUserPassword(
+        platformPasswordResetTarget.userId
+      );
+      const temporaryPassword = String(
+        resetResult?.temporaryPassword || ""
+      ).trim();
+
+      if (!temporaryPassword) {
+        throw new Error(
+          language === "ar"
+            ? "تمت إعادة التعيين لكن لم يتم إرجاع كلمة مرور مؤقتة."
+            : "The password was reset, but no temporary password was returned."
+        );
+      }
+
+      setPlatformPasswordResetResult({
+        userName: platformPasswordResetTarget.userName,
+        temporaryPassword,
+      });
+      setPlatformPasswordResetTarget(null);
+
+      showToast?.(
+        "success",
+        t("users.messages.temporaryPasswordGenerated")
+      );
+    } catch (error) {
+      const backendMessage =
+        error?.response?.data?.message ||
+        error?.message ||
+        t("users.messages.resetPasswordFailed");
+
+      showToast?.(
+        "warning",
+        Array.isArray(backendMessage)
+          ? backendMessage.join(", ")
+          : backendMessage
+      );
+    } finally {
+      setResettingPlatformPassword(false);
+    }
+  };
+
   const getEditableTeamValue = (fueler, field) => {
+    if (field === "employeeId")
+      return fueler.employeeId || fueler.id || "";
     if (field === "name") return fueler.name || "";
     if (field === "jobTitle") return fueler.jobTitle || "Operator";
     if (field === "mobile") return fueler.mobile || "";
@@ -1606,6 +1726,7 @@ export default function TeamPage({
   };
 
   const getTeamFieldLabel = (field) => {
+    if (field === "employeeId") return t("team.table.memberId");
     if (field === "name") return t("team.fields.name");
     if (field === "mobile") return t("team.fields.mobile");
     if (field === "email") return t("team.fields.email");
@@ -1924,6 +2045,12 @@ export default function TeamPage({
   const buildTeamChangeMessage = ({ field, oldDisplayValue, newDisplayValue }) => {
     if (field === "project") {
       return t("team.confirm.transfer", { fromProject: oldDisplayValue || "-", toProject: newDisplayValue || "-" });
+    }
+
+    if (field === "employeeId") {
+      return language === "ar"
+        ? `هل تريد تغيير رقم الموظف من ${oldDisplayValue || "-"} إلى ${newDisplayValue || "-"}؟ إذا كان الموظف مرتبطًا بحساب مستخدم فسيتغير اسم الدخول تلقائيًا، بينما تظل كلمة المرور كما هي.`
+        : `Change the Employee ID from ${oldDisplayValue || "-"} to ${newDisplayValue || "-"}? If this employee has a linked user account, the username will change automatically while the password stays the same.`;
     }
 
     return t("team.confirm.changeField", { field: getTeamFieldLabel(field), oldValue: oldDisplayValue || "-", newValue: newDisplayValue || "-" });
@@ -2298,7 +2425,17 @@ export default function TeamPage({
   };
 
   const requestTeamChange = ({ fueler, field, newValue }) => {
-    if (field === "project") {
+    if (field === "employeeId") {
+      if (!canCorrectEmployeeId(fueler)) {
+        showToast?.(
+          "warning",
+          language === "ar"
+            ? "تعديل رقم الموظف متاح للأدمن فقط، ولـ Platform User عند تصحيح رقم أول أدمن للشركة."
+            : "Employee ID correction is available only to Admin, or to Platform User when correcting the first company Admin."
+        );
+        return;
+      }
+    } else if (field === "project") {
       if (!canRequestTeamProjectTransfer(fueler)) {
         showToast?.(
           "warning",
@@ -2541,7 +2678,9 @@ export default function TeamPage({
       }
 
       const payload =
-        field === "name"
+        field === "employeeId"
+          ? { employeeId: String(newValue || "").trim().toUpperCase() }
+          : field === "name"
           ? { name: newValue }
           : field === "jobTitle"
           ? { jobTitle: newValue }
@@ -2612,7 +2751,11 @@ export default function TeamPage({
   };
 
   const startInlineFuelerEdit = (fueler, field) => {
-    if (!hasPermission("team", "edit")) return;
+    if (field === "employeeId") {
+      if (!canCorrectEmployeeId(fueler)) return;
+    } else if (!hasPermission("team", "edit")) {
+      return;
+    }
 
     setInlineFuelerEdit({
       fuelerId: fueler.id,
@@ -2840,13 +2983,63 @@ export default function TeamPage({
                     <Td>{teamPageStartIndex + i + 1}</Td>
 
                     <Td>
-                      <button
-                        onClick={() => setSelectedFuelerHistory(fueler)}
-                        className="text-blue-300 hover:text-yellow-400 font-semibold transition cursor-pointer"
-                        title={t("team.history.open")}
-                      >
-                        {fueler.id}
-                      </button>
+                      {canCorrectEmployeeId(fueler) &&
+                      inlineFuelerEdit?.fuelerId === fueler.id &&
+                      inlineFuelerEdit?.field === "employeeId" ? (
+                        <input
+                          autoFocus
+                          value={inlineFuelerEdit.value}
+                          onChange={(e) =>
+                            setInlineFuelerEdit({
+                              ...inlineFuelerEdit,
+                              value: e.target.value.toUpperCase(),
+                            })
+                          }
+                          onBlur={() => commitInlineFuelerEdit(fueler)}
+                          onKeyDown={(e) => {
+                            if (e.key === "Enter") {
+                              e.preventDefault();
+                              e.currentTarget.blur();
+                            }
+                            if (e.key === "Escape") cancelInlineFuelerEdit();
+                          }}
+                          className="w-28 rounded-lg border border-amber-400/60 bg-slate-950 px-2 py-1 font-semibold text-amber-200 outline-none"
+                        />
+                      ) : (
+                        <div className="inline-flex items-center gap-2">
+                          <button
+                            onClick={() => setSelectedFuelerHistory(fueler)}
+                            className="cursor-pointer font-semibold text-blue-300 transition hover:text-yellow-400"
+                            title={t("team.history.open")}
+                          >
+                            {fueler.employeeId || fueler.id}
+                          </button>
+
+                          {canCorrectEmployeeId(fueler) && (
+                            <button
+                              type="button"
+                              onClick={(e) => {
+                                e.preventDefault();
+                                e.stopPropagation();
+                                startInlineFuelerEdit(fueler, "employeeId");
+                              }}
+                              className="rounded-md px-1 text-amber-300 transition hover:bg-amber-400/10 hover:text-yellow-300"
+                              title={
+                                language === "ar"
+                                  ? "تصحيح رقم الموظف"
+                                  : "Correct Employee ID"
+                              }
+                              aria-label={
+                                language === "ar"
+                                  ? "تصحيح رقم الموظف"
+                                  : "Correct Employee ID"
+                              }
+                            >
+                              ✏️
+                            </button>
+                          )}
+                        </div>
+                      )}
                     </Td>
 
                     <Td strong>
@@ -3008,6 +3201,18 @@ export default function TeamPage({
                           {getUserStatusLabel(fueler.userStatus)}
                         </span>
                       )}
+
+                      {platformBootstrapMode &&
+                        fueler.userStatus === "Linked" &&
+                        (fueler.linkedUserId || getExistingUserForFueler(fueler)?.id) && (
+                          <button
+                            type="button"
+                            onClick={() => openPlatformAdminPasswordReset(fueler)}
+                            className="mt-2 inline-flex items-center rounded-lg border border-amber-400/40 bg-amber-500/10 px-2.5 py-1 text-[11px] font-bold text-amber-300 transition hover:bg-amber-500/20"
+                          >
+                            {t("users.actions.resetPassword")}
+                          </button>
+                        )}
 
                       {fueler.suggestedUserId && !fueler.linkedUserId && (
                         <div className="mt-1 text-[10px] text-amber-300">
@@ -3230,6 +3435,112 @@ export default function TeamPage({
                 ))}
             </div>
           </div>
+        )}
+
+        {platformPasswordResetTarget && (
+          <ModalPortal>
+            <div
+              dir={isRtl ? "rtl" : "ltr"}
+              className="fixed inset-0 z-[10000] flex items-center justify-center bg-black/75 backdrop-blur-sm p-4"
+            >
+              <div className="w-full max-w-lg overflow-hidden rounded-3xl border border-amber-500/30 bg-[#071226] text-white shadow-2xl shadow-black/50">
+                <div className="border-b border-slate-700/60 px-6 pb-4 pt-6">
+                  <h3 className="text-xl font-extrabold text-amber-300">
+                    {t("users.confirm.resetPasswordTitle")}
+                  </h3>
+                  <p className="mt-2 text-sm text-slate-300">
+                    {t("users.confirm.resetPasswordMessage", {
+                      userName:
+                        platformPasswordResetTarget.userName || "-",
+                    })}
+                  </p>
+                </div>
+
+                <div className="flex items-center justify-end gap-3 bg-slate-900/40 px-6 py-5">
+                  <button
+                    type="button"
+                    onClick={() => setPlatformPasswordResetTarget(null)}
+                    disabled={resettingPlatformPassword}
+                    className="rounded-xl border border-slate-600 px-5 py-2 font-bold text-slate-200 transition hover:bg-slate-800 disabled:opacity-50"
+                  >
+                    {t("common.cancel")}
+                  </button>
+                  <button
+                    type="button"
+                    onClick={confirmPlatformAdminPasswordReset}
+                    disabled={resettingPlatformPassword}
+                    className="rounded-xl bg-amber-400 px-5 py-2 font-extrabold text-slate-950 transition hover:bg-amber-300 disabled:opacity-50"
+                  >
+                    {resettingPlatformPassword
+                      ? t("common.saving")
+                      : t("users.actions.resetPassword")}
+                  </button>
+                </div>
+              </div>
+            </div>
+          </ModalPortal>
+        )}
+
+        {platformPasswordResetResult && (
+          <ModalPortal>
+            <div
+              dir={isRtl ? "rtl" : "ltr"}
+              className="fixed inset-0 z-[10000] flex items-center justify-center bg-black/75 backdrop-blur-sm p-4"
+            >
+              <div className="w-full max-w-lg overflow-hidden rounded-3xl border border-amber-500/30 bg-[#071226] text-white shadow-2xl shadow-black/50">
+                <div className="border-b border-slate-700/60 px-6 pb-4 pt-6">
+                  <h3 className="text-xl font-extrabold text-amber-300">
+                    {t("users.passwordModal.title")}
+                  </h3>
+                  <p className="mt-2 text-sm text-slate-300">
+                    {t("users.passwordModal.description", {
+                      userName: platformPasswordResetResult.userName,
+                    })}
+                  </p>
+                </div>
+
+                <div className="px-6 py-5">
+                  <div
+                    dir="ltr"
+                    className="rounded-2xl border border-amber-400/30 bg-amber-400/10 px-4 py-4 text-center text-2xl font-black tracking-widest text-amber-300"
+                  >
+                    {platformPasswordResetResult.temporaryPassword}
+                  </div>
+                  <p className="mt-3 text-xs text-slate-400">
+                    {language === "ar"
+                      ? "احفظ كلمة المرور المؤقتة الآن. سيُطلب من المستخدم تغييرها عند أول تسجيل دخول."
+                      : "Save this temporary password now. The user will be required to change it at the next sign-in."}
+                  </p>
+                </div>
+
+                <div className="flex items-center justify-end gap-3 bg-slate-900/40 px-6 py-5">
+                  <button
+                    type="button"
+                    onClick={() => {
+                      navigator.clipboard?.writeText(
+                        platformPasswordResetResult.temporaryPassword
+                      );
+                      notifyUser(
+                        showToast,
+                        "success",
+                        t("users.messages.passwordCopied")
+                      );
+                    }}
+                    className="rounded-xl border border-amber-400/40 px-5 py-2 font-bold text-amber-300 transition hover:bg-amber-400/10"
+                  >
+                    {t("users.actions.copy")}
+                  </button>
+                  <button
+                    type="button"
+                    onClick={() => setPlatformPasswordResetResult(null)}
+                    className="rounded-xl bg-amber-400 px-5 py-2 font-extrabold text-slate-950 transition hover:bg-amber-300"
+                  >
+                    {t("common.close")}
+                  </button>
+                </div>
+              </div>
+            </div>
+          </ModalPortal>
         )}
 
         {linkUserModal && (

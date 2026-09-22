@@ -2,6 +2,8 @@
 
 import { useMemo, useState } from "react";
 import ReportToolbar from "../components/ReportToolbar";
+import { useLanguage } from "../../../context/LanguageContext";
+import { ReportLocalizationBoundary, reportText } from "../utils/reportI18n";
 import { printReport } from "../utils/printReport";
 import { exportReportToExcel } from "../utils/exportReportToExcel";
 import {
@@ -142,6 +144,9 @@ function groupTransferRows(rows) {
 }
 
 function TransferStatusBadge({ status }) {
+  const { language, t } = useLanguage();
+  const tr = (value, params) => reportText(t, value, params);
+
   const style =
     status === "APPROVED"
       ? "border-emerald-500/30 bg-emerald-500/10 text-emerald-300"
@@ -152,13 +157,19 @@ function TransferStatusBadge({ status }) {
           : "border-sky-500/30 bg-sky-500/10 text-sky-300";
 
   return (
+    <ReportLocalizationBoundary t={t} language={language}>
     <span className={`inline-flex rounded-full border px-2.5 py-1 text-[11px] font-extrabold ${style}`}>
       {TRANSFER_STATUS_LABELS[status] || displayStatus(status)}
     </span>
+  
+    </ReportLocalizationBoundary>
   );
 }
 
 function StatusBadge({ status }) {
+  const { language, t } = useLanguage();
+  const tr = (value, params) => reportText(t, value, params);
+
   const style =
     status === "ON_DUTY"
       ? "border-emerald-500/30 bg-emerald-500/10 text-emerald-300"
@@ -167,9 +178,12 @@ function StatusBadge({ status }) {
         : "border-rose-500/30 bg-rose-500/10 text-rose-300";
 
   return (
+    <ReportLocalizationBoundary t={t} language={language}>
     <span className={`inline-flex rounded-full border px-2.5 py-1 text-[11px] font-extrabold ${style}`}>
       {displayStatus(status)}
     </span>
+  
+    </ReportLocalizationBoundary>
   );
 }
 
@@ -191,6 +205,9 @@ function SummaryCard({ label, value, tone = "amber" }) {
 }
 
 function EmployeeMasterReport({ selectedReport, currentUser, currentCompany, projects, onBack }) {
+  const { language, t } = useLanguage();
+  const tr = (value, params) => reportText(t, value, params);
+
   const [draftFilters, setDraftFilters] = useState(EMPTY_MASTER_FILTERS);
   const [appliedFilters, setAppliedFilters] = useState(EMPTY_MASTER_FILTERS);
   const [filtersOpen, setFiltersOpen] = useState(true);
@@ -227,6 +244,8 @@ function EmployeeMasterReport({ selectedReport, currentUser, currentCompany, pro
   }), [filteredRows]);
 
   const reportMeta = {
+    translate: tr,
+    language,
     title: selectedReport?.title || "Employee Master Report",
     companyName: currentCompany?.name || "Fleet Fuel PRO",
     generatedBy: getUserName(currentUser),
@@ -299,6 +318,7 @@ function EmployeeMasterReport({ selectedReport, currentUser, currentCompany, pro
   }
 
   return (
+    <ReportLocalizationBoundary t={t} language={language}>
     <div className="min-h-full bg-slate-950 px-4 py-5 text-slate-100 sm:px-6 lg:px-8">
       <div className="mx-auto max-w-[1800px] space-y-5">
         <section className="rounded-2xl border border-slate-800 bg-slate-900/80 p-5 shadow-xl shadow-black/10">
@@ -377,10 +397,15 @@ function EmployeeMasterReport({ selectedReport, currentUser, currentCompany, pro
         ) : null}
       </div>
     </div>
+  
+    </ReportLocalizationBoundary>
   );
 }
 
 function EmployeeTransferReport({ selectedReport, currentUser, currentCompany, projects, onBack }) {
+  const { language, t } = useLanguage();
+  const tr = (value, params) => reportText(t, value, params);
+
   const [draftFilters, setDraftFilters] = useState(EMPTY_TRANSFER_FILTERS);
   const [appliedFilters, setAppliedFilters] = useState(EMPTY_TRANSFER_FILTERS);
   const [filtersOpen, setFiltersOpen] = useState(true);
@@ -454,6 +479,8 @@ function EmployeeTransferReport({ selectedReport, currentUser, currentCompany, p
   }), [filteredBatches, visibleEmployeeRows]);
 
   const reportMeta = {
+    translate: tr,
+    language,
     title: selectedReport?.title || "Employee Transfer Report",
     companyName: currentCompany?.name || "Fleet Fuel PRO",
     generatedBy: getUserName(currentUser),
@@ -528,6 +555,7 @@ function EmployeeTransferReport({ selectedReport, currentUser, currentCompany, p
   }
 
   return (
+    <ReportLocalizationBoundary t={t} language={language}>
     <div className="min-h-full bg-slate-950 px-4 py-5 text-slate-100 sm:px-6 lg:px-8">
       <div className="mx-auto max-w-[1800px] space-y-5">
         <section className="rounded-2xl border border-slate-800 bg-slate-900/80 p-5 shadow-xl shadow-black/10">
@@ -620,6 +648,8 @@ function EmployeeTransferReport({ selectedReport, currentUser, currentCompany, p
         ) : null}
       </div>
     </div>
+  
+    </ReportLocalizationBoundary>
   );
 }
 

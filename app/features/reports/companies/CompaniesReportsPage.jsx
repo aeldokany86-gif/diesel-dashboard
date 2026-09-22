@@ -2,6 +2,8 @@
 
 import { useEffect, useMemo, useState } from "react";
 import ReportToolbar from "../components/ReportToolbar";
+import { useLanguage } from "../../../context/LanguageContext";
+import { ReportLocalizationBoundary, reportText } from "../utils/reportI18n";
 import { printReport } from "../utils/printReport";
 import { exportReportToExcel } from "../utils/exportReportToExcel";
 import {
@@ -108,6 +110,9 @@ export default function CompaniesReportsPage({
   currentUser,
   onBack,
 }) {
+  const { language, t } = useLanguage();
+  const tr = (value, params) => reportText(t, value, params);
+
   const [filtersOpen, setFiltersOpen] = useState(true);
   const [loading, setLoading] = useState(false);
   const [companiesLoading, setCompaniesLoading] = useState(false);
@@ -240,6 +245,8 @@ export default function CompaniesReportsPage({
   ]);
 
   const reportMeta = {
+    translate: tr,
+    language,
     title: selectedReport?.title || "Companies Master Report",
     companyName: "Fleet Fuel PRO Platform",
     generatedBy: getUserName(currentUser),
@@ -350,6 +357,7 @@ export default function CompaniesReportsPage({
   }
 
   return (
+    <ReportLocalizationBoundary t={t} language={language}>
     <div className="min-h-full bg-slate-950 px-4 py-5 text-slate-100 sm:px-6 lg:px-8">
       <div className="mx-auto max-w-[1800px] space-y-4">
         <section className="rounded-2xl border border-slate-700 bg-slate-900/90 p-5">
@@ -647,5 +655,7 @@ export default function CompaniesReportsPage({
         </div>
       ) : null}
     </div>
+  
+    </ReportLocalizationBoundary>
   );
 }
