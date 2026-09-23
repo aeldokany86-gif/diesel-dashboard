@@ -177,6 +177,7 @@ export default function AddOperationModal({
   const [destinationId, setDestinationId] = useState("");
   const [dieselQuantity, setDieselQuantity] = useState("");
   const [odometer, setOdometer] = useState("");
+  const [dispenserReadings, setDispenserReadings] = useState({});
   const [externalStationName, setExternalStationName] = useState("");
   const [invoiceNumber, setInvoiceNumber] = useState("");
   const [externalInvoiceAmount, setExternalInvoiceAmount] = useState("");
@@ -314,6 +315,35 @@ export default function AddOperationModal({
     ? "external-supplier-history-options"
     : "external-station-history-options";
 
+  const getStationStructureType = (station) =>
+    String(station?.structureType || "STANDALONE").trim().toUpperCase();
+
+  const isStationEligibleAsSource = (station) => {
+    const structureType = getStationStructureType(station);
+
+    if (isExternalTransfer) return structureType === "STANDALONE";
+
+    if (isInternalTransfer || isAssetRefuel) {
+      return structureType === "STANDALONE" || structureType === "DISPENSER";
+    }
+
+    return structureType === "STANDALONE";
+  };
+
+  const isStationEligibleAsDestination = (station) => {
+    const structureType = getStationStructureType(station);
+
+    if (isInternalTransfer || isExternalTransfer) {
+      return structureType === "STANDALONE";
+    }
+
+    if (isExternalSupply) {
+      return structureType === "STANDALONE" || structureType === "SHARED_TANK";
+    }
+
+    return true;
+  };
+
   const currentProjectStations = stations.filter((station) => {
     const status = String(station.status || "Active").trim().toLowerCase();
 
@@ -343,18 +373,25 @@ export default function AddOperationModal({
 
   const sourceStationOptions = isExternalSource
     ? []
-    : currentProjectStations.map((station) => station.id);
+    : currentProjectStations
+        .filter(isStationEligibleAsSource)
+        .map((station) => station.id);
 
   const destinationOptions = isAssetRefuel
     ? currentProjectAssets.map((asset) => asset.id)
     : isInternalTransfer
     ? currentProjectStations
+        .filter(isStationEligibleAsDestination)
         .filter((station) => !sourceStation || !isSameText(station.id, sourceStation))
         .map((station) => station.id)
     : isExternalSupply
-    ? currentProjectStations.map((station) => station.id)
+    ? currentProjectStations
+        .filter(isStationEligibleAsDestination)
+        .map((station) => station.id)
     : isExternalTransfer
-    ? otherProjectStations.map((station) => station.id)
+    ? otherProjectStations
+        .filter(isStationEligibleAsDestination)
+        .map((station) => station.id)
     : [];
 
   const selectedAsset = assets.find((asset) => isSameText(asset.id, destinationId));
@@ -363,6 +400,41 @@ export default function AddOperationModal({
   const selectedDestinationStation = (allStations.length ? allStations : stations).find(
     (station) => isSameText(station.id, destinationId)
   );
+  const selectedDestinationStructureType =
+    getStationStructureType(selectedDestinationStation);
+  const isSharedTankExternalSupply =
+    isExternalSupply && selectedDestinationStructureType === "SHARED_TANK";
+  const activeDestinationDispensers = isSharedTankExternalSupply
+    ? (Array.isArray(selectedDestinationStation?.dispensers)
+        ? selectedDestinationStation.dispensers
+        : []
+      ).filter(
+        (dispenser) =>
+          String(dispenser?.status || "ACTIVE").trim().toUpperCase() === "ACTIVE"
+      )
+    : [];
+  const normalizedDispenserReadings = activeDestinationDispensers.map(
+    (dispenser) => ({
+      stationId: dispenser.id,
+      counter: Number(dispenserReadings[dispenser.id]),
+    })
+  );
+  const allDispenserReadingsValid =
+    !isSharedTankExternalSupply ||
+    (
+      activeDestinationDispensers.length > 0 &&
+      normalizedDispenserReadings.every((reading) => {
+        const dispenser = activeDestinationDispensers.find(
+          (item) => item.id === reading.stationId
+        );
+        const currentCounter = Number(dispenser?.currentCounter || 0);
+        return (
+          Number.isFinite(reading.counter) &&
+          reading.counter >= 0 &&
+          reading.counter >= currentCounter
+        );
+      })
+    );
 
   const getStationBalance = (station) => {
     const rawBalance =
@@ -445,6 +517,32 @@ export default function AddOperationModal({
 
   const handleDestinationChange = (value) => {
     setDestinationId(value);
+
+    const nextDestination = (allStations.length ? allStations : stations).find(
+      (station) => isSameText(station.id, value)
+    );
+    const nextStructureType = getStationStructureType(nextDestination);
+
+    if (isExternalSupply && nextStructureType === "SHARED_TANK") {
+      const nextReadings = {};
+      (Array.isArray(nextDestination?.dispensers)
+        ? nextDestination.dispensers
+        : []
+      )
+        .filter(
+          (dispenser) =>
+            String(dispenser?.status || "ACTIVE").trim().toUpperCase() ===
+            "ACTIVE"
+        )
+        .forEach((dispenser) => {
+          nextReadings[dispenser.id] = String(dispenser.currentCounter ?? 0);
+        });
+      setDispenserReadings(nextReadings);
+      setOdometer("");
+      return;
+    }
+
+    setDispenserReadings({});
 
     if (isAssetRefuel) {
       const lastReading = getLastOdometerForEquipment?.(value);
@@ -572,7 +670,8 @@ export default function AddOperationModal({
   const needsSourceStation = Boolean(transactionType) && !isExternalSource;
   const needsExternalSourceDetails = isExternalDirectRefuel || isExternalSupply;
   const needsInvoiceNumber = isExternalDirectRefuel || isExternalSupply;
-  const needsReading = Boolean(transactionType);
+  const needsReading =
+    Boolean(transactionType) && !isSharedTankExternalSupply;
   const isDieselQuantityOverTankCapacity =
     isAssetRefuel &&
     tankCapacity > 0 &&
@@ -638,6 +737,26 @@ export default function AddOperationModal({
       }
     }
 
+    if (isSharedTankExternalSupply) {
+      if (!activeDestinationDispensers.length) {
+        notifyUser(
+          showToast,
+          "warning",
+          t("addOperation.validation.sharedTankNeedsActiveDispensers")
+        );
+        return false;
+      }
+
+      if (!allDispenserReadingsValid) {
+        notifyUser(
+          showToast,
+          "warning",
+          t("addOperation.validation.dispenserReadingsRequired")
+        );
+        return false;
+      }
+    }
+
     const qty = Number(dieselQuantity);
 
     if (!qty || qty <= 0) {
@@ -678,6 +797,7 @@ export default function AddOperationModal({
     if (
       needsReading &&
       !isAssetRefuel &&
+      !isSharedTankExternalSupply &&
       (!Number.isFinite(newReading) || newReading <= 0)
     ) {
       notifyUser(
@@ -701,6 +821,7 @@ export default function AddOperationModal({
 
     if (
       isStationCounterOperation &&
+      !isSharedTankExternalSupply &&
       lastStationCounter > 0 &&
       newReading < lastStationCounter
     ) {
@@ -818,7 +939,10 @@ export default function AddOperationModal({
       createdByRole: currentUser?.role || "",
       destinationId,
       dieselQuantity: qty,
-      odometer: Number(odometer),
+      odometer: isSharedTankExternalSupply ? undefined : Number(odometer),
+      dispenserReadings: isSharedTankExternalSupply
+        ? normalizedDispenserReadings
+        : undefined,
       externalStationName: externalStationName.trim(),
       invoiceNumber: invoiceNumber.trim(),
       externalInvoiceAmount: isExternalDirectRefuel ? Number(externalInvoiceAmount) : undefined,
@@ -844,7 +968,9 @@ export default function AddOperationModal({
     (!needsInvoiceNumber || Boolean(invoiceNumber.trim())) &&
     (!isExternalDirectRefuel || Number(externalInvoiceAmount) > 0) &&
     (
-      isAssetRefuel
+      isSharedTankExternalSupply
+        ? allDispenserReadingsValid
+        : isAssetRefuel
         ? odometer !== "" &&
           Number.isFinite(Number(odometer)) &&
           Number(odometer) >= 0
@@ -1041,13 +1167,44 @@ export default function AddOperationModal({
                 error={dieselQuantityError}
               />
 
-              <Field
-                label={readingLabel}
-                value={odometer}
-                onChange={(e) => setOdometer(e.target.value)}
-                type="number"
-                placeholder={readingPlaceholder}
-              />
+              {isSharedTankExternalSupply ? (
+                <div className="rounded-xl border border-amber-500/30 bg-amber-500/5 p-4">
+                  <div className="mb-3">
+                    <p className="font-bold text-amber-300">
+                      {t("addOperation.sharedTank.dispenserReadingsTitle")}
+                    </p>
+                    <p className="mt-1 text-xs text-slate-400">
+                      {t("addOperation.sharedTank.dispenserReadingsHelp")}
+                    </p>
+                  </div>
+
+                  <div className="space-y-3">
+                    {activeDestinationDispensers.map((dispenser) => (
+                      <Field
+                        key={dispenser.id}
+                        label={`${dispenser.stationId || dispenser.name || dispenser.id} — ${t("addOperation.sharedTank.counterReading")}`}
+                        value={dispenserReadings[dispenser.id] ?? ""}
+                        onChange={(e) =>
+                          setDispenserReadings((current) => ({
+                            ...current,
+                            [dispenser.id]: e.target.value,
+                          }))
+                        }
+                        type="number"
+                        placeholder={`${t("addOperation.currentCounter")}: ${formatNumber(dispenser.currentCounter || 0)}`}
+                      />
+                    ))}
+                  </div>
+                </div>
+              ) : (
+                <Field
+                  label={readingLabel}
+                  value={odometer}
+                  onChange={(e) => setOdometer(e.target.value)}
+                  type="number"
+                  placeholder={readingPlaceholder}
+                />
+              )}
 
               <Field
                 label={t("addOperation.fields.notes")}

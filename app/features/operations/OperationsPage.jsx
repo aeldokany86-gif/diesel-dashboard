@@ -729,6 +729,10 @@ export default function OperationsPage({
     if (field === "equipment") return getAssetDisplayCode(value);
     if (field === "station") return getStationDisplayCode(value);
     if (field === "fueler") return getFuelerDisplayName(value);
+    if (field === "dispenserCounter") {
+      const numberValue = Number(value);
+      return Number.isFinite(numberValue) ? formatNumber(numberValue) : "-";
+    }
     return value === undefined || value === null || value === "" ? "-" : String(value);
   };
 
@@ -743,6 +747,7 @@ export default function OperationsPage({
       diesel: "QUANTITY",
       odometer: "ODOMETER",
       fueler: "FUELER_ID",
+      dispenserCounter: "DISPENSER_COUNTER_READING",
     };
 
     return map[field] || field;
@@ -2068,6 +2073,69 @@ const payload = mapFrontendOperationToBackendPayload({
     }
   };
 
+  const openDispenserCounterEdit = (readingItem) => {
+    if (!hasPermission("operations", "edit")) return;
+
+    const operation = readingItem?.operation || {};
+    const operationBackendId = String(operation?.id || "").trim();
+    const stationId = String(readingItem?.stationId || "").trim();
+    const oldCounter = Number(readingItem?.counterValue);
+
+    if (!operationBackendId || !stationId || !Number.isFinite(oldCounter)) {
+      notifyUser(
+        showToast,
+        "warning",
+        t("operations.sharedTankReadings.invalidReading")
+      );
+      return;
+    }
+
+    setCorrectionContextLoading(false);
+    setCorrectionContextError("");
+
+    setEditCell({
+      originalIndex: readingItem?.originalIndex ?? -1,
+      row: readingItem?.row || [],
+      field: "dispenserCounter",
+      operationType: operation?.type || "EXTERNAL_SUPPLY",
+      operationBackendId,
+      isExternalDirectRefuel: false,
+      oldValue: oldCounter,
+      oldValueDisplay: formatNumber(oldCounter),
+      newValue: String(oldCounter),
+      reason: "",
+      targetDispenserStationId: stationId,
+      dispenserDisplayCode:
+        readingItem?.stationCode ||
+        readingItem?.stationName ||
+        getStationDisplayCode(stationId),
+      operationContext: {
+        operationId: operationBackendId,
+        operationNo: operation?.operationNo || null,
+        operationType: operation?.type || "EXTERNAL_SUPPLY",
+        operationDate:
+          operation?.occurredAt ||
+          operation?.completedAt ||
+          operation?.createdAt ||
+          null,
+        projectIdAtOperation: operation?.projectIdAtOperation || null,
+        projectNameAtOperation: operation?.projectNameAtOperation || null,
+        sourceProjectIdAtOperation:
+          operation?.sourceProjectIdAtOperation || null,
+        sourceProjectNameAtOperation:
+          operation?.sourceProjectNameAtOperation || null,
+        destinationProjectIdAtOperation:
+          operation?.destinationProjectIdAtOperation || null,
+        destinationProjectNameAtOperation:
+          operation?.destinationProjectNameAtOperation || null,
+      },
+      allowedAssets: [],
+      allowedSourceStations: [],
+      allowedDestinationStations: [],
+      allowedFuelers: [],
+    });
+  };
+
   const closeEditCell = () => {
     setEditCell(null);
     setCorrectionContextLoading(false);
@@ -2166,6 +2234,32 @@ const payload = mapFrontendOperationToBackendPayload({
       fieldLabel = "Odometer";
     }
 
+    if (field === "dispenserCounter") {
+      const newCounter = Number(editCell.newValue);
+
+      if (!Number.isFinite(newCounter) || newCounter < 0) {
+        notifyUser(
+          typeof showToast !== "undefined" ? showToast : null,
+          "warning",
+          t("operations.sharedTankReadings.invalidCounter")
+        );
+        return;
+      }
+
+      if (!String(editCell.targetDispenserStationId || "").trim()) {
+        notifyUser(
+          typeof showToast !== "undefined" ? showToast : null,
+          "warning",
+          t("operations.sharedTankReadings.invalidReading")
+        );
+        return;
+      }
+
+      fieldLabel = `${t("operationCorrection.fields.dispenserCounter")} - ${
+        editCell.dispenserDisplayCode || getStationDisplayCode(editCell.targetDispenserStationId)
+      }`;
+    }
+
     if (field === "station") {
       if (editCell.isExternalDirectRefuel) {
         const externalStationName = String(editCell.newValue || "").trim();
@@ -2246,7 +2340,15 @@ const payload = mapFrontendOperationToBackendPayload({
       const correctionPayload = {
         operationId: operationBackendId,
         fieldName,
-        newValue: field === "diesel" || field === "odometer" ? Number(editCell.newValue) : editCell.newValue,
+        newValue:
+          field === "dispenserCounter"
+            ? {
+                stationId: editCell.targetDispenserStationId,
+                counter: Number(editCell.newValue),
+              }
+            : field === "diesel" || field === "odometer"
+            ? Number(editCell.newValue)
+            : editCell.newValue,
         reason: editCell.reason,
       };
 
@@ -2297,6 +2399,74 @@ const payload = mapFrontendOperationToBackendPayload({
       );
     }
   };
+
+  const sharedTankSupplyReadingRows = (data || [])
+    .flatMap((row, originalIndex) => {
+      const operation = row?.__operation || {};
+      const operationType = String(
+        operation?.type || (typeIndex !== -1 ? row?.[typeIndex] : "")
+      )
+        .trim()
+        .toUpperCase()
+        .replace(/[\s-]+/g, "_");
+
+      const destinationStructureType = String(
+        operation?.destinationStation?.structureType || ""
+      )
+        .trim()
+        .toUpperCase();
+
+      const readings = Array.isArray(operation?.stationCounterReadings)
+        ? operation.stationCounterReadings
+        : [];
+
+      if (
+        operationType !== "EXTERNAL_SUPPLY" ||
+        destinationStructureType !== "SHARED_TANK" ||
+        !readings.length
+      ) {
+        return [];
+      }
+
+      return readings.map((reading) => ({
+        row,
+        originalIndex,
+        operation,
+        operationNo:
+          operation?.operationNo ||
+          (operationIdIndex !== -1 ? row?.[operationIdIndex] : operation?.id) ||
+          "-",
+        occurredAt:
+          operation?.occurredAt ||
+          operation?.completedAt ||
+          operation?.createdAt ||
+          (dateIndex !== -1 ? row?.[dateIndex] : null),
+        sharedTankCode:
+          operation?.destinationStation?.stationId ||
+          operation?.destinationStation?.name ||
+          (destinationIndex !== -1 ? row?.[destinationIndex] : "-"),
+        stationId: reading?.stationId || "",
+        stationCode:
+          reading?.station?.stationId ||
+          reading?.station?.name ||
+          reading?.stationId ||
+          "-",
+        stationName: reading?.station?.name || "",
+        counterValue: reading?.counterValue,
+      }));
+    })
+    .filter(
+      (item) =>
+        item.stationId &&
+        item.counterValue !== null &&
+        item.counterValue !== undefined &&
+        Number.isFinite(Number(item.counterValue))
+    )
+    .sort(
+      (a, b) =>
+        (new Date(b.occurredAt || 0).getTime() || 0) -
+        (new Date(a.occurredAt || 0).getTime() || 0)
+    );
 
   return (
     <div className="bg-transparent min-h-screen text-slate-100 overflow-y-auto h-screen scroll-smooth [scrollbar-color:#334155_transparent]">
@@ -3168,6 +3338,75 @@ const payload = mapFrontendOperationToBackendPayload({
           </div>
         </div>
       </div>
+
+      {sharedTankSupplyReadingRows.length > 0 && (
+        <div className="relative z-0 bg-slate-900/80 rounded-2xl shadow-xl shadow-black/10 overflow-hidden border border-slate-700/80 mb-5">
+          <div className="p-3 sm:p-4 border-b border-slate-700/80 bg-slate-900/60">
+            <h2 className="text-base font-extrabold text-amber-300">
+              {t("operations.sharedTankReadings.title")}
+            </h2>
+            <p className="text-xs text-gray-400 mt-1">
+              {t("operations.sharedTankReadings.description")}
+            </p>
+          </div>
+
+          <div className="max-h-[320px] overflow-auto overflow-x-auto [scrollbar-color:#334155_transparent]">
+            <table className="min-w-[760px] w-full border-collapse text-[11px] sm:text-xs lg:text-sm">
+              <thead className="bg-slate-800 sticky top-0 z-[1] shadow-sm">
+                <tr>
+                  <Th>{t("operations.table.date")}</Th>
+                  <Th>{t("operations.sharedTankReadings.operationNo")}</Th>
+                  <Th>{t("operations.sharedTankReadings.sharedTank")}</Th>
+                  <Th>{t("operations.sharedTankReadings.dispenser")}</Th>
+                  <Th>{t("operations.sharedTankReadings.reading")}</Th>
+                </tr>
+              </thead>
+              <tbody>
+                {sharedTankSupplyReadingRows.map((item) => {
+                  const canEditReading = hasPermission("operations", "edit");
+
+                  return (
+                    <tr
+                      key={`${item.operation?.id || item.operationNo}-${item.stationId}`}
+                      className="hover:bg-slate-800/70 transition-colors duration-150"
+                    >
+                      <Td>{formatDisplayDate(item.occurredAt)}</Td>
+                      <Td>{item.operationNo}</Td>
+                      <Td strong>{item.sharedTankCode || "-"}</Td>
+                      <Td>
+                        <div className="font-semibold text-sky-200">
+                          {item.stationCode || "-"}
+                        </div>
+                        {item.stationName && item.stationName !== item.stationCode ? (
+                          <div className="text-[10px] text-slate-400">
+                            {item.stationName}
+                          </div>
+                        ) : null}
+                      </Td>
+                      <Td>
+                        {canEditReading ? (
+                          <button
+                            type="button"
+                            onClick={() => openDispenserCounterEdit(item)}
+                            className="font-bold text-blue-300 hover:text-yellow-400 cursor-pointer"
+                            title={t("operations.sharedTankReadings.editReading")}
+                          >
+                            {formatNumber(item.counterValue)}
+                          </button>
+                        ) : (
+                          <span className="font-bold">
+                            {formatNumber(item.counterValue)}
+                          </span>
+                        )}
+                      </Td>
+                    </tr>
+                  );
+                })}
+              </tbody>
+            </table>
+          </div>
+        </div>
+      )}
 
       {selectedEquipmentHistory && (
         <ModalPortal>

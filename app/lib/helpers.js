@@ -215,6 +215,33 @@ export function mapBackendStationForState(station = {}) {
       station.id ||
       "",
     type: station.type || "",
+    structureType: station.structureType || "STANDALONE",
+    parentStationId: station.parentStationId || null,
+    parentStation: station.parentStation
+      ? {
+          ...station.parentStation,
+          structureType:
+            station.parentStation.structureType || "SHARED_TANK",
+          currentStock: Number(station.parentStation.currentStock || 0),
+          capacity:
+            station.parentStation.capacity === undefined ||
+            station.parentStation.capacity === null
+              ? null
+              : Number(station.parentStation.capacity) || 0,
+        }
+      : null,
+    dispensers: Array.isArray(station.dispensers)
+      ? station.dispensers.map((dispenser) => ({
+          ...dispenser,
+          status: normalizeBackendStationStatusForState(dispenser.status),
+          structureType: dispenser.structureType || "DISPENSER",
+          currentCounter: Number(dispenser.currentCounter || 0),
+          currentLifetimeCounter: Number(
+            dispenser.currentLifetimeCounter || 0
+          ),
+          currentCounterCycle: Number(dispenser.currentCounterCycle || 1),
+        }))
+      : [],
     capacity:
       station.capacity === undefined || station.capacity === null
         ? 0

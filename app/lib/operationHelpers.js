@@ -9,8 +9,6 @@ export function mapFrontendOperationToBackendPayload(operation = {}) {
 
   const payload = {
     type: normalizedType,
-    currentProjectId: operation.currentProjectId || undefined,
-    occurredAt: operation.occurredAt || operation.transactionDate || undefined,
     quantity: Number(operation.dieselQuantity || 0),
     notes: operation.notes || undefined,
     externalStationName: operation.externalStationName || undefined,
@@ -30,10 +28,55 @@ export function mapFrontendOperationToBackendPayload(operation = {}) {
 
   if (["INTERNAL_TRANSFER", "EXTERNAL_SUPPLY", "EXTERNAL_TRANSFER"].includes(normalizedType)) {
     payload.destinationStationId = operation.destinationId || undefined;
-    payload.stationCounter =
-      operation.odometer === undefined || operation.odometer === null
+
+    const normalizedDispenserReadings = Array.isArray(operation.dispenserReadings)
+      ? operation.dispenserReadings
+          .map((item) => ({
+            stationId: String(item?.stationId || "").trim(),
+            counter: Number(item?.counter),
+          }))
+          .filter(
+            (item) =>
+              item.stationId &&
+              Number.isFinite(item.counter) &&
+              item.counter >= 0
+          )
+      : [];
+
+    if (
+      normalizedType === "EXTERNAL_SUPPLY" &&
+      normalizedDispenserReadings.length > 0
+    ) {
+      // Shared Tank supply: the tank owns stock while each active child
+      // dispenser provides its own physical counter snapshot.
+      payload.dispenserReadings = normalizedDispenserReadings;
+    } else {
+      const destinationCounterValue =
+        operation.destinationStationCounter ??
+        operation.stationCounter ??
+        operation.odometer;
+
+      payload.destinationStationCounter =
+        destinationCounterValue === undefined ||
+        destinationCounterValue === null ||
+        destinationCounterValue === ""
+          ? undefined
+          : Number(destinationCounterValue);
+
+      // Keep the legacy field populated with the destination counter so existing
+      // reports/corrections remain backward-compatible while the new explicit
+      // source/destination counter fields are adopted.
+      payload.stationCounter = payload.destinationStationCounter;
+    }
+  }
+
+  if (["INTERNAL_TRANSFER", "EXTERNAL_TRANSFER"].includes(normalizedType)) {
+    payload.sourceStationCounter =
+      operation.sourceStationCounter === undefined ||
+      operation.sourceStationCounter === null ||
+      operation.sourceStationCounter === ""
         ? undefined
-        : Number(operation.odometer);
+        : Number(operation.sourceStationCounter);
   }
 
   if (["DIRECT_REFUEL", "EXTERNAL_DIRECT_REFUEL"].includes(normalizedType)) {

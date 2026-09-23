@@ -46,6 +46,7 @@ const ar = {
       externalTransfer: "نقل خارجي",
     },
     stationType: { main: "رئيسية", sub: "فرعية" },
+    stationStructureType: { standalone: "مستقلة", sharedTank: "خزان مشترك", dispenser: "نقطة تعبئة" },
   },
 
 
@@ -151,6 +152,8 @@ const ar = {
       stationId: "كود المحطة",
       stationName: "اسم المحطة",
       stationType: "نوع المحطة",
+      structureType: "نوع الهيكل",
+      parentStationId: "كود المحطة الرئيسية",
       capacity: "السعة",
       openingBalance: "الرصيد الافتتاحي",
       currentCounter: "العداد الحالي",
@@ -260,6 +263,19 @@ const ar = {
       negativeOpeningBalance: "يجب أن يكون الرصيد الافتتاحي صفرًا أو أكبر.",
       invalidCurrentCounter: "العداد الحالي مطلوب ويجب أن يكون رقمًا صحيحًا.",
       negativeCurrentCounter: "يجب أن يكون العداد الحالي صفرًا أو أكبر.",
+      invalidStationStructureType: "نوع الهيكل يجب أن يكون STANDALONE أو SHARED_TANK أو DISPENSER.",
+      parentNotAllowed: "هذا النوع من المحطات لا يقبل محطة رئيسية.",
+      openingBalanceRequired: "الرصيد الافتتاحي مطلوب لهذا النوع من المحطات.",
+      currentCounterRequired: "العداد الحالي مطلوب لهذا النوع من المحطات.",
+      sharedTankCounterNotAllowed: "الخزان المشترك لا يملك عدادًا مستقلًا.",
+      parentStationRequired: "كود المحطة الرئيسية مطلوب لنقطة التعبئة.",
+      parentStationSelfReference: "لا يمكن لنقطة التعبئة أن تكون هي المحطة الرئيسية لنفسها.",
+      dispenserOpeningBalanceNotAllowed: "نقطة التعبئة لا تملك رصيد مخزون افتتاحي.",
+      dispenserCapacityNotAllowed: "نقطة التعبئة لا تملك سعة خزان مستقلة.",
+      parentMustBeSharedTank: "المحطة الرئيسية يجب أن تكون خزانًا مشتركًا.",
+      parentProjectMismatch: "نقطة التعبئة والخزان المشترك يجب أن يكونا في نفس المشروع.",
+      parentStationNotFound: "لم يتم العثور على الخزان المشترك الرئيسي.",
+      negativeCapacity: "يجب أن تكون السعة صفرًا أو أكبر.",
     },
     messages: {
       accessEnabled: "تم تفعيل صلاحية استيراد البيانات بنجاح.",
@@ -352,6 +368,17 @@ const ar = {
       directRefuel: "تعبئة مباشرة",
       externalDirectRefuel: "تعبئة مباشرة خارجية",
     },
+    sharedTankReadings: {
+      title: "قراءات عدادات التوريد للخزان المشترك",
+      description: "القراءات الفعلية لنقاط التعبئة المسجلة مع عمليات التوريد الخارجي. اضغط على القراءة لطلب تصحيحها.",
+      operationNo: "رقم العملية",
+      sharedTank: "الخزان المشترك",
+      dispenser: "نقطة التعبئة",
+      reading: "قراءة العداد",
+      editReading: "تصحيح قراءة نقطة التعبئة",
+      invalidCounter: "يجب أن تكون قراءة عداد نقطة التعبئة صفرًا أو أكبر.",
+      invalidReading: "مرجع قراءة نقطة التعبئة غير صالح.",
+    },
     sections: {
       equipmentConsumptionSummary: "ملخص استهلاك المعدات",
       consumedByEquipmentType: "الكمية المستهلكة حسب نوع المعدة",
@@ -425,6 +452,11 @@ const ar = {
   },
 
   addOperation: {
+    sharedTank: {
+      dispenserReadingsTitle: "قراءات عدادات نقاط التعبئة النشطة",
+      dispenserReadingsHelp: "أدخل القراءة الفعلية لكل عداد نشط متصل بهذا الخزان المشترك.",
+      counterReading: "قراءة العداد",
+    },
     title: "إضافة عملية ديزل",
     subtitle: "اختر نوع العملية أولًا، ثم أكمل جميع الحقول المطلوبة والصور الثلاث الإلزامية.",
     projectScope: "نطاق مشروع المستخدم",
@@ -490,6 +522,8 @@ const ar = {
       uploaded: "تم الرفع",
     },
     validation: {
+      sharedTankNeedsActiveDispensers: "الخزان المشترك المحدد لا يحتوي على نقاط تعبئة نشطة.",
+      dispenserReadingsRequired: "أدخل قراءة صحيحة لكل نقطة تعبئة نشطة، ولا يجوز أن تقل القراءة عن العداد الحالي.",
       selectTransactionType: "يرجى اختيار نوع العملية.",
       transactionNotAllowed: "ليس لديك صلاحية لإضافة هذا النوع من العمليات.",
       selectSourceStation: "يرجى اختيار المحطة المصدر.",
@@ -532,6 +566,7 @@ const ar = {
       dieselQuantity: "كمية الديزل",
       odometer: "العداد",
       stationCounter: "عداد المحطة",
+      dispenserCounter: "قراءة عداد نقطة التعبئة",
       externalStation: "المحطة الخارجية",
       sourceStation: "المحطة المصدر",
       operator: "المشغّل",
@@ -541,6 +576,7 @@ const ar = {
       operationDate: "تاريخ العملية",
       operation: "العملية",
       operationType: "نوع العملية",
+      dispenser: "نقطة التعبئة",
     },
     placeholders: {
       selectEquipment: "اختر المعدة",
@@ -833,6 +869,13 @@ const ar = {
   },
 
   stations: {
+    sharedTank: {
+      dispensers: "نقاط التعبئة",
+      dispenser: "نقطة تعبئة",
+      dispensersHelp: "لكل نقطة عداد مستقل، بينما مخزون الوقود مملوك للخزان المشترك.",
+      noDispensers: "لا توجد نقاط تعبئة مرتبطة بهذا الخزان المشترك.",
+      selectParent: "اختر الخزان المشترك الرئيسي",
+    },
     title: "محطات الوقود",
     subtitle: "إدارة مخزون الوقود",
     searchPlaceholder: "ابحث برقم المحطة أو الاسم أو المشروع أو النوع أو الحالة...",
@@ -893,6 +936,8 @@ const ar = {
     },
     add: { title: "إضافة محطة", save: "حفظ المحطة" },
     fields: {
+      structureType: "نوع الهيكل",
+      parentStation: "الخزان المشترك الرئيسي",
       stationId: "رقم المحطة",
       stationType: "نوع المحطة",
       project: "المشروع",
@@ -983,6 +1028,9 @@ const ar = {
       validCapacity: "يجب أن تكون السعة صفرًا أو رقمًا موجبًا صحيحًا.",
       validOpeningBalance: "يجب أن يكون الرصيد الافتتاحي صفرًا أو رقمًا موجبًا صحيحًا.",
       validOpeningCounter: "يجب أن تكون قراءة العداد الافتتاحية صفرًا أو رقمًا موجبًا صحيحًا.",
+      parentSharedTankRequired: "يرجى اختيار الخزان المشترك الرئيسي لنقطة التعبئة.",
+      parentMustBeSharedTank: "المحطة الرئيسية المحددة يجب أن تكون خزانًا مشتركًا.",
+      parentProjectMismatch: "نقطة التعبئة والخزان المشترك الرئيسي يجب أن يكونا في نفس المشروع.",
       selectNewProject: "يرجى اختيار مشروع جديد.",
       differentProject: "يرجى اختيار مشروع مختلف عن المشروع الحالي.",
       selectValidProject: "يرجى اختيار مشروع صحيح.",

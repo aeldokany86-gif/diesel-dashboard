@@ -334,16 +334,25 @@ export default function StationsPage({
     if (direction === "Out") return t("stations.history.out");
     return direction || "-";
   };
-  const FlowmeterCounterDisplay = ({ value }) => {
+  const FlowmeterCounterDisplay = ({ value, compact = false }) => {
     const safeValue = Math.max(0, Math.floor(Number(value) || 0));
     const digits = String(safeValue).padStart(9, "0").slice(-9).split("");
 
     return (
-      <div dir="ltr" className="station-counter-display w-full flex items-center gap-1.5">
+      <div
+        dir="ltr"
+        className={`station-counter-display w-full flex items-center ${
+          compact ? "gap-1" : "gap-1.5"
+        }`}
+      >
         {digits.map((digit, index) => (
           <span
             key={`${digit}-${index}`}
-            className="station-counter-digit w-6 h-9 sm:w-7 flex items-center justify-center rounded-md border border-slate-600/80 bg-slate-950 text-amber-300 font-mono text-base sm:text-lg font-black shadow-inner shadow-black/80 tabular-nums"
+            className={`station-counter-digit flex shrink-0 items-center justify-center rounded-md border border-slate-600/80 bg-slate-950 text-amber-300 font-mono font-black shadow-inner shadow-black/80 tabular-nums ${
+              compact
+                ? "w-5 h-8 text-sm"
+                : "w-6 h-9 sm:w-7 text-base sm:text-lg"
+            }`}
             style={{
               textShadow:
                 "0 0 4px rgba(251,191,36,0.75), 0 0 8px rgba(245,158,11,0.35)",
@@ -437,6 +446,37 @@ export default function StationsPage({
       return 0;
     }
 
+    const structureType = String(
+      station?.structureType || "STANDALONE"
+    )
+      .trim()
+      .toUpperCase();
+
+    const sourceCandidates =
+      structureType === "SHARED_TANK"
+        ? (station?.dispensers || [])
+            .flatMap((dispenser) => [
+              dispenser?.stationId,
+              dispenser?.id,
+              dispenser?.backendId,
+              dispenser?.stationBackendId,
+              dispenser?.code,
+              dispenser?.name,
+            ])
+            .filter(Boolean)
+        : [
+            station?.id,
+            station?.stationId,
+            station?.backendId,
+            station?.stationBackendId,
+            station?.code,
+            station?.name,
+          ].filter(Boolean);
+
+    if (!sourceCandidates.length) {
+      return 0;
+    }
+
     return (data || []).reduce((sum, row) => {
       const type = row?.[typeIndex];
       const source = row?.[sourceIndex];
@@ -446,13 +486,20 @@ export default function StationsPage({
         return sum;
       }
 
-      const isOutboundOperation =
-        (isSameText(type, "Direct_Refuel") ||
-          isSameText(type, "Internal_Transfer") ||
-          isSameText(type, "External_Transfer")) &&
-        isSameText(source, station.id);
+      const isOutboundType =
+        isSameText(type, "Direct_Refuel") ||
+        isSameText(type, "Internal_Transfer") ||
+        isSameText(type, "External_Transfer");
 
-      return isOutboundOperation ? sum + quantity : sum;
+      if (!isOutboundType) {
+        return sum;
+      }
+
+      const sourceBelongsToStation = sourceCandidates.some((candidate) =>
+        isSameText(source, candidate)
+      );
+
+      return sourceBelongsToStation ? sum + quantity : sum;
     }, 0);
   };
 
@@ -655,6 +702,8 @@ export default function StationsPage({
   const [newStation, setNewStation] = useState({
     id: "",
     type: "Main",
+    structureType: "STANDALONE",
+    parentStationId: "",
     project: "",
     capacity: "",
     openingBalance: "",
@@ -699,6 +748,8 @@ export default function StationsPage({
     setNewStation({
       id: "",
       type: "Main",
+      structureType: "STANDALONE",
+      parentStationId: "",
       project: "",
       capacity: "",
       openingBalance: "",
@@ -772,9 +823,69 @@ export default function StationsPage({
       return;
     }
 
-    const capacity = Number(newStation.capacity || 0);
-    const openingBalance = Number(newStation.openingBalance || 0);
-    const openingCounter = Number(newStationOpeningCounter || 0);
+    const structureType = String(
+      newStation.structureType || "STANDALONE"
+    ).toUpperCase();
+    const capacity =
+      structureType === "DISPENSER"
+        ? 0
+        : Number(newStation.capacity || 0);
+    const openingBalance =
+      structureType === "DISPENSER"
+        ? 0
+        : Number(newStation.openingBalance || 0);
+    const openingCounter =
+      structureType === "SHARED_TANK"
+        ? 0
+        : Number(newStationOpeningCounter || 0);
+
+    const parentStation =
+      structureType === "DISPENSER"
+        ? [...stations, ...localStations].find(
+            (station) =>
+              (station.backendId || station.stationBackendId || station.id) ===
+                newStation.parentStationId ||
+              station.id === newStation.parentStationId
+          )
+        : null;
+
+    if (structureType === "DISPENSER" && !parentStation) {
+      showToast?.(
+        "warning",
+        t("stationWorkflows.validation.parentSharedTankRequired")
+      );
+      return;
+    }
+
+    if (
+      parentStation &&
+      String(parentStation.structureType || "STANDALONE").toUpperCase() !==
+        "SHARED_TANK"
+    ) {
+      showToast?.(
+        "warning",
+        t("stationWorkflows.validation.parentMustBeSharedTank")
+      );
+      return;
+    }
+
+    if (
+      parentStation &&
+      normalizeScopeValue(
+        parentStation.projectId || parentStation.project
+      ) !==
+        normalizeScopeValue(
+          matchedProjectBackendId || matchedProject?.name || selectedProjectValue
+        ) &&
+      normalizeScopeValue(parentStation.project) !==
+        normalizeScopeValue(matchedProject?.name || selectedProjectValue)
+    ) {
+      showToast?.(
+        "warning",
+        t("stationWorkflows.validation.parentProjectMismatch")
+      );
+      return;
+    }
 
     if (!Number.isFinite(capacity) || capacity < 0) {
       showToast?.("warning", t("stationWorkflows.validation.validCapacity"));
@@ -796,9 +907,17 @@ export default function StationsPage({
       stationId,
       name: stationId,
       type: newStation.type || "Main",
+      structureType,
+      parentStationId:
+        structureType === "DISPENSER"
+          ? parentStation?.backendId ||
+            parentStation?.stationBackendId ||
+            parentStation?.id ||
+            null
+          : null,
       project: matchedProject?.name || selectedProjectValue || "-",
       projectId: matchedProjectBackendId,
-      capacity,
+      capacity: structureType === "DISPENSER" ? null : capacity,
       openingBalance,
       currentStock: openingBalance,
       currentCounter: openingCounter,
@@ -834,6 +953,8 @@ export default function StationsPage({
         stationId: cleanStation.stationId,
         name: cleanStation.name,
         type: cleanStation.type,
+        structureType: cleanStation.structureType,
+        parentStationId: cleanStation.parentStationId || undefined,
         capacity: cleanStation.capacity,
         openingBalance: cleanStation.openingBalance,
         currentCounter: cleanStation.currentCounter,
@@ -842,7 +963,17 @@ export default function StationsPage({
         createdById: currentUser?.id || undefined,
       });
 
-      createdStation = mapBackendStationForState(createdStationData);
+      const mappedCreatedStation = mapBackendStationForState(createdStationData);
+      createdStation = {
+        ...createdStationData,
+        ...mappedCreatedStation,
+        structureType: mappedCreatedStation.structureType || "STANDALONE",
+        parentStationId: mappedCreatedStation.parentStationId || null,
+        parentStation: mappedCreatedStation.parentStation || null,
+        dispensers: Array.isArray(mappedCreatedStation.dispensers)
+          ? mappedCreatedStation.dispensers
+          : [],
+      };
     } catch (error) {
       const backendMessage = getFriendlyApiErrorMessage(
         error,
@@ -882,7 +1013,19 @@ export default function StationsPage({
       const backendStations = await fetchStations({
         companyId: stationCompanyId,
       });
-      const mappedStations = backendStations.map(mapBackendStationForState);
+      const mappedStations = backendStations.map((backendStation) => {
+        const mappedStation = mapBackendStationForState(backendStation);
+        return {
+          ...backendStation,
+          ...mappedStation,
+          structureType: mappedStation.structureType || "STANDALONE",
+          parentStationId: mappedStation.parentStationId || null,
+          parentStation: mappedStation.parentStation || null,
+          dispensers: Array.isArray(mappedStation.dispensers)
+            ? mappedStation.dispensers
+            : [],
+        };
+      });
 
       setStations((prev) => {
         const otherCompanies = prev.filter(
@@ -1797,6 +1940,9 @@ export default function StationsPage({
     return currentStock;
   };
 
+  const getStationStructureType = (station) =>
+    String(station?.structureType || "STANDALONE").trim().toUpperCase();
+
   const realStations = [...stations, ...localStations].filter(
     (station) => !isSameText(station.id, "External_Supply")
   );
@@ -1830,15 +1976,28 @@ export default function StationsPage({
       ? filterActiveProjects(transferProjects).map((project) => project.name || project.id).filter(Boolean)
       : [];
 
-  const filteredStations = stationsWithBalance.filter((station) => {
+  const filteredStations = stationsWithBalance
+    .filter((station) => getStationStructureType(station) !== "DISPENSER")
+    .filter((station) => {
     const search = searchTerm.trim().toLowerCase();
     if (!search) return true;
+
+    const childSearchValues = (station.dispensers || []).flatMap(
+      (dispenser) => [
+        dispenser.stationId,
+        dispenser.name,
+        dispenser.status,
+        dispenser.currentCounter,
+        dispenser.currentLifetimeCounter,
+      ]
+    );
 
     const searchableText = [
       station.id,
       station.stationId,
       station.name,
       station.type,
+      station.structureType,
       station.project,
       station.originalProject,
       station.status,
@@ -1847,6 +2006,7 @@ export default function StationsPage({
       station.currentCounter,
       station.lifetimeCounter,
       station.totalPumpedFromOperations,
+      ...childSearchValues,
     ]
       .filter((value) => value !== undefined && value !== null)
       .join(" ")
@@ -2537,32 +2697,34 @@ export default function StationsPage({
                       {station.project || "-"}
                     </p>
                   </button>
-                  <div className="mt-4 w-full">
-                    <button
-                      onClick={(e) => {
-                        e.stopPropagation();
-                        setCounterResetStation(station);
-                        setStationCounterResetValue(String(station.currentCounter ?? 0));
-                        setStationCounterResetDate("");
-                        setStationCounterResetReason("");
-                      }}
-                      className="block text-[10px] uppercase tracking-[0.24em] text-slate-400 hover:text-yellow-400 transition cursor-pointer mb-2"
-                      title={t("stationWorkflows.counter.title")}
-                    >
-                      {t("stations.table.currentCounter")}
-                    </button>
+                  {getStationStructureType(station) !== "SHARED_TANK" && (
+                    <div className="mt-4 w-full">
+                      <button
+                        onClick={(e) => {
+                          e.stopPropagation();
+                          setCounterResetStation(station);
+                          setStationCounterResetValue(String(station.currentCounter ?? 0));
+                          setStationCounterResetDate("");
+                          setStationCounterResetReason("");
+                        }}
+                        className="block text-[10px] uppercase tracking-[0.24em] text-slate-400 hover:text-yellow-400 transition cursor-pointer mb-2"
+                        title={t("stationWorkflows.counter.title")}
+                      >
+                        {t("stations.table.currentCounter")}
+                      </button>
 
-                    <FlowmeterCounterDisplay value={station.currentCounter} />
+                      <FlowmeterCounterDisplay value={station.currentCounter} />
 
-                    <div className="station-lifetime mt-3 flex items-center justify-between gap-3 rounded-xl border px-3 py-2.5">
-                      <span className="station-lifetime-label text-[10px] uppercase tracking-[0.16em]">
-                        {t("stations.table.lifetimeCounter")}
-                      </span>
-                      <span className="station-lifetime-value text-sm font-black tabular-nums">
-                        {formatNumber(station.lifetimeCounter)}
-                      </span>
+                      <div className="station-lifetime mt-3 flex items-center justify-between gap-3 rounded-xl border px-3 py-2.5">
+                        <span className="station-lifetime-label text-[10px] uppercase tracking-[0.16em]">
+                          {t("stations.table.lifetimeCounter")}
+                        </span>
+                        <span className="station-lifetime-value text-sm font-black tabular-nums">
+                          {formatNumber(station.lifetimeCounter)}
+                        </span>
+                      </div>
                     </div>
-                  </div>
+                  )}
                 </div>
                 </div>
 
@@ -2617,6 +2779,123 @@ export default function StationsPage({
                   </p>
                 </div>
               </div>
+
+              {getStationStructureType(station) === "SHARED_TANK" && (
+                <div className="mb-5 rounded-2xl border border-amber-500/25 bg-slate-950/50 p-3 sm:p-4">
+                  <div className="mb-4 flex items-start justify-between gap-3">
+                    <div className="min-w-0">
+                      <p className="text-xs font-bold uppercase tracking-[0.16em] text-amber-300">
+                        {t("stations.sharedTank.dispensers")}
+                      </p>
+                      <p className="mt-1 text-[11px] leading-relaxed text-slate-500">
+                        {t("stations.sharedTank.dispensersHelp")}
+                      </p>
+                    </div>
+
+                    <span className="shrink-0 rounded-full border border-slate-700 bg-slate-900/80 px-2.5 py-1 text-xs font-bold text-slate-300">
+                      {(station.dispensers || []).length}
+                    </span>
+                  </div>
+
+                  <div className="grid grid-cols-1 gap-3">
+                    {(station.dispensers || []).map((dispenser) => {
+                      const childStation = {
+                        ...dispenser,
+                        id: dispenser.stationId || dispenser.id,
+                        backendId: dispenser.id,
+                        stationBackendId: dispenser.id,
+                        companyId: station.companyId,
+                        project: station.project,
+                        projectId: station.projectId,
+                        structureType: "DISPENSER",
+                        parentStationId:
+                          dispenser.parentStationId ||
+                          station.backendId ||
+                          station.stationBackendId,
+                      };
+
+                      const childCurrentCounter = getEffectiveStationCounter(childStation);
+                      const childLifetimeCounter = getStationLifetimeCounter(childStation);
+
+                      return (
+                        <div
+                          key={dispenser.id}
+                          className="rounded-2xl border border-slate-700/80 bg-slate-900/85 p-3 sm:p-4 shadow-inner shadow-black/20"
+                        >
+                          <div className="mb-4 flex flex-wrap items-start justify-between gap-3">
+                            <div className="min-w-0">
+                              <button
+                                type="button"
+                                onClick={() => setSelectedStationHistory(childStation)}
+                                className="block max-w-full truncate text-left text-base font-bold text-blue-200 transition hover:text-yellow-300"
+                              >
+                                {dispenser.stationId || dispenser.name || dispenser.id}
+                              </button>
+
+                              {dispenser.name &&
+                                dispenser.name !== dispenser.stationId && (
+                                  <p className="mt-1 truncate text-xs text-slate-500">
+                                    {dispenser.name}
+                                  </p>
+                                )}
+                            </div>
+
+                            <button
+                              type="button"
+                              onClick={() => openStatusChange(childStation)}
+                              className="shrink-0 cursor-pointer"
+                            >
+                              {renderStationStatusBadge(dispenser.status)}
+                            </button>
+                          </div>
+
+                          <div className="w-full min-w-0">
+                            <button
+                              type="button"
+                              onClick={() => {
+                                setCounterResetStation(childStation);
+                                setStationCounterResetValue(
+                                  String(childCurrentCounter ?? 0)
+                                );
+                                setStationCounterResetDate("");
+                                setStationCounterResetReason("");
+                              }}
+                              className="mb-2 block text-[10px] uppercase tracking-[0.24em] text-slate-400 transition hover:text-yellow-400 cursor-pointer"
+                              title={t("stationWorkflows.counter.title")}
+                            >
+                              {t("stations.table.currentCounter")}
+                            </button>
+
+                            <div className="overflow-x-auto pb-1 [scrollbar-width:none] [&::-webkit-scrollbar]:hidden">
+                              <div className="min-w-max">
+                                <FlowmeterCounterDisplay
+                                  value={childCurrentCounter}
+                                  compact
+                                />
+                              </div>
+                            </div>
+
+                            <div className="station-lifetime mt-3 flex items-center justify-between gap-3 rounded-xl border px-3 py-2.5">
+                              <span className="station-lifetime-label text-[10px] uppercase tracking-[0.16em]">
+                                {t("stations.table.lifetimeCounter")}
+                              </span>
+                              <span className="station-lifetime-value text-sm font-black tabular-nums">
+                                {formatNumber(childLifetimeCounter)}
+                              </span>
+                            </div>
+                          </div>
+                        </div>
+                      );
+                    })}
+
+                    {!(station.dispensers || []).length && (
+                      <p className="rounded-xl border border-dashed border-slate-700 bg-slate-900/50 px-3 py-4 text-center text-sm text-slate-500">
+                        {t("stations.sharedTank.noDispensers")}
+                      </p>
+                    )}
+                  </div>
+                </div>
+              )}
 
               <div className="station-metric bg-gray-800 rounded-xl p-4">
                 <p className="text-xs text-gray-400 mb-3">{t("stations.table.tankLevel")}</p>
@@ -3175,6 +3454,82 @@ export default function StationsPage({
               </div>
 
               <div className="grid grid-cols-1 sm:grid-cols-3 items-start sm:items-center gap-2 sm:gap-4">
+                <label className="font-medium text-slate-300">{t("stations.fields.structureType")}</label>
+                <select
+                  value={newStation.structureType}
+                  onChange={(e) => {
+                    const nextStructureType = e.target.value;
+                    setNewStation({
+                      ...newStation,
+                      structureType: nextStructureType,
+                      parentStationId:
+                        nextStructureType === "DISPENSER"
+                          ? newStation.parentStationId
+                          : "",
+                      capacity:
+                        nextStructureType === "DISPENSER"
+                          ? ""
+                          : newStation.capacity,
+                      openingBalance:
+                        nextStructureType === "DISPENSER"
+                          ? ""
+                          : newStation.openingBalance,
+                    });
+                    if (nextStructureType === "SHARED_TANK") {
+                      setNewStationOpeningCounter("0");
+                    }
+                  }}
+                  className="col-span-2 rounded-lg border border-slate-700 bg-slate-900 p-2 text-white outline-none focus:border-amber-400"
+                >
+                  <option value="STANDALONE">{t("enumValues.stationStructureType.standalone")}</option>
+                  <option value="SHARED_TANK">{t("enumValues.stationStructureType.sharedTank")}</option>
+                  <option value="DISPENSER">{t("enumValues.stationStructureType.dispenser")}</option>
+                </select>
+              </div>
+
+              {newStation.structureType === "DISPENSER" && (
+                <div className="grid grid-cols-1 sm:grid-cols-3 items-start sm:items-center gap-2 sm:gap-4">
+                  <label className="font-medium text-slate-300">{t("stations.fields.parentStation")}</label>
+                  <select
+                    value={newStation.parentStationId}
+                    onChange={(e) =>
+                      setNewStation({
+                        ...newStation,
+                        parentStationId: e.target.value,
+                      })
+                    }
+                    className="col-span-2 rounded-lg border border-slate-700 bg-slate-900 p-2 text-white outline-none focus:border-amber-400"
+                  >
+                    <option value="">{t("stations.sharedTank.selectParent")}</option>
+                    {stationsWithBalance
+                      .filter(
+                        (station) =>
+                          getStationStructureType(station) === "SHARED_TANK" &&
+                          (
+                            !newStation.project ||
+                            normalizeScopeValue(station.project) ===
+                              normalizeScopeValue(newStation.project) ||
+                            normalizeScopeValue(station.projectId) ===
+                              normalizeScopeValue(newStation.project)
+                          )
+                      )
+                      .map((station) => (
+                        <option
+                          key={makeTenantEntityKey(station)}
+                          value={
+                            station.backendId ||
+                            station.stationBackendId ||
+                            station.id
+                          }
+                        >
+                          {station.id} — {station.project || "-"}
+                        </option>
+                      ))}
+                  </select>
+                </div>
+              )}
+
+              <div className="grid grid-cols-1 sm:grid-cols-3 items-start sm:items-center gap-2 sm:gap-4">
                 <label className="font-medium text-slate-300">{t("stations.fields.project")}</label>
                 <select
                   value={newStation.project}
@@ -3189,27 +3544,34 @@ export default function StationsPage({
                   ))}
                 </select>
               </div>
-              <Field
-                label={t("stations.fields.capacity")}
-                placeholder={t("stations.placeholders.liters")}
-                type="number"
-                value={newStation.capacity}
-                onChange={(e) => setNewStation({ ...newStation, capacity: e.target.value })}
-              />
-              <Field
-                label={t("stations.fields.openingBalance")}
-                placeholder={t("stations.placeholders.liters")}
-                type="number"
-                value={newStation.openingBalance}
-                onChange={(e) => setNewStation({ ...newStation, openingBalance: e.target.value })}
-              />
-              <Field
-                label={t("stations.fields.currentCounter")}
-                placeholder={t("stations.placeholders.currentCounter")}
-                type="number"
-                value={newStationOpeningCounter}
-                onChange={(e) => setNewStationOpeningCounter(e.target.value)}
-              />
+              {newStation.structureType !== "DISPENSER" && (
+                <>
+                  <Field
+                    label={t("stations.fields.capacity")}
+                    placeholder={t("stations.placeholders.liters")}
+                    type="number"
+                    value={newStation.capacity}
+                    onChange={(e) => setNewStation({ ...newStation, capacity: e.target.value })}
+                  />
+                  <Field
+                    label={t("stations.fields.openingBalance")}
+                    placeholder={t("stations.placeholders.liters")}
+                    type="number"
+                    value={newStation.openingBalance}
+                    onChange={(e) => setNewStation({ ...newStation, openingBalance: e.target.value })}
+                  />
+                </>
+              )}
+
+              {newStation.structureType !== "SHARED_TANK" && (
+                <Field
+                  label={t("stations.fields.currentCounter")}
+                  placeholder={t("stations.placeholders.currentCounter")}
+                  type="number"
+                  value={newStationOpeningCounter}
+                  onChange={(e) => setNewStationOpeningCounter(e.target.value)}
+                />
+              )}
 
               <div className="grid grid-cols-1 sm:grid-cols-3 items-start sm:items-center gap-2 sm:gap-4">
                 <label className="font-medium text-slate-300">{t("stations.fields.status")}</label>

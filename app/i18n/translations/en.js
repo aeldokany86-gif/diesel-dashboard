@@ -46,6 +46,7 @@ const en = {
       externalTransfer: "External Transfer",
     },
     stationType: { main: "Main", sub: "Sub" },
+    stationStructureType: { standalone: "Standalone", sharedTank: "Shared Tank", dispenser: "Dispenser" },
   },
 
 
@@ -151,6 +152,8 @@ const en = {
       stationId: "Station ID",
       stationName: "Station Name",
       stationType: "Station Type",
+      structureType: "Structure Type",
+      parentStationId: "Parent Station ID",
       capacity: "Capacity",
       openingBalance: "Opening Balance",
       currentCounter: "Current Counter",
@@ -260,6 +263,19 @@ const en = {
       negativeOpeningBalance: "Opening Balance must be zero or positive.",
       invalidCurrentCounter: "Current Counter is required and must be a valid number.",
       negativeCurrentCounter: "Current Counter must be zero or positive.",
+      invalidStationStructureType: "Structure Type must be STANDALONE, SHARED_TANK, or DISPENSER.",
+      parentNotAllowed: "This station type cannot have a parent station.",
+      openingBalanceRequired: "Opening Balance is required for this station type.",
+      currentCounterRequired: "Current Counter is required for this station type.",
+      sharedTankCounterNotAllowed: "A Shared Tank does not have its own counter.",
+      parentStationRequired: "Parent Station ID is required for a Dispenser.",
+      parentStationSelfReference: "A Dispenser cannot reference itself as its parent.",
+      dispenserOpeningBalanceNotAllowed: "A Dispenser does not own an opening stock balance.",
+      dispenserCapacityNotAllowed: "A Dispenser does not own tank capacity.",
+      parentMustBeSharedTank: "The parent station must be a Shared Tank.",
+      parentProjectMismatch: "The Dispenser and its parent Shared Tank must belong to the same project.",
+      parentStationNotFound: "The parent Shared Tank was not found.",
+      negativeCapacity: "Capacity must be zero or positive.",
     },
     messages: {
       accessEnabled: "Data Import access enabled successfully.",
@@ -352,6 +368,17 @@ const en = {
       directRefuel: "Direct Refuel",
       externalDirectRefuel: "External Direct Refuel",
     },
+    sharedTankReadings: {
+      title: "Shared Tank Supply Meter Readings",
+      description: "Physical dispenser readings captured with External Supply operations. Click a reading to request a correction.",
+      operationNo: "Operation No.",
+      sharedTank: "Shared Tank",
+      dispenser: "Dispenser",
+      reading: "Counter Reading",
+      editReading: "Correct this dispenser reading",
+      invalidCounter: "Dispenser counter must be zero or greater.",
+      invalidReading: "The dispenser reading reference is invalid.",
+    },
     sections: {
       equipmentConsumptionSummary: "Equipment Consumption Summary",
       consumedByEquipmentType: "Consumed Quantity per Equipment Type",
@@ -425,6 +452,11 @@ const en = {
   },
 
   addOperation: {
+    sharedTank: {
+      dispenserReadingsTitle: "Active Dispenser Counter Readings",
+      dispenserReadingsHelp: "Enter the actual physical counter reading for every active dispenser connected to this Shared Tank.",
+      counterReading: "Counter Reading",
+    },
     title: "Add Diesel Operation",
     subtitle: "Select the operation type first, then complete all required fields and the 3 mandatory photos.",
     projectScope: "User Project Scope",
@@ -490,6 +522,8 @@ const en = {
       uploaded: "Uploaded",
     },
     validation: {
+      sharedTankNeedsActiveDispensers: "The selected Shared Tank has no active dispensers.",
+      dispenserReadingsRequired: "Enter a valid counter reading for every active dispenser. A reading cannot be lower than its current counter.",
       selectTransactionType: "Please select transaction type.",
       transactionNotAllowed: "You are not allowed to add this transaction type.",
       selectSourceStation: "Please select source station.",
@@ -532,6 +566,7 @@ const en = {
       dieselQuantity: "Diesel Quantity",
       odometer: "Odometer",
       stationCounter: "Station Counter",
+      dispenserCounter: "Dispenser Counter Reading",
       externalStation: "External Station",
       sourceStation: "Source Station",
       operator: "Operator",
@@ -541,6 +576,7 @@ const en = {
       operationDate: "Operation Date",
       operation: "Operation",
       operationType: "Operation Type",
+      dispenser: "Dispenser",
     },
     placeholders: {
       selectEquipment: "Select Equipment",
@@ -833,6 +869,13 @@ const en = {
   },
 
   stations: {
+    sharedTank: {
+      dispensers: "Dispensing Points",
+      dispenser: "Dispenser",
+      dispensersHelp: "Counters are independent; fuel stock belongs to the Shared Tank.",
+      noDispensers: "No dispensers are linked to this Shared Tank.",
+      selectParent: "Select parent Shared Tank",
+    },
     title: "Fuel Stations",
     subtitle: "Fuel stock management",
     searchPlaceholder: "Search by station ID, name, project, type, status...",
@@ -893,6 +936,8 @@ const en = {
     },
     add: { title: "Add Station", save: "Save Station" },
     fields: {
+      structureType: "Structure Type",
+      parentStation: "Parent Shared Tank",
       stationId: "Station ID",
       stationType: "Station Type",
       project: "Project",
@@ -983,6 +1028,9 @@ const en = {
       validCapacity: "Capacity must be a valid zero or positive number.",
       validOpeningBalance: "Opening balance must be a valid zero or positive number.",
       validOpeningCounter: "Opening counter must be a valid zero or positive number.",
+      parentSharedTankRequired: "Select a parent Shared Tank for the Dispenser.",
+      parentMustBeSharedTank: "The selected parent station must be a Shared Tank.",
+      parentProjectMismatch: "The Dispenser and its parent Shared Tank must belong to the same project.",
       selectNewProject: "Please select a new project.",
       differentProject: "Please select a project different from the current project.",
       selectValidProject: "Please select a valid project.",

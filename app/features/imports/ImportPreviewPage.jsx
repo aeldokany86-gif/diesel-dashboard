@@ -67,6 +67,19 @@ const VALIDATION_ISSUE_TRANSLATION_KEYS = {
   NEGATIVE_OPENING_BALANCE: "negativeOpeningBalance",
   INVALID_CURRENT_COUNTER: "invalidCurrentCounter",
   NEGATIVE_CURRENT_COUNTER: "negativeCurrentCounter",
+  INVALID_STATION_STRUCTURE_TYPE: "invalidStationStructureType",
+  PARENT_NOT_ALLOWED: "parentNotAllowed",
+  OPENING_BALANCE_REQUIRED: "openingBalanceRequired",
+  CURRENT_COUNTER_REQUIRED: "currentCounterRequired",
+  SHARED_TANK_COUNTER_NOT_ALLOWED: "sharedTankCounterNotAllowed",
+  PARENT_STATION_REQUIRED: "parentStationRequired",
+  PARENT_STATION_SELF_REFERENCE: "parentStationSelfReference",
+  DISPENSER_OPENING_BALANCE_NOT_ALLOWED: "dispenserOpeningBalanceNotAllowed",
+  DISPENSER_CAPACITY_NOT_ALLOWED: "dispenserCapacityNotAllowed",
+  PARENT_MUST_BE_SHARED_TANK: "parentMustBeSharedTank",
+  PARENT_PROJECT_MISMATCH: "parentProjectMismatch",
+  PARENT_STATION_NOT_FOUND: "parentStationNotFound",
+  NEGATIVE_CAPACITY: "negativeCapacity",
 };
 
 function getTranslatedIssue(issue, t) {
@@ -342,13 +355,15 @@ export default function ImportPreviewPage({
           </div>
         ) : isStations ? (
           <div className="overflow-x-auto border border-slate-300">
-            <table className="min-w-[1250px] w-full border-collapse text-xs">
+            <table className="min-w-[1550px] w-full border-collapse text-xs">
               <thead className="bg-slate-100">
                 <tr>
                   <th className="border-b border-e border-slate-300 px-2 py-2 text-start">#</th>
                   <th className="border-b border-e border-slate-300 px-2 py-2 text-start">{t("dataImport.fields.stationId")}</th>
                   <th className="border-b border-e border-slate-300 px-2 py-2 text-start">{t("dataImport.fields.stationName")}</th>
                   <th className="border-b border-e border-slate-300 px-2 py-2 text-start">{t("dataImport.fields.stationType")}</th>
+                  <th className="border-b border-e border-slate-300 px-2 py-2 text-start">{t("dataImport.fields.structureType")}</th>
+                  <th className="border-b border-e border-slate-300 px-2 py-2 text-start">{t("dataImport.fields.parentStationId")}</th>
                   <th className="border-b border-e border-slate-300 px-2 py-2 text-start">{t("dataImport.fields.capacity")}</th>
                   <th className="border-b border-e border-slate-300 px-2 py-2 text-start">{t("dataImport.fields.projectCode")}</th>
                   <th className="border-b border-e border-slate-300 px-2 py-2 text-start">{t("dataImport.fields.projectName")}</th>
@@ -370,6 +385,8 @@ export default function ImportPreviewPage({
                       <td className="border-b border-e border-slate-200 px-2 py-2 align-top">{valueOrDash(data.stationId)}</td>
                       <td className="border-b border-e border-slate-200 px-2 py-2 align-top">{valueOrDash(data.stationName)}</td>
                       <td className="border-b border-e border-slate-200 px-2 py-2 align-top">{valueOrDash(data.stationType)}</td>
+                      <td className="border-b border-e border-slate-200 px-2 py-2 align-top">{valueOrDash(data.structureType)}</td>
+                      <td className="border-b border-e border-slate-200 px-2 py-2 align-top">{valueOrDash(data.parentStationId)}</td>
                       <td className="border-b border-e border-slate-200 px-2 py-2 align-top">{valueOrDash(data.capacity)}</td>
                       <td className="border-b border-e border-slate-200 px-2 py-2 align-top">{valueOrDash(data.projectCode)}</td>
                       <td className="border-b border-e border-slate-200 px-2 py-2 align-top">{valueOrDash(computed.projectName)}</td>

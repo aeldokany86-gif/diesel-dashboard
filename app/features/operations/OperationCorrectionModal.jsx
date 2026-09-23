@@ -64,6 +64,8 @@ export default function OperationCorrectionModal({
       ? t("operationCorrection.fields.odometer")
       : editCell.field === "stationCounter"
       ? t("operationCorrection.fields.stationCounter")
+      : editCell.field === "dispenserCounter"
+      ? t("operationCorrection.fields.dispenserCounter")
       : editCell.field === "station"
       ? editCell.isExternalDirectRefuel
         ? t("operationCorrection.fields.externalStation")
@@ -145,6 +147,18 @@ export default function OperationCorrectionModal({
                 {operationContext?.operationType || editCell.operationType || "-"}
               </p>
             </div>
+            {editCell.field === "dispenserCounter" && (
+              <div className="sm:col-span-2">
+                <p className="text-xs text-slate-400">
+                  {t("operationCorrection.context.dispenser")}
+                </p>
+                <p className="font-bold text-amber-300">
+                  {editCell.dispenserDisplayCode ||
+                    getStationDisplayCode?.(editCell.targetDispenserStationId) ||
+                    "-"}
+                </p>
+              </div>
+            )}
           </div>
 
           <div className="bg-gray-100 rounded-xl p-4 mb-4">
@@ -284,6 +298,8 @@ export default function OperationCorrectionModal({
             ) : (
               <input
                 type="number"
+                min={editCell.field === "dispenserCounter" ? "0" : undefined}
+                step={editCell.field === "dispenserCounter" ? "any" : undefined}
                 value={editCell.newValue}
                 onChange={(event) =>
                   setEditCell({ ...editCell, newValue: event.target.value })
