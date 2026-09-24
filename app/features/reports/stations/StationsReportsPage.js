@@ -25,6 +25,8 @@ const COUNTER_HISTORY_HEADERS = [
   "Event Type",
   "Reference",
   "Station",
+  "Structure",
+  "Parent Shared Tank",
   "Project",
   "Operation Type",
   "Counter Before",
@@ -183,6 +185,8 @@ function CounterHistoryDetailsModal({ row, onClose }) {
               ["Event Type", formatLabel(row.eventType)],
               ["Reference", row.reference],
               ["Station", row.station],
+              ["Structure", formatLabel(row.structureType)],
+              ["Parent Shared Tank", row.parentSharedTank],
               ["Project", row.project],
               ["Operation Type", formatLabel(row.operationType)],
               ["Counter Before", formatNumber(row.counterBefore)],
@@ -248,6 +252,11 @@ function StationCounterMeterHistoryReport({
           eventDate: event?.eventDate || event?.createdAt,
           reference: event?.referenceNo || event?.operationNo || event?.eventId || "-",
           station: getStationLabel(station),
+          structureType: String(station?.structureType || "STANDALONE").toUpperCase(),
+          parentSharedTank:
+            station?.parentStation?.stationId ||
+            station?.parentStation?.name ||
+            "-",
           project: getProjectLabel(project),
           performedBy: getPerformedByName(event?.performedBy),
           cycle: getEventCycle(event),
@@ -377,6 +386,8 @@ function StationCounterMeterHistoryReport({
         formatLabel(row.eventType),
         row.reference,
         row.station,
+        formatLabel(row.structureType),
+        row.parentSharedTank,
         row.project,
         formatLabel(row.operationType),
         formatNumber(row.counterBefore),
@@ -399,6 +410,8 @@ function StationCounterMeterHistoryReport({
         "Event Type": formatLabel(row.eventType),
         Reference: row.reference,
         Station: row.station,
+        Structure: formatLabel(row.structureType),
+        "Parent Shared Tank": row.parentSharedTank,
         Project: row.project,
         "Operation Type": formatLabel(row.operationType),
         "Counter Before": row.counterBefore,
@@ -533,6 +546,8 @@ function StationCounterMeterHistoryReport({
                           <td className="whitespace-nowrap px-3 py-3"><span className={`rounded-full border px-2.5 py-1 text-xs font-extrabold ${row.eventType === "RESET" ? "border-violet-500/30 bg-violet-500/10 text-violet-300" : row.eventType === "CORRECTION" ? "border-amber-500/30 bg-amber-500/10 text-amber-300" : "border-sky-500/30 bg-sky-500/10 text-sky-300"}`}>{formatLabel(row.eventType)}</span></td>
                           <td className="whitespace-nowrap px-3 py-3 font-bold text-amber-300">{row.reference}</td>
                           <td className="whitespace-nowrap px-3 py-3 font-extrabold text-white">{row.station}</td>
+                          <td className="whitespace-nowrap px-3 py-3 text-sky-300">{formatLabel(row.structureType)}</td>
+                          <td className="whitespace-nowrap px-3 py-3 text-cyan-300">{row.parentSharedTank}</td>
                           <td className="whitespace-nowrap px-3 py-3 text-slate-300">{row.project}</td>
                           <td className="whitespace-nowrap px-3 py-3 text-slate-300">{formatLabel(row.operationType)}</td>
                           <td className="whitespace-nowrap px-3 py-3 text-right text-slate-300">{formatNumber(row.counterBefore)}</td>
@@ -601,6 +616,7 @@ const STATION_MASTER_FILTERS = {
   stationId: "all",
   status: "all",
   type: "all",
+  structureType: "all",
 };
 
 const STATION_MASTER_HEADERS = [
@@ -608,6 +624,8 @@ const STATION_MASTER_HEADERS = [
   "Station Name",
   "Project",
   "Type",
+  "Structure",
+  "Parent Shared Tank",
   "Status",
   "Capacity (L)",
   "Current Stock (L)",
@@ -673,6 +691,30 @@ function getStationNumber(station, aliases = []) {
   return 0;
 }
 
+function getStationStructureType(station) {
+  return String(station?.structureType || "STANDALONE").trim().toUpperCase();
+}
+
+function getParentSharedTankLabel(station, allStations = []) {
+  const nested = station?.parentStation?.stationId || station?.parentStation?.name || "";
+  if (nested) return nested;
+
+  const parentId = station?.parentStationId;
+  if (!parentId) return "-";
+
+  const parent = allStations.find(
+    (candidate) =>
+      normalizeValue(getStationBackendId(candidate)) === normalizeValue(parentId),
+  );
+
+  return parent ? getStationLabel(parent) : parentId;
+}
+
+function formatAuthoritativeNumber(value) {
+  if (value === null || value === undefined || value === "") return "-";
+  return formatNumber(value);
+}
+
 function StationMasterReport({
   selectedReport,
   currentUser,
@@ -702,12 +744,29 @@ function StationMasterReport({
         projectId: getStationProjectId(station),
         project: getStationProjectLabel(station, projects),
         type: station?.type || station?.stationType || "-",
+        structureType: getStationStructureType(station),
+        parentSharedTank: getParentSharedTankLabel(station, stations),
         status: getStationStatus(station),
-        capacity: getStationNumber(station, ["capacity", "tankCapacity", "stationCapacity"]),
-        currentStock: getStationNumber(station, ["currentStock", "currentBalance", "stockBalance", "balance"]),
-        currentCounter: getStationNumber(station, ["currentCounter", "counter", "currentCounterValue"]),
-        lifetimeCounter: getStationNumber(station, ["currentLifetimeCounter", "lifetimeCounter", "totalLifetimeCounter"]),
-        counterCycle: getStationNumber(station, ["currentCounterCycle", "counterCycle", "meterCycle"]) || 1,
+        capacity:
+          getStationStructureType(station) === "DISPENSER"
+            ? null
+            : getStationNumber(station, ["capacity", "tankCapacity", "stationCapacity"]),
+        currentStock:
+          getStationStructureType(station) === "DISPENSER"
+            ? null
+            : getStationNumber(station, ["currentStock", "currentBalance", "stockBalance", "balance"]),
+        currentCounter:
+          getStationStructureType(station) === "SHARED_TANK"
+            ? null
+            : getStationNumber(station, ["currentCounter", "counter", "currentCounterValue"]),
+        lifetimeCounter:
+          getStationStructureType(station) === "SHARED_TANK"
+            ? null
+            : getStationNumber(station, ["currentLifetimeCounter", "lifetimeCounter", "totalLifetimeCounter"]),
+        counterCycle:
+          getStationStructureType(station) === "SHARED_TANK"
+            ? null
+            : getStationNumber(station, ["currentCounterCycle", "counterCycle", "meterCycle"]) || 1,
       })),
     [stations, projects]
   );
@@ -765,6 +824,11 @@ function StationMasterReport({
         normalizeValue(row.type) !== normalizeValue(appliedFilters.type)
       ) return false;
 
+      if (
+        appliedFilters.structureType !== "all" &&
+        normalizeValue(row.structureType) !== normalizeValue(appliedFilters.structureType)
+      ) return false;
+
       return true;
     });
   }, [rows, appliedFilters]);
@@ -775,8 +839,10 @@ function StationMasterReport({
       active: filteredRows.filter((row) => normalizeValue(row.status) === "active").length,
       inactive: filteredRows.filter((row) => normalizeValue(row.status) === "inactive").length,
       deleted: filteredRows.filter((row) => normalizeValue(row.status) === "deleted").length,
-      totalCapacity: filteredRows.reduce((sum, row) => sum + row.capacity, 0),
-      currentStock: filteredRows.reduce((sum, row) => sum + row.currentStock, 0),
+      sharedTanks: filteredRows.filter((row) => row.structureType === "SHARED_TANK").length,
+      dispensers: filteredRows.filter((row) => row.structureType === "DISPENSER").length,
+      totalCapacity: filteredRows.reduce((sum, row) => sum + (Number(row.capacity) || 0), 0),
+      currentStock: filteredRows.reduce((sum, row) => sum + (Number(row.currentStock) || 0), 0),
     }),
     [filteredRows]
   );
@@ -805,6 +871,13 @@ function StationMasterReport({
     {
       label: "Station Type",
       value: appliedFilters.type === "all" ? "All Types" : appliedFilters.type,
+    },
+    {
+      label: "Structure",
+      value:
+        appliedFilters.structureType === "all"
+          ? "All Structures"
+          : formatLabel(appliedFilters.structureType),
     },
     {
       label: "Station",
@@ -842,12 +915,14 @@ function StationMasterReport({
         row.stationName,
         row.project,
         row.type,
+        formatLabel(row.structureType),
+        row.parentSharedTank,
         formatLabel(row.status),
-        formatNumber(row.capacity),
-        formatNumber(row.currentStock),
-        formatNumber(row.currentCounter),
-        formatNumber(row.lifetimeCounter),
-        formatNumber(row.counterCycle, 0),
+        formatAuthoritativeNumber(row.capacity),
+        formatAuthoritativeNumber(row.currentStock),
+        formatAuthoritativeNumber(row.currentCounter),
+        formatAuthoritativeNumber(row.lifetimeCounter),
+        row.counterCycle === null ? "-" : formatNumber(row.counterCycle, 0),
       ]),
     });
   };
@@ -862,12 +937,14 @@ function StationMasterReport({
         "Station Name": row.stationName,
         Project: row.project,
         Type: row.type,
+        Structure: formatLabel(row.structureType),
+        "Parent Shared Tank": row.parentSharedTank,
         Status: formatLabel(row.status),
-        "Capacity (L)": row.capacity,
-        "Current Stock (L)": row.currentStock,
-        "Current Counter": row.currentCounter,
-        "Lifetime Counter": row.lifetimeCounter,
-        "Counter Cycle": row.counterCycle,
+        "Capacity (L)": row.capacity ?? "",
+        "Current Stock (L)": row.currentStock ?? "",
+        "Current Counter": row.currentCounter ?? "",
+        "Lifetime Counter": row.lifetimeCounter ?? "",
+        "Counter Cycle": row.counterCycle ?? "",
       })),
       totals: {
         "Station ID": "Totals",
@@ -969,7 +1046,8 @@ function StationMasterReport({
                 ["Total Stations", totals.stations],
                 ["Active Stations", totals.active],
                 ["Inactive Stations", totals.inactive],
-                ["Deleted Stations", totals.deleted],
+                ["Shared Tanks", totals.sharedTanks],
+                ["Dispensing Points", totals.dispensers],
                 ["Total Capacity (L)", formatNumber(totals.totalCapacity)],
                 ["Current Stock (L)", formatNumber(totals.currentStock)],
               ].map(([label, value]) => (
@@ -1001,12 +1079,14 @@ function StationMasterReport({
                         <td className="whitespace-nowrap px-3 py-3 font-bold text-white">{row.stationName}</td>
                         <td className="whitespace-nowrap px-3 py-3 text-slate-300">{row.project}</td>
                         <td className="whitespace-nowrap px-3 py-3 text-slate-300">{row.type}</td>
+                        <td className="whitespace-nowrap px-3 py-3 font-extrabold text-sky-300">{formatLabel(row.structureType)}</td>
+                        <td className="whitespace-nowrap px-3 py-3 text-cyan-300">{row.parentSharedTank}</td>
                         <td className="whitespace-nowrap px-3 py-3 font-bold text-slate-300">{formatLabel(row.status)}</td>
-                        <td className="whitespace-nowrap px-3 py-3 text-right font-extrabold text-emerald-300">{formatNumber(row.capacity)}</td>
-                        <td className="whitespace-nowrap px-3 py-3 text-right font-extrabold text-sky-300">{formatNumber(row.currentStock)}</td>
-                        <td className="whitespace-nowrap px-3 py-3 text-right font-extrabold text-white">{formatNumber(row.currentCounter)}</td>
-                        <td className="whitespace-nowrap px-3 py-3 text-right font-extrabold text-amber-300">{formatNumber(row.lifetimeCounter)}</td>
-                        <td className="whitespace-nowrap px-3 py-3 text-center font-extrabold text-violet-300">{formatNumber(row.counterCycle, 0)}</td>
+                        <td className="whitespace-nowrap px-3 py-3 text-right font-extrabold text-emerald-300">{formatAuthoritativeNumber(row.capacity)}</td>
+                        <td className="whitespace-nowrap px-3 py-3 text-right font-extrabold text-sky-300">{formatAuthoritativeNumber(row.currentStock)}</td>
+                        <td className="whitespace-nowrap px-3 py-3 text-right font-extrabold text-white">{formatAuthoritativeNumber(row.currentCounter)}</td>
+                        <td className="whitespace-nowrap px-3 py-3 text-right font-extrabold text-amber-300">{formatAuthoritativeNumber(row.lifetimeCounter)}</td>
+                        <td className="whitespace-nowrap px-3 py-3 text-center font-extrabold text-violet-300">{row.counterCycle === null ? "-" : formatNumber(row.counterCycle, 0)}</td>
                       </tr>
                     )) : (
                       <tr><td colSpan={STATION_MASTER_HEADERS.length} className="px-6 py-12 text-center text-slate-500">No stations match the selected filters.</td></tr>
@@ -1033,6 +1113,7 @@ function StationMasterReport({
                 <label className="block"><span className="mb-2 block text-sm font-bold text-slate-300">Status</span><select value={draftFilters.status} onChange={(event) => setDraftFilters((previous) => ({ ...previous, status: event.target.value }))} className="w-full rounded-xl border border-slate-700 bg-slate-950 px-3 py-2.5 text-sm text-white outline-none focus:border-amber-500"><option value="all">All Statuses</option><option value="ACTIVE">Active</option><option value="INACTIVE">Inactive</option><option value="DELETED">Deleted</option></select></label>
 
                 <label className="block"><span className="mb-2 block text-sm font-bold text-slate-300">Station Type</span><select value={draftFilters.type} onChange={(event) => setDraftFilters((previous) => ({ ...previous, type: event.target.value }))} className="w-full rounded-xl border border-slate-700 bg-slate-950 px-3 py-2.5 text-sm text-white outline-none focus:border-amber-500"><option value="all">All Types</option>{typeOptions.map((type) => <option key={type} value={type}>{type}</option>)}</select></label>
+                <label className="block"><span className="mb-2 block text-sm font-bold text-slate-300">Structure</span><select value={draftFilters.structureType} onChange={(event) => setDraftFilters((previous) => ({ ...previous, structureType: event.target.value }))} className="w-full rounded-xl border border-slate-700 bg-slate-950 px-3 py-2.5 text-sm text-white outline-none focus:border-amber-500"><option value="all">All Structures</option><option value="STANDALONE">Standalone</option><option value="SHARED_TANK">Shared Tank</option><option value="DISPENSER">Dispensing Point</option></select></label>
 
                 <label className="block">
                   <span className="mb-2 block text-sm font-bold text-slate-300">Station</span>
@@ -1520,6 +1601,7 @@ function StationTransferReport({
     </ReportLocalizationBoundary>
   );
 }
+
 
 export default function StationsReportsPage(props) {
   if (props?.selectedReport?.id === "station-counter-meter-history") {

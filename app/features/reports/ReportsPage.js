@@ -805,23 +805,68 @@ function getDestinationMeterReading(operation) {
     : null;
 }
 
+
+function getDispenserLabel(item) {
+  return (
+    item?.station?.stationId ||
+    item?.station?.stationCode ||
+    item?.station?.code ||
+    item?.station?.name ||
+    item?.stationId ||
+    "-"
+  );
+}
+
+function getDispenserBackendId(item) {
+  return (
+    item?.stationId ||
+    item?.station?.id ||
+    item?.station?.backendId ||
+    item?.station?.stationId ||
+    item?.station?.stationCode ||
+    ""
+  );
+}
+
+function getOperationCounterReadings(operation) {
+  if (Array.isArray(operation?.stationCounterReadings)) {
+    return operation.stationCounterReadings;
+  }
+
+  if (Array.isArray(operation?.dispenserReadings)) {
+    return operation.dispenserReadings;
+  }
+
+  return [];
+}
+
+function getCounterReadingValue(item) {
+  const value = item?.counterValue ?? item?.counter;
+  const number = Number(value);
+  return Number.isFinite(number) ? number : null;
+}
+
 function mapSummaryOperation(operation, index) {
   const type = String(operation?.type || "").toUpperCase();
+
   const sourceStation = getOperationEntityLabel(operation?.sourceStation, [
     "stationId",
     "stationCode",
     "code",
   ]);
+
   const destinationStation = getOperationEntityLabel(
     operation?.destinationStation,
     ["stationId", "stationCode", "code"],
   );
+
   const asset = getOperationEntityLabel(operation?.asset, [
     "assetId",
     "equipmentNo",
     "equipmentNumber",
     "code",
   ]);
+
   const externalSource =
     operation?.externalStationName ||
     operation?.supplierName ||
@@ -843,6 +888,7 @@ function mapSummaryOperation(operation, index) {
 
   return {
     key: operation?.id || `${operation?.operationNo || "operation"}-${index}`,
+    operationId: operation?.id || "",
     operationNo: operation?.operationNo || "-",
     transactionDate:
       operation?.occurredAt || operation?.operationDate || operation?.createdAt,
@@ -886,7 +932,86 @@ function mapSummaryOperation(operation, index) {
       operation?.sourceProjectNameAtOperation ||
       operation?.destinationProjectNameAtOperation ||
       "-",
+    rowKind: "MOVEMENT",
+    countsInTotals: true,
   };
+}
+
+function expandSummaryOperation(operation, index) {
+  const base = mapSummaryOperation(operation, index);
+
+  const allocations = Array.isArray(operation?.dispenserAllocations)
+    ? operation.dispenserAllocations.filter((item) => {
+        const quantity = Number(item?.quantity);
+        return Number.isFinite(quantity) && quantity > 0;
+      })
+    : [];
+
+  const readings = getOperationCounterReadings(operation).filter(
+    (item) => getCounterReadingValue(item) !== null,
+  );
+
+  const rows = [];
+
+  if (allocations.length) {
+    const allocationTotal = allocations.reduce(
+      (sum, item) => sum + Number(item?.quantity || 0),
+      0,
+    );
+
+    allocations.forEach((allocation, allocationIndex) => {
+      const quantity = Number(allocation?.quantity || 0);
+      const proportionalCost =
+        allocationTotal > 0
+          ? (base.cost * quantity) / allocationTotal
+          : 0;
+
+      rows.push({
+        ...base,
+        key: `${base.key}-source-${allocationIndex}`,
+        source: getDispenserLabel(allocation),
+        sourceStationRaw: getDispenserBackendId(allocation),
+        sourceGroupStationRaw:
+          operation?.sourceStationId ||
+          operation?.sourceStation?.id ||
+          operation?.sourceStation?.backendId ||
+          "",
+        quantity,
+        cost: proportionalCost,
+        rowKind: "MOVEMENT",
+        countsInTotals: true,
+      });
+    });
+  } else {
+    rows.push({
+      ...base,
+      sourceGroupStationRaw: base.sourceStationRaw,
+      destinationGroupStationRaw: base.destinationStationRaw,
+    });
+  }
+
+  if (readings.length) {
+    readings.forEach((reading, readingIndex) => {
+      rows.push({
+        ...base,
+        key: `${base.key}-meter-${readingIndex}`,
+        destination: getDispenserLabel(reading),
+        destinationMeter: getCounterReadingValue(reading),
+        destinationStationRaw: getDispenserBackendId(reading),
+        destinationGroupStationRaw:
+          operation?.destinationStationId ||
+          operation?.destinationStation?.id ||
+          operation?.destinationStation?.backendId ||
+          "",
+        quantity: null,
+        cost: null,
+        rowKind: "METER_READING",
+        countsInTotals: false,
+      });
+    });
+  }
+
+  return rows;
 }
 
 const STATION_MOVEMENT_FILTERS = {
@@ -1904,9 +2029,16 @@ function StationMovementsReport({
     draftFilters.projectId === "all" ? "" : draftFilters.projectId;
 
   const availableStations = useMemo(() => {
-    if (!selectedProjectId) return stations;
+    const stockOwners = stations.filter(
+      (station) =>
+        String(station?.structureType || "STANDALONE")
+          .trim()
+          .toUpperCase() !== "DISPENSER",
+    );
 
-    return stations.filter((station) => {
+    if (!selectedProjectId) return stockOwners;
+
+    return stockOwners.filter((station) => {
       const stationProject =
         station?.projectId ||
         station?.projectBackendId ||
@@ -1914,9 +2046,7 @@ function StationMovementsReport({
         station?.project ||
         "";
 
-      return (
-        normalizeValue(stationProject) === normalizeValue(selectedProjectId)
-      );
+      return normalizeValue(stationProject) === normalizeValue(selectedProjectId);
     });
   }, [stations, selectedProjectId]);
 
@@ -6312,9 +6442,13 @@ export default function ReportsPage({
     });
   }, [stations, draftFilters.project]);
 
-  const reportRows = useMemo(() => {
-    return operationsReportRows.map(mapSummaryOperation);
-  }, [operationsReportRows]);
+  const reportRows = useMemo(
+    () =>
+      operationsReportRows.flatMap((operation, index) =>
+        expandSummaryOperation(operation, index),
+      ),
+    [operationsReportRows],
+  );
 
   const filteredRows = useMemo(() => {
     return reportRows.filter((row) => {
@@ -6372,11 +6506,17 @@ export default function ReportsPage({
         }
 
         const stationCandidates = getStationCandidates(selectedStation);
-        const sourceMatches = stationCandidates.includes(
-          normalizeValue(row.sourceStationRaw),
+        const sourceMatches = [
+          row.sourceStationRaw,
+          row.sourceGroupStationRaw,
+        ].some((value) =>
+          stationCandidates.includes(normalizeValue(value)),
         );
-        const destinationMatches = stationCandidates.includes(
-          normalizeValue(row.destinationStationRaw),
+        const destinationMatches = [
+          row.destinationStationRaw,
+          row.destinationGroupStationRaw,
+        ].some((value) =>
+          stationCandidates.includes(normalizeValue(value)),
         );
 
         if (!sourceMatches && !destinationMatches) {
@@ -6414,18 +6554,32 @@ export default function ReportsPage({
   const operationsPagination = useReportPagination(filteredRows);
   const paginatedOperationRows = operationsPagination.paginatedItems;
 
-  const totals = useMemo(
-    () =>
-      filteredRows.reduce(
-        (summary, row) => ({
-          operations: summary.operations + 1,
+  const totals = useMemo(() => {
+    const operationKeys = new Set();
+
+    const totals = filteredRows.reduce(
+      (summary, row) => {
+        operationKeys.add(row.operationId || row.operationNo);
+
+        if (!row.countsInTotals) {
+          return summary;
+        }
+
+        return {
+          ...summary,
           quantity: summary.quantity + getNumericValue(row.quantity),
           cost: summary.cost + getNumericValue(row.cost),
-        }),
-        { operations: 0, quantity: 0, cost: 0 },
-      ),
-    [filteredRows],
-  );
+        };
+      },
+      { quantity: 0, cost: 0 },
+    );
+
+    return {
+      operations: operationKeys.size,
+      quantity: totals.quantity,
+      cost: totals.cost,
+    };
+  }, [filteredRows]);
 
   const filterSummary = useMemo(() => {
     const selectedAsset = assets.find(
@@ -6467,8 +6621,8 @@ export default function ReportsPage({
           row.destinationMeter === null
             ? "-"
             : formatNumber(row.destinationMeter),
-        Quantity: row.quantity,
-        [`Cost (${currency})`]: row.cost,
+        Quantity: row.countsInTotals ? row.quantity : "-",
+        [`Cost (${currency})`]: row.countsInTotals ? row.cost : "-",
         Status: String(row.status || "COMPLETED").replaceAll("_", " "),
       })),
     [filteredRows, currency],
@@ -6505,8 +6659,8 @@ export default function ReportsPage({
         row.destinationMeter === null
           ? "-"
           : formatNumber(row.destinationMeter),
-        formatNumber(row.quantity),
-        formatMoney(row.cost, currency),
+        row.countsInTotals ? formatNumber(row.quantity) : "-",
+        row.countsInTotals ? formatMoney(row.cost, currency) : "-",
         String(row.status || "COMPLETED").replaceAll("_", " "),
       ]),
       footerRow: [
@@ -6941,10 +7095,10 @@ export default function ReportsPage({
                                   : formatNumber(row.destinationMeter)}
                               </td>
                               <td className="whitespace-nowrap px-4 py-3 text-center font-bold text-white">
-                                {formatNumber(row.quantity)}
+                                {row.countsInTotals ? formatNumber(row.quantity) : "-"}
                               </td>
                               <td className="whitespace-nowrap px-4 py-3 text-right font-bold text-emerald-300">
-                                {formatMoney(row.cost, currency)}
+                                {row.countsInTotals ? formatMoney(row.cost, currency) : "-"}
                               </td>
                               <td className="whitespace-nowrap px-4 py-3">
                                 <span className="rounded-full border border-emerald-500/30 bg-emerald-500/10 px-2.5 py-1 text-xs font-bold text-emerald-300">
@@ -6959,7 +7113,7 @@ export default function ReportsPage({
 
                           <tr className="bg-slate-950/70">
                             <td
-                              colSpan={9}
+                              colSpan={12}
                               className="px-4 py-4 text-right text-sm font-black uppercase tracking-wider text-amber-300"
                             >
                               Grand Total
@@ -6999,7 +7153,7 @@ export default function ReportsPage({
                     </tbody>
                   </table>
                 </div>
-                    <ReportPagination pagination={operationsPagination} itemLabel="operations" />
+                    <ReportPagination pagination={operationsPagination} itemLabel="rows" />
               </section>
             </>
           )}
