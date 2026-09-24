@@ -178,6 +178,7 @@ export default function AddOperationModal({
   const [dieselQuantity, setDieselQuantity] = useState("");
   const [odometer, setOdometer] = useState("");
   const [dispenserReadings, setDispenserReadings] = useState({});
+  const [dispenserAllocations, setDispenserAllocations] = useState({});
   const [externalStationName, setExternalStationName] = useState("");
   const [invoiceNumber, setInvoiceNumber] = useState("");
   const [externalInvoiceAmount, setExternalInvoiceAmount] = useState("");
@@ -321,10 +322,8 @@ export default function AddOperationModal({
   const isStationEligibleAsSource = (station) => {
     const structureType = getStationStructureType(station);
 
-    if (isExternalTransfer) return structureType === "STANDALONE";
-
-    if (isInternalTransfer || isAssetRefuel) {
-      return structureType === "STANDALONE" || structureType === "DISPENSER";
+    if (isDirectRefuel || isInternalTransfer || isExternalTransfer) {
+      return ["STANDALONE", "DISPENSER", "SHARED_TANK"].includes(structureType);
     }
 
     return structureType === "STANDALONE";
@@ -333,11 +332,7 @@ export default function AddOperationModal({
   const isStationEligibleAsDestination = (station) => {
     const structureType = getStationStructureType(station);
 
-    if (isInternalTransfer || isExternalTransfer) {
-      return structureType === "STANDALONE";
-    }
-
-    if (isExternalSupply) {
+    if (isInternalTransfer || isExternalTransfer || isExternalSupply) {
       return structureType === "STANDALONE" || structureType === "SHARED_TANK";
     }
 
@@ -400,11 +395,57 @@ export default function AddOperationModal({
   const selectedDestinationStation = (allStations.length ? allStations : stations).find(
     (station) => isSameText(station.id, destinationId)
   );
+  const selectedSourceStructureType =
+    getStationStructureType(selectedSourceStation);
   const selectedDestinationStructureType =
     getStationStructureType(selectedDestinationStation);
-  const isSharedTankExternalSupply =
-    isExternalSupply && selectedDestinationStructureType === "SHARED_TANK";
-  const activeDestinationDispensers = isSharedTankExternalSupply
+
+  const isSharedTankSource =
+    (isDirectRefuel || isInternalTransfer || isExternalTransfer) &&
+    selectedSourceStructureType === "SHARED_TANK";
+
+  const activeSourceDispensers = isSharedTankSource
+    ? (Array.isArray(selectedSourceStation?.dispensers)
+        ? selectedSourceStation.dispensers
+        : []
+      ).filter(
+        (dispenser) =>
+          String(dispenser?.status || "ACTIVE").trim().toUpperCase() === "ACTIVE"
+      )
+    : [];
+
+  const normalizedDispenserAllocations = activeSourceDispensers.map(
+    (dispenser) => ({
+      stationId: dispenser.id,
+      quantity: Number(dispenserAllocations[dispenser.id] || 0),
+    })
+  );
+
+  const dispenserAllocationTotal = normalizedDispenserAllocations.reduce(
+    (sum, item) =>
+      sum +
+      (Number.isFinite(item.quantity) && item.quantity > 0
+        ? item.quantity
+        : 0),
+    0
+  );
+
+  const allDispenserAllocationsValid =
+    !isSharedTankSource ||
+    (
+      activeSourceDispensers.length > 0 &&
+      normalizedDispenserAllocations.length === activeSourceDispensers.length &&
+      normalizedDispenserAllocations.every(
+        (item) => Number.isFinite(item.quantity) && item.quantity >= 0
+      ) &&
+      dispenserAllocationTotal > 0
+    );
+
+  const isSharedTankDestination =
+    (isExternalSupply || isInternalTransfer || isExternalTransfer) &&
+    selectedDestinationStructureType === "SHARED_TANK";
+
+  const activeDestinationDispensers = isSharedTankDestination
     ? (Array.isArray(selectedDestinationStation?.dispensers)
         ? selectedDestinationStation.dispensers
         : []
@@ -420,7 +461,7 @@ export default function AddOperationModal({
     })
   );
   const allDispenserReadingsValid =
-    !isSharedTankExternalSupply ||
+    !isSharedTankDestination ||
     (
       activeDestinationDispensers.length > 0 &&
       normalizedDispenserReadings.every((reading) => {
@@ -449,7 +490,64 @@ export default function AddOperationModal({
     return Number.isFinite(numericBalance) ? numericBalance : null;
   };
 
-  const sourceStationBalance = getStationBalance(selectedSourceStation);
+  const getStationInventoryOwner = (station) => {
+    if (!station) return null;
+
+    if (getStationStructureType(station) !== "DISPENSER") {
+      return station;
+    }
+
+    const stationPool = allStations.length ? allStations : stations;
+
+    const parentId = station.parentStationId;
+    const matchedParentById = parentId
+      ? stationPool.find(
+          (candidate) =>
+            isSameText(candidate?.id, parentId) ||
+            isSameText(candidate?.backendId, parentId) ||
+            isSameText(candidate?.stationBackendId, parentId) ||
+            isSameText(candidate?.stationId, parentId)
+        )
+      : null;
+
+    if (matchedParentById) {
+      return matchedParentById;
+    }
+
+    const matchedParentByChild = stationPool.find((candidate) => {
+      if (getStationStructureType(candidate) !== "SHARED_TANK") {
+        return false;
+      }
+
+      const childStations = Array.isArray(candidate?.dispensers)
+        ? candidate.dispensers
+        : [];
+
+      return childStations.some(
+        (child) =>
+          isSameText(child?.id, station?.id) ||
+          isSameText(child?.stationId, station?.id) ||
+          isSameText(child?.id, station?.backendId) ||
+          isSameText(child?.stationId, station?.stationId) ||
+          isSameText(child?.name, station?.name)
+      );
+    });
+
+    if (matchedParentByChild) {
+      return matchedParentByChild;
+    }
+
+    if (station.parentStation) {
+      return station.parentStation;
+    }
+
+    return null;
+  };
+
+  const selectedSourceInventoryOwner =
+    getStationInventoryOwner(selectedSourceStation);
+
+  const sourceStationBalance = getStationBalance(selectedSourceInventoryOwner);
   const destinationStationBalance = getStationBalance(selectedDestinationStation);
 
   const shouldShowSourceStationBalance =
@@ -495,6 +593,8 @@ export default function AddOperationModal({
     setDestinationId("");
     setDieselQuantity("");
     setOdometer("");
+    setDispenserReadings({});
+    setDispenserAllocations({});
     setExternalStationName("");
     setInvoiceNumber("");
     setExternalInvoiceAmount("");
@@ -523,7 +623,10 @@ export default function AddOperationModal({
     );
     const nextStructureType = getStationStructureType(nextDestination);
 
-    if (isExternalSupply && nextStructureType === "SHARED_TANK") {
+    if (
+      (isExternalSupply || isInternalTransfer || isExternalTransfer) &&
+      nextStructureType === "SHARED_TANK"
+    ) {
       const nextReadings = {};
       (Array.isArray(nextDestination?.dispensers)
         ? nextDestination.dispensers
@@ -671,11 +774,16 @@ export default function AddOperationModal({
   const needsExternalSourceDetails = isExternalDirectRefuel || isExternalSupply;
   const needsInvoiceNumber = isExternalDirectRefuel || isExternalSupply;
   const needsReading =
-    Boolean(transactionType) && !isSharedTankExternalSupply;
+    Boolean(transactionType) && !isSharedTankDestination;
+
+  const operationQuantity = isSharedTankSource
+    ? dispenserAllocationTotal
+    : Number(dieselQuantity || 0);
+
   const isDieselQuantityOverTankCapacity =
     isAssetRefuel &&
     tankCapacity > 0 &&
-    Number(dieselQuantity || 0) > tankCapacity;
+    operationQuantity > tankCapacity;
   const dieselQuantityError = isDieselQuantityOverTankCapacity
     ? t("addOperation.validation.tankCapacityExceeded", {
         capacity: formatNumber(tankCapacity),
@@ -737,7 +845,31 @@ export default function AddOperationModal({
       }
     }
 
-    if (isSharedTankExternalSupply) {
+    if (isSharedTankSource) {
+      if (!activeSourceDispensers.length) {
+        notifyUser(
+          showToast,
+          "warning",
+          language === "ar"
+            ? "يجب أن يحتوي الخزان المشترك على نقطة تعبئة فعالة واحدة على الأقل."
+            : "Shared Tank must have at least one active dispensing point."
+        );
+        return false;
+      }
+
+      if (!allDispenserAllocationsValid) {
+        notifyUser(
+          showToast,
+          "warning",
+          language === "ar"
+            ? "أدخل كمية صحيحة لكل نقطة تعبئة، ويجب أن تكون كمية نقطة واحدة على الأقل أكبر من صفر."
+            : "Enter a valid quantity for every dispensing point, with at least one quantity greater than zero."
+        );
+        return false;
+      }
+    }
+
+    if (isSharedTankDestination) {
       if (!activeDestinationDispensers.length) {
         notifyUser(
           showToast,
@@ -757,7 +889,7 @@ export default function AddOperationModal({
       }
     }
 
-    const qty = Number(dieselQuantity);
+    const qty = operationQuantity;
 
     if (!qty || qty <= 0) {
       notifyUser(showToast, "warning", t("addOperation.validation.quantityPositive"));
@@ -797,7 +929,7 @@ export default function AddOperationModal({
     if (
       needsReading &&
       !isAssetRefuel &&
-      !isSharedTankExternalSupply &&
+      !isSharedTankDestination &&
       (!Number.isFinite(newReading) || newReading <= 0)
     ) {
       notifyUser(
@@ -821,7 +953,7 @@ export default function AddOperationModal({
 
     if (
       isStationCounterOperation &&
-      !isSharedTankExternalSupply &&
+      !isSharedTankDestination &&
       lastStationCounter > 0 &&
       newReading < lastStationCounter
     ) {
@@ -846,7 +978,7 @@ export default function AddOperationModal({
   const handleSave = async () => {
     if (!validateBeforeSave()) return;
 
-    const qty = Number(dieselQuantity);
+    const qty = operationQuantity;
     const createdByName = currentUser?.fullName || currentUser?.username || currentUser?.email || currentUser?.id || t("addOperation.systemUser");
     const operationId = `OP-${Date.now()}`;
 
@@ -939,8 +1071,11 @@ export default function AddOperationModal({
       createdByRole: currentUser?.role || "",
       destinationId,
       dieselQuantity: qty,
-      odometer: isSharedTankExternalSupply ? undefined : Number(odometer),
-      dispenserReadings: isSharedTankExternalSupply
+      odometer: isSharedTankDestination ? undefined : Number(odometer),
+      dispenserAllocations: isSharedTankSource
+        ? normalizedDispenserAllocations
+        : undefined,
+      dispenserReadings: isSharedTankDestination
         ? normalizedDispenserReadings
         : undefined,
       externalStationName: externalStationName.trim(),
@@ -961,14 +1096,14 @@ export default function AddOperationModal({
     Boolean(transactionType) &&
     (!needsSourceStation || Boolean(sourceStation)) &&
     Boolean(destinationId) &&
-    Boolean(dieselQuantity) &&
-    Number(dieselQuantity) > 0 &&
+    operationQuantity > 0 &&
+    (!isSharedTankSource || allDispenserAllocationsValid) &&
     !isDieselQuantityOverTankCapacity &&
     (!needsExternalSourceDetails || Boolean(externalStationName.trim())) &&
     (!needsInvoiceNumber || Boolean(invoiceNumber.trim())) &&
     (!isExternalDirectRefuel || Number(externalInvoiceAmount) > 0) &&
     (
-      isSharedTankExternalSupply
+      isSharedTankDestination
         ? allDispenserReadingsValid
         : isAssetRefuel
         ? odometer !== "" &&
@@ -1042,7 +1177,35 @@ export default function AddOperationModal({
                       setSourceStation(value);
                       setDestinationId("");
                       setOdometer("");
+                      setDispenserReadings({});
                       setDestinationSearch("");
+
+                      const nextSource = currentProjectStations.find((station) =>
+                        isSameText(station.id, value)
+                      );
+
+                      if (getStationStructureType(nextSource) === "SHARED_TANK") {
+                        const nextAllocations = {};
+                        (Array.isArray(nextSource?.dispensers)
+                          ? nextSource.dispensers
+                          : []
+                        )
+                          .filter(
+                            (dispenser) =>
+                              String(dispenser?.status || "ACTIVE")
+                                .trim()
+                                .toUpperCase() === "ACTIVE"
+                          )
+                          .forEach((dispenser) => {
+                            nextAllocations[dispenser.id] = "";
+                          });
+
+                        setDispenserAllocations(nextAllocations);
+                        setDieselQuantity("");
+                      } else {
+                        setDispenserAllocations({});
+                      }
+
                       resetPhotos();
                     }}
                     options={sourceStationOptions}
@@ -1158,16 +1321,68 @@ export default function AddOperationModal({
                 </>
               )}
 
-              <Field
-                label={t("addOperation.fields.dieselQuantity")}
-                value={dieselQuantity}
-                onChange={(e) => setDieselQuantity(e.target.value)}
-                type="number"
-                placeholder={t("addOperation.placeholders.enterQuantity")}
-                error={dieselQuantityError}
-              />
+              {isSharedTankSource ? (
+                <div className="rounded-xl border border-cyan-500/30 bg-cyan-500/5 p-4">
+                  <div className="mb-3">
+                    <p className="font-bold text-cyan-300">
+                      {language === "ar"
+                        ? "توزيع الكمية على نقاط التعبئة"
+                        : "Dispensing Point Quantities"}
+                    </p>
+                    <p className="mt-1 text-xs text-slate-400">
+                      {language === "ar"
+                        ? "أدخل الكمية الخارجة من كل نقطة تعبئة. إجمالي العملية يُحسب تلقائيًا."
+                        : "Enter the quantity pumped from each dispensing point. The operation total is calculated automatically."}
+                    </p>
+                  </div>
 
-              {isSharedTankExternalSupply ? (
+                  <div className="space-y-3">
+                    {activeSourceDispensers.map((dispenser) => (
+                      <Field
+                        key={dispenser.id}
+                        label={`${dispenser.stationId || dispenser.name || dispenser.id} — ${
+                          language === "ar" ? "الكمية (L)" : "Quantity (L)"
+                        }`}
+                        value={dispenserAllocations[dispenser.id] ?? ""}
+                        onChange={(e) =>
+                          setDispenserAllocations((current) => ({
+                            ...current,
+                            [dispenser.id]: e.target.value,
+                          }))
+                        }
+                        type="number"
+                        placeholder={
+                          language === "ar"
+                            ? "أدخل الكمية"
+                            : "Enter quantity"
+                        }
+                      />
+                    ))}
+                  </div>
+
+                  <div className="mt-4 flex items-center justify-between border-t border-cyan-500/20 pt-3">
+                    <span className="text-sm font-semibold text-slate-300">
+                      {language === "ar"
+                        ? "إجمالي كمية العملية"
+                        : "Total Operation Quantity"}
+                    </span>
+                    <span className="text-lg font-black text-amber-300">
+                      {formatNumber(dispenserAllocationTotal)} L
+                    </span>
+                  </div>
+                </div>
+              ) : (
+                <Field
+                  label={t("addOperation.fields.dieselQuantity")}
+                  value={dieselQuantity}
+                  onChange={(e) => setDieselQuantity(e.target.value)}
+                  type="number"
+                  placeholder={t("addOperation.placeholders.enterQuantity")}
+                  error={dieselQuantityError}
+                />
+              )}
+
+              {isSharedTankDestination ? (
                 <div className="rounded-xl border border-amber-500/30 bg-amber-500/5 p-4">
                   <div className="mb-3">
                     <p className="font-bold text-amber-300">

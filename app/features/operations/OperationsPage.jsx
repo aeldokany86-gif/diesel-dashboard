@@ -2400,7 +2400,7 @@ const payload = mapFrontendOperationToBackendPayload({
     }
   };
 
-  const sharedTankSupplyReadingRows = (data || [])
+  const sharedTankDestinationReadingRows = (data || [])
     .flatMap((row, originalIndex) => {
       const operation = row?.__operation || {};
       const operationType = String(
@@ -2421,7 +2421,9 @@ const payload = mapFrontendOperationToBackendPayload({
         : [];
 
       if (
-        operationType !== "EXTERNAL_SUPPLY" ||
+        !["EXTERNAL_SUPPLY", "INTERNAL_TRANSFER", "EXTERNAL_TRANSFER"].includes(
+          operationType
+        ) ||
         destinationStructureType !== "SHARED_TANK" ||
         !readings.length
       ) {
@@ -3339,7 +3341,7 @@ const payload = mapFrontendOperationToBackendPayload({
         </div>
       </div>
 
-      {sharedTankSupplyReadingRows.length > 0 && (
+      {sharedTankDestinationReadingRows.length > 0 && (
         <div className="relative z-0 bg-slate-900/80 rounded-2xl shadow-xl shadow-black/10 overflow-hidden border border-slate-700/80 mb-5">
           <div className="p-3 sm:p-4 border-b border-slate-700/80 bg-slate-900/60">
             <h2 className="text-base font-extrabold text-amber-300">
@@ -3362,7 +3364,7 @@ const payload = mapFrontendOperationToBackendPayload({
                 </tr>
               </thead>
               <tbody>
-                {sharedTankSupplyReadingRows.map((item) => {
+                {sharedTankDestinationReadingRows.map((item) => {
                   const canEditReading = hasPermission("operations", "edit");
 
                   return (

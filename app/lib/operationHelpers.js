@@ -24,6 +24,24 @@ export function mapFrontendOperationToBackendPayload(operation = {}) {
 
   if (["DIRECT_REFUEL", "INTERNAL_TRANSFER", "EXTERNAL_TRANSFER"].includes(normalizedType)) {
     payload.sourceStationId = operation.sourceStation || undefined;
+
+    const normalizedDispenserAllocations = Array.isArray(operation.dispenserAllocations)
+      ? operation.dispenserAllocations
+          .map((item) => ({
+            stationId: String(item?.stationId || "").trim(),
+            quantity: Number(item?.quantity),
+          }))
+          .filter(
+            (item) =>
+              item.stationId &&
+              Number.isFinite(item.quantity) &&
+              item.quantity >= 0
+          )
+      : [];
+
+    if (normalizedDispenserAllocations.length > 0) {
+      payload.dispenserAllocations = normalizedDispenserAllocations;
+    }
   }
 
   if (["INTERNAL_TRANSFER", "EXTERNAL_SUPPLY", "EXTERNAL_TRANSFER"].includes(normalizedType)) {
@@ -43,11 +61,8 @@ export function mapFrontendOperationToBackendPayload(operation = {}) {
           )
       : [];
 
-    if (
-      normalizedType === "EXTERNAL_SUPPLY" &&
-      normalizedDispenserReadings.length > 0
-    ) {
-      // Shared Tank supply: the tank owns stock while each active child
+    if (normalizedDispenserReadings.length > 0) {
+      // Shared Tank destination: the parent owns stock while each active child
       // dispenser provides its own physical counter snapshot.
       payload.dispenserReadings = normalizedDispenserReadings;
     } else {

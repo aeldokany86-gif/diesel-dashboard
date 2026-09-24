@@ -452,7 +452,16 @@ export default function StationsPage({
       .trim()
       .toUpperCase();
 
-    const sourceCandidates =
+    const ownCandidates = [
+      station?.id,
+      station?.stationId,
+      station?.backendId,
+      station?.stationBackendId,
+      station?.code,
+      station?.name,
+    ].filter(Boolean);
+
+    const childCandidates =
       structureType === "SHARED_TANK"
         ? (station?.dispensers || [])
             .flatMap((dispenser) => [
@@ -464,23 +473,13 @@ export default function StationsPage({
               dispenser?.name,
             ])
             .filter(Boolean)
-        : [
-            station?.id,
-            station?.stationId,
-            station?.backendId,
-            station?.stationBackendId,
-            station?.code,
-            station?.name,
-          ].filter(Boolean);
-
-    if (!sourceCandidates.length) {
-      return 0;
-    }
+        : [];
 
     return (data || []).reduce((sum, row) => {
       const type = row?.[typeIndex];
       const source = row?.[sourceIndex];
       const quantity = Number(row?.[dieselIndex]);
+      const operation = row?.__operation || {};
 
       if (!Number.isFinite(quantity) || quantity <= 0) {
         return sum;
@@ -495,7 +494,55 @@ export default function StationsPage({
         return sum;
       }
 
-      const sourceBelongsToStation = sourceCandidates.some((candidate) =>
+      const allocations = Array.isArray(operation?.dispenserAllocations)
+        ? operation.dispenserAllocations
+        : [];
+
+      if (structureType === "SHARED_TANK") {
+        const parentWasSelected =
+          ownCandidates.some((candidate) => isSameText(source, candidate)) ||
+          ownCandidates.some(
+            (candidate) =>
+              isSameText(operation?.sourceStation?.id, candidate) ||
+              isSameText(operation?.sourceStation?.stationId, candidate)
+          );
+
+        if (parentWasSelected && allocations.length) {
+          const allocatedTotal = allocations.reduce((allocationSum, item) => {
+            const allocationQty = Number(item?.quantity);
+            return Number.isFinite(allocationQty) && allocationQty > 0
+              ? allocationSum + allocationQty
+              : allocationSum;
+          }, 0);
+
+          return sum + (allocatedTotal > 0 ? allocatedTotal : quantity);
+        }
+
+        const legacyChildSource = childCandidates.some((candidate) =>
+          isSameText(source, candidate)
+        );
+
+        return legacyChildSource ? sum + quantity : sum;
+      }
+
+      if (structureType === "DISPENSER") {
+        const allocationForThisDispenser = allocations.find((item) =>
+          ownCandidates.some(
+            (candidate) =>
+              isSameText(item?.stationId, candidate) ||
+              isSameText(item?.station?.stationId, candidate)
+          )
+        );
+
+        if (allocationForThisDispenser) {
+          const allocationQty = Number(allocationForThisDispenser.quantity);
+          if (Number.isFinite(allocationQty) && allocationQty > 0) {
+            return sum + allocationQty;
+          }
+        }
+      }
+
+      const sourceBelongsToStation = ownCandidates.some((candidate) =>
         isSameText(source, candidate)
       );
 
