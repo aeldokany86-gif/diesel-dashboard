@@ -29,6 +29,7 @@ import {
   isSameText,
   getHeaderIndex,
   formatNumber,
+  mapBackendOperationForState,
 } from "../../lib/helpers";
 
 import {
@@ -54,6 +55,9 @@ import {
 import {
   createOperationCorrection,
 } from "../../services/operationCorrectionsService";
+import {
+  fetchStationOperationsHistory,
+} from "../../services/operationsService";
 import OperationCorrectionModal from "../operations/OperationCorrectionModal";
 
 function notifyUser(showToastFn, type, message) {
@@ -740,6 +744,17 @@ export default function StationsPage({
   const [selectedStation, setSelectedStation] = useState(null);
   const [zeroBalanceReason, setZeroBalanceReason] = useState(t("stationWorkflows.zero.defaultReason"));
   const [selectedStationHistory, setSelectedStationHistory] = useState(null);
+  const [stationHistoryRows, setStationHistoryRows] = useState([]);
+  const [stationHistoryLoading, setStationHistoryLoading] = useState(false);
+  const [stationHistoryError, setStationHistoryError] = useState("");
+  const [stationHistoryPagination, setStationHistoryPagination] = useState({
+    page: 1,
+    pageSize: 100,
+    total: 0,
+    totalPages: 1,
+    hasPreviousPage: false,
+    hasNextPage: false,
+  });
   const [showLocationNotRecordedModal, setShowLocationNotRecordedModal] = useState(false);
   const [stationCounterCorrection, setStationCounterCorrection] = useState(null);
   const [stationCounterCorrectionSaving, setStationCounterCorrectionSaving] = useState(false);
@@ -1229,34 +1244,100 @@ export default function StationsPage({
     });
   };
 
-  const getStationOperations = (stationId) => {
-    return data
-      .map((row, originalIndex) => ({ row, originalIndex }))
-      .filter((item) => {
-        const row = item.row;
-        const type = row[typeIndex];
-        const source = row[sourceIndex];
-        const destination = row[destinationIndex];
+  const getStationHistoryBackendId = (station) =>
+    String(
+      station?.backendId ||
+        station?.stationBackendId ||
+        station?.backendStationId ||
+        ""
+    ).trim();
 
-        return (
-          (isSameText(type, "Direct_Refuel") &&
-            isSameText(source, stationId)) ||
-          (isSameText(type, "Internal_Transfer") &&
-            (isSameText(source, stationId) ||
-              isSameText(destination, stationId))) ||
-          (isSameText(type, "External_Transfer") &&
-            (isSameText(source, stationId) ||
-              isSameText(destination, stationId))) ||
-          (isSameText(type, "External_Supply") &&
-            isSameText(destination, stationId))
-        );
-      })
-      .sort((a, b) => {
-        const dateA = new Date(a.row[dateIndex]).getTime() || 0;
-        const dateB = new Date(b.row[dateIndex]).getTime() || 0;
-        return dateB - dateA;
-      });
+  const loadStationHistoryPage = async (station, page = 1) => {
+    const backendStationId = getStationHistoryBackendId(station);
+
+    if (!backendStationId) {
+      setStationHistoryRows([]);
+      setStationHistoryError(
+        language === "ar"
+          ? "تعذر تحديد رقم المحطة في قاعدة البيانات."
+          : "The station backend ID could not be identified."
+      );
+      return;
+    }
+
+    if (!canUseNetwork(showToast)) return;
+
+    setStationHistoryLoading(true);
+    setStationHistoryError("");
+
+    try {
+      const result = await fetchStationOperationsHistory(
+        backendStationId,
+        {
+          page,
+          pageSize: 100,
+        },
+        currentUser
+      );
+
+      const mappedRows = (result.operations || []).map(
+        mapBackendOperationForState
+      );
+
+      setStationHistoryRows(mappedRows);
+      setStationHistoryPagination(
+        result.pagination || {
+          page,
+          pageSize: 100,
+          total: mappedRows.length,
+          totalPages: 1,
+          hasPreviousPage: false,
+          hasNextPage: false,
+        }
+      );
+    } catch (error) {
+      console.warn("Station operations history load failed:", error);
+      setStationHistoryRows([]);
+      const message = getFriendlyApiErrorMessage(
+        error,
+        language === "ar"
+          ? "تعذر تحميل سجل عمليات المحطة."
+          : "Failed to load station operations history."
+      );
+      setStationHistoryError(message);
+      notifyUser(showToast, "warning", message);
+    } finally {
+      setStationHistoryLoading(false);
+    }
   };
+
+  const openStationHistory = (station) => {
+    setSelectedStationHistory(station);
+    setStationHistoryRows([]);
+    setStationHistoryError("");
+    setStationHistoryPagination({
+      page: 1,
+      pageSize: 100,
+      total: 0,
+      totalPages: 1,
+      hasPreviousPage: false,
+      hasNextPage: false,
+    });
+    void loadStationHistoryPage(station, 1);
+  };
+
+  const closeStationHistory = () => {
+    setSelectedStationHistory(null);
+    setStationHistoryRows([]);
+    setStationHistoryError("");
+    setStationHistoryLoading(false);
+  };
+
+  const getStationOperations = () =>
+    stationHistoryRows.map((row, originalIndex) => ({
+      row,
+      originalIndex,
+    }));
 
   const getStationOperationDirection = (row, stationId) => {
     const type = row[typeIndex];
@@ -2971,7 +3052,7 @@ export default function StationsPage({
                   <div className="flex flex-col items-start w-full min-w-0">
                   <div className="flex items-center gap-3">
                     <button
-                      onClick={() => setSelectedStationHistory(station)}
+                      onClick={() => openStationHistory(station)}
                       className="station-title text-xl font-bold text-blue-200 truncate min-w-0 max-w-full"
                     >
                       {station.id}
@@ -3150,7 +3231,7 @@ export default function StationsPage({
                             <div className="min-w-0">
                               <button
                                 type="button"
-                                onClick={() => setSelectedStationHistory(childStation)}
+                                onClick={() => openStationHistory(childStation)}
                                 className="block max-w-full truncate text-left text-base font-bold text-blue-200 transition hover:text-yellow-300"
                               >
                                 {dispenser.stationId || dispenser.name || dispenser.id}
@@ -3306,7 +3387,7 @@ export default function StationsPage({
               </div>
 
               <button
-                onClick={() => setSelectedStationHistory(null)}
+                onClick={closeStationHistory}
                 className="text-gray-400 hover:text-red-400 text-2xl"
               >
                 ×
@@ -3334,7 +3415,25 @@ export default function StationsPage({
                 </thead>
 
                 <tbody>
-                  {getStationOperations(selectedStationHistory.id).length === 0 ? (
+                  {stationHistoryLoading ? (
+                    <tr>
+                      <Td colSpan={11}>
+                        <span className="text-gray-400">
+                          {language === "ar"
+                            ? "جاري تحميل سجل عمليات المحطة..."
+                            : "Loading station operations history..."}
+                        </span>
+                      </Td>
+                    </tr>
+                  ) : stationHistoryError ? (
+                    <tr>
+                      <Td colSpan={11}>
+                        <span className="text-red-300">
+                          {stationHistoryError}
+                        </span>
+                      </Td>
+                    </tr>
+                  ) : getStationOperations().length === 0 ? (
                     <tr>
                       <Td colSpan={11}>
                         <span className="text-gray-400">
@@ -3343,7 +3442,7 @@ export default function StationsPage({
                       </Td>
                     </tr>
                   ) : (
-                    getStationOperations(selectedStationHistory.id).map((item, i) => {
+                    getStationOperations().map((item, i) => {
                       const row = item.row;
                       const direction = getStationOperationDirection(
                         row,
@@ -3357,7 +3456,7 @@ export default function StationsPage({
                           key={item.originalIndex}
                           className="hover:bg-slate-800/70 transition-colors duration-150"
                         >
-                          <Td>{i + 1}</Td>
+                          <Td>{(stationHistoryPagination.page - 1) * stationHistoryPagination.pageSize + i + 1}</Td>
                           <Td>{formatDisplayDate(row[dateIndex])}</Td>
 
                           <Td>
@@ -3487,6 +3586,54 @@ export default function StationsPage({
                   )}
                 </tbody>
               </table>
+            </div>
+
+            <div className="flex flex-col gap-2 border-t border-slate-800 px-4 py-3 sm:flex-row sm:items-center sm:justify-between">
+              <div className="text-xs text-slate-400">
+                {language === "ar"
+                  ? `إجمالي العمليات: ${stationHistoryPagination.total}`
+                  : `Total operations: ${stationHistoryPagination.total}`}
+                {" · "}
+                {language === "ar"
+                  ? `صفحة ${stationHistoryPagination.page} من ${stationHistoryPagination.totalPages}`
+                  : `Page ${stationHistoryPagination.page} of ${stationHistoryPagination.totalPages}`}
+              </div>
+
+              <div className="flex items-center gap-2">
+                <button
+                  type="button"
+                  disabled={
+                    stationHistoryLoading ||
+                    !stationHistoryPagination.hasPreviousPage
+                  }
+                  onClick={() =>
+                    void loadStationHistoryPage(
+                      selectedStationHistory,
+                      stationHistoryPagination.page - 1
+                    )
+                  }
+                  className="rounded-lg border border-slate-600 bg-slate-800 px-3 py-1.5 text-xs font-bold text-slate-200 transition hover:border-amber-400 hover:text-amber-300 disabled:cursor-not-allowed disabled:opacity-40"
+                >
+                  {language === "ar" ? "السابق" : "Previous"}
+                </button>
+
+                <button
+                  type="button"
+                  disabled={
+                    stationHistoryLoading ||
+                    !stationHistoryPagination.hasNextPage
+                  }
+                  onClick={() =>
+                    void loadStationHistoryPage(
+                      selectedStationHistory,
+                      stationHistoryPagination.page + 1
+                    )
+                  }
+                  className="rounded-lg border border-slate-600 bg-slate-800 px-3 py-1.5 text-xs font-bold text-slate-200 transition hover:border-amber-400 hover:text-amber-300 disabled:cursor-not-allowed disabled:opacity-40"
+                >
+                  {language === "ar" ? "التالي" : "Next"}
+                </button>
+              </div>
             </div>
           </div>
         </div>

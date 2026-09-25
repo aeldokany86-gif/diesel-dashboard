@@ -111,6 +111,42 @@ export async function fetchOperations(currentUser = {}) {
   return Array.isArray(response.data) ? response.data : [];
 }
 
+export async function fetchStationOperationsHistory(
+  stationId,
+  { page = 1, pageSize = 100 } = {},
+  currentUser = {}
+) {
+  if (!stationId) {
+    throw new Error("Station backend ID is required.");
+  }
+
+  const response = await api.get(
+    `/operations/station/${encodeURIComponent(stationId)}/history`,
+    {
+      params: {
+        page,
+        pageSize,
+      },
+      headers: buildOperationRequestHeaders(currentUser),
+    }
+  );
+
+  return {
+    station: response.data?.station || null,
+    operations: Array.isArray(response.data?.operations)
+      ? response.data.operations
+      : [],
+    pagination: response.data?.pagination || {
+      page: 1,
+      pageSize: 100,
+      total: 0,
+      totalPages: 1,
+      hasPreviousPage: false,
+      hasNextPage: false,
+    },
+  };
+}
+
 export async function subscribeToOperationEvents({
   currentUser = {},
   signal,
