@@ -51,6 +51,11 @@ import {
   createStationActionRequest,
 } from "../../services/stationsService";
 
+import {
+  createOperationCorrection,
+} from "../../services/operationCorrectionsService";
+import OperationCorrectionModal from "../operations/OperationCorrectionModal";
+
 function notifyUser(showToastFn, type, message) {
   const safeType = type || "info";
   const safeMessage = String(message ?? "");
@@ -736,6 +741,8 @@ export default function StationsPage({
   const [zeroBalanceReason, setZeroBalanceReason] = useState(t("stationWorkflows.zero.defaultReason"));
   const [selectedStationHistory, setSelectedStationHistory] = useState(null);
   const [showLocationNotRecordedModal, setShowLocationNotRecordedModal] = useState(false);
+  const [stationCounterCorrection, setStationCounterCorrection] = useState(null);
+  const [stationCounterCorrectionSaving, setStationCounterCorrectionSaving] = useState(false);
   const [editingProjectStation, setEditingProjectStation] = useState(null);
   const [stationTransferStockConfirmation, setStationTransferStockConfirmation] = useState(null);
   const [newStationProject, setNewStationProject] = useState("");
@@ -1004,6 +1011,7 @@ export default function StationsPage({
         parentStationId: cleanStation.parentStationId || undefined,
         capacity: cleanStation.capacity,
         openingBalance: cleanStation.openingBalance,
+        openingCounter: cleanStation.openingCounter,
         currentCounter: cleanStation.currentCounter,
         projectId: cleanStation.projectId || undefined,
         status: mapFrontendStationStatusForBackend(cleanStation.status),
@@ -1305,6 +1313,275 @@ export default function StationsPage({
     }
 
     return sourceIndex !== -1 ? row?.[sourceIndex] || "-" : "-";
+  };
+
+
+  const normalizeOperationTypeForMeter = (value) =>
+    String(value || "")
+      .trim()
+      .toUpperCase()
+      .replace(/[\s-]+/g, "_");
+
+  const getHistoryOperationBackendId = (row) =>
+    String(row?.__operation?.id || "").trim();
+
+  const getDestinationMeterDescriptor = (row) => {
+    const operation = row?.__operation || {};
+    const operationType = normalizeOperationTypeForMeter(
+      operation?.type || (typeIndex !== -1 ? row?.[typeIndex] : "")
+    );
+
+    if (operationType === "DIRECT_REFUEL") {
+      const rawValue =
+        operation?.odometer ??
+        operation?.odometerAtFueling ??
+        operation?.destinationMeter ??
+        (stationCounterIndex !== -1 ? row?.[stationCounterIndex] : null);
+
+      const numericValue = Number(rawValue);
+      return {
+        kind: "ASSET_METER",
+        value:
+          rawValue === null || rawValue === undefined || rawValue === ""
+            ? null
+            : Number.isFinite(numericValue)
+            ? numericValue
+            : rawValue,
+        editable: false,
+        readings: [],
+      };
+    }
+
+    if (
+      ["INTERNAL_TRANSFER", "EXTERNAL_SUPPLY", "EXTERNAL_TRANSFER"].includes(
+        operationType
+      )
+    ) {
+      const rawStationCounter =
+        operation?.stationCounter ??
+        operation?.destinationStationCounter ??
+        (stationCounterIndex !== -1 ? row?.[stationCounterIndex] : null);
+
+      const numericStationCounter = Number(rawStationCounter);
+
+      if (
+        rawStationCounter !== null &&
+        rawStationCounter !== undefined &&
+        rawStationCounter !== "" &&
+        Number.isFinite(numericStationCounter)
+      ) {
+        return {
+          kind: "STATION_COUNTER",
+          value: numericStationCounter,
+          editable: Boolean(getHistoryOperationBackendId(row)),
+          readings: [],
+        };
+      }
+
+      const readings = Array.isArray(operation?.stationCounterReadings)
+        ? operation.stationCounterReadings
+            .map((reading) => {
+              const counterValue = Number(
+                reading?.counterAfter ?? reading?.counterValue
+              );
+
+              if (!Number.isFinite(counterValue)) return null;
+
+              return {
+                stationId: String(reading?.stationId || "").trim(),
+                stationCode:
+                  reading?.station?.stationId ||
+                  reading?.station?.name ||
+                  reading?.stationId ||
+                  "-",
+                counterValue,
+              };
+            })
+            .filter(Boolean)
+        : [];
+
+      if (readings.length) {
+        return {
+          kind: "DISPENSER_COUNTERS",
+          value: null,
+          editable: Boolean(getHistoryOperationBackendId(row)),
+          readings,
+        };
+      }
+    }
+
+    return {
+      kind: "NONE",
+      value: null,
+      editable: false,
+      readings: [],
+    };
+  };
+
+  const buildStationCorrectionOperationContext = (row) => {
+    const operation = row?.__operation || {};
+
+    return {
+      operationId: operation?.id || null,
+      operationNo:
+        operation?.operationNo ||
+        (operationIdIndex !== -1 ? row?.[operationIdIndex] : null),
+      operationType:
+        operation?.type || (typeIndex !== -1 ? row?.[typeIndex] : null),
+      operationDate:
+        operation?.occurredAt ||
+        operation?.completedAt ||
+        operation?.createdAt ||
+        (dateIndex !== -1 ? row?.[dateIndex] : null),
+      projectIdAtOperation: operation?.projectIdAtOperation || null,
+      projectNameAtOperation: operation?.projectNameAtOperation || null,
+      sourceProjectIdAtOperation: operation?.sourceProjectIdAtOperation || null,
+      sourceProjectNameAtOperation:
+        operation?.sourceProjectNameAtOperation || null,
+      destinationProjectIdAtOperation:
+        operation?.destinationProjectIdAtOperation || null,
+      destinationProjectNameAtOperation:
+        operation?.destinationProjectNameAtOperation || null,
+    };
+  };
+
+  const openStationCounterCorrection = (
+    item,
+    meterValue,
+    dispenserReading = null
+  ) => {
+    if (!hasPermission("operations", "edit")) return;
+
+    const row = item?.row || [];
+    const operation = row?.__operation || {};
+    const operationBackendId = getHistoryOperationBackendId(row);
+    const numericValue = Number(meterValue);
+
+    if (!operationBackendId || !Number.isFinite(numericValue)) {
+      notifyUser(
+        showToast,
+        "warning",
+        language === "ar"
+          ? "تعذر تحديد العملية أو قراءة عداد الوجهة."
+          : "The operation or destination meter reading could not be identified."
+      );
+      return;
+    }
+
+    const isDispenser = Boolean(dispenserReading?.stationId);
+
+    setStationCounterCorrection({
+      originalIndex: item?.originalIndex ?? -1,
+      row,
+      field: isDispenser ? "dispenserCounter" : "stationCounter",
+      operationType:
+        operation?.type || (typeIndex !== -1 ? row?.[typeIndex] : ""),
+      operationBackendId,
+      isExternalDirectRefuel: false,
+      oldValue: numericValue,
+      oldValueDisplay: formatNumber(numericValue),
+      newValue: String(numericValue),
+      reason: "",
+      targetDispenserStationId: isDispenser
+        ? dispenserReading.stationId
+        : null,
+      dispenserDisplayCode: isDispenser
+        ? dispenserReading.stationCode || dispenserReading.stationId
+        : null,
+      operationContext: buildStationCorrectionOperationContext(row),
+      allowedAssets: [],
+      allowedSourceStations: [],
+      allowedDestinationStations: [],
+      allowedFuelers: [],
+    });
+  };
+
+  const closeStationCounterCorrection = () => {
+    if (stationCounterCorrectionSaving) return;
+    setStationCounterCorrection(null);
+  };
+
+  const saveStationCounterCorrection = async () => {
+    if (!stationCounterCorrection || stationCounterCorrectionSaving) return;
+
+    const reason = String(stationCounterCorrection.reason || "").trim();
+    const newCounter = Number(stationCounterCorrection.newValue);
+
+    if (!reason) {
+      notifyUser(
+        showToast,
+        "warning",
+        language === "ar"
+          ? "أدخل سبب التصحيح."
+          : "Please enter a correction reason."
+      );
+      return;
+    }
+
+    if (!Number.isFinite(newCounter) || newCounter < 0) {
+      notifyUser(
+        showToast,
+        "warning",
+        language === "ar"
+          ? "أدخل قراءة عداد صحيحة."
+          : "Please enter a valid counter reading."
+      );
+      return;
+    }
+
+    if (!canUseNetwork(showToast)) return;
+
+    setStationCounterCorrectionSaving(true);
+
+    try {
+      const isDispenser =
+        stationCounterCorrection.field === "dispenserCounter";
+
+      const payload = {
+        operationId: stationCounterCorrection.operationBackendId,
+        fieldName: isDispenser
+          ? "DISPENSER_COUNTER_READING"
+          : "STATION_COUNTER",
+        newValue: isDispenser
+          ? {
+              stationId:
+                stationCounterCorrection.targetDispenserStationId,
+              counter: newCounter,
+            }
+          : newCounter,
+        reason,
+      };
+
+      const responseBody = await createOperationCorrection(
+        payload,
+        currentUser
+      );
+
+      setStationCounterCorrection(null);
+
+      notifyUser(
+        showToast,
+        "success",
+        responseBody?.message ||
+          (language === "ar"
+            ? "تم إرسال طلب تصحيح عداد المحطة."
+            : "Station counter correction request submitted.")
+      );
+    } catch (error) {
+      console.warn("Station counter correction submit failed:", error);
+      notifyUser(
+        showToast,
+        "warning",
+        getFriendlyApiErrorMessage(
+          error,
+          language === "ar"
+            ? "تعذر إرسال طلب تصحيح عداد المحطة."
+            : "Failed to submit the station counter correction request."
+        )
+      );
+    } finally {
+      setStationCounterCorrectionSaving(false);
+    }
   };
 
   const getCurrentStationProject = (station) => station?.project || "-";
@@ -3037,7 +3314,7 @@ export default function StationsPage({
             </div>
 
             <div className="max-h-[68vh] overflow-x-scroll overflow-y-auto [scrollbar-gutter:stable_both-edges] overscroll-contain">
-              <table className="min-w-[920px] lg:min-w-[1060px] xl:min-w-[1160px] w-full border-separate border-spacing-0 text-[11px] sm:text-xs lg:text-sm">
+              <table className="min-w-[1080px] lg:min-w-[1220px] xl:min-w-[1320px] w-full border-separate border-spacing-0 text-[11px] sm:text-xs lg:text-sm">
                 <thead className="relative z-30 shadow-sm">
                   <tr>
                     <Th className="sticky top-0 z-40 bg-slate-800">#</Th>
@@ -3049,6 +3326,9 @@ export default function StationsPage({
                     <Th className={`sticky top-0 z-40 bg-slate-800 ${isRtl ? "text-right" : "text-left"}`}>{t("stations.history.destination")}</Th>
                     <Th className={`sticky top-0 z-40 bg-slate-800 ${isRtl ? "text-right" : "text-left"}`}>{t("stations.history.fueler")}</Th>
                     <Th className={`sticky top-0 z-40 bg-slate-800 ${isRtl ? "text-right" : "text-left"}`}>{t("stations.history.qtyLiters")}</Th>
+                    <Th className={`sticky top-0 z-40 bg-slate-800 ${isRtl ? "text-right" : "text-left"}`}>
+                      {language === "ar" ? "عداد الوجهة" : "Destination Meter"}
+                    </Th>
                     <Th className={`sticky top-0 z-40 bg-slate-800 ${isRtl ? "text-right" : "text-left"}`}>{t("stations.history.location")}</Th>
                   </tr>
                 </thead>
@@ -3056,7 +3336,7 @@ export default function StationsPage({
                 <tbody>
                   {getStationOperations(selectedStationHistory.id).length === 0 ? (
                     <tr>
-                      <Td colSpan={10}>
+                      <Td colSpan={11}>
                         <span className="text-gray-400">
                           {t("stations.history.noOperations")}
                         </span>
@@ -3069,6 +3349,8 @@ export default function StationsPage({
                         row,
                         selectedStationHistory.id
                       );
+                      const destinationMeter =
+                        getDestinationMeterDescriptor(row);
 
                       return (
                         <tr
@@ -3105,6 +3387,79 @@ export default function StationsPage({
                           <Td>{fuelerIndex !== -1 ? row[fuelerIndex] || "-" : "-"}</Td>
                           <Td>{formatNumber(row[dieselIndex])}</Td>
                           <Td>
+                            {destinationMeter.kind === "DISPENSER_COUNTERS" ? (
+                              <div className="flex flex-wrap gap-1.5">
+                                {destinationMeter.readings.map((reading) => {
+                                  const canEditReading =
+                                    destinationMeter.editable &&
+                                    hasPermission("operations", "edit");
+
+                                  return canEditReading ? (
+                                    <button
+                                      key={`${reading.stationId}-${reading.counterValue}`}
+                                      type="button"
+                                      onClick={() =>
+                                        openStationCounterCorrection(
+                                          item,
+                                          reading.counterValue,
+                                          reading
+                                        )
+                                      }
+                                      className="rounded-md border border-amber-400/50 bg-amber-400/10 px-2 py-1 font-bold text-amber-300 underline decoration-dotted underline-offset-2 transition hover:bg-amber-400/20 hover:text-amber-200"
+                                      title={
+                                        language === "ar"
+                                          ? `تصحيح عداد ${reading.stationCode}`
+                                          : `Correct ${reading.stationCode} counter`
+                                      }
+                                    >
+                                      {reading.stationCode}:{" "}
+                                      {formatNumber(reading.counterValue)}
+                                    </button>
+                                  ) : (
+                                    <span
+                                      key={`${reading.stationId}-${reading.counterValue}`}
+                                      className="whitespace-nowrap"
+                                    >
+                                      {reading.stationCode}:{" "}
+                                      {formatNumber(reading.counterValue)}
+                                    </span>
+                                  );
+                                })}
+                              </div>
+                            ) : destinationMeter.value !== null &&
+                              destinationMeter.value !== undefined ? (
+                              destinationMeter.kind === "STATION_COUNTER" &&
+                              destinationMeter.editable &&
+                              hasPermission("operations", "edit") ? (
+                                <button
+                                  type="button"
+                                  onClick={() =>
+                                    openStationCounterCorrection(
+                                      item,
+                                      destinationMeter.value
+                                    )
+                                  }
+                                  className="font-bold text-amber-300 underline decoration-dotted underline-offset-2 transition hover:text-amber-200"
+                                  title={
+                                    language === "ar"
+                                      ? "تصحيح عداد المحطة"
+                                      : "Correct station counter"
+                                  }
+                                >
+                                  {formatNumber(destinationMeter.value)}
+                                </button>
+                              ) : (
+                                <span className="font-semibold text-slate-200">
+                                  {typeof destinationMeter.value === "number"
+                                    ? formatNumber(destinationMeter.value)
+                                    : destinationMeter.value}
+                                </span>
+                              )
+                            ) : (
+                              "-"
+                            )}
+                          </Td>
+                          <Td>
                             <button
                               type="button"
                               onClick={() => {
@@ -3137,6 +3492,50 @@ export default function StationsPage({
         </div>
       )}
 
+
+      <OperationCorrectionModal
+        editCell={stationCounterCorrection}
+        setEditCell={setStationCounterCorrection}
+        assets={[]}
+        stations={[]}
+        destinationStations={[]}
+        fuelers={[]}
+        operationContext={stationCounterCorrection?.operationContext || null}
+        contextLoading={stationCounterCorrectionSaving}
+        contextError=""
+        externalStationHistory={[]}
+        onClose={closeStationCounterCorrection}
+        onSave={saveStationCounterCorrection}
+        getDisplayValue={(field, value) => {
+          if (field === "stationCounter" || field === "dispenserCounter") {
+            const numericValue = Number(value);
+            return Number.isFinite(numericValue)
+              ? formatNumber(numericValue)
+              : "-";
+          }
+          return value ?? "-";
+        }}
+        getAssetDisplayCode={() => "-"}
+        getStationDisplayCode={(stationId) => {
+          const station = (stations || []).find(
+            (item) =>
+              normalizeScopeValue(
+                item?.backendId ||
+                  item?.stationBackendId ||
+                  item?.id
+              ) === normalizeScopeValue(stationId)
+          );
+
+          return (
+            station?.stationId ||
+            station?.code ||
+            station?.name ||
+            stationId ||
+            "-"
+          );
+        }}
+        getFuelerDisplayName={() => "-"}
+      />
 
       {showLocationNotRecordedModal && (
         <ModalPortal>

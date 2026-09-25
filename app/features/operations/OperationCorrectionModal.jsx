@@ -298,8 +298,16 @@ export default function OperationCorrectionModal({
             ) : (
               <input
                 type="number"
-                min={editCell.field === "dispenserCounter" ? "0" : undefined}
-                step={editCell.field === "dispenserCounter" ? "any" : undefined}
+                min={
+                  ["stationCounter", "dispenserCounter"].includes(editCell.field)
+                    ? "0"
+                    : undefined
+                }
+                step={
+                  ["stationCounter", "dispenserCounter"].includes(editCell.field)
+                    ? "any"
+                    : undefined
+                }
                 value={editCell.newValue}
                 onChange={(event) =>
                   setEditCell({ ...editCell, newValue: event.target.value })

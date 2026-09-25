@@ -67,10 +67,13 @@ const VALIDATION_ISSUE_TRANSLATION_KEYS = {
   NEGATIVE_OPENING_BALANCE: "negativeOpeningBalance",
   INVALID_CURRENT_COUNTER: "invalidCurrentCounter",
   NEGATIVE_CURRENT_COUNTER: "negativeCurrentCounter",
+  INVALID_OPENING_COUNTER: "invalidOpeningCounter",
+  NEGATIVE_OPENING_COUNTER: "negativeOpeningCounter",
   INVALID_STATION_STRUCTURE_TYPE: "invalidStationStructureType",
   PARENT_NOT_ALLOWED: "parentNotAllowed",
   OPENING_BALANCE_REQUIRED: "openingBalanceRequired",
   CURRENT_COUNTER_REQUIRED: "currentCounterRequired",
+  OPENING_COUNTER_REQUIRED: "openingCounterRequired",
   SHARED_TANK_COUNTER_NOT_ALLOWED: "sharedTankCounterNotAllowed",
   PARENT_STATION_REQUIRED: "parentStationRequired",
   PARENT_STATION_SELF_REFERENCE: "parentStationSelfReference",
@@ -355,7 +358,7 @@ export default function ImportPreviewPage({
           </div>
         ) : isStations ? (
           <div className="overflow-x-auto border border-slate-300">
-            <table className="min-w-[1550px] w-full border-collapse text-xs">
+            <table className="min-w-[1700px] w-full border-collapse text-xs">
               <thead className="bg-slate-100">
                 <tr>
                   <th className="border-b border-e border-slate-300 px-2 py-2 text-start">#</th>
@@ -368,6 +371,7 @@ export default function ImportPreviewPage({
                   <th className="border-b border-e border-slate-300 px-2 py-2 text-start">{t("dataImport.fields.projectCode")}</th>
                   <th className="border-b border-e border-slate-300 px-2 py-2 text-start">{t("dataImport.fields.projectName")}</th>
                   <th className="border-b border-e border-slate-300 px-2 py-2 text-start">{t("dataImport.fields.openingBalance")}</th>
+                  <th className="border-b border-e border-slate-300 px-2 py-2 text-start">{t("dataImport.fields.openingCounter")}</th>
                   <th className="border-b border-e border-slate-300 px-2 py-2 text-start">{t("dataImport.fields.currentCounter")}</th>
                   <th className="border-b border-e border-slate-300 px-2 py-2 text-start">{t("dataImport.fields.currentStock")}</th>
                   <th className="border-b border-e border-slate-300 px-2 py-2 text-start">{t("dataImport.fields.lifetimeCounter")}</th>
@@ -391,7 +395,15 @@ export default function ImportPreviewPage({
                       <td className="border-b border-e border-slate-200 px-2 py-2 align-top">{valueOrDash(data.projectCode)}</td>
                       <td className="border-b border-e border-slate-200 px-2 py-2 align-top">{valueOrDash(computed.projectName)}</td>
                       <td className="border-b border-e border-slate-200 px-2 py-2 align-top">{valueOrDash(data.openingBalance)}</td>
-                      <td className="border-b border-e border-slate-200 px-2 py-2 align-top">{valueOrDash(data.currentCounter)}</td>
+                      <td className="border-b border-e border-slate-200 px-2 py-2 align-top">{valueOrDash(data.openingCounter)}</td>
+                      <td className="border-b border-e border-slate-200 px-2 py-2 align-top">
+                        {valueOrDash(
+                          computed.currentCounter ??
+                            (String(data.structureType || "").toUpperCase() === "SHARED_TANK"
+                              ? 0
+                              : data.openingCounter)
+                        )}
+                      </td>
                       <td className="border-b border-e border-slate-200 px-2 py-2 align-top">{valueOrDash(computed.currentStock)}</td>
                       <td className="border-b border-e border-slate-200 px-2 py-2 align-top">{valueOrDash(computed.currentLifetimeCounter)}</td>
                       <td className="border-b border-slate-200 px-2 py-2 align-top">
