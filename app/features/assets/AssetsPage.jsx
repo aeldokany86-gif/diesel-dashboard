@@ -48,6 +48,8 @@ import {
   createAssetActionRequest,
 } from "../../services/assetsService";
 
+import { fetchOperationsDashboard } from "../../services/operationsService";
+
 function notifyUser(showToastFn, type, message) {
   const safeType = type || "info";
   const safeMessage = String(message ?? "");
@@ -595,6 +597,10 @@ export default function AssetsPage({
   const [assetStatusConfirm, setAssetStatusConfirm] = useState(null);
   const [assetIdBackendError, setAssetIdBackendError] = useState("");
 
+  // Authoritative server-aggregated consumption for the Assets chart.
+  const [assetConsumptionSummary, setAssetConsumptionSummary] = useState([]);
+  const assetConsumptionRequestRef = useRef(0);
+
   const [projectTargetAsset, setProjectTargetAsset] = useState(null);
   const [selectedProjectValue, setSelectedProjectValue] = useState("");
   const [showProjectConfirm, setShowProjectConfirm] = useState(false);
@@ -871,6 +877,67 @@ export default function AssetsPage({
     }
   }, [assetsPage, assetsTotalPages]);
 
+  useEffect(() => {
+    if (!currentUser?.id) {
+      setAssetConsumptionSummary([]);
+      return undefined;
+    }
+
+    const requestId = ++assetConsumptionRequestRef.current;
+    const timer = window.setTimeout(async () => {
+      try {
+        const projectIds = (projects || [])
+          .map(
+            (project) =>
+              project?.backendId ||
+              project?.id ||
+              project?.projectId ||
+              ""
+          )
+          .filter(Boolean)
+          .join(",");
+
+        const result = await fetchOperationsDashboard(
+          {
+            projectIds,
+            utcOffsetMinutes: -new Date().getTimezoneOffset(),
+          },
+          currentUser
+        );
+
+        if (requestId !== assetConsumptionRequestRef.current) return;
+
+        setAssetConsumptionSummary(
+          Array.isArray(result?.equipmentSummary)
+            ? result.equipmentSummary
+            : []
+        );
+      } catch (error) {
+        if (requestId !== assetConsumptionRequestRef.current) return;
+
+        console.warn(
+          "Assets consumption aggregation refresh failed.",
+          error
+        );
+      }
+    }, 120);
+
+    return () => window.clearTimeout(timer);
+  }, [
+    currentUser?.id,
+    currentUser?.companyId,
+    currentUser?.role,
+    (projects || [])
+      .map(
+        (project) =>
+          project?.backendId ||
+          project?.id ||
+          project?.projectId ||
+          ""
+      )
+      .join("|"),
+  ]);
+
   const getAssetSelectionKey = (asset) =>
     getBackendAssetId(asset) || asset?.id || "";
 
@@ -1048,7 +1115,7 @@ export default function AssetsPage({
     "destination",
   ]);
 
-  const consumptionByAsset = data.reduce((acc, row) => {
+  const localConsumptionByAsset = data.reduce((acc, row) => {
     if (typeIndex === -1 || dieselIndex === -1 || destinationIndex === -1) {
       return acc;
     }
@@ -1064,15 +1131,62 @@ export default function AssetsPage({
       return acc;
     }
 
-    acc[assetId] = (acc[assetId] || 0) + dieselQty;
+    const key = normalizeScopeValue(assetId);
+    acc[key] = (acc[key] || 0) + dieselQty;
     return acc;
   }, {});
 
+  const authoritativeConsumptionByAsset = useMemo(() => {
+    const map = new Map();
+
+    (assetConsumptionSummary || []).forEach((item) => {
+      const quantity = Number(item?.fuelConsumption || 0);
+      const candidates = [
+        item?.equipmentNo,
+        item?.equipmentBackendId,
+        item?.assetId,
+        item?.id,
+      ]
+        .filter(Boolean)
+        .map(normalizeScopeValue);
+
+      candidates.forEach((key) => {
+        if (!key) return;
+        map.set(key, quantity);
+      });
+    });
+
+    return map;
+  }, [assetConsumptionSummary]);
+
   const assetConsumptionChartData = filteredAssets
-    .map((asset) => ({
-      equipmentNo: asset.id,
-      qtyLiters: Number(consumptionByAsset[asset.id]) || 0,
-    }))
+    .map((asset) => {
+      const candidates = [
+        asset?.id,
+        asset?.assetId,
+        asset?.backendId,
+        asset?.assetBackendId,
+      ]
+        .filter(Boolean)
+        .map(normalizeScopeValue);
+
+      const authoritativeValue = candidates
+        .map((key) => authoritativeConsumptionByAsset.get(key))
+        .find((value) => Number.isFinite(Number(value)));
+
+      const localFallback = candidates
+        .map((key) => localConsumptionByAsset[key])
+        .find((value) => Number.isFinite(Number(value)));
+
+      return {
+        equipmentNo: asset.id,
+        qtyLiters: Number(
+          authoritativeValue !== undefined
+            ? authoritativeValue
+            : localFallback || 0
+        ),
+      };
+    })
     .sort((a, b) => b.qtyLiters - a.qtyLiters);
 
   const assetConsumptionChartWidth = Math.max(
@@ -2197,24 +2311,43 @@ export default function AssetsPage({
           {t("assets.chart.consumedQuantityPerAsset")}
         </h2>
 
-        <div className="overflow-x-auto overflow-y-hidden pb-2" dir={isRtl ? "rtl" : "ltr"}>
-          <div className="flex min-w-full justify-center">
-            <div
-              className="mx-auto shrink-0"
-              style={{ width: `${assetConsumptionChartWidth}px`, minWidth: "700px", height: "340px" }}
-            >
-              <ChartFrame height={260}>
-                <BarChart
-                  data={assetConsumptionChartData}
-                  margin={{ top: 10, right: isRtl ? 24 : 12, left: isRtl ? 12 : 24, bottom: 5 }}
-                >
-                  <XAxis dataKey="equipmentNo" stroke="#ccc" tick={{ fontSize: 11 }} minTickGap={16} />
-                  <YAxis stroke="#ccc" tick={{ fontSize: 11 }} />
-                  <Tooltip wrapperStyle={{ direction: isRtl ? "rtl" : "ltr", textAlign: isRtl ? "right" : "left" }} />
-                  <Bar dataKey="qtyLiters" fill="#86efac" name={t("assets.chart.qtyLiters")} />
-                </BarChart>
-              </ChartFrame>
-            </div>
+        <div
+          className="overflow-x-auto overflow-y-hidden pb-2"
+          dir="ltr"
+        >
+          <div
+            className="shrink-0"
+            style={{
+              width: `${assetConsumptionChartWidth}px`,
+              minWidth: "700px",
+              height: "340px",
+            }}
+          >
+            <ChartFrame height={260}>
+              <BarChart
+                data={assetConsumptionChartData}
+                margin={{ top: 10, right: 16, left: 24, bottom: 5 }}
+              >
+                <XAxis
+                  dataKey="equipmentNo"
+                  stroke="#ccc"
+                  tick={{ fontSize: 11 }}
+                  interval={0}
+                />
+                <YAxis stroke="#ccc" tick={{ fontSize: 11 }} />
+                <Tooltip
+                  wrapperStyle={{
+                    direction: isRtl ? "rtl" : "ltr",
+                    textAlign: isRtl ? "right" : "left",
+                  }}
+                />
+                <Bar
+                  dataKey="qtyLiters"
+                  fill="#86efac"
+                  name={t("assets.chart.qtyLiters")}
+                />
+              </BarChart>
+            </ChartFrame>
           </div>
         </div>
       </div>
