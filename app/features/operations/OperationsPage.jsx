@@ -3744,12 +3744,20 @@ const payload = mapFrontendOperationToBackendPayload({
         <div className="fleet-chart-card relative z-0 bg-slate-900/80 rounded-2xl shadow-xl shadow-black/10 overflow-visible border border-slate-700/80 p-3 lg:p-4">
           <h2 className="fleet-chart-title text-base sm:text-lg font-extrabold text-amber-300 mb-3">
             {t("operations.charts.consumedPerEquipment")}
+            <span className="block mt-1 text-xs font-medium text-slate-400">
+              Top 10 Equipment
+            </span>
           </h2>
 
           <div className="h-[300px] sm:h-[340px] xl:h-[360px]">
             <ChartFrame height={260}>
               <BarChart data={topEquipmentConsumptionChartData}>
-              <XAxis dataKey="equipmentNo" stroke="#ccc" tick={{ fontSize: 11 }} minTickGap={16} />
+              <XAxis
+                dataKey="equipmentNo"
+                stroke="#ccc"
+                tick={{ fontSize: 11 }}
+                interval={0}
+              />
               <YAxis stroke="#ccc" tick={{ fontSize: 11 }} />
               <Tooltip />
               <Bar dataKey="qtyLiters" fill="#86efac" name="Qty Liters" />
