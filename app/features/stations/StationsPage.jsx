@@ -1553,12 +1553,40 @@ export default function StationsPage({
         : [];
 
       if (readings.length) {
-        return {
-          kind: "DISPENSER_COUNTERS",
-          value: null,
-          editable: Boolean(getHistoryOperationBackendId(row)),
-          readings,
-        };
+        const selectedStructureType = String(
+          selectedStationHistory?.structureType || "STANDALONE"
+        )
+          .trim()
+          .toUpperCase();
+
+        const selectedStationKeys = [
+          selectedStationHistory?.id,
+          selectedStationHistory?.stationId,
+          selectedStationHistory?.backendId,
+          selectedStationHistory?.stationBackendId,
+          selectedStationHistory?.backendStationId,
+          selectedStationHistory?.name,
+        ].filter(Boolean);
+
+        const visibleReadings =
+          selectedStructureType === "DISPENSER"
+            ? readings.filter((reading) =>
+                selectedStationKeys.some(
+                  (selectedKey) =>
+                    isSameText(reading?.stationId, selectedKey) ||
+                    isSameText(reading?.stationCode, selectedKey)
+                )
+              )
+            : readings;
+
+        if (visibleReadings.length) {
+          return {
+            kind: "DISPENSER_COUNTERS",
+            value: null,
+            editable: Boolean(getHistoryOperationBackendId(row)),
+            readings: visibleReadings,
+          };
+        }
       }
     }
 
@@ -3585,23 +3613,37 @@ export default function StationsPage({
                                           reading
                                         )
                                       }
-                                      className="rounded-md border border-amber-400/50 bg-amber-400/10 px-2 py-1 font-bold text-amber-300 underline decoration-dotted underline-offset-2 transition hover:bg-amber-400/20 hover:text-amber-200"
+                                      className="font-bold text-amber-300 underline decoration-dotted underline-offset-2 transition hover:text-amber-200"
                                       title={
                                         language === "ar"
                                           ? `تصحيح عداد ${reading.stationCode}`
                                           : `Correct ${reading.stationCode} counter`
                                       }
                                     >
-                                      {reading.stationCode}:{" "}
-                                      {formatNumber(reading.counterValue)}
+                                      {String(
+                                        selectedStationHistory?.structureType || ""
+                                      )
+                                        .trim()
+                                        .toUpperCase() === "DISPENSER"
+                                        ? formatNumber(reading.counterValue)
+                                        : `${reading.stationCode}: ${formatNumber(
+                                            reading.counterValue
+                                          )}`}
                                     </button>
                                   ) : (
                                     <span
                                       key={`${reading.stationId}-${reading.counterValue}`}
                                       className="whitespace-nowrap"
                                     >
-                                      {reading.stationCode}:{" "}
-                                      {formatNumber(reading.counterValue)}
+                                      {String(
+                                        selectedStationHistory?.structureType || ""
+                                      )
+                                        .trim()
+                                        .toUpperCase() === "DISPENSER"
+                                        ? formatNumber(reading.counterValue)
+                                        : `${reading.stationCode}: ${formatNumber(
+                                            reading.counterValue
+                                          )}`}
                                     </span>
                                   );
                                 })}
