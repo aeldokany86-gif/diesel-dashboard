@@ -106,10 +106,10 @@ export const ROLE_PERMISSIONS = {
 
   Officer: {
     // Officer can view Operations as read-only.
-    // Officer can propose changes on master-data pages; non-status changes go to Manager approval.
+    // Asset/station status changes are direct; controlled master-data actions keep their approval workflows.
     operations: { view: true, add: false, edit: false, delete: false, approve: false, export: true, print: true },
     assets: { view: true, add: false, edit: true, delete: false, approve: false, export: true, print: true },
-    stations: { view: true, add: false, edit: true, delete: false, approve: false, adjustInventory: false, updatePrice: false, export: true, print: true },
+    stations: { view: true, add: false, edit: true, delete: false, approve: false, adjustInventory: true, updatePrice: false, export: true, print: true },
     team: { view: true, add: true, edit: true, delete: false, approve: false, export: true, print: true },
     projects: { view: true, add: true, edit: true, delete: false, approve: false, export: true, print: true },
     reports: { view: true, export: true, print: true },
@@ -175,7 +175,12 @@ export function getRolePermissions(role) {
 }
 
 export function hasPermissionForUser(user, module, action = "view") {
-  if (!user || user.status !== "Active") return false;
+  const normalizedStatus = String(user?.status || "")
+    .trim()
+    .toLowerCase();
+
+  if (!user || normalizedStatus !== "active") return false;
+
   return Boolean(getRolePermissions(user.role)?.[module]?.[action]);
 }
 
@@ -184,12 +189,18 @@ export function canAccessPageForUser(user, pageKey) {
 }
 
 export function actionRequiresManagerApproval(user) {
-  if (!user || user.status !== "Active") return true;
+  if (
+    !user ||
+    String(user.status || "").trim().toLowerCase() !== "active"
+  ) return true;
   return !["Admin", "Manager"].includes(user.role);
 }
 
 export function canPerformWriteAction(user, module) {
-  if (!user || user.status !== "Active") return false;
+  if (
+    !user ||
+    String(user.status || "").trim().toLowerCase() !== "active"
+  ) return false;
   if (user.role === "TopManagement") return false;
   return Boolean(
     hasPermissionForUser(user, module, "add") ||

@@ -1081,7 +1081,10 @@ export default function AssetsPage({
   );
 
   const changeAssetStatus = (asset) => {
-    if (!hasPermission("assets", "edit")) {
+    const canChangeAssetStatus =
+      currentUser?.role === "Officer" || hasPermission("assets", "edit");
+
+    if (!canChangeAssetStatus) {
       showToast?.("warning", t("assetWorkflows.messages.readOnlyStatus"));
       return;
     }
@@ -2139,7 +2142,8 @@ export default function AssetsPage({
                   <Td>{formatNumber(asset.fuelTank)} L</Td>
 
                   <Td>
-                    {hasPermission("assets", "edit") ? (
+                    {(currentUser?.role === "Officer" ||
+                      hasPermission("assets", "edit")) ? (
                       <button
                         onClick={() => changeAssetStatus(asset)}
                         className="cursor-pointer"

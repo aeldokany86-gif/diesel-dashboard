@@ -1985,7 +1985,10 @@ export default function StationsPage({
 
 
   const openStatusChange = (station) => {
-    if (!hasPermission("stations", "edit")) {
+    const canChangeStationStatus =
+      currentUser?.role === "Officer" || hasPermission("stations", "edit");
+
+    if (!canChangeStationStatus) {
       showToast?.("warning", t("stationWorkflows.messages.readOnlyStatus"));
       return;
     }
@@ -2524,8 +2527,15 @@ export default function StationsPage({
     setShowConfirm(true);
   };
 
+  const inventoryAdjustmentStations = stationsWithBalance.filter(
+    (station) =>
+      String(station?.structureType || "STANDALONE")
+        .trim()
+        .toUpperCase() !== "DISPENSER"
+  );
+
   const openStockCountAdjustment = () => {
-    if (currentUser?.role !== "Manager") {
+    if (!["Manager", "Officer"].includes(currentUser?.role)) {
       showToast?.("warning", t("stationWorkflows.messages.managerOnlyAdjustment"));
       return;
     }
@@ -2539,7 +2549,7 @@ export default function StationsPage({
   };
 
   const confirmStockCountAdjustment = () => {
-    if (currentUser?.role !== "Manager") {
+    if (!["Manager", "Officer"].includes(currentUser?.role)) {
       showToast?.("warning", t("stationWorkflows.messages.managerOnlyAdjustment"));
       return;
     }
@@ -3012,7 +3022,7 @@ export default function StationsPage({
                 </button>
               )}
 
-              {currentUser?.role === "Manager" && (
+              {["Manager", "Officer"].includes(currentUser?.role) && (
                 <button
                   onClick={openStockCountAdjustment}
                   className="flex items-center gap-3 w-full cursor-pointer text-left px-5 py-4 hover:bg-amber-500/10 transition text-amber-300 border-t border-gray-700"
@@ -4405,7 +4415,7 @@ export default function StationsPage({
                     className="border border-slate-700 bg-slate-900 text-slate-100 rounded-lg p-2 w-full mt-2 outline-none focus:border-amber-500"
                     value={stockCountStation?.id || ""}
                     onChange={(e) => {
-                      const station = stationsWithBalance.find(
+                      const station = inventoryAdjustmentStations.find(
                         (s) => s.id === e.target.value
                       );
                       setStockCountStation(station || null);
@@ -4414,7 +4424,7 @@ export default function StationsPage({
                     }}
                   >
                     <option value="">{t("stationWorkflows.labels.selectStation")}</option>
-                    {stationsWithBalance.map((s) => (
+                    {inventoryAdjustmentStations.map((s) => (
                       <option key={makeTenantEntityKey(s)} value={s.id}>
                         {s.id}
                       </option>
