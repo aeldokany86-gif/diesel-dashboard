@@ -11,7 +11,10 @@ import StationsReportsPage from "./stations/StationsReportsPage";
 import EmployeesReportsPage from "./employees/EmployeesReportsPage";
 import ProjectsReportsPage from "./projects/ProjectsReportsPage";
 import CompaniesReportsPage from "./companies/CompaniesReportsPage";
-import { fetchOperationsSummaryReport } from "../../services/operationsService";
+import {
+  fetchOperationsSummaryReport,
+  fetchWarehouseOperationsReport,
+} from "../../services/operationsService";
 import {
   fetchAssetTransferHistory,
   fetchAssetMeterHistory,
@@ -27,6 +30,13 @@ const OPERATIONS_REPORTS = [
     title: "Operations Summary Report",
     description:
       "Detailed operational transactions report including date, project, type, source, destination, quantity, cost and status.",
+    available: true,
+  },
+  {
+    id: "warehouse-operations",
+    title: "Warehouse Operations Report",
+    description:
+      "Simple warehouse movement report showing completed operations, source, destination and fuel quantity without meter details.",
     available: true,
   },
   {
@@ -947,71 +957,51 @@ function expandSummaryOperation(operation, index) {
       })
     : [];
 
-  const readings = getOperationCounterReadings(operation).filter(
-    (item) => getCounterReadingValue(item) !== null,
+  /*
+    Operations Summary is a movement/value report, not a meter-event report.
+
+    Shared Tank counter readings are still available in the dedicated meter
+    history, but they must not create extra summary rows with no quantity/cost.
+    This also prevents legacy operations that later received counter-reading
+    snapshots from appearing twice in Operations Summary.
+  */
+  if (!allocations.length) {
+    return [
+      {
+        ...base,
+        sourceGroupStationRaw: base.sourceStationRaw,
+        destinationGroupStationRaw: base.destinationStationRaw,
+      },
+    ];
+  }
+
+  const allocationTotal = allocations.reduce(
+    (sum, item) => sum + Number(item?.quantity || 0),
+    0,
   );
 
-  const rows = [];
+  return allocations.map((allocation, allocationIndex) => {
+    const quantity = Number(allocation?.quantity || 0);
+    const proportionalCost =
+      allocationTotal > 0 ? (base.cost * quantity) / allocationTotal : 0;
 
-  if (allocations.length) {
-    const allocationTotal = allocations.reduce(
-      (sum, item) => sum + Number(item?.quantity || 0),
-      0,
-    );
-
-    allocations.forEach((allocation, allocationIndex) => {
-      const quantity = Number(allocation?.quantity || 0);
-      const proportionalCost =
-        allocationTotal > 0
-          ? (base.cost * quantity) / allocationTotal
-          : 0;
-
-      rows.push({
-        ...base,
-        key: `${base.key}-source-${allocationIndex}`,
-        source: getDispenserLabel(allocation),
-        sourceStationRaw: getDispenserBackendId(allocation),
-        sourceGroupStationRaw:
-          operation?.sourceStationId ||
-          operation?.sourceStation?.id ||
-          operation?.sourceStation?.backendId ||
-          "",
-        quantity,
-        cost: proportionalCost,
-        rowKind: "MOVEMENT",
-        countsInTotals: true,
-      });
-    });
-  } else {
-    rows.push({
+    return {
       ...base,
-      sourceGroupStationRaw: base.sourceStationRaw,
+      key: `${base.key}-source-${allocationIndex}`,
+      source: getDispenserLabel(allocation),
+      sourceStationRaw: getDispenserBackendId(allocation),
+      sourceGroupStationRaw:
+        operation?.sourceStationId ||
+        operation?.sourceStation?.id ||
+        operation?.sourceStation?.backendId ||
+        "",
       destinationGroupStationRaw: base.destinationStationRaw,
-    });
-  }
-
-  if (readings.length) {
-    readings.forEach((reading, readingIndex) => {
-      rows.push({
-        ...base,
-        key: `${base.key}-meter-${readingIndex}`,
-        destination: getDispenserLabel(reading),
-        destinationMeter: getCounterReadingValue(reading),
-        destinationStationRaw: getDispenserBackendId(reading),
-        destinationGroupStationRaw:
-          operation?.destinationStationId ||
-          operation?.destinationStation?.id ||
-          operation?.destinationStation?.backendId ||
-          "",
-        quantity: null,
-        cost: null,
-        rowKind: "METER_READING",
-        countsInTotals: false,
-      });
-    });
-  }
-
-  return rows;
+      quantity,
+      cost: proportionalCost,
+      rowKind: "MOVEMENT",
+      countsInTotals: true,
+    };
+  });
 }
 
 const STATION_MOVEMENT_FILTERS = {
@@ -6375,6 +6365,542 @@ function isPlatformReportsUser(user) {
   );
 }
 
+const WAREHOUSE_OPERATION_FILTERS = {
+  dateFrom: "",
+  dateTo: "",
+  operationType: "all",
+  assetId: "all",
+};
+
+const WAREHOUSE_OPERATION_HEADERS = [
+  "#",
+  "Date / Time",
+  "Destination",
+  "Quantity (L)",
+  "Asset Type",
+  "Operation Type",
+];
+
+function WarehouseOperationsReport({
+  selectedReport,
+  currentUser,
+  currentCompany,
+  assets = [],
+  onBack,
+}) {
+  const { language, t } = useLanguage();
+  const tr = (value, params) => reportText(t, value, params);
+
+  const [filtersOpen, setFiltersOpen] = useState(true);
+  const [reportGenerated, setReportGenerated] = useState(false);
+  const [draftFilters, setDraftFilters] = useState(WAREHOUSE_OPERATION_FILTERS);
+  const [appliedFilters, setAppliedFilters] = useState(WAREHOUSE_OPERATION_FILTERS);
+  const [rows, setRows] = useState([]);
+  const [summary, setSummary] = useState({ operations: 0, totalQuantity: 0 });
+  const [loading, setLoading] = useState(false);
+  const [error, setError] = useState("");
+
+  const pagination = useReportPagination(rows);
+  const paginatedRows = pagination.paginatedItems;
+
+  const warehouseAssets = useMemo(
+    () =>
+      (assets || [])
+        .slice()
+        .sort((a, b) => getAssetLabel(a).localeCompare(getAssetLabel(b))),
+    [assets],
+  );
+
+  const operationTypes = [
+    "DIRECT_REFUEL",
+    "INTERNAL_TRANSFER",
+    "EXTERNAL_SUPPLY",
+    "EXTERNAL_DIRECT_REFUEL",
+    "EXTERNAL_TRANSFER",
+  ];
+
+  const selectedAssetLabel = useMemo(() => {
+    if (appliedFilters.assetId === "all") return "All Assets";
+    const asset = warehouseAssets.find(
+      (item) =>
+        normalizeValue(getAssetFilterValue(item)) ===
+        normalizeValue(appliedFilters.assetId),
+    );
+    return asset ? getAssetLabel(asset) : appliedFilters.assetId;
+  }, [appliedFilters.assetId, warehouseAssets]);
+
+  const filterSummary = useMemo(
+    () => [
+      {
+        label: "Period",
+        value:
+          appliedFilters.dateFrom || appliedFilters.dateTo
+            ? `${formatReportDate(appliedFilters.dateFrom)} → ${formatReportDate(
+                appliedFilters.dateTo,
+              )}`
+            : "All dates",
+      },
+      {
+        label: "Operation Type",
+        value:
+          appliedFilters.operationType === "all"
+            ? "All Operation Types"
+            : formatOperationType(appliedFilters.operationType),
+      },
+      { label: "Asset", value: selectedAssetLabel },
+    ],
+    [appliedFilters, selectedAssetLabel],
+  );
+
+  const reportMeta = {
+    translate: tr,
+    language,
+    title: selectedReport?.title || "Warehouse Operations Report",
+    companyName: currentCompany?.name || "Fleet Fuel PRO",
+    generatedBy: getUserDisplayName(currentUser),
+    generatedAt: new Date().toLocaleString("en-GB"),
+    filters: filterSummary,
+    totals: [
+      { label: "Operations", value: Number(summary.operations || 0) },
+      {
+        label: "Total Quantity",
+        value: `${formatNumber(summary.totalQuantity || 0)} L`,
+      },
+    ],
+  };
+
+  const generateReport = async () => {
+    setLoading(true);
+    setError("");
+
+    try {
+      const result = await fetchWarehouseOperationsReport(
+        {
+          dateFrom: draftFilters.dateFrom,
+          dateTo: draftFilters.dateTo,
+          type:
+            draftFilters.operationType === "all"
+              ? ""
+              : draftFilters.operationType,
+          assetId: draftFilters.assetId === "all" ? "" : draftFilters.assetId,
+        },
+        currentUser,
+      );
+
+      setRows(result.rows || []);
+      setSummary({
+        operations: Number(result.summary?.operations || 0),
+        totalQuantity: Number(result.summary?.totalQuantity || 0),
+      });
+      setAppliedFilters({ ...draftFilters });
+      setReportGenerated(true);
+      pagination.resetPage();
+      setFiltersOpen(false);
+    } catch (requestError) {
+      setRows([]);
+      setSummary({ operations: 0, totalQuantity: 0 });
+      setError(
+        requestError?.response?.data?.message ||
+          requestError?.message ||
+          "Failed to generate warehouse operations report.",
+      );
+    } finally {
+      setLoading(false);
+    }
+  };
+
+  const resetFilters = () => {
+    setDraftFilters({ ...WAREHOUSE_OPERATION_FILTERS });
+  };
+
+  const handlePrint = () => {
+    printReport({
+      ...reportMeta,
+      columns: WAREHOUSE_OPERATION_HEADERS.slice(1),
+      columnAlignments: [
+        "center",
+        "center",
+        "center",
+        "center",
+        "center",
+      ],
+      rows: rows.map((row) => [
+        formatDateTime(row.occurredAt),
+        row.destination || "-",
+        formatNumber(row.quantity),
+        row.assetType || "-",
+        formatOperationType(row.type),
+      ]),
+      footerRow: [
+        "Grand Total",
+        "",
+        formatNumber(summary.totalQuantity || 0),
+        `${summary.operations || 0} operations`,
+        "",
+      ],
+    });
+  };
+
+  const handleExport = () => {
+    exportReportToExcel({
+      fileName: "Warehouse_Operations_Report",
+      sheetName: "Warehouse Operations",
+      ...reportMeta,
+      rows: rows.map((row) => ({
+        "Date / Time": formatDateTime(row.occurredAt),
+        Destination: row.destination || "-",
+        "Quantity (L)": Number(row.quantity || 0),
+        "Asset Type": row.assetType || "-",
+        "Operation Type": formatOperationType(row.type),
+      })),
+      totals: {
+        "Date / Time": "Grand Total",
+        "Quantity (L)": Number(summary.totalQuantity || 0),
+        "Asset Type": `${summary.operations || 0} operations`,
+      },
+    });
+  };
+
+  return (
+    <ReportLocalizationBoundary t={t} language={language}>
+      <div className="min-h-full bg-slate-950 px-4 py-5 text-slate-100 sm:px-6 lg:px-8">
+        <div className="mx-auto max-w-[1500px] space-y-5">
+          <section className="rounded-2xl border border-slate-800 bg-slate-900/80 p-5 shadow-xl shadow-black/10">
+            <div className="flex flex-col gap-4 xl:flex-row xl:items-center xl:justify-between">
+              <div>
+                <button
+                  type="button"
+                  onClick={onBack}
+                  className="mb-4 inline-flex items-center gap-2 rounded-lg border border-slate-700 bg-slate-950/70 px-3 py-2 text-sm font-bold text-slate-300 transition hover:border-amber-500/50 hover:text-amber-300"
+                >
+                  <span aria-hidden="true">←</span> Back to Reports
+                </button>
+                <p className="text-xs font-bold uppercase tracking-[0.22em] text-amber-400">
+                  Operations Reports
+                </p>
+                <h1 className="mt-1 text-2xl font-black text-white sm:text-3xl">
+                  {selectedReport?.title}
+                </h1>
+                <p className="mt-2 max-w-3xl text-sm leading-6 text-slate-400">
+                  {selectedReport?.description}
+                </p>
+                <p className="mt-2 text-xs font-extrabold text-amber-300">
+                  Completed operations only · Quantities only · No meter readings
+                </p>
+              </div>
+
+              <ReportToolbar
+                onOpenFilters={() => setFiltersOpen(true)}
+                onPrint={handlePrint}
+                onExport={handleExport}
+                disabled={!reportGenerated || !rows.length}
+              />
+            </div>
+          </section>
+
+          {!reportGenerated ? (
+            <section className="rounded-2xl border border-amber-500/30 bg-slate-900/80 px-6 py-14 text-center shadow-xl shadow-black/10">
+              <div className="mx-auto flex max-w-xl flex-col items-center">
+                <div className="flex h-16 w-16 items-center justify-center rounded-2xl border border-amber-500/30 bg-amber-500/10 text-3xl">
+                  📦
+                </div>
+                <h2 className="mt-5 text-xl font-black text-white sm:text-2xl">
+                  Select warehouse report filters first
+                </h2>
+                <p className="mt-3 text-sm leading-6 text-slate-400">
+                  Choose the period, operation type and asset, then generate the report.
+                </p>
+                <button
+                  type="button"
+                  onClick={() => setFiltersOpen(true)}
+                  className="mt-6 rounded-xl border border-amber-500 bg-amber-500 px-5 py-3 text-sm font-extrabold text-slate-950 transition hover:bg-amber-400"
+                >
+                  Set Report Filters
+                </button>
+              </div>
+            </section>
+          ) : (
+            <>
+              <section className="grid gap-3 sm:grid-cols-3">
+                {filterSummary.map((item) => (
+                  <div
+                    key={item.label}
+                    className="rounded-xl border border-slate-800 bg-slate-900/70 px-4 py-3"
+                  >
+                    <p className="text-[11px] font-bold uppercase tracking-wider text-slate-500">
+                      {item.label}
+                    </p>
+                    <p className="mt-1 truncate text-sm font-extrabold text-slate-200">
+                      {item.value}
+                    </p>
+                  </div>
+                ))}
+              </section>
+
+              <section className="grid gap-3 sm:grid-cols-2">
+                <div className="rounded-2xl border border-amber-500/25 bg-slate-900/80 p-4 shadow-lg shadow-black/10">
+                  <p className="text-xs font-bold uppercase tracking-wider text-amber-400">
+                    Operations
+                  </p>
+                  <p className="mt-2 text-2xl font-black text-white">
+                    {formatNumber(summary.operations || 0)}
+                  </p>
+                </div>
+                <div className="rounded-2xl border border-amber-500/25 bg-slate-900/80 p-4 shadow-lg shadow-black/10">
+                  <p className="text-xs font-bold uppercase tracking-wider text-amber-400">
+                    Total Quantity (L)
+                  </p>
+                  <p className="mt-2 text-2xl font-black text-white">
+                    {formatNumber(summary.totalQuantity || 0)}
+                  </p>
+                </div>
+              </section>
+
+              <section className="overflow-hidden rounded-2xl border border-slate-800 bg-slate-900/80 shadow-xl shadow-black/10">
+                <div className="flex flex-col gap-2 border-b border-slate-800 px-5 py-4 sm:flex-row sm:items-center sm:justify-between">
+                  <div>
+                    <h2 className="font-extrabold text-white">
+                      Warehouse Operation Details
+                    </h2>
+                    <p className="mt-1 text-xs text-slate-500">
+                      One row per completed operation. Shared Tanks are shown as the parent tank only.
+                    </p>
+                  </div>
+                  <p className="text-xs font-bold text-amber-300">
+                    {rows.length} operation{rows.length === 1 ? "" : "s"}
+                  </p>
+                </div>
+
+                <div className="overflow-x-auto">
+                  <table className="min-w-[860px] w-full border-collapse text-sm">
+                    <thead className="bg-slate-950/90">
+                      <tr>
+                        {WAREHOUSE_OPERATION_HEADERS.map((header) => (
+                          <th
+                            key={header}
+                            className="whitespace-nowrap border-b border-slate-800 px-3 py-3 text-center text-[11px] font-black uppercase tracking-wider text-slate-400"
+                          >
+                            {header}
+                          </th>
+                        ))}
+                      </tr>
+                    </thead>
+                    <tbody>
+                      {paginatedRows.length ? (
+                        paginatedRows.map((row, index) => (
+                          <tr
+                            key={row.id || `${row.operationNo}-${row.occurredAt}`}
+                            className="border-b border-slate-800/70 text-center transition hover:bg-slate-800/30"
+                          >
+                            <td className="px-3 py-3 text-slate-500">
+                              {pagination.startItem + index}
+                            </td>
+                            <td className="whitespace-nowrap px-3 py-3 text-slate-300">
+                              {formatDateTime(row.occurredAt)}
+                            </td>
+                            <td className="whitespace-nowrap px-3 py-3 font-semibold text-slate-200">
+                              {row.destination || "-"}
+                            </td>
+                            <td className="whitespace-nowrap px-3 py-3 font-black text-white">
+                              {formatNumber(row.quantity)}
+                            </td>
+                            <td className="whitespace-nowrap px-3 py-3 text-center text-slate-300">
+                              {row.assetType || "-"}
+                            </td>
+                            <td className="whitespace-nowrap px-3 py-3 text-slate-300">
+                              {formatOperationType(row.type)}
+                            </td>
+                          </tr>
+                        ))
+                      ) : (
+                        <tr>
+                          <td
+                            colSpan={WAREHOUSE_OPERATION_HEADERS.length}
+                            className="px-6 py-12 text-center text-slate-500"
+                          >
+                            No completed operations match the selected filters.
+                          </td>
+                        </tr>
+                      )}
+                    </tbody>
+                    <tfoot className="bg-slate-950/80">
+                      <tr className="text-center font-black text-white">
+                        <td className="px-3 py-3" colSpan={3}>
+                          Grand Total
+                        </td>
+                        <td className="px-3 py-3 text-amber-300">
+                          {formatNumber(summary.totalQuantity || 0)}
+                        </td>
+                        <td className="px-3 py-3 text-xs text-slate-400">
+                          {summary.operations || 0} operations
+                        </td>
+                        <td className="px-3 py-3" />
+                      </tr>
+                    </tfoot>
+                  </table>
+                </div>
+                <ReportPagination pagination={pagination} itemLabel="operations" />
+              </section>
+            </>
+          )}
+        </div>
+
+        {filtersOpen ? (
+          <div className="fixed inset-0 z-[120] bg-black/70 backdrop-blur-sm">
+            <button
+              type="button"
+              aria-label="Close filters"
+              onClick={() => setFiltersOpen(false)}
+              className="absolute inset-0 h-full w-full"
+            />
+            <aside
+              className={`absolute top-0 z-10 flex h-full w-full max-w-md flex-col border-slate-800 bg-slate-900 shadow-2xl shadow-black/50 ${
+                language === "ar" ? "left-0 border-r" : "right-0 border-l"
+              }`}
+            >
+              <div className="flex items-start justify-between border-b border-slate-800 px-5 py-4">
+                <div>
+                  <p className="text-xs font-bold uppercase tracking-[0.2em] text-amber-400">
+                    Report Setup
+                  </p>
+                  <h2 className="mt-1 text-xl font-black text-white">
+                    Warehouse Report Filters
+                  </h2>
+                </div>
+                <button
+                  type="button"
+                  aria-label="Close filters"
+                  onClick={() => setFiltersOpen(false)}
+                  className="flex h-9 w-9 items-center justify-center rounded-lg border border-slate-700 bg-slate-950/70 text-lg text-slate-400 transition hover:text-white"
+                >
+                  ×
+                </button>
+              </div>
+
+              <div className="flex-1 space-y-4 overflow-y-auto px-5 py-5">
+                <div className="grid grid-cols-2 gap-3">
+                  <label className="block">
+                    <span className="mb-2 block text-sm font-bold text-slate-300">
+                      Date From
+                    </span>
+                    <input
+                      type="date"
+                      value={draftFilters.dateFrom}
+                      onChange={(event) =>
+                        setDraftFilters((previous) => ({
+                          ...previous,
+                          dateFrom: event.target.value,
+                        }))
+                      }
+                      className="w-full rounded-xl border border-slate-700 bg-slate-950 px-3 py-2.5 text-sm text-white outline-none focus:border-amber-500"
+                    />
+                  </label>
+
+                  <label className="block">
+                    <span className="mb-2 block text-sm font-bold text-slate-300">
+                      Date To
+                    </span>
+                    <input
+                      type="date"
+                      value={draftFilters.dateTo}
+                      onChange={(event) =>
+                        setDraftFilters((previous) => ({
+                          ...previous,
+                          dateTo: event.target.value,
+                        }))
+                      }
+                      className="w-full rounded-xl border border-slate-700 bg-slate-950 px-3 py-2.5 text-sm text-white outline-none focus:border-amber-500"
+                    />
+                  </label>
+                </div>
+
+                <label className="block">
+                  <span className="mb-2 block text-sm font-bold text-slate-300">
+                    Operation Type
+                  </span>
+                  <select
+                    value={draftFilters.operationType}
+                    onChange={(event) =>
+                      setDraftFilters((previous) => ({
+                        ...previous,
+                        operationType: event.target.value,
+                      }))
+                    }
+                    className="w-full rounded-xl border border-slate-700 bg-slate-950 px-3 py-2.5 text-sm text-white outline-none focus:border-amber-500"
+                  >
+                    <option value="all">All Operation Types</option>
+                    {operationTypes.map((type) => (
+                      <option key={type} value={type}>
+                        {formatOperationType(type)}
+                      </option>
+                    ))}
+                  </select>
+                </label>
+
+                <label className="block">
+                  <span className="mb-2 block text-sm font-bold text-slate-300">
+                    Asset / Equipment
+                  </span>
+                  <select
+                    value={draftFilters.assetId}
+                    onChange={(event) =>
+                      setDraftFilters((previous) => ({
+                        ...previous,
+                        assetId: event.target.value,
+                      }))
+                    }
+                    className="w-full rounded-xl border border-slate-700 bg-slate-950 px-3 py-2.5 text-sm text-white outline-none focus:border-amber-500"
+                  >
+                    <option value="all">All Assets</option>
+                    {warehouseAssets.map((asset) => (
+                      <option
+                        key={getAssetFilterValue(asset)}
+                        value={getAssetFilterValue(asset)}
+                      >
+                        {getAssetLabel(asset)}
+                        {asset?.type ? ` — ${asset.type}` : ""}
+                      </option>
+                    ))}
+                  </select>
+                </label>
+
+                {error ? (
+                  <div className="rounded-xl border border-red-500/30 bg-red-950/20 px-4 py-3 text-sm font-bold text-red-300">
+                    {error}
+                  </div>
+                ) : null}
+              </div>
+
+              <div className="grid grid-cols-2 gap-3 border-t border-slate-800 px-5 py-4">
+                <button
+                  type="button"
+                  onClick={resetFilters}
+                  disabled={loading}
+                  className="rounded-xl border border-slate-700 bg-slate-950 px-4 py-2.5 text-sm font-extrabold text-slate-300 transition hover:border-slate-500 hover:text-white disabled:opacity-50"
+                >
+                  Reset
+                </button>
+                <button
+                  type="button"
+                  onClick={generateReport}
+                  disabled={loading}
+                  className="rounded-xl border border-amber-500 bg-amber-500 px-4 py-2.5 text-sm font-extrabold text-slate-950 transition hover:bg-amber-400 disabled:cursor-wait disabled:opacity-60"
+                >
+                  {loading
+                    ? "Generating..."
+                    : reportGenerated
+                      ? "Update Report"
+                      : "Generate Report"}
+                </button>
+              </div>
+            </aside>
+          </div>
+        ) : null}
+      </div>
+    </ReportLocalizationBoundary>
+  );
+}
+
 export default function ReportsPage({
   currentUser,
   currentCompany,
@@ -6901,6 +7427,18 @@ export default function ReportsPage({
         currentUser={currentUser}
         currentCompany={currentCompany}
         projects={projects}
+        onBack={handleBackToReports}
+      />
+    );
+  }
+
+  if (selectedReport?.id === "warehouse-operations") {
+    return (
+      <WarehouseOperationsReport
+        selectedReport={selectedReport}
+        currentUser={currentUser}
+        currentCompany={currentCompany}
+        assets={assets}
         onBack={handleBackToReports}
       />
     );

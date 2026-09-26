@@ -26,6 +26,7 @@ import {
   getHeaderIndex,
   isSameText,
   normalizeScopeValue,
+  mapBackendOperationForState,
 } from "../../lib/helpers";
 
 import {
@@ -45,6 +46,8 @@ import {
 import {
   getUploadSignedUrl,
   createOperation,
+  fetchOperationsDashboard,
+  fetchAssetOperationsHistory,
 } from "../../services/operationsService";
 
 import {
@@ -519,6 +522,33 @@ export default function OperationsPage({
     useState(false);
   const [showDailyConsumptionSettings, setShowDailyConsumptionSettings] =
     useState(false);
+
+  // Server-backed dashboard aggregation. Local rows remain available as an
+  // instant preview while the authoritative aggregate refresh runs.
+  const [remoteDashboard, setRemoteDashboard] = useState(null);
+  const [dashboardLoading, setDashboardLoading] = useState(false);
+  const dashboardRequestIdRef = useRef(0);
+
+  const [equipmentSummaryPage, setEquipmentSummaryPage] = useState(1);
+  const [equipmentSummaryPageSize, setEquipmentSummaryPageSize] = useState(10);
+  const [equipmentTypePage, setEquipmentTypePage] = useState(1);
+  const [equipmentTypePageSize, setEquipmentTypePageSize] = useState(10);
+  const [dailyConsumptionPage, setDailyConsumptionPage] = useState(1);
+  const [dailyConsumptionPageSize, setDailyConsumptionPageSize] = useState(10);
+
+  const [equipmentHistoryRows, setEquipmentHistoryRows] = useState([]);
+  const [equipmentHistoryPagination, setEquipmentHistoryPagination] = useState({
+    page: 1,
+    pageSize: 25,
+    total: 0,
+    totalPages: 1,
+    hasPreviousPage: false,
+    hasNextPage: false,
+  });
+  const [equipmentHistoryLoading, setEquipmentHistoryLoading] = useState(false);
+  const [equipmentHistoryError, setEquipmentHistoryError] = useState("");
+  const equipmentHistoryCacheRef = useRef(new Map());
+  const equipmentHistoryRequestRef = useRef(0);
 
   const dateFilterRef = useRef(null);
   const equipmentDropdownRef = useRef(null);
@@ -1256,11 +1286,10 @@ const payload = mapFrontendOperationToBackendPayload({
     return diesel * getOperationLiterPrice(item);
   };
 
-  const equipmentTypeOptions = [
+  const localEquipmentTypeOptions = [
     ...new Set(
       refuelTypeFilteredData
         .filter((item) => {
-          const equipmentNo = item.row[destinationIndex];
           const project = getOperationProjectName(item);
 
           if (
@@ -1281,7 +1310,7 @@ const payload = mapFrontendOperationToBackendPayload({
     ),
   ];
 
-  const equipmentOptions = [
+  const localEquipmentOptions = [
     ...new Set(
       refuelTypeFilteredData
         .filter((item) => {
@@ -1312,7 +1341,7 @@ const payload = mapFrontendOperationToBackendPayload({
     ),
   ];
 
-  const projectOptions = [
+  const localProjectOptions = [
     ...new Set(
       refuelTypeFilteredData
         .filter((item) => {
@@ -1336,12 +1365,32 @@ const payload = mapFrontendOperationToBackendPayload({
 
           return true;
         })
-        .map((item) =>
-          getOperationProjectName(item)
-        )
+        .map((item) => getOperationProjectName(item))
         .filter((project) => project && project !== "-")
     ),
   ];
+
+  const remoteFilterOptions = remoteDashboard?.filterOptions || {};
+  const equipmentTypeOptions =
+    Array.isArray(remoteFilterOptions.assetTypes) &&
+    remoteFilterOptions.assetTypes.length
+      ? remoteFilterOptions.assetTypes
+      : localEquipmentTypeOptions;
+
+  const equipmentOptions =
+    Array.isArray(remoteFilterOptions.assets) && remoteFilterOptions.assets.length
+      ? remoteFilterOptions.assets
+          .map((asset) => asset?.assetId || asset?.id)
+          .filter(Boolean)
+      : localEquipmentOptions;
+
+  const projectOptions =
+    Array.isArray(remoteFilterOptions.projects) &&
+    remoteFilterOptions.projects.length
+      ? remoteFilterOptions.projects
+          .map((project) => project?.name || project?.id)
+          .filter(Boolean)
+      : localProjectOptions;
 
   const visibleEquipmentOptions = equipmentOptions.filter((equipment) =>
     equipment.toLowerCase().includes(equipmentSearch.toLowerCase())
@@ -1399,6 +1448,76 @@ const payload = mapFrontendOperationToBackendPayload({
     return t("operations.filters.projectsSelected", { count: selectedProject.length });
   };
 
+  useEffect(() => {
+    if (!currentUser?.id) {
+      setRemoteDashboard(null);
+      return undefined;
+    }
+
+    const requestId = ++dashboardRequestIdRef.current;
+    const timer = window.setTimeout(async () => {
+      const selectedAssetIds = selectedEquipment
+        .map((value) => {
+          const asset = getAsset(value);
+          return (
+            asset?.backendId ||
+            asset?.assetBackendId ||
+            asset?.id ||
+            ""
+          );
+        })
+        .filter(Boolean);
+
+      const selectedProjectIds = selectedProject
+        .map((value) => {
+          const project = getProject(value);
+          return project?.backendId || project?.id || project?.projectId || "";
+        })
+        .filter(Boolean);
+
+      setDashboardLoading(true);
+
+      try {
+        const result = await fetchOperationsDashboard(
+          {
+            dateFrom: fromDate,
+            dateTo: toDate,
+            refuelType: selectedRefuelType,
+            assetIds: selectedAssetIds.join(","),
+            assetTypes: selectedEquipmentType.join(","),
+            projectIds: selectedProjectIds.join(","),
+            utcOffsetMinutes: -new Date().getTimezoneOffset(),
+          },
+          currentUser
+        );
+
+        if (requestId !== dashboardRequestIdRef.current) return;
+
+        setRemoteDashboard(result);
+      } catch (error) {
+        if (requestId !== dashboardRequestIdRef.current) return;
+        // Keep the instant local preview visible if the aggregate endpoint is
+        // temporarily unavailable. The next refresh will retry automatically.
+        console.warn("Operations dashboard aggregation refresh failed.", error);
+      } finally {
+        if (requestId === dashboardRequestIdRef.current) {
+          setDashboardLoading(false);
+        }
+      }
+    }, 120);
+
+    return () => window.clearTimeout(timer);
+  }, [
+    currentUser?.id,
+    fromDate,
+    toDate,
+    selectedRefuelType,
+    selectedEquipment.join("|"),
+    selectedEquipmentType.join("|"),
+    selectedProject.join("|"),
+    data,
+  ]);
+
   const filteredDirectRefuelData = refuelTypeFilteredData.filter((item) => {
     const equipmentNo = item.row[destinationIndex];
     const asset = getAsset(equipmentNo);
@@ -1427,11 +1546,11 @@ const payload = mapFrontendOperationToBackendPayload({
     return true;
   });
 
-  const totalDiesel = filteredDirectRefuelData.reduce((sum, item) => {
+  const localTotalDiesel = filteredDirectRefuelData.reduce((sum, item) => {
     return sum + (parseFloat(item.row[dieselIndex]) || 0);
   }, 0);
 
-  const totalCost = filteredDirectRefuelData.reduce((sum, item) => {
+  const localTotalCost = filteredDirectRefuelData.reduce((sum, item) => {
     return sum + getOperationTotalCost(item);
   }, 0);
 
@@ -1450,7 +1569,7 @@ const payload = mapFrontendOperationToBackendPayload({
     {}
   );
 
-  const dailyData = (() => {
+  const localDailyData = (() => {
     const operationDates = Object.keys(dailyConsumptionByDate).sort();
 
     if (operationDates.length === 0) return [];
@@ -1491,7 +1610,7 @@ const payload = mapFrontendOperationToBackendPayload({
     return result;
   })();
 
-  const dailyConsumptionSummary = Object.values(
+  const localDailyConsumptionSummary = Object.values(
     filteredDirectRefuelData.reduce((acc, item) => {
       const operationDate = parseOperationDate(item.row[dateIndex]);
       const dateKey = operationDate
@@ -1519,7 +1638,7 @@ const payload = mapFrontendOperationToBackendPayload({
     return new Date(b.dateKey) - new Date(a.dateKey);
   });
 
-  const equipmentTypeConsumptionSummary = Object.values(
+  const localEquipmentTypeConsumptionSummary = Object.values(
     filteredDirectRefuelData.reduce((acc, item) => {
       const row = item.row;
       const equipmentNo = row[destinationIndex];
@@ -1625,7 +1744,7 @@ const payload = mapFrontendOperationToBackendPayload({
     currentUser?.companyId,
   ]);
 
-  const equipmentSummary = Object.values(
+  const localEquipmentSummary = Object.values(
     filteredDirectRefuelData.reduce((acc, item) => {
       const row = item.row;
       const equipmentNo = row[destinationIndex];
@@ -1705,6 +1824,147 @@ const payload = mapFrontendOperationToBackendPayload({
     };
   });
 
+  const totalDiesel =
+    Number.isFinite(Number(remoteDashboard?.summary?.totalQuantity))
+      ? Number(remoteDashboard.summary.totalQuantity)
+      : localTotalDiesel;
+
+  const totalCost =
+    Number.isFinite(Number(remoteDashboard?.summary?.totalCost))
+      ? Number(remoteDashboard.summary.totalCost)
+      : localTotalCost;
+
+  const dashboardOperationCount =
+    Number.isFinite(Number(remoteDashboard?.summary?.operations))
+      ? Number(remoteDashboard.summary.operations)
+      : filteredDirectRefuelData.length;
+
+  const dashboardActiveEquipmentCount =
+    Number.isFinite(Number(remoteDashboard?.summary?.activeEquipment))
+      ? Number(remoteDashboard.summary.activeEquipment)
+      : localEquipmentSummary.length;
+
+  const equipmentSummary =
+    Array.isArray(remoteDashboard?.equipmentSummary)
+      ? remoteDashboard.equipmentSummary
+      : localEquipmentSummary;
+
+  const equipmentTypeConsumptionSummary =
+    Array.isArray(remoteDashboard?.equipmentTypeConsumptionSummary)
+      ? remoteDashboard.equipmentTypeConsumptionSummary
+      : localEquipmentTypeConsumptionSummary;
+
+  const dailyConsumptionSummary =
+    Array.isArray(remoteDashboard?.dailyConsumptionSummary)
+      ? remoteDashboard.dailyConsumptionSummary
+      : localDailyConsumptionSummary;
+
+  const dailyData =
+    Array.isArray(remoteDashboard?.dailyData)
+      ? remoteDashboard.dailyData
+      : localDailyData;
+
+  const paginateDashboardRows = (rows, page, pageSize) => {
+    const total = rows.length;
+    const effectiveSize =
+      pageSize === "ALL" ? Math.max(1, total) : Number(pageSize) || 10;
+    const totalPages = Math.max(1, Math.ceil(total / effectiveSize));
+    const safePage = Math.min(Math.max(1, Number(page) || 1), totalPages);
+    const start = (safePage - 1) * effectiveSize;
+
+    return {
+      rows: rows.slice(start, start + effectiveSize),
+      total,
+      page: safePage,
+      pageSize: effectiveSize,
+      totalPages,
+      startIndex: start,
+      startItem: total ? start + 1 : 0,
+      endItem: Math.min(start + effectiveSize, total),
+    };
+  };
+
+  const equipmentSummaryPagination = paginateDashboardRows(
+    equipmentSummary,
+    equipmentSummaryPage,
+    equipmentSummaryPageSize
+  );
+  const equipmentTypePagination = paginateDashboardRows(
+    equipmentTypeConsumptionSummary,
+    equipmentTypePage,
+    equipmentTypePageSize
+  );
+  const dailyConsumptionPagination = paginateDashboardRows(
+    dailyConsumptionSummary,
+    dailyConsumptionPage,
+    dailyConsumptionPageSize
+  );
+
+  const renderDashboardPagination = ({
+    pagination,
+    pageSize,
+    setPageSize,
+    setPage,
+  }) => {
+    const isArabic = language === "ar";
+    return (
+      <div className="flex flex-col gap-3 border-t border-slate-800 bg-slate-950/35 px-4 py-3 sm:flex-row sm:items-center sm:justify-between">
+        <div className="text-xs font-semibold text-slate-400">
+          {isArabic
+            ? `عرض ${pagination.startItem}–${pagination.endItem} من ${pagination.total}`
+            : `Showing ${pagination.startItem}–${pagination.endItem} of ${pagination.total}`}
+          <span className="mx-2 text-slate-600">·</span>
+          {isArabic
+            ? `الصفحة ${pagination.page} من ${pagination.totalPages}`
+            : `Page ${pagination.page} of ${pagination.totalPages}`}
+          {null}
+        </div>
+
+        <div className="flex flex-wrap items-center gap-2">
+          <select
+            value={pageSize}
+            onChange={(event) => {
+              const value =
+                event.target.value === "ALL"
+                  ? "ALL"
+                  : Number(event.target.value);
+              setPageSize(value);
+              setPage(1);
+            }}
+            className="rounded-lg border border-slate-700 bg-slate-900 px-2 py-1.5 text-xs font-bold text-slate-200 outline-none focus:border-amber-500"
+          >
+            <option value={10}>10</option>
+            <option value={25}>25</option>
+            <option value={50}>50</option>
+            <option value="ALL">{isArabic ? "الكل" : "All"}</option>
+          </select>
+
+          <button
+            type="button"
+            disabled={pagination.page <= 1}
+            onClick={() => setPage((value) => Math.max(1, value - 1))}
+            className="rounded-lg border border-slate-700 bg-slate-900 px-3 py-1.5 text-xs font-bold text-slate-300 transition hover:border-amber-500/60 hover:text-amber-300 disabled:cursor-not-allowed disabled:opacity-40"
+          >
+            {isArabic ? "السابق" : "Previous"}
+          </button>
+
+          <button
+            type="button"
+            disabled={pagination.page >= pagination.totalPages}
+            onClick={() =>
+              setPage((value) =>
+                Math.min(pagination.totalPages, value + 1)
+              )
+            }
+            className="rounded-lg border border-slate-700 bg-slate-900 px-3 py-1.5 text-xs font-bold text-slate-300 transition hover:border-amber-500/60 hover:text-amber-300 disabled:cursor-not-allowed disabled:opacity-40"
+          >
+            {isArabic ? "التالي" : "Next"}
+          </button>
+        </div>
+      </div>
+    );
+  };
+
   const topEquipmentConsumptionChartData = equipmentSummary
     .slice()
     .sort((a, b) => b.fuelConsumption - a.fuelConsumption)
@@ -1755,6 +2015,227 @@ const payload = mapFrontendOperationToBackendPayload({
         const db = parseOperationDate(b.row[dateIndex])?.getTime() || 0;
         return db - da;
       });
+  };
+
+  const getEquipmentHistoryFilterRequest = () => {
+    const selectedProjectIds = selectedProject
+      .map((value) => {
+        const project = getProject(value);
+        return project?.backendId || project?.id || project?.projectId || "";
+      })
+      .filter(Boolean);
+
+    return {
+      dateFrom: fromDate,
+      dateTo: toDate,
+      refuelType: selectedRefuelType,
+      projectIds: selectedProjectIds.join(","),
+      utcOffsetMinutes: -new Date().getTimezoneOffset(),
+    };
+  };
+
+  const getEquipmentHistoryCacheKey = (assetBackendId, pageNumber) => {
+    const filters = getEquipmentHistoryFilterRequest();
+    return [
+      assetBackendId,
+      pageNumber,
+      filters.dateFrom,
+      filters.dateTo,
+      filters.refuelType,
+      filters.projectIds,
+      filters.utcOffsetMinutes,
+    ].join("::");
+  };
+
+  const mapEquipmentHistoryResponse = (response) => {
+    const pageNumber = Number(response?.pagination?.page || 1);
+    const pageSize = Number(response?.pagination?.pageSize || 25);
+
+    return {
+      rows: (response?.operations || []).map((operation, index) => ({
+        row: mapBackendOperationForState(operation),
+        originalIndex: (pageNumber - 1) * pageSize + index,
+      })),
+      pagination: response?.pagination || {
+        page: pageNumber,
+        pageSize,
+        total: 0,
+        totalPages: 1,
+        hasPreviousPage: false,
+        hasNextPage: false,
+      },
+    };
+  };
+
+  const prefetchEquipmentHistoryPage = async (
+    assetBackendId,
+    pageNumber,
+    filterRequest
+  ) => {
+    const cacheKey = getEquipmentHistoryCacheKey(assetBackendId, pageNumber);
+    if (equipmentHistoryCacheRef.current.has(cacheKey)) return;
+
+    try {
+      const response = await fetchAssetOperationsHistory(
+        assetBackendId,
+        {
+          ...filterRequest,
+          page: pageNumber,
+          pageSize: 25,
+        },
+        currentUser
+      );
+      equipmentHistoryCacheRef.current.set(
+        cacheKey,
+        mapEquipmentHistoryResponse(response)
+      );
+    } catch (error) {
+      // Prefetch is best-effort; the foreground navigation will retry.
+      console.warn("Equipment history prefetch failed.", error);
+    }
+  };
+
+  const loadEquipmentHistoryPage = async (
+    equipmentSummaryItem,
+    pageNumber = 1,
+    { useCache = true } = {}
+  ) => {
+    const asset =
+      getAsset(equipmentSummaryItem?.equipmentBackendId) ||
+      getAsset(equipmentSummaryItem?.equipmentNo);
+
+    const assetBackendId =
+      equipmentSummaryItem?.equipmentBackendId ||
+      asset?.backendId ||
+      asset?.assetBackendId ||
+      asset?.id ||
+      "";
+
+    if (!assetBackendId) {
+      setEquipmentHistoryError("Asset backend ID was not found.");
+      return;
+    }
+
+    const filterRequest = getEquipmentHistoryFilterRequest();
+    const cacheKey = getEquipmentHistoryCacheKey(assetBackendId, pageNumber);
+    const cached = equipmentHistoryCacheRef.current.get(cacheKey);
+
+    if (useCache && cached) {
+      setEquipmentHistoryRows(cached.rows);
+      setEquipmentHistoryPagination(cached.pagination);
+
+      if (cached.pagination?.hasNextPage) {
+        void prefetchEquipmentHistoryPage(
+          assetBackendId,
+          Number(cached.pagination.page) + 1,
+          filterRequest
+        );
+      }
+      return;
+    }
+
+    const requestId = ++equipmentHistoryRequestRef.current;
+    setEquipmentHistoryLoading(true);
+    setEquipmentHistoryError("");
+
+    try {
+      const response = await fetchAssetOperationsHistory(
+        assetBackendId,
+        {
+          ...filterRequest,
+          page: pageNumber,
+          pageSize: 25,
+        },
+        currentUser
+      );
+
+      if (requestId !== equipmentHistoryRequestRef.current) return;
+
+      const mapped = mapEquipmentHistoryResponse(response);
+      equipmentHistoryCacheRef.current.set(cacheKey, mapped);
+      setEquipmentHistoryRows(mapped.rows);
+      setEquipmentHistoryPagination(mapped.pagination);
+
+      if (mapped.pagination?.hasNextPage) {
+        void prefetchEquipmentHistoryPage(
+          assetBackendId,
+          Number(mapped.pagination.page) + 1,
+          filterRequest
+        );
+      }
+    } catch (error) {
+      if (requestId !== equipmentHistoryRequestRef.current) return;
+      setEquipmentHistoryError(
+        getFriendlyApiErrorMessage(
+          error,
+          "Failed to load equipment operation history."
+        )
+      );
+    } finally {
+      if (requestId === equipmentHistoryRequestRef.current) {
+        setEquipmentHistoryLoading(false);
+      }
+    }
+  };
+
+  const openEquipmentHistory = (equipmentSummaryItem) => {
+    const asset =
+      getAsset(equipmentSummaryItem?.equipmentBackendId) ||
+      getAsset(equipmentSummaryItem?.equipmentNo);
+
+    const assetBackendId =
+      equipmentSummaryItem?.equipmentBackendId ||
+      asset?.backendId ||
+      asset?.assetBackendId ||
+      asset?.id ||
+      "";
+
+    const localPreview = getEquipmentHistory(
+      equipmentSummaryItem.equipmentNo
+    ).slice(0, 25);
+
+    setSelectedEquipmentHistory({
+      ...equipmentSummaryItem,
+      equipmentBackendId: assetBackendId,
+    });
+    setEquipmentHistoryRows(localPreview);
+    setEquipmentHistoryPagination({
+      page: 1,
+      pageSize: 25,
+      total: localPreview.length,
+      totalPages: 1,
+      hasPreviousPage: false,
+      hasNextPage: false,
+      preview: true,
+    });
+    setEquipmentHistoryError("");
+
+    // Local rows are already visible; authoritative DB history replaces them
+    // silently as soon as page 1 arrives.
+    void loadEquipmentHistoryPage(
+      {
+        ...equipmentSummaryItem,
+        equipmentBackendId: assetBackendId,
+      },
+      1,
+      { useCache: true }
+    );
+  };
+
+  const goToEquipmentHistoryPage = (pageNumber) => {
+    if (!selectedEquipmentHistory) return;
+    if (
+      pageNumber < 1 ||
+      pageNumber > Number(equipmentHistoryPagination.totalPages || 1)
+    ) {
+      return;
+    }
+
+    void loadEquipmentHistoryPage(
+      selectedEquipmentHistory,
+      pageNumber,
+      { useCache: true }
+    );
   };
 
   const getOperationAttachmentsFromRow = (row) => {
@@ -2818,12 +3299,12 @@ const payload = mapFrontendOperationToBackendPayload({
 
         <Card
           title={t("operations.cards.refuelOperations")}
-          value={formatNumber(filteredDirectRefuelData.length)}
+          value={formatNumber(dashboardOperationCount)}
         />
 
         <Card
           title={t("operations.cards.activeEquipment")}
-          value={formatNumber(equipmentSummary.length)}
+          value={formatNumber(dashboardActiveEquipmentCount)}
         />
       </div>
 
@@ -2885,7 +3366,7 @@ const payload = mapFrontendOperationToBackendPayload({
           </div>
         </div>
 
-        <div className="relative z-0 w-full max-h-[360px] overflow-auto overflow-x-auto [scrollbar-color:#334155_transparent]">
+        <div className="relative z-0 w-full overflow-x-auto [scrollbar-color:#334155_transparent]">
           <table
               id="equipment-summary-table"
               className="min-w-[880px] lg:min-w-[1000px] xl:min-w-[1080px] 2xl:min-w-[1220px] w-full border-collapse text-[11px] sm:text-xs lg:text-sm"
@@ -2944,13 +3425,13 @@ const payload = mapFrontendOperationToBackendPayload({
             </thead>
 
             <tbody>
-              {equipmentSummary.map((item, i) => (
+              {equipmentSummaryPagination.rows.map((item, i) => (
                 <tr key={i} className="hover:bg-slate-800/70 transition-colors duration-150">
-                  <Td>{i + 1}</Td>
+                  <Td>{equipmentSummaryPagination.startIndex + i + 1}</Td>
 
                   <Td>
                     <button
-                      onClick={() => setSelectedEquipmentHistory(item)}
+                      onClick={() => openEquipmentHistory(item)}
                       className="text-blue-300 hover:text-yellow-400 font-semibold transition cursor-pointer"
                     >
                       {item.equipmentNo}
@@ -2970,6 +3451,12 @@ const payload = mapFrontendOperationToBackendPayload({
             </tbody>
           </table>
         </div>
+        {renderDashboardPagination({
+          pagination: equipmentSummaryPagination,
+          pageSize: equipmentSummaryPageSize,
+          setPageSize: setEquipmentSummaryPageSize,
+          setPage: setEquipmentSummaryPage,
+        })}
       </div>
 
       <div className="fleet-chart-grid grid grid-cols-1 xl:grid-cols-2 gap-4 mb-5">
@@ -3034,7 +3521,7 @@ const payload = mapFrontendOperationToBackendPayload({
             </div>
           </div>
 
-          <div className="relative z-0 w-full max-h-[320px] overflow-auto overflow-x-auto [scrollbar-color:#334155_transparent]">
+          <div className="relative z-0 w-full overflow-x-auto [scrollbar-color:#334155_transparent]">
             <table
                 id="equipment-type-table"
                 className="min-w-[560px] lg:min-w-[620px] w-full border-collapse text-[11px] sm:text-xs lg:text-sm"
@@ -3069,9 +3556,9 @@ const payload = mapFrontendOperationToBackendPayload({
               </thead>
 
               <tbody>
-                {equipmentTypeConsumptionSummary.map((item, i) => (
+                {equipmentTypePagination.rows.map((item, i) => (
                   <tr key={item.equipmentType} className="hover:bg-slate-800/70 transition-colors duration-150">
-                    <Td>{i + 1}</Td>
+                    <Td>{equipmentTypePagination.startIndex + i + 1}</Td>
                     <Td strong>{item.equipmentType}</Td>
                     <Td>{formatNumber(item.qtyLiters)}</Td>
                     <Td>
@@ -3082,6 +3569,12 @@ const payload = mapFrontendOperationToBackendPayload({
               </tbody>
             </table>
           </div>
+          {renderDashboardPagination({
+            pagination: equipmentTypePagination,
+            pageSize: equipmentTypePageSize,
+            setPageSize: setEquipmentTypePageSize,
+            setPage: setEquipmentTypePage,
+          })}
         </div>
 
         <div className="relative z-0 bg-slate-900/80 rounded-2xl shadow-xl shadow-black/10 overflow-hidden border border-slate-700/80">
@@ -3147,7 +3640,7 @@ const payload = mapFrontendOperationToBackendPayload({
             </div>
           </div>
 
-          <div className="relative z-0 w-full max-h-[320px] overflow-auto overflow-x-auto [scrollbar-color:#334155_transparent]">
+          <div className="relative z-0 w-full overflow-x-auto [scrollbar-color:#334155_transparent]">
             <table
                 id="daily-consumption-table"
                 className="min-w-[560px] lg:min-w-[620px] w-full border-collapse text-[11px] sm:text-xs lg:text-sm"
@@ -3182,9 +3675,9 @@ const payload = mapFrontendOperationToBackendPayload({
               </thead>
 
               <tbody>
-                {dailyConsumptionSummary.map((item, i) => (
+                {dailyConsumptionPagination.rows.map((item, i) => (
                   <tr key={item.dateKey} className="hover:bg-slate-800/70 transition-colors duration-150">
-                    <Td>{i + 1}</Td>
+                    <Td>{dailyConsumptionPagination.startIndex + i + 1}</Td>
                     <Td strong>{item.dateKey}</Td>
                     <Td>{formatNumber(item.qtyLiters)}</Td>
                     <Td>
@@ -3195,6 +3688,12 @@ const payload = mapFrontendOperationToBackendPayload({
               </tbody>
             </table>
           </div>
+          {renderDashboardPagination({
+            pagination: dailyConsumptionPagination,
+            pageSize: dailyConsumptionPageSize,
+            setPageSize: setDailyConsumptionPageSize,
+            setPage: setDailyConsumptionPage,
+          })}
         </div>
       </div>
 
@@ -3428,10 +3927,26 @@ const payload = mapFrontendOperationToBackendPayload({
                     {selectedEquipmentHistory.equipmentNo}
                   </span>
                 </p>
+                {equipmentHistoryLoading ? (
+                  <p className="mt-1 text-xs font-semibold text-amber-300">
+                    {language === "ar"
+                      ? "جاري تحديث السجل الكامل..."
+                      : "Refreshing complete history..."}
+                  </p>
+                ) : null}
+                {equipmentHistoryError ? (
+                  <p className="mt-1 text-xs font-semibold text-red-300">
+                    {equipmentHistoryError}
+                  </p>
+                ) : null}
               </div>
 
               <button
-                onClick={() => setSelectedEquipmentHistory(null)}
+                onClick={() => {
+                  equipmentHistoryRequestRef.current += 1;
+                  setSelectedEquipmentHistory(null);
+                  setEquipmentHistoryLoading(false);
+                }}
                 className="text-gray-400 hover:text-red-400 text-2xl"
               >
                 ×
@@ -3524,7 +4039,7 @@ const payload = mapFrontendOperationToBackendPayload({
                 </thead>
 
                 <tbody>
-                  {getEquipmentHistory(selectedEquipmentHistory.equipmentNo).map(
+                  {equipmentHistoryRows.map(
                     (item, i) => {
                       const row = item.row;
                       const operationTypeValue = typeIndex !== -1 ? row[typeIndex] : row?.__operation?.type || "";
@@ -3544,7 +4059,7 @@ const payload = mapFrontendOperationToBackendPayload({
                             isExternalDirectRefuelRow ? "bg-purple-950/20" : ""
                           }`}
                         >
-                          <Td>{i + 1}</Td>
+                          <Td>{(equipmentHistoryPagination.page - 1) * equipmentHistoryPagination.pageSize + i + 1}</Td>
                           <Td>{formatDisplayDate(row[dateIndex])}</Td>
 
                           <Td>
@@ -3661,7 +4176,7 @@ const payload = mapFrontendOperationToBackendPayload({
                     }
                   )}
 
-                  {getEquipmentHistory(selectedEquipmentHistory.equipmentNo).length === 0 && (
+                  {equipmentHistoryRows.length === 0 && !equipmentHistoryLoading && (
                     <tr>
                       <Td colSpan={12}>
                         No operations match the selected refuel type.
@@ -3670,6 +4185,73 @@ const payload = mapFrontendOperationToBackendPayload({
                   )}
                 </tbody>
               </table>
+
+              <div className="flex flex-col gap-3 border-t border-slate-800 bg-slate-950/80 px-4 py-3 sm:flex-row sm:items-center sm:justify-between">
+                <div className="text-xs font-semibold text-slate-400">
+                  {language === "ar"
+                    ? `عرض ${
+                        equipmentHistoryPagination.total
+                          ? (equipmentHistoryPagination.page - 1) *
+                              equipmentHistoryPagination.pageSize +
+                            1
+                          : 0
+                      }–${Math.min(
+                        equipmentHistoryPagination.page *
+                          equipmentHistoryPagination.pageSize,
+                        equipmentHistoryPagination.total
+                      )} من ${equipmentHistoryPagination.total} عملية`
+                    : `Showing ${
+                        equipmentHistoryPagination.total
+                          ? (equipmentHistoryPagination.page - 1) *
+                              equipmentHistoryPagination.pageSize +
+                            1
+                          : 0
+                      }–${Math.min(
+                        equipmentHistoryPagination.page *
+                          equipmentHistoryPagination.pageSize,
+                        equipmentHistoryPagination.total
+                      )} of ${equipmentHistoryPagination.total} operations`}
+                  <span className="mx-2 text-slate-600">·</span>
+                  {language === "ar"
+                    ? `الصفحة ${equipmentHistoryPagination.page} من ${equipmentHistoryPagination.totalPages}`
+                    : `Page ${equipmentHistoryPagination.page} of ${equipmentHistoryPagination.totalPages}`}
+                </div>
+
+                <div className="flex items-center gap-2">
+                  <button
+                    type="button"
+                    disabled={
+                      equipmentHistoryLoading ||
+                      !equipmentHistoryPagination.hasPreviousPage
+                    }
+                    onClick={() =>
+                      goToEquipmentHistoryPage(
+                        equipmentHistoryPagination.page - 1
+                      )
+                    }
+                    className="rounded-lg border border-slate-700 bg-slate-900 px-3 py-1.5 text-xs font-bold text-slate-300 transition hover:border-amber-500/60 hover:text-amber-300 disabled:cursor-not-allowed disabled:opacity-40"
+                  >
+                    {language === "ar" ? "السابق" : "Previous"}
+                  </button>
+
+                  <button
+                    type="button"
+                    disabled={
+                      equipmentHistoryLoading ||
+                      !equipmentHistoryPagination.hasNextPage
+                    }
+                    onClick={() =>
+                      goToEquipmentHistoryPage(
+                        equipmentHistoryPagination.page + 1
+                      )
+                    }
+                    className="rounded-lg border border-slate-700 bg-slate-900 px-3 py-1.5 text-xs font-bold text-slate-300 transition hover:border-amber-500/60 hover:text-amber-300 disabled:cursor-not-allowed disabled:opacity-40"
+                  >
+                    {language === "ar" ? "التالي" : "Next"}
+                  </button>
+                </div>
+              </div>
+
 
               {auditLog.length > 0 && (
                 <div className="mt-6 bg-gray-950 border border-gray-700 rounded-2xl p-4">

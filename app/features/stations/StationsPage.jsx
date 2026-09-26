@@ -1340,37 +1340,108 @@ export default function StationsPage({
     }));
 
   const getStationOperationDirection = (row, stationId) => {
+    const operation = row?.__operation || {};
     const type = row[typeIndex];
     const source = row[sourceIndex];
     const destination = row[destinationIndex];
 
-    if (isSameText(type, "Direct_Refuel") && isSameText(source, stationId)) {
-      return "Out";
-    }
+    const selectedStationKeys = [
+      stationId,
+      selectedStationHistory?.id,
+      selectedStationHistory?.stationId,
+      selectedStationHistory?.backendId,
+      selectedStationHistory?.stationBackendId,
+      selectedStationHistory?.backendStationId,
+    ].filter(Boolean);
 
-    if (isSameText(type, "Internal_Transfer") && isSameText(source, stationId)) {
+    const matchesSelectedStation = (...values) =>
+      values
+        .filter(Boolean)
+        .some((value) =>
+          selectedStationKeys.some((selectedKey) =>
+            isSameText(value, selectedKey)
+          )
+        );
+
+    const isSourceStation = matchesSelectedStation(
+      source,
+      operation?.sourceStationId,
+      operation?.sourceStation?.id,
+      operation?.sourceStation?.stationId,
+      operation?.sourceStation?.name
+    );
+
+    const isDestinationStation = matchesSelectedStation(
+      destination,
+      operation?.destinationStationId,
+      operation?.destinationStation?.id,
+      operation?.destinationStation?.stationId,
+      operation?.destinationStation?.name
+    );
+
+    // Shared Tank source: a physical dispenser participates through
+    // OperationDispenserAllocation even though the displayed source is the
+    // parent SHARED_TANK.
+    const isSourceDispenser = (operation?.dispenserAllocations || []).some(
+      (allocation) =>
+        matchesSelectedStation(
+          allocation?.stationId,
+          allocation?.station?.id,
+          allocation?.station?.stationId,
+          allocation?.station?.name
+        )
+    );
+
+    // Shared Tank destination: a physical dispenser participates through
+    // OperationStationCounterReading even though the displayed destination is
+    // the parent SHARED_TANK.
+    const isDestinationDispenser = (
+      operation?.stationCounterReadings || []
+    ).some((reading) =>
+      matchesSelectedStation(
+        reading?.stationId,
+        reading?.station?.id,
+        reading?.station?.stationId,
+        reading?.station?.name
+      )
+    );
+
+    if (isSameText(type, "Direct_Refuel") && isSourceStation) {
       return "Out";
     }
 
     if (
       isSameText(type, "Internal_Transfer") &&
-      isSameText(destination, stationId)
+      (isSourceStation || isSourceDispenser)
+    ) {
+      return "Out";
+    }
+
+    if (
+      isSameText(type, "Internal_Transfer") &&
+      (isDestinationStation || isDestinationDispenser)
     ) {
       return "In";
     }
 
-    if (isSameText(type, "External_Transfer") && isSameText(source, stationId)) {
+    if (
+      isSameText(type, "External_Transfer") &&
+      (isSourceStation || isSourceDispenser)
+    ) {
       return "Out";
     }
 
     if (
       isSameText(type, "External_Transfer") &&
-      isSameText(destination, stationId)
+      (isDestinationStation || isDestinationDispenser)
     ) {
       return "In";
     }
 
-    if (isSameText(type, "External_Supply") && isSameText(destination, stationId)) {
+    if (
+      isSameText(type, "External_Supply") &&
+      (isDestinationStation || isDestinationDispenser)
+    ) {
       return "In";
     }
 
@@ -3367,7 +3438,7 @@ export default function StationsPage({
 
       {selectedStationHistory && (
         <div dir={isRtl ? "rtl" : "ltr"} className="fixed inset-0 z-[12000] bg-black/75 backdrop-blur-sm flex items-center justify-center p-3">
-          <div className="bg-slate-950 text-white w-full max-w-[min(1150px,calc(100vw-2rem))] max-h-[92vh] rounded-3xl shadow-2xl border border-slate-700 overflow-hidden min-w-0">
+          <div className="bg-slate-950 text-white w-full max-w-[min(1150px,calc(100vw-2rem))] max-h-[92vh] rounded-3xl shadow-2xl border border-slate-700 overflow-hidden min-w-0 flex flex-col">
             <div className="p-3 sm:p-5 border-b border-gray-700 flex justify-between items-start gap-3">
               <div>
                 <h2 className="text-xl sm:text-2xl font-bold text-yellow-400 italic underline">
@@ -3394,7 +3465,7 @@ export default function StationsPage({
               </button>
             </div>
 
-            <div className="max-h-[68vh] overflow-x-scroll overflow-y-auto [scrollbar-gutter:stable_both-edges] overscroll-contain">
+            <div className="flex-1 min-h-0 overflow-x-scroll overflow-y-auto [scrollbar-gutter:stable_both-edges] overscroll-contain">
               <table className="min-w-[1080px] lg:min-w-[1220px] xl:min-w-[1320px] w-full border-separate border-spacing-0 text-[11px] sm:text-xs lg:text-sm">
                 <thead className="relative z-30 shadow-sm">
                   <tr>
@@ -3588,7 +3659,7 @@ export default function StationsPage({
               </table>
             </div>
 
-            <div className="flex flex-col gap-2 border-t border-slate-800 px-4 py-3 sm:flex-row sm:items-center sm:justify-between">
+            <div className="shrink-0 flex flex-col gap-2 border-t border-slate-700 bg-slate-950 px-4 py-3 sm:flex-row sm:items-center sm:justify-between">
               <div className="text-xs text-slate-400">
                 {language === "ar"
                   ? `إجمالي العمليات: ${stationHistoryPagination.total}`
@@ -3612,7 +3683,7 @@ export default function StationsPage({
                       stationHistoryPagination.page - 1
                     )
                   }
-                  className="rounded-lg border border-slate-600 bg-slate-800 px-3 py-1.5 text-xs font-bold text-slate-200 transition hover:border-amber-400 hover:text-amber-300 disabled:cursor-not-allowed disabled:opacity-40"
+                  className="min-w-[84px] rounded-lg border border-slate-500 bg-slate-800 px-4 py-2 text-xs font-extrabold text-slate-100 shadow-sm transition hover:border-amber-400 hover:bg-slate-700 hover:text-amber-300 disabled:cursor-not-allowed disabled:border-slate-700 disabled:bg-slate-900 disabled:text-slate-500 disabled:opacity-70"
                 >
                   {language === "ar" ? "السابق" : "Previous"}
                 </button>
@@ -3629,7 +3700,7 @@ export default function StationsPage({
                       stationHistoryPagination.page + 1
                     )
                   }
-                  className="rounded-lg border border-slate-600 bg-slate-800 px-3 py-1.5 text-xs font-bold text-slate-200 transition hover:border-amber-400 hover:text-amber-300 disabled:cursor-not-allowed disabled:opacity-40"
+                  className="min-w-[84px] rounded-lg border border-slate-500 bg-slate-800 px-4 py-2 text-xs font-extrabold text-slate-100 shadow-sm transition hover:border-amber-400 hover:bg-slate-700 hover:text-amber-300 disabled:cursor-not-allowed disabled:border-slate-700 disabled:bg-slate-900 disabled:text-slate-500 disabled:opacity-70"
                 >
                   {language === "ar" ? "التالي" : "Next"}
                 </button>

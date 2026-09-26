@@ -17,6 +17,7 @@ export function printReport({
   columns = [],
   rows = [],
   footerRow = [],
+  columnAlignments = [],
   note = "",
   translate = (value) => value,
   language = "en",
@@ -52,15 +53,30 @@ export function printReport({
     )
     .join("");
 
+  const getColumnAlignment = (index) => {
+    const value = String(columnAlignments?.[index] || "").toLowerCase();
+    return ["left", "center", "right"].includes(value) ? value : "";
+  };
+
   const headerHtml = columns
-    .map((column) => `<th>${escapeHtml(translate(column))}</th>`)
+    .map((column, index) => {
+      const alignment = getColumnAlignment(index);
+      const style = alignment ? ` style="text-align:${alignment}"` : "";
+      return `<th${style}>${escapeHtml(translate(column))}</th>`;
+    })
     .join("");
 
   const bodyHtml = rows
     .map(
       (row) => `
         <tr>
-          ${row.map((cell) => `<td>${escapeHtml(translate(cell))}</td>`).join("")}
+          ${row
+            .map((cell, index) => {
+              const alignment = getColumnAlignment(index);
+              const style = alignment ? ` style="text-align:${alignment}"` : "";
+              return `<td${style}>${escapeHtml(translate(cell))}</td>`;
+            })
+            .join("")}
         </tr>
       `
     )
@@ -73,7 +89,9 @@ export function printReport({
           ${footerRow
             .map((cell, index) => {
               const colspan = index === 0 ? 1 : 1;
-              return `<td colspan="${colspan}">${escapeHtml(translate(cell))}</td>`;
+              const alignment = getColumnAlignment(index);
+              const style = alignment ? ` style="text-align:${alignment}"` : "";
+              return `<td colspan="${colspan}"${style}>${escapeHtml(translate(cell))}</td>`;
             })
             .join("")}
         </tr>

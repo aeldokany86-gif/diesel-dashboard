@@ -147,6 +147,102 @@ export async function fetchStationOperationsHistory(
   };
 }
 
+
+export async function fetchOperationsDashboard(
+  filters = {},
+  currentUser = {}
+) {
+  const params = Object.fromEntries(
+    Object.entries(filters).filter(
+      ([, value]) =>
+        value !== undefined &&
+        value !== null &&
+        value !== "" &&
+        value !== "all"
+    )
+  );
+
+  const response = await api.get("/operations/dashboard", {
+    params,
+    headers: buildOperationRequestHeaders(currentUser),
+  });
+
+  return {
+    generatedAt: response.data?.generatedAt || null,
+    summary: response.data?.summary || {},
+    equipmentSummary: Array.isArray(response.data?.equipmentSummary)
+      ? response.data.equipmentSummary
+      : [],
+    equipmentTypeConsumptionSummary: Array.isArray(
+      response.data?.equipmentTypeConsumptionSummary
+    )
+      ? response.data.equipmentTypeConsumptionSummary
+      : [],
+    dailyConsumptionSummary: Array.isArray(
+      response.data?.dailyConsumptionSummary
+    )
+      ? response.data.dailyConsumptionSummary
+      : [],
+    dailyData: Array.isArray(response.data?.dailyData)
+      ? response.data.dailyData
+      : [],
+    filterOptions: response.data?.filterOptions || {
+      assets: [],
+      assetTypes: [],
+      projects: [],
+    },
+  };
+}
+
+export async function fetchAssetOperationsHistory(
+  assetId,
+  {
+    page = 1,
+    pageSize = 25,
+    dateFrom = "",
+    dateTo = "",
+    refuelType = "ALL",
+    projectIds = "",
+    utcOffsetMinutes = "",
+  } = {},
+  currentUser = {}
+) {
+  if (!assetId) {
+    throw new Error("Asset backend ID is required.");
+  }
+
+  const response = await api.get(
+    `/operations/asset/${encodeURIComponent(assetId)}/history`,
+    {
+      params: {
+        page,
+        pageSize,
+        ...(dateFrom ? { dateFrom } : {}),
+        ...(dateTo ? { dateTo } : {}),
+        ...(refuelType && refuelType !== "ALL" ? { refuelType } : {}),
+        ...(projectIds ? { projectIds } : {}),
+        ...(utcOffsetMinutes !== "" ? { utcOffsetMinutes } : {}),
+      },
+      headers: buildOperationRequestHeaders(currentUser),
+    }
+  );
+
+  return {
+    asset: response.data?.asset || null,
+    operations: Array.isArray(response.data?.operations)
+      ? response.data.operations
+      : [],
+    pagination: response.data?.pagination || {
+      page: 1,
+      pageSize: 25,
+      total: 0,
+      totalPages: 1,
+      hasPreviousPage: false,
+      hasNextPage: false,
+    },
+  };
+}
+
 export async function subscribeToOperationEvents({
   currentUser = {},
   signal,
@@ -259,6 +355,37 @@ export async function fetchOperationsSummaryReport(
   );
 
   const response = await api.get("/operations/report/summary", {
+    params,
+    headers: buildOperationRequestHeaders(currentUser),
+  });
+
+  return {
+    rows: Array.isArray(response.data?.rows) ? response.data.rows : [],
+    summary: response.data?.summary || {},
+  };
+}
+
+export async function fetchWarehouseOperationsReport(
+  filters = {},
+  currentUser = {}
+) {
+  const params = Object.fromEntries(
+    Object.entries({
+      ...filters,
+      utcOffsetMinutes:
+        typeof window !== "undefined"
+          ? -new Date().getTimezoneOffset()
+          : 0,
+    }).filter(
+      ([, value]) =>
+        value !== undefined &&
+        value !== null &&
+        value !== "" &&
+        value !== "all"
+    )
+  );
+
+  const response = await api.get("/operations/report/warehouse", {
     params,
     headers: buildOperationRequestHeaders(currentUser),
   });
