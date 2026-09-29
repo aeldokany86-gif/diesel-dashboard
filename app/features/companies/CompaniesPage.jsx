@@ -45,7 +45,67 @@ import {
   updateCompanyMultiProjectAccess,
 } from "../../services/companiesService";
 
+import {
+  buildCompanyIntegrationSettingsPayload,
+  fetchCompanyIntegrationSettings,
+  updateCompanyIntegrationSettings,
+} from "../../services/integrationsService";
+
 const COMPANY_CONTEXT_STORAGE_KEY = "fleetfuelpro_company_context";
+
+const DEFAULT_INTEGRATION_FEATURES = {
+  operationsSummary: true,
+  operationsDetails: false,
+  costData: false,
+  stockData: false,
+  stockMovements: false,
+  webhooks: false,
+};
+
+const INTEGRATION_FEATURE_OPTIONS = [
+  { key: "operationsSummary", label: "Operations Summary", description: "Aggregated fuel quantity and operation count by asset and period." },
+  { key: "operationsDetails", label: "Operations Details", description: "Read-only detailed transaction data for completed operations." },
+  { key: "costData", label: "Cost Data", description: "Allow external systems to receive fuel cost values." },
+  { key: "stockData", label: "Stock Data", description: "Current station, project, and company fuel stock balances." },
+  { key: "stockMovements", label: "Stock Movements", description: "Detailed inventory movement history and balance changes." },
+  { key: "webhooks", label: "Webhooks", description: "Push approved integration events to external systems." },
+];
+
+const DEFAULT_WEBHOOK_EVENTS = {
+  operationCompleted: true,
+  operationCorrected: true,
+  inventoryAdjusted: false,
+};
+
+const DEFAULT_EXTERNAL_MAPPING_SETTINGS = {
+  enabled: false,
+  manualEnabled: true,
+  importEnabled: false,
+};
+
+const WEBHOOK_EVENT_OPTIONS = [
+  {
+    group: "Operations",
+    key: "operationCompleted",
+    event: "operation.completed",
+    label: "Operation Completed",
+    description: "Notify the external system when an operation is completed and approved.",
+  },
+  {
+    group: "Operations",
+    key: "operationCorrected",
+    event: "operation.corrected",
+    label: "Operation Corrected",
+    description: "Notify the external system when an approved correction changes a completed operation.",
+  },
+  {
+    group: "Inventory",
+    key: "inventoryAdjusted",
+    event: "inventory.adjusted",
+    label: "Inventory Adjusted",
+    description: "Notify the external system when an approved manual station inventory adjustment is applied.",
+  },
+];
 
 function notifyUser(showToastFn, type, message) {
   const safeType = type || "info";
@@ -133,6 +193,25 @@ export default function CompaniesPage({ companies = [], setCompanies, currentUse
   const [search, setSearch] = useState("");
   const [updatingDataImportCompanyId, setUpdatingDataImportCompanyId] = useState("");
   const [updatingMultiProjectCompanyId, setUpdatingMultiProjectCompanyId] = useState("");
+  const [integrationFeatureConfigs, setIntegrationFeatureConfigs] = useState({});
+  const [integrationFeatureLoadingCompanyId, setIntegrationFeatureLoadingCompanyId] = useState("");
+  const [integrationFeatureSaving, setIntegrationFeatureSaving] = useState(false);
+  const [integrationFeatureModalTab, setIntegrationFeatureModalTab] = useState("api");
+  const [integrationFeatureModal, setIntegrationFeatureModal] = useState({
+    open: false,
+    company: null,
+    enabled: false,
+    features: {
+      operationsSummary: true,
+      operationsDetails: false,
+      costData: false,
+      stockData: false,
+      stockMovements: false,
+      webhooks: false,
+    },
+    webhookEvents: { ...DEFAULT_WEBHOOK_EVENTS },
+    externalMapping: { ...DEFAULT_EXTERNAL_MAPPING_SETTINGS },
+  });
   const [settingsOpen, setSettingsOpen] = useState(false);
   const [selectedCompanyId, setSelectedCompanyId] = useState(() => {
     if (typeof window === "undefined") return "";
@@ -166,6 +245,53 @@ export default function CompaniesPage({ companies = [], setCompanies, currentUse
   const [companyForm, setCompanyForm] = useState(emptyCompanyForm);
 
   useOutsideClick(settingsRef, () => setSettingsOpen(false));
+
+  useEffect(() => {
+    if (!canManageCompanies) {
+      setIntegrationFeatureConfigs({});
+      return;
+    }
+
+    const customerCompanies = companies.filter(
+      (company) => company?.id && !company.isPlatformContext && !isPlatformCompany(company),
+    );
+
+    if (!customerCompanies.length) {
+      setIntegrationFeatureConfigs({});
+      return;
+    }
+
+    let cancelled = false;
+
+    async function loadIntegrationSettings() {
+      const results = await Promise.allSettled(
+        customerCompanies.map(async (company) => {
+          const config = await fetchCompanyIntegrationSettings(company.id);
+          return [company.id, config];
+        }),
+      );
+
+      if (cancelled) return;
+
+      const nextConfigs = {};
+      for (const result of results) {
+        if (result.status === "fulfilled") {
+          const [companyId, config] = result.value;
+          nextConfigs[companyId] = config;
+        }
+      }
+
+      setIntegrationFeatureConfigs(nextConfigs);
+    }
+
+    loadIntegrationSettings().catch((error) => {
+      console.warn("Failed to load company Integration settings.", error);
+    });
+
+    return () => {
+      cancelled = true;
+    };
+  }, [canManageCompanies, companies]);
 
   const companyScopeList = (() => {
     if (isPlatformAdminUser(currentUser)) {
@@ -548,6 +674,239 @@ export default function CompaniesPage({ companies = [], setCompanies, currentUse
     });
   };
 
+  const openIntegrationFeatureModal = async (company) => {
+    if (!canManageCompanies) {
+      notifyUser(showToast, "warning", "Only Platform Admin can manage Integration access.");
+      return;
+    }
+
+    if (!company?.id || company.isPlatformContext) return;
+
+    const cachedConfig = integrationFeatureConfigs[company.id] || {};
+
+    setIntegrationFeatureModalTab("api");
+    setIntegrationFeatureModal({
+      open: true,
+      company,
+      enabled: Boolean(cachedConfig.enabled),
+      features: {
+        ...DEFAULT_INTEGRATION_FEATURES,
+        ...(cachedConfig.features || {}),
+      },
+      webhookEvents: {
+        ...DEFAULT_WEBHOOK_EVENTS,
+        ...(cachedConfig.webhookEvents || {}),
+      },
+      externalMapping: {
+        ...DEFAULT_EXTERNAL_MAPPING_SETTINGS,
+        ...(cachedConfig.externalMapping || {}),
+      },
+      clientLimit: cachedConfig.clientLimit || 5,
+    });
+
+    setIntegrationFeatureLoadingCompanyId(company.id);
+
+    try {
+      const backendConfig = await fetchCompanyIntegrationSettings(company.id);
+
+      setIntegrationFeatureConfigs((current) => ({
+        ...current,
+        [company.id]: backendConfig,
+      }));
+
+      setIntegrationFeatureModal((current) => {
+        if (current.company?.id !== company.id) return current;
+
+        return {
+          ...current,
+          enabled: Boolean(backendConfig.enabled),
+          features: {
+            ...DEFAULT_INTEGRATION_FEATURES,
+            ...(backendConfig.features || {}),
+          },
+          webhookEvents: {
+            ...DEFAULT_WEBHOOK_EVENTS,
+            ...(backendConfig.webhookEvents || {}),
+          },
+          externalMapping: {
+            ...DEFAULT_EXTERNAL_MAPPING_SETTINGS,
+            ...(backendConfig.externalMapping || {}),
+          },
+          clientLimit: backendConfig.clientLimit || 5,
+        };
+      });
+    } catch (error) {
+      logHandledApiIssue("Failed to load Integration settings", error);
+      notifyUser(
+        showToast,
+        "warning",
+        error?.response?.data?.message || "Failed to load Integration settings.",
+      );
+    } finally {
+      setIntegrationFeatureLoadingCompanyId("");
+    }
+  };
+
+  const closeIntegrationFeatureModal = (force = false) => {
+    if (integrationFeatureSaving && !force) return;
+
+    setIntegrationFeatureModalTab("api");
+    setIntegrationFeatureModal({
+      open: false,
+      company: null,
+      enabled: false,
+      features: { ...DEFAULT_INTEGRATION_FEATURES },
+      webhookEvents: { ...DEFAULT_WEBHOOK_EVENTS },
+      externalMapping: { ...DEFAULT_EXTERNAL_MAPPING_SETTINGS },
+      clientLimit: 5,
+    });
+  };
+
+  const toggleIntegrationFeatureDraft = (featureKey) => {
+    setIntegrationFeatureModal((current) => ({
+      ...current,
+      features: {
+        ...current.features,
+        [featureKey]: !Boolean(current.features?.[featureKey]),
+      },
+    }));
+  };
+
+  const toggleWebhookEventDraft = (eventKey) => {
+    setIntegrationFeatureModal((current) => ({
+      ...current,
+      webhookEvents: {
+        ...DEFAULT_WEBHOOK_EVENTS,
+        ...(current.webhookEvents || {}),
+        [eventKey]: !Boolean(current.webhookEvents?.[eventKey]),
+      },
+    }));
+  };
+
+  const toggleExternalMappingDraft = (field) => {
+    setIntegrationFeatureModal((current) => {
+      const currentMapping = {
+        ...DEFAULT_EXTERNAL_MAPPING_SETTINGS,
+        ...(current.externalMapping || {}),
+      };
+
+      if (field === "enabled") {
+        const nextEnabled = !Boolean(currentMapping.enabled);
+        return {
+          ...current,
+          externalMapping: {
+            ...currentMapping,
+            enabled: nextEnabled,
+          },
+        };
+      }
+
+      return {
+        ...current,
+        externalMapping: {
+          ...currentMapping,
+          [field]: !Boolean(currentMapping[field]),
+        },
+      };
+    });
+  };
+
+  const saveIntegrationFeatures = async () => {
+    const company = integrationFeatureModal.company;
+    if (!company?.id || integrationFeatureSaving) return;
+
+    setIntegrationFeatureSaving(true);
+
+    try {
+      const payload = buildCompanyIntegrationSettingsPayload({
+        enabled: true,
+        features: { ...integrationFeatureModal.features },
+        webhookEvents: {
+          ...DEFAULT_WEBHOOK_EVENTS,
+          ...(integrationFeatureModal.webhookEvents || {}),
+        },
+        externalMapping: {
+          ...DEFAULT_EXTERNAL_MAPPING_SETTINGS,
+          ...(integrationFeatureModal.externalMapping || {}),
+        },
+        clientLimit:
+          integrationFeatureModal.clientLimit ||
+          integrationFeatureConfigs[company.id]?.clientLimit ||
+          5,
+      });
+
+      const savedConfig = await updateCompanyIntegrationSettings(
+        company.id,
+        payload,
+      );
+
+      setIntegrationFeatureConfigs((current) => ({
+        ...current,
+        [company.id]: savedConfig,
+      }));
+
+      setIntegrationFeatureModal((current) => ({
+        ...current,
+        enabled: true,
+      }));
+
+      closeIntegrationFeatureModal(true);
+      notifyUser(
+        showToast,
+        "success",
+        `API Integration settings saved for ${company.name || company.id}.`,
+      );
+    } catch (error) {
+      logHandledApiIssue("Failed to save Integration settings", error);
+      notifyUser(
+        showToast,
+        "warning",
+        error?.response?.data?.message || "Failed to save Integration settings.",
+      );
+    } finally {
+      setIntegrationFeatureSaving(false);
+    }
+  };
+
+  const disableIntegrationAccess = async () => {
+    const company = integrationFeatureModal.company;
+    if (!company?.id || integrationFeatureSaving) return;
+
+    setIntegrationFeatureSaving(true);
+
+    try {
+      const savedConfig = await updateCompanyIntegrationSettings(company.id, {
+        enabled: false,
+      });
+
+      setIntegrationFeatureConfigs((current) => ({
+        ...current,
+        [company.id]: savedConfig,
+      }));
+
+      setIntegrationFeatureModal((current) => ({
+        ...current,
+        enabled: false,
+      }));
+
+      closeIntegrationFeatureModal(true);
+      notifyUser(
+        showToast,
+        "success",
+        `API Integration disabled for ${company.name || company.id}.`,
+      );
+    } catch (error) {
+      logHandledApiIssue("Failed to disable Integration", error);
+      notifyUser(
+        showToast,
+        "warning",
+        error?.response?.data?.message || "Failed to disable Integration.",
+      );
+    } finally {
+      setIntegrationFeatureSaving(false);
+    }
+  };
+
   const closeCompanyConfirmModal = () => {
     setCompanyConfirmModal({
       open: false,
@@ -845,6 +1204,7 @@ export default function CompaniesPage({ companies = [], setCompanies, currentUse
                 <th className="text-left p-3">Status</th>
                 <th className="text-left p-3">{t("dataImport.accessLabel")}</th>
                 <th className="text-left p-3">{t("multiProject.accessLabel")}</th>
+                <th className="text-left p-3">API Integration</th>
               </tr>
             </thead>
             <tbody>
@@ -951,13 +1311,34 @@ export default function CompaniesPage({ companies = [], setCompanies, currentUse
                         </button>
                       )}
                     </td>
+                    <td className="p-3">
+                      {company.isPlatformContext ? (
+                        <span className="text-xs font-bold text-slate-500">—</span>
+                      ) : (
+                        <button
+                          type="button"
+                          onClick={(event) => {
+                            event.stopPropagation();
+                            openIntegrationFeatureModal(company);
+                          }}
+                          className={`rounded-full px-3 py-1 text-xs font-black border transition ${
+                            integrationFeatureConfigs[company.id]?.enabled
+                              ? "bg-emerald-500/10 text-emerald-300 border-emerald-500/30 hover:bg-emerald-500/20"
+                              : "bg-slate-500/10 text-slate-300 border-slate-500/30 hover:bg-slate-500/20"
+                          }`}
+                          title="Configure the Integration features available to this company"
+                        >
+                          {integrationFeatureConfigs[company.id]?.enabled ? "Enabled" : "Disabled"}
+                        </button>
+                      )}
+                    </td>
                   </tr>
                 );
               })}
 
               {!visibleCompanies.length && (
                 <tr>
-                  <td colSpan={9} className="p-8 text-center text-slate-500">
+                  <td colSpan={10} className="p-8 text-center text-slate-500">
                     No companies found. Add companies from Settings using the backend Companies API.
                   </td>
                 </tr>
@@ -966,6 +1347,431 @@ export default function CompaniesPage({ companies = [], setCompanies, currentUse
           </table>
         </div>
       </div>
+
+      {integrationFeatureModal.open && (
+        <ModalPortal>
+          <div className="fixed inset-0 z-[125] flex items-center justify-center bg-black/75 backdrop-blur-sm p-4">
+            <div className="flex max-h-[calc(100vh-2rem)] w-full max-w-2xl flex-col overflow-hidden rounded-3xl border border-slate-700 bg-slate-950 shadow-2xl shadow-black/60">
+              <div className="shrink-0 border-b border-slate-800 px-5 pt-4 pb-3">
+                <div className="flex items-start justify-between gap-4">
+                  <div>
+                    <p className="text-[11px] uppercase tracking-[0.22em] text-amber-300 font-bold">
+                      Integration Access
+                    </p>
+                    <h3 className="mt-1.5 text-lg font-black text-white">
+                      {integrationFeatureModal.company?.name || "Company"}
+                    </h3>
+                    <p className="mt-1 text-xs leading-5 text-slate-400">
+                      Select which Integration capabilities this company purchased. Only these capabilities can appear to the customer Admin.
+                    </p>
+                  </div>
+                  <button
+                    type="button"
+                    onClick={closeIntegrationFeatureModal}
+                    className="rounded-xl border border-slate-700 px-3 py-2 text-sm font-black text-slate-300 hover:bg-slate-900"
+                  >
+                    ✕
+                  </button>
+                </div>
+              </div>
+
+              <div className="shrink-0 border-b border-slate-800 px-5">
+                <div className="flex gap-1">
+                  <button
+                    type="button"
+                    onClick={() => setIntegrationFeatureModalTab("api")}
+                    className={`border-b-2 px-4 py-3 text-sm font-black transition ${
+                      integrationFeatureModalTab === "api"
+                        ? "border-amber-400 text-amber-300"
+                        : "border-transparent text-slate-400 hover:text-slate-200"
+                    }`}
+                  >
+                    API Access
+                  </button>
+                  <button
+                    type="button"
+                    onClick={() => setIntegrationFeatureModalTab("webhooks")}
+                    className={`border-b-2 px-4 py-3 text-sm font-black transition ${
+                      integrationFeatureModalTab === "webhooks"
+                        ? "border-amber-400 text-amber-300"
+                        : "border-transparent text-slate-400 hover:text-slate-200"
+                    }`}
+                  >
+                    <span className="flex items-center gap-2">
+                      <span>Webhooks</span>
+                      <span className="rounded-full border border-violet-500/30 bg-violet-500/10 px-2 py-0.5 text-[9px] font-black uppercase tracking-wide text-violet-200">
+                        Advanced
+                      </span>
+                    </span>
+                  </button>
+                  <button
+                    type="button"
+                    onClick={() => setIntegrationFeatureModalTab("mapping")}
+                    className={`border-b-2 px-4 py-3 text-sm font-black transition ${
+                      integrationFeatureModalTab === "mapping"
+                        ? "border-amber-400 text-amber-300"
+                        : "border-transparent text-slate-400 hover:text-slate-200"
+                    }`}
+                  >
+                    External Mapping
+                  </button>
+                </div>
+              </div>
+
+              <div className="min-h-0 flex-1 overflow-y-auto px-5 py-4">
+                {integrationFeatureModalTab === "api" ? (
+                  <div>
+                    <div className="mb-3">
+                      <p className="text-[11px] font-black uppercase tracking-[0.18em] text-sky-300">
+                        API Access
+                      </p>
+                      <p className="mt-1 text-xs leading-5 text-slate-500">
+                        Select the read-only API capabilities included for this company.
+                      </p>
+                    </div>
+
+                    <div className="grid gap-2.5 sm:grid-cols-2">
+                      {INTEGRATION_FEATURE_OPTIONS
+                        .filter((feature) => feature.key !== "webhooks")
+                        .map((feature) => {
+                          const selected = Boolean(
+                            integrationFeatureModal.features?.[feature.key],
+                          );
+
+                          return (
+                            <button
+                              key={feature.key}
+                              type="button"
+                              onClick={() => toggleIntegrationFeatureDraft(feature.key)}
+                              className={`text-left rounded-2xl border p-3.5 transition ${
+                                selected
+                                  ? "border-emerald-500/40 bg-emerald-500/10"
+                                  : "border-slate-800 bg-slate-900/60 hover:border-slate-700"
+                              }`}
+                            >
+                              <div className="flex items-start gap-3">
+                                <span
+                                  className={`mt-0.5 flex h-5 w-5 shrink-0 items-center justify-center rounded-md border text-xs font-black ${
+                                    selected
+                                      ? "border-emerald-400 bg-emerald-400 text-slate-950"
+                                      : "border-slate-600 bg-slate-950 text-transparent"
+                                  }`}
+                                >
+                                  ✓
+                                </span>
+                                <span>
+                                  <span className="block text-sm font-black text-white">
+                                    {feature.label}
+                                  </span>
+                                  <span className="mt-1 block text-xs leading-5 text-slate-400">
+                                    {feature.description}
+                                  </span>
+                                </span>
+                              </div>
+                            </button>
+                          );
+                        })}
+                    </div>
+                  </div>
+                ) : integrationFeatureModalTab === "webhooks" ? (
+                  <div>
+                    <div className="mb-4 flex flex-wrap items-center justify-between gap-3">
+                      <div>
+                        <p className="text-[11px] font-black uppercase tracking-[0.18em] text-violet-300">
+                          Webhooks
+                        </p>
+                        <p className="mt-1 text-xs leading-5 text-slate-500">
+                          Enable event-driven delivery to external systems as an advanced add-on.
+                        </p>
+                      </div>
+                      <span className="rounded-full border border-violet-500/30 bg-violet-500/10 px-2.5 py-1 text-[10px] font-black uppercase tracking-wide text-violet-200">
+                        Advanced Add-on
+                      </span>
+                    </div>
+
+                    {INTEGRATION_FEATURE_OPTIONS
+                      .filter((feature) => feature.key === "webhooks")
+                      .map((feature) => {
+                        const selected = Boolean(
+                          integrationFeatureModal.features?.[feature.key],
+                        );
+
+                        return (
+                          <button
+                            key={feature.key}
+                            type="button"
+                            onClick={() => toggleIntegrationFeatureDraft(feature.key)}
+                            className={`w-full text-left rounded-2xl border p-4 transition ${
+                              selected
+                                ? "border-violet-500/40 bg-violet-500/10"
+                                : "border-slate-800 bg-slate-900/60 hover:border-slate-700"
+                            }`}
+                          >
+                            <div className="flex items-start gap-3">
+                              <span
+                                className={`mt-0.5 flex h-5 w-5 shrink-0 items-center justify-center rounded-md border text-xs font-black ${
+                                  selected
+                                    ? "border-violet-400 bg-violet-400 text-slate-950"
+                                    : "border-slate-600 bg-slate-950 text-transparent"
+                                }`}
+                              >
+                                ✓
+                              </span>
+                              <span>
+                                <span className="block text-sm font-black text-white">
+                                  {feature.label}
+                                </span>
+                                <span className="mt-1 block text-xs leading-5 text-slate-400">
+                                  {feature.description}
+                                </span>
+                              </span>
+                            </div>
+                          </button>
+                        );
+                      })}
+
+                    <div className={`mt-4 space-y-4 ${
+                      integrationFeatureModal.features?.webhooks
+                        ? ""
+                        : "pointer-events-none opacity-45"
+                    }`}>
+                      {["Operations", "Inventory"].map((groupName) => {
+                        const groupEvents = WEBHOOK_EVENT_OPTIONS.filter(
+                          (eventOption) => eventOption.group === groupName,
+                        );
+
+                        return (
+                          <div key={groupName}>
+                            <div className="mb-2 flex items-center justify-between gap-3">
+                              <p className="text-[11px] font-black uppercase tracking-[0.16em] text-slate-400">
+                                {groupName}
+                              </p>
+                              {!integrationFeatureModal.features?.webhooks && (
+                                <span className="text-[10px] font-bold text-slate-600">
+                                  Enable Webhooks first
+                                </span>
+                              )}
+                            </div>
+
+                            <div className="space-y-2.5">
+                              {groupEvents.map((eventOption) => {
+                                const selected = Boolean(
+                                  integrationFeatureModal.webhookEvents?.[eventOption.key],
+                                );
+
+                                return (
+                                  <button
+                                    key={eventOption.key}
+                                    type="button"
+                                    onClick={() => toggleWebhookEventDraft(eventOption.key)}
+                                    className={`w-full rounded-2xl border p-3.5 text-left transition ${
+                                      selected
+                                        ? "border-violet-500/40 bg-violet-500/10"
+                                        : "border-slate-800 bg-slate-900/50 hover:border-slate-700"
+                                    }`}
+                                  >
+                                    <div className="flex items-start gap-3">
+                                      <span
+                                        className={`mt-0.5 flex h-5 w-5 shrink-0 items-center justify-center rounded-md border text-xs font-black ${
+                                          selected
+                                            ? "border-violet-400 bg-violet-400 text-slate-950"
+                                            : "border-slate-600 bg-slate-950 text-transparent"
+                                        }`}
+                                      >
+                                        ✓
+                                      </span>
+
+                                      <span className="min-w-0">
+                                        <span className="flex flex-wrap items-center gap-2">
+                                          <span className="text-sm font-black text-white">
+                                            {eventOption.label}
+                                          </span>
+                                          <span className="rounded-full border border-slate-700 bg-slate-950/70 px-2 py-0.5 font-mono text-[10px] text-sky-300">
+                                            {eventOption.event}
+                                          </span>
+                                        </span>
+                                        <span className="mt-1 block text-xs leading-5 text-slate-400">
+                                          {eventOption.description}
+                                        </span>
+                                      </span>
+                                    </div>
+                                  </button>
+                                );
+                              })}
+                            </div>
+                          </div>
+                        );
+                      })}
+                    </div>
+                  </div>
+                ) : (
+                  <div>
+                    <div className="mb-4">
+                      <p className="text-[11px] font-black uppercase tracking-[0.18em] text-cyan-300">
+                        External Mapping
+                      </p>
+                      <p className="mt-1 text-xs leading-5 text-slate-500">
+                        Enable code mapping when Fleet Fuel PRO codes differ from codes used by an external ERP.
+                      </p>
+                    </div>
+
+                    <button
+                      type="button"
+                      onClick={() => toggleExternalMappingDraft("enabled")}
+                      className={`w-full rounded-2xl border p-4 text-left transition ${
+                        integrationFeatureModal.externalMapping?.enabled
+                          ? "border-cyan-500/40 bg-cyan-500/10"
+                          : "border-slate-800 bg-slate-900/60 hover:border-slate-700"
+                      }`}
+                    >
+                      <div className="flex items-start gap-3">
+                        <span
+                          className={`mt-0.5 flex h-5 w-5 shrink-0 items-center justify-center rounded-md border text-xs font-black ${
+                            integrationFeatureModal.externalMapping?.enabled
+                              ? "border-cyan-400 bg-cyan-400 text-slate-950"
+                              : "border-slate-600 bg-slate-950 text-transparent"
+                          }`}
+                        >
+                          ✓
+                        </span>
+                        <span>
+                          <span className="block text-sm font-black text-white">
+                            Enable External Mapping
+                          </span>
+                          <span className="mt-1 block text-xs leading-5 text-slate-400">
+                            Allow this company to map Asset, Project, and Station codes to external system codes.
+                          </span>
+                        </span>
+                      </div>
+                    </button>
+
+                    <div
+                      className={`mt-4 grid gap-3 sm:grid-cols-2 ${
+                        integrationFeatureModal.externalMapping?.enabled
+                          ? ""
+                          : "pointer-events-none opacity-45"
+                      }`}
+                    >
+                      <button
+                        type="button"
+                        onClick={() => toggleExternalMappingDraft("manualEnabled")}
+                        className={`rounded-2xl border p-4 text-left transition ${
+                          integrationFeatureModal.externalMapping?.manualEnabled
+                            ? "border-emerald-500/40 bg-emerald-500/10"
+                            : "border-slate-800 bg-slate-900/50 hover:border-slate-700"
+                        }`}
+                      >
+                        <div className="flex items-start gap-3">
+                          <span
+                            className={`mt-0.5 flex h-5 w-5 shrink-0 items-center justify-center rounded-md border text-xs font-black ${
+                              integrationFeatureModal.externalMapping?.manualEnabled
+                                ? "border-emerald-400 bg-emerald-400 text-slate-950"
+                                : "border-slate-600 bg-slate-950 text-transparent"
+                            }`}
+                          >
+                            ✓
+                          </span>
+                          <span>
+                            <span className="block text-sm font-black text-white">
+                              Manual Mapping
+                            </span>
+                            <span className="mt-1 block text-xs leading-5 text-slate-400">
+                              Show the External Mapping page so the company Admin can add, edit, archive, and remove mappings manually.
+                            </span>
+                          </span>
+                        </div>
+                      </button>
+
+                      <button
+                        type="button"
+                        onClick={() => toggleExternalMappingDraft("importEnabled")}
+                        className={`rounded-2xl border p-4 text-left transition ${
+                          integrationFeatureModal.externalMapping?.importEnabled
+                            ? "border-emerald-500/40 bg-emerald-500/10"
+                            : "border-slate-800 bg-slate-900/50 hover:border-slate-700"
+                        }`}
+                      >
+                        <div className="flex items-start gap-3">
+                          <span
+                            className={`mt-0.5 flex h-5 w-5 shrink-0 items-center justify-center rounded-md border text-xs font-black ${
+                              integrationFeatureModal.externalMapping?.importEnabled
+                                ? "border-emerald-400 bg-emerald-400 text-slate-950"
+                                : "border-slate-600 bg-slate-950 text-transparent"
+                            }`}
+                          >
+                            ✓
+                          </span>
+                          <span>
+                            <span className="block text-sm font-black text-white">
+                              Bulk Import
+                            </span>
+                            <span className="mt-1 block text-xs leading-5 text-slate-400">
+                              Show External Mapping in Data Import Center for bulk onboarding from Excel.
+                            </span>
+                          </span>
+                        </div>
+                      </button>
+                    </div>
+
+                    {!integrationFeatureModal.externalMapping?.enabled && (
+                      <p className="mt-3 text-xs font-bold text-slate-600">
+                        Enable External Mapping first to configure Manual Mapping or Bulk Import.
+                      </p>
+                    )}
+                  </div>
+                )}
+
+                <div className="mt-4 rounded-2xl border border-amber-500/20 bg-amber-500/5 px-4 py-2.5 text-[11px] leading-5 text-amber-100">
+                  Company Integration entitlements are now saved to the Fleet Fuel PRO backend and database.
+                </div>
+              </div>
+
+              <div className="shrink-0 flex flex-wrap items-center justify-between gap-3 border-t border-slate-800 px-5 py-3.5">
+                <div>
+                  {integrationFeatureConfigs[integrationFeatureModal.company?.id]?.enabled && (
+                    <button
+                      type="button"
+                      onClick={disableIntegrationAccess}
+                      disabled={integrationFeatureSaving}
+                      className="rounded-xl border border-red-500/30 bg-red-500/10 px-4 py-2.5 text-sm font-black text-red-300 hover:bg-red-500/20 disabled:cursor-wait disabled:opacity-60"
+                    >
+                      {integrationFeatureSaving ? "Saving..." : "Disable Integration"}
+                    </button>
+                  )}
+                </div>
+
+                <div className="flex items-center gap-2">
+                  <button
+                    type="button"
+                    onClick={closeIntegrationFeatureModal}
+                    disabled={integrationFeatureSaving}
+                    className="rounded-xl border border-slate-700 px-4 py-2.5 text-sm font-black text-slate-300 hover:bg-slate-900 disabled:cursor-wait disabled:opacity-60"
+                  >
+                    Cancel
+                  </button>
+                  <button
+                    type="button"
+                    onClick={saveIntegrationFeatures}
+                    disabled={
+                      integrationFeatureSaving ||
+                      integrationFeatureLoadingCompanyId === integrationFeatureModal.company?.id
+                    }
+                    className="rounded-xl bg-amber-400 px-4 py-2.5 text-sm font-black text-slate-950 hover:bg-amber-300 disabled:cursor-wait disabled:opacity-60"
+                  >
+                    {integrationFeatureSaving
+                      ? "Saving..."
+                      : integrationFeatureLoadingCompanyId === integrationFeatureModal.company?.id
+                        ? "Loading..."
+                        : integrationFeatureConfigs[integrationFeatureModal.company?.id]?.enabled
+                          ? "Save Features"
+                          : "Enable Integration"}
+                  </button>
+                </div>
+              </div>
+            </div>
+          </div>
+        </ModalPortal>
+      )}
 
       {companyConfirmModal.open && (
         <ModalPortal>

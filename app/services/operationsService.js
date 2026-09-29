@@ -194,6 +194,36 @@ export async function fetchOperationsDashboard(
   };
 }
 
+
+export async function fetchOperationsDashboardMap(
+  filters = {},
+  currentUser = {}
+) {
+  const params = Object.fromEntries(
+    Object.entries(filters).filter(
+      ([, value]) =>
+        value !== undefined &&
+        value !== null &&
+        value !== "" &&
+        value !== "all"
+    )
+  );
+
+  const response = await api.get("/operations/dashboard/map", {
+    params,
+    headers: buildOperationRequestHeaders(currentUser),
+  });
+
+  return {
+    generatedAt: response.data?.generatedAt || null,
+    mapDate: response.data?.mapDate || null,
+    mode: response.data?.mode || "LATEST_BY_FUELER",
+    points: Array.isArray(response.data?.points)
+      ? response.data.points
+      : [],
+  };
+}
+
 export async function fetchAssetOperationsHistory(
   assetId,
   {

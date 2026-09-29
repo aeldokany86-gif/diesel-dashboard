@@ -39,6 +39,7 @@ export default function DataImportCenterPage({
   onEmployeesImported,
   onAssetsImported,
   onStationsImported,
+  externalMappingImportEnabled = false,
 }) {
   const { t } = useLanguage();
   const projectsFileInputRef = useRef(null);
@@ -367,6 +368,19 @@ export default function DataImportCenterPage({
     { key: "employees", label: t("dataImport.modules.employees"), ready: true },
     { key: "assets", label: t("dataImport.modules.assets"), ready: true },
     { key: "stations", label: t("dataImport.modules.stations"), ready: true },
+    ...(externalMappingImportEnabled
+      ? [
+          {
+            key: "externalMapping",
+            label: currentLanguage === "ar" ? "تعيين الأكواد الخارجية" : "External Mapping",
+            ready: false,
+            prototypeNote:
+              currentLanguage === "ar"
+                ? "تم تفعيل Bulk Import للشركة — سيتم ربط Workflow الاستيراد بالباك اند في المرحلة التالية."
+                : "Bulk Import is enabled for this company — the import workflow will be connected in the backend phase.",
+          },
+        ]
+      : []),
   ];
 
   return (
@@ -456,7 +470,7 @@ export default function DataImportCenterPage({
 
                     {!module.ready && (
                       <p className="mt-1 text-xs text-slate-600">
-                        {t("dataImport.modules.comingLater")}
+                        {module.prototypeNote || t("dataImport.modules.comingLater")}
                       </p>
                     )}
                   </div>

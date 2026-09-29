@@ -34,6 +34,8 @@ import NotificationCenterPage from "./features/notifications/NotificationCenterP
 import AuditTimelinePage from "./features/audit/AuditTimelinePage";
 import ReportsPage from "./features/reports/ReportsPage";
 import DataImportCenterPage from "./features/imports/DataImportCenterPage";
+import IntegrationsPage from "./features/integrations/IntegrationsPage";
+import ExternalMappingPage from "./features/integrations/ExternalMappingPage";
 
 import {
   normalizeSystemUserStatus,
@@ -91,6 +93,7 @@ import {
   updateMobileApplicationSettings,
 } from "./services/companiesService";
 import { fetchDataImportAccess } from "./services/importsService";
+import { fetchAuthenticatedCompanyIntegrationSettings } from "./services/integrationsService";
 
 import {
   fetchAssets,
@@ -753,6 +756,8 @@ export default function Home() {
   const [projects, setProjects] = useState([]);
   const [companies, setCompanies] = useState([]);
   const [companyAdminDataImportAllowed, setCompanyAdminDataImportAllowed] = useState(false);
+  const [companyAdminIntegrationAllowed, setCompanyAdminIntegrationAllowed] = useState(false);
+  const [companyAdminIntegrationConfig, setCompanyAdminIntegrationConfig] = useState(null);
 
   const [assetProjectHistory, setAssetProjectHistory] = useState([]);
   const [assetOdometerHistory, setAssetOdometerHistory] = useState([]);
@@ -1275,6 +1280,10 @@ export default function Home() {
   };
 
   const canAccessPage = (pageKey) => {
+    if (pageKey === "externalMapping") {
+      return Boolean(canOpenExternalMapping);
+    }
+
     // Users & Roles should not appear for Manager/Officer/Supervisor/Operator.
     // Admin and PlatformAdmin remain the only roles that can open it.
     if (pageKey === "users") {
@@ -3734,6 +3743,69 @@ export default function Home() {
     currentUser?.role === "PlatformAdmin" ||
     (currentUser?.role === "Admin" && companyAdminDataImportAllowed);
 
+  useEffect(() => {
+    if (
+      !backendIsLoggedIn ||
+      currentUser?.role !== "Admin" ||
+      !currentCompanyId
+    ) {
+      setCompanyAdminIntegrationAllowed(false);
+      setCompanyAdminIntegrationConfig(null);
+      return;
+    }
+
+    let cancelled = false;
+
+    async function loadCompanyIntegrationAccess() {
+      try {
+        const currentConfig =
+          await fetchAuthenticatedCompanyIntegrationSettings();
+
+        if (cancelled) return;
+
+        setCompanyAdminIntegrationConfig(currentConfig);
+        setCompanyAdminIntegrationAllowed(Boolean(currentConfig?.enabled));
+      } catch (error) {
+        if (cancelled) return;
+
+        console.warn("Failed to load company Integration settings.", error);
+        setCompanyAdminIntegrationAllowed(false);
+        setCompanyAdminIntegrationConfig(null);
+      }
+    }
+
+    loadCompanyIntegrationAccess();
+
+    return () => {
+      cancelled = true;
+    };
+  }, [
+    backendIsLoggedIn,
+    currentUser?.id,
+    currentUser?.role,
+    currentUser?.companyId,
+    currentCompanyId,
+  ]);
+
+  // Backend gate: company Admin + API Integration enabled by Platform Admin.
+  const canOpenIntegrations =
+    currentUser?.role === "Admin" && companyAdminIntegrationAllowed;
+
+  const externalMappingSettings =
+    companyAdminIntegrationConfig?.externalMapping || {};
+
+  const canOpenExternalMapping =
+    currentUser?.role === "Admin" &&
+    companyAdminIntegrationAllowed &&
+    Boolean(externalMappingSettings.enabled) &&
+    Boolean(externalMappingSettings.manualEnabled);
+
+  const externalMappingImportEnabled =
+    currentUser?.role === "Admin" &&
+    companyAdminIntegrationAllowed &&
+    Boolean(externalMappingSettings.enabled) &&
+    Boolean(externalMappingSettings.importEnabled);
+
   const companyUsers = isPlatformAdminUser(currentUser)
     ? isPlatformConsoleContext
       ? users
@@ -5066,6 +5138,53 @@ export default function Home() {
           }
           onAssetsImported={() => refreshBackendAssets()}
           onStationsImported={() => refreshBackendStations()}
+          externalMappingImportEnabled={externalMappingImportEnabled}
+        />
+      );
+    }
+
+    if (page === "integrations") {
+      if (!canOpenIntegrations) {
+        return (
+          <div className="min-h-screen p-6 text-slate-100">
+            <div className="rounded-2xl border border-red-500/30 bg-red-500/10 p-5 font-bold text-red-300">
+              {language === "ar"
+                ? "التكاملات متاحة فقط لأدمن الشركة عندما تكون ميزة API Integration مفعلة للشركة."
+                : "Integrations are available only to the company Admin when API Integration is enabled for the company."}
+            </div>
+          </div>
+        );
+      }
+
+      return (
+        <IntegrationsPage
+          currentUser={currentUser}
+          currentCompany={currentCompany}
+          companyIntegrationConfig={companyAdminIntegrationConfig}
+          showToast={showToast}
+        />
+      );
+    }
+
+    if (page === "externalMapping") {
+      if (!canOpenExternalMapping) {
+        return (
+          <div className="min-h-screen p-6 text-slate-100">
+            <div className="rounded-2xl border border-red-500/30 bg-red-500/10 p-5 font-bold text-red-300">
+              External Mapping is not enabled for this company.
+            </div>
+          </div>
+        );
+      }
+
+      return (
+        <ExternalMappingPage
+          currentCompany={currentCompany}
+          currentCompanyId={currentCompanyId}
+          assets={scopedAssets}
+          projects={scopedProjects}
+          stations={scopedStations}
+          showToast={showToast}
         />
       );
     }
@@ -5514,6 +5633,15 @@ export default function Home() {
     { key: "stations", label: t("sidebar.stations"), Icon: Fuel },
     { key: "team", label: t("sidebar.team"), Icon: Users },
     { key: "projects", label: t("sidebar.projects"), Icon: Building2 },
+    ...(canOpenExternalMapping
+      ? [
+          {
+            key: "externalMapping",
+            label: language === "ar" ? "تعيين الأكواد الخارجية" : "External Mapping",
+            Icon: FileBarChart2,
+          },
+        ]
+      : []),
     { key: "reports", label: t("sidebar.reports"), Icon: FileBarChart2 },
     { key: "companies", label: t("sidebar.companies"), Icon: Building2 },
     { key: "notifications", label: t("sidebar.notifications"), Icon: Bell },
@@ -6205,6 +6333,20 @@ export default function Home() {
                           <span className="text-slate-500">›</span>
                         </button>
                       )}
+                      {canOpenIntegrations && (
+                        <button
+                          type="button"
+                          onClick={() => {
+                            setPage("integrations");
+                            setShowSettingsMenu(false);
+                            setActiveSettingsSection(null);
+                          }}
+                          className="w-full flex items-center justify-between px-4 py-3 text-sm text-slate-200 border-t border-slate-700 hover:bg-slate-800 transition-colors"
+                        >
+                          <span>{language === "ar" ? "التكاملات" : "Integrations"}</span>
+                          <span className="text-slate-500">›</span>
+                        </button>
+                      )}
                     </>
                   ) : activeSettingsSection === "theme" ? (
                     <>
@@ -6301,6 +6443,20 @@ export default function Home() {
                       className="w-full flex items-center justify-between px-4 py-3 text-sm text-slate-200 border-t border-slate-700 hover:bg-slate-800 transition-colors"
                     >
                       <span>{t("dataImport.title")}</span><span className="text-slate-500">›</span>
+                    </button>
+                  )}
+                  {canOpenIntegrations && (
+                    <button
+                      type="button"
+                      onClick={() => {
+                        setPage("integrations");
+                        setShowSettingsMenu(false);
+                        setActiveSettingsSection(null);
+                      }}
+                      className="w-full flex items-center justify-between px-4 py-3 text-sm text-slate-200 border-t border-slate-700 hover:bg-slate-800 transition-colors"
+                    >
+                      <span>{language === "ar" ? "التكاملات" : "Integrations"}</span>
+                      <span className="text-slate-500">›</span>
                     </button>
                   )}
                 </>

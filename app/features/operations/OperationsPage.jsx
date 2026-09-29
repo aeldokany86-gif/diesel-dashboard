@@ -1,6 +1,7 @@
 "use client";
 
 import React, { useEffect, useMemo, useRef, useState } from "react";
+import dynamic from "next/dynamic";
 import {
   AreaChart,
   Area,
@@ -47,6 +48,7 @@ import {
   getUploadSignedUrl,
   createOperation,
   fetchOperationsDashboard,
+  fetchOperationsDashboardMap,
   fetchAssetOperationsHistory,
 } from "../../services/operationsService";
 
@@ -55,6 +57,10 @@ import {
   fetchOperationCorrectionContext,
 } from "../../services/operationCorrectionsService";
 import OperationCorrectionModal from "./OperationCorrectionModal";
+const FuelOperationsMap = dynamic(
+  () => import("./FuelOperationsMap"),
+  { ssr: false }
+);
 import AddOperationModal from "./AddOperationModal";
 import useOperationsData from "./hooks/useOperationsData";
 import { companyMatches } from "../../lib/companyHelpers";
@@ -528,6 +534,13 @@ export default function OperationsPage({
   const [remoteDashboard, setRemoteDashboard] = useState(null);
   const [dashboardLoading, setDashboardLoading] = useState(false);
   const dashboardRequestIdRef = useRef(0);
+
+  // Fuel operations map uses the same dashboard filters, but keeps its own
+  // lightweight request lifecycle and display mode.
+  const [operationsMap, setOperationsMap] = useState(null);
+  const [operationsMapLoading, setOperationsMapLoading] = useState(false);
+  const [operationsMapMode, setOperationsMapMode] = useState("LATEST_BY_FUELER");
+  const operationsMapRequestIdRef = useRef(0);
 
   const [equipmentSummaryPage, setEquipmentSummaryPage] = useState(1);
   const [equipmentSummaryPageSize, setEquipmentSummaryPageSize] = useState(10);
@@ -1516,6 +1529,75 @@ const payload = mapFrontendOperationToBackendPayload({
     selectedEquipmentType.join("|"),
     selectedProject.join("|"),
     data,
+  ]);
+
+  useEffect(() => {
+    if (!currentUser?.id) {
+      setOperationsMap(null);
+      return undefined;
+    }
+
+    const requestId = ++operationsMapRequestIdRef.current;
+    const timer = window.setTimeout(async () => {
+      const selectedAssetIds = selectedEquipment
+        .map((value) => {
+          const asset = getAsset(value);
+          return (
+            asset?.backendId ||
+            asset?.assetBackendId ||
+            asset?.id ||
+            ""
+          );
+        })
+        .filter(Boolean);
+
+      const selectedProjectIds = selectedProject
+        .map((value) => {
+          const project = getProject(value);
+          return project?.backendId || project?.id || project?.projectId || "";
+        })
+        .filter(Boolean);
+
+      setOperationsMapLoading(true);
+
+      try {
+        const result = await fetchOperationsDashboardMap(
+          {
+            mode: operationsMapMode,
+            dateFrom: fromDate,
+            dateTo: toDate,
+            refuelType: selectedRefuelType,
+            assetIds: selectedAssetIds.join(","),
+            assetTypes: selectedEquipmentType.join(","),
+            projectIds: selectedProjectIds.join(","),
+            utcOffsetMinutes: -new Date().getTimezoneOffset(),
+          },
+          currentUser
+        );
+
+        if (requestId !== operationsMapRequestIdRef.current) return;
+        setOperationsMap(result);
+      } catch (error) {
+        if (requestId !== operationsMapRequestIdRef.current) return;
+        console.warn("Operations dashboard map refresh failed.", error);
+        setOperationsMap(null);
+      } finally {
+        if (requestId === operationsMapRequestIdRef.current) {
+          setOperationsMapLoading(false);
+        }
+      }
+    }, 120);
+
+    return () => window.clearTimeout(timer);
+  }, [
+    currentUser?.id,
+    operationsMapMode,
+    fromDate,
+    toDate,
+    selectedRefuelType,
+    selectedEquipment.join("|"),
+    selectedEquipmentType.join("|"),
+    selectedProject.join("|"),
   ]);
 
   const filteredDirectRefuelData = refuelTypeFilteredData.filter((item) => {
@@ -3457,6 +3539,16 @@ const payload = mapFrontendOperationToBackendPayload({
           setPageSize: setEquipmentSummaryPageSize,
           setPage: setEquipmentSummaryPage,
         })}
+      </div>
+
+      <div className="relative z-0 mb-4">
+        <FuelOperationsMap
+          points={operationsMap?.points || []}
+          mapDate={operationsMap?.mapDate || null}
+          mode={operationsMapMode}
+          onModeChange={setOperationsMapMode}
+          loading={operationsMapLoading}
+        />
       </div>
 
       <div className="fleet-chart-grid grid grid-cols-1 xl:grid-cols-2 gap-4 mb-5">
