@@ -281,7 +281,7 @@ function getNumericValue(...values) {
 }
 
 function getOperationCost(row, headers = []) {
-  const embeddedOperation = getEmbeddedOperation(row);
+  const embeddedOperation = getEmbeddedOperation(row) || row;
 
   return getNumericValue(
     embeddedOperation?.totalCostAtOperation,
@@ -1142,7 +1142,7 @@ function getOperationField(
   embeddedAliases = [],
   rowAliases = [],
 ) {
-  const embeddedOperation = getEmbeddedOperation(row);
+  const embeddedOperation = getEmbeddedOperation(row) || row;
 
   for (const alias of embeddedAliases) {
     const value = embeddedOperation?.[alias];
@@ -1172,11 +1172,54 @@ function FuelSuppliersReport({
   const [reportGenerated, setReportGenerated] = useState(false);
   const [draftFilters, setDraftFilters] = useState(FUEL_SUPPLIER_FILTERS);
   const [appliedFilters, setAppliedFilters] = useState(FUEL_SUPPLIER_FILTERS);
+  const [supplierReportData, setSupplierReportData] = useState(data || []);
+  const [supplierDataLoading, setSupplierDataLoading] = useState(false);
+  const [supplierDataError, setSupplierDataError] = useState("");
+
+  useEffect(() => {
+    let active = true;
+
+    const loadSupplierOperations = async () => {
+      setSupplierDataLoading(true);
+      setSupplierDataError("");
+
+      try {
+        const result = await fetchOperationsSummaryReport(
+          {
+            type: "EXTERNAL_SUPPLY",
+            status: "ALL",
+          },
+          currentUser,
+        );
+
+        if (active) {
+          setSupplierReportData(Array.isArray(result?.rows) ? result.rows : []);
+        }
+      } catch (requestError) {
+        if (active) {
+          setSupplierDataError(
+            requestError?.response?.data?.message ||
+              requestError?.message ||
+              "Failed to load fuel supplier operations.",
+          );
+          setSupplierReportData(data || []);
+        }
+      } finally {
+        if (active) setSupplierDataLoading(false);
+      }
+    };
+
+    void loadSupplierOperations();
+
+    return () => {
+      active = false;
+    };
+  }, [currentUser, data]);
 
   const supplyRows = useMemo(() => {
-    return (data || [])
+    return (supplierReportData || [])
       .map((row, index) => {
-        const embeddedOperation = getEmbeddedOperation(row);
+        const embeddedOperation = getEmbeddedOperation(row) || row;
         const operationType = getOperationField(
           row,
           headers,
@@ -1326,7 +1369,7 @@ function FuelSuppliersReport({
         };
       })
       .filter(Boolean);
-  }, [data, headers, projects, stations]);
+  }, [supplierReportData, headers, projects, stations]);
 
   const supplierOptions = useMemo(
     () =>
@@ -1393,21 +1436,37 @@ function FuelSuppliersReport({
   const pagination = useReportPagination(filteredRows);
   const paginatedRows = pagination.paginatedItems;
 
+  const rowsForSupplierTotals = useMemo(() => {
+    if (normalizeValue(appliedFilters.status) === "cancelled") {
+      return filteredRows;
+    }
+
+    return filteredRows.filter(
+      (row) => normalizeValue(row.status) !== "cancelled",
+    );
+  }, [filteredRows, appliedFilters.status]);
+
   const totals = useMemo(
     () => ({
-      deliveries: filteredRows.length,
+      deliveries: rowsForSupplierTotals.length,
       suppliers: new Set(
-        filteredRows.map((row) => normalizeValue(row.supplier)),
+        rowsForSupplierTotals.map((row) => normalizeValue(row.supplier)),
       ).size,
-      quantity: filteredRows.reduce((sum, row) => sum + row.quantity, 0),
-      cost: filteredRows.reduce((sum, row) => sum + row.totalCost, 0),
+      quantity: rowsForSupplierTotals.reduce(
+        (sum, row) => sum + row.quantity,
+        0,
+      ),
+      cost: rowsForSupplierTotals.reduce(
+        (sum, row) => sum + row.totalCost,
+        0,
+      ),
     }),
-    [filteredRows],
+    [rowsForSupplierTotals],
   );
 
   const supplierSummary = useMemo(() => {
     const groups = new Map();
-    filteredRows.forEach((row) => {
+    rowsForSupplierTotals.forEach((row) => {
       const key = normalizeValue(row.supplier) || "unspecified";
       const current = groups.get(key) || {
         supplier: row.supplier,
@@ -1421,7 +1480,7 @@ function FuelSuppliersReport({
       groups.set(key, current);
     });
     return [...groups.values()].sort((a, b) => b.quantity - a.quantity);
-  }, [filteredRows]);
+  }, [rowsForSupplierTotals]);
 
   const filterSummary = useMemo(
     () => [
@@ -1599,6 +1658,12 @@ function FuelSuppliersReport({
             />
           </div>
         </section>
+
+        {supplierDataError ? (
+          <section className="rounded-2xl border border-red-500/30 bg-red-500/10 px-5 py-4 text-sm font-bold text-red-200">
+            {supplierDataError}
+          </section>
+        ) : null}
 
         {!reportGenerated ? (
           <section className="rounded-2xl border border-amber-500/30 bg-slate-900/80 px-6 py-14 text-center shadow-xl shadow-black/10">
@@ -1965,6 +2030,7 @@ function FuelSuppliersReport({
                       Partially Approved
                     </option>
                     <option value="REJECTED">Rejected</option>
+                    <option value="CANCELLED">Cancelled</option>
                   </select>
                 </label>
               </div>
@@ -1979,9 +2045,14 @@ function FuelSuppliersReport({
                 <button
                   type="button"
                   onClick={applyFilters}
-                  className="rounded-xl border border-amber-500 bg-amber-500 px-4 py-2.5 text-sm font-extrabold text-slate-950 hover:bg-amber-400"
+                  disabled={supplierDataLoading}
+                  className="rounded-xl border border-amber-500 bg-amber-500 px-4 py-2.5 text-sm font-extrabold text-slate-950 hover:bg-amber-400 disabled:cursor-wait disabled:opacity-60"
                 >
-                  {reportGenerated ? "Update Report" : "Generate Report"}
+                  {supplierDataLoading
+                    ? "Generating..."
+                    : reportGenerated
+                      ? "Update Report"
+                      : "Generate Report"}
                 </button>
               </div>
             </aside>
@@ -7091,6 +7162,14 @@ export default function ReportsPage({
           return summary;
         }
 
+        const isCancelled = normalizeValue(row.status) === "cancelled";
+        const cancelledAuditSelected =
+          normalizeValue(appliedFilters.status) === "cancelled";
+
+        if (isCancelled && !cancelledAuditSelected) {
+          return summary;
+        }
+
         return {
           ...summary,
           quantity: summary.quantity + getNumericValue(row.quantity),
@@ -7301,7 +7380,10 @@ export default function ReportsPage({
               ? ""
               : draftFilters.operationType.toUpperCase(),
           fuelerEmployeeId: draftFilters.fuelerEmployeeId.trim(),
-          status: draftFilters.status === "all" ? "" : draftFilters.status,
+          status:
+            draftFilters.status === "all"
+              ? "ALL"
+              : draftFilters.status,
         },
         currentUser,
       );
@@ -7562,8 +7644,11 @@ export default function ReportsPage({
                       Report Details
                     </h2>
                     <p className="mt-1 text-sm text-slate-500">
-                      Showing completed operations from the current accessible
-                      scope.
+                      {appliedFilters.status === "CANCELLED"
+                        ? "Showing cancelled operations from the current accessible scope."
+                        : appliedFilters.status === "all"
+                          ? "Showing completed and cancelled operations from the current accessible scope."
+                          : "Showing completed operations from the current accessible scope."}
                     </p>
                   </div>
 
@@ -7861,6 +7946,7 @@ export default function ReportsPage({
                   >
                     <option value="all">All Statuses</option>
                     <option value="COMPLETED">Completed</option>
+                    <option value="CANCELLED">Cancelled</option>
                   </select>
                 </label>
 

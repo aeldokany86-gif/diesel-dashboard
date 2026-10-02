@@ -1777,7 +1777,7 @@ export default function StationsPage({
     currentUser?.status === "Active" && ["Officer", "Manager"].includes(currentUser?.role);
 
   const canCurrentUserRequestZeroBalance = () =>
-    currentUser?.status === "Active" && ["Officer", "Manager"].includes(currentUser?.role);
+    currentUser?.status === "Active" && ["Supervisor", "Manager"].includes(currentUser?.role);
 
   const resolveStationProjectId = (projectValue) => {
     const normalized = normalizeScopeValue(projectValue);
@@ -2673,37 +2673,6 @@ export default function StationsPage({
       zeroBalanceReason?.trim() || t("stationWorkflows.zero.defaultReason");
     const backendId = getStationBackendId(selectedStation);
 
-    if (currentUser?.role === "Officer") {
-      if (!backendId) {
-        showToast?.("warning", t("stationWorkflows.validation.stationNotLinked"));
-        return;
-      }
-
-      try {
-        const createdRequest = await createStationActionRequest(backendId, {
-          actionType: "ZERO_BALANCE",
-          requestedByUserId: currentUser?.id,
-          reason,
-          movementAt: new Date().toISOString(),
-        });
-
-        await onStationActionRequestCreated?.(createdRequest);
-        setShowConfirm(false);
-        setSelectedStation(null);
-        setZeroBalanceReason(t("stationWorkflows.zero.defaultReason"));
-        showToast?.("warning", t("stationWorkflows.messages.zeroPendingApproval"));
-      } catch (error) {
-        showToast?.(
-          "warning",
-          getFriendlyApiErrorMessage(
-            error,
-            t("stationWorkflows.messages.zeroFailed")
-          )
-        );
-      }
-      return;
-    }
-
     if (!backendId) {
       showToast?.("warning", t("stationWorkflows.validation.stationNotLinked"));
       return;
@@ -2740,7 +2709,7 @@ export default function StationsPage({
           adjustmentType: "ZERO_BALANCE_ADJUSTMENT",
           createdBy: currentUser?.fullName || currentUser?.name || t("stationWorkflows.defaults.manager"),
           createdAt: new Date().toISOString(),
-          source: "manager_zero_balance",
+          source: "direct_zero_balance",
         },
       ]);
 

@@ -494,6 +494,7 @@ export default function OperationsPage({
 
 
   const [showForm, setShowForm] = useState(false);
+  const [missingOperationContext, setMissingOperationContext] = useState(null);
   const [transactionType, setTransactionType] = useState("");
   const [stationMeterPhoto, setStationMeterPhoto] = useState(null);
   const [assetPhoto, setAssetPhoto] = useState(null);
@@ -596,6 +597,10 @@ export default function OperationsPage({
   const [editCell, setEditCell] = useState(null);
   const [correctionContextLoading, setCorrectionContextLoading] = useState(false);
   const [correctionContextError, setCorrectionContextError] = useState("");
+  const [operationActionModal, setOperationActionModal] = useState(null);
+  const [operationCancellationReason, setOperationCancellationReason] = useState("");
+  const [operationCancellationConfirming, setOperationCancellationConfirming] = useState(false);
+  const [operationCancellationSubmitting, setOperationCancellationSubmitting] = useState(false);
 
 
   const dieselIndex = getHeaderIndex(headers, [
@@ -854,11 +859,47 @@ export default function OperationsPage({
 
   const closeForm = () => {
     setShowForm(false);
+    setMissingOperationContext(null);
     setTransactionType("");
     setStationMeterPhoto(null);
     setAssetPhoto(null);
     setAssetMeterPhoto(null);
     setInvoicePhoto(null);
+  };
+
+  const openMissingOperationForm = () => {
+    if (!selectedEquipmentHistory) return;
+    if (!hasPermission("operations", "edit")) return;
+
+    const asset =
+      getAsset(selectedEquipmentHistory?.equipmentBackendId) ||
+      getAsset(selectedEquipmentHistory?.equipmentNo);
+
+    const assetBackendId =
+      selectedEquipmentHistory?.equipmentBackendId ||
+      asset?.backendId ||
+      asset?.assetBackendId ||
+      asset?.id ||
+      "";
+
+    if (!assetBackendId) {
+      showToast?.(
+        "warning",
+        t("operations.history.missingOperation.assetResolveFailed")
+      );
+      return;
+    }
+
+    setMissingOperationContext({
+      assetBackendId,
+      assetDisplayCode:
+        selectedEquipmentHistory?.equipmentNo ||
+        asset?.assetId ||
+        asset?.code ||
+        assetBackendId,
+    });
+    setTransactionType("");
+    setShowForm(true);
   };
 
   const saveNewOperation = async (operation) => {
@@ -912,16 +953,28 @@ const payload = mapFrontendOperationToBackendPayload({
       const backendStatus = String(createdOperation?.status || "").toUpperCase();
       const toastType = backendStatus === "COMPLETED" ? "success" : "warning";
 
+      const wasHistoricalMissingOperation =
+        Boolean(operation?.historicalMissingOperation);
+
       // The backend has confirmed that the operation was saved.
       // Close the form immediately and refresh the operations list in the background.
       closeForm();
       showToast?.(toastType, backendMessage);
 
       trackActivity(
-        "Add Operation",
+        wasHistoricalMissingOperation ? "Add Missing Operation" : "Add Operation",
         "operations",
         `${operation.transactionType} ${createdOperation?.operationNo || createdOperation?.operationId || operation.operationId} saved through backend.`
       );
+
+      if (wasHistoricalMissingOperation && selectedEquipmentHistory) {
+        equipmentHistoryCacheRef.current.clear();
+        void loadEquipmentHistoryPage(
+          selectedEquipmentHistory,
+          equipmentHistoryPagination.page || 1,
+          { useCache: false }
+        );
+      }
 
       if (typeof onOperationsWorkspaceRefresh === "function") {
         void onOperationsWorkspaceRefresh();
@@ -2636,6 +2689,167 @@ const payload = mapFrontendOperationToBackendPayload({
     }
   };
 
+  const closeOperationActionModal = () => {
+    if (operationCancellationSubmitting) return;
+    setOperationActionModal(null);
+    setOperationCancellationReason("");
+    setOperationCancellationConfirming(false);
+  };
+
+  const openOperationActionModal = (item) => {
+    const row = item?.row || [];
+    const operation = row?.__operation || {};
+    const operationBackendId = getOperationCorrectionBackendId(row);
+    const operationNo =
+      operationIdIndex !== -1
+        ? row?.[operationIdIndex]
+        : operation?.operationNo || operationBackendId || "-";
+    const operationType =
+      typeIndex !== -1 ? row?.[typeIndex] : operation?.type || "";
+    const normalizedOperationType = String(operationType || "")
+      .trim()
+      .toUpperCase()
+      .replace(/[\s-]+/g, "_");
+
+    setOperationCancellationReason("");
+    setOperationCancellationConfirming(false);
+    setOperationActionModal({
+      row,
+      originalIndex: item?.originalIndex ?? -1,
+      operation,
+      operationBackendId,
+      operationNo,
+      operationType,
+      normalizedOperationType,
+      occurredAt:
+        operation?.occurredAt ||
+        operation?.completedAt ||
+        operation?.createdAt ||
+        (dateIndex !== -1 ? row?.[dateIndex] : null),
+      equipment:
+        destinationIndex !== -1
+          ? getAssetDisplayCode(row?.[destinationIndex])
+          : operation?.asset?.assetId || operation?.assetId || "-",
+      quantity:
+        dieselIndex !== -1
+          ? Number(row?.[dieselIndex] || 0)
+          : Number(operation?.quantity || 0),
+      status: String(operation?.status || "COMPLETED").toUpperCase(),
+      canCancel:
+        hasPermission("operations", "edit") &&
+        ["DIRECT_REFUEL", "EXTERNAL_DIRECT_REFUEL"].includes(
+          normalizedOperationType
+        ) &&
+        String(operation?.status || "COMPLETED").toUpperCase() === "COMPLETED",
+    });
+  };
+
+  const confirmOperationCancellation = async () => {
+    if (!operationActionModal || operationCancellationSubmitting) return;
+
+    const reason = String(operationCancellationReason || "").trim();
+    if (!reason) {
+      notifyUser(
+        showToast,
+        "warning",
+        language === "ar"
+          ? "سبب إلغاء العملية مطلوب."
+          : "Cancellation reason is required."
+      );
+      return;
+    }
+
+    if (!operationActionModal.operationBackendId) {
+      notifyUser(
+        showToast,
+        "warning",
+        language === "ar"
+          ? "لم يتم العثور على رقم العملية الداخلي."
+          : "Backend operation id was not found."
+      );
+      return;
+    }
+
+    if (!canUseNetwork(showToast)) return;
+
+    setOperationCancellationSubmitting(true);
+
+    try {
+      const responseBody = await createOperationCorrection(
+        {
+          operationId: operationActionModal.operationBackendId,
+          fieldName: "CANCELLATION",
+          newValue: "CANCELLED",
+          reason,
+        },
+        currentUser
+      );
+
+      const correctionStatus = String(
+        responseBody?.correction?.status || ""
+      ).toUpperCase();
+      const applied = correctionStatus === "APPLIED";
+
+      trackActivity(
+        applied ? "Cancel Operation" : "Request Operation Cancellation",
+        "operations",
+        `${operationActionModal.operationNo} ${
+          applied ? "cancelled" : "cancellation requested"
+        }.`
+      );
+
+      setOperationActionModal(null);
+      setOperationCancellationReason("");
+      setOperationCancellationConfirming(false);
+
+      notifyUser(
+        showToast,
+        applied ? "success" : "warning",
+        responseBody?.message ||
+          (applied
+            ? language === "ar"
+              ? "تم إلغاء العملية بنجاح."
+              : "Operation cancelled successfully."
+            : language === "ar"
+            ? "تم إرسال طلب إلغاء العملية للمدير."
+            : "Operation cancellation request was sent for manager approval.")
+      );
+
+      // Always refresh silently after a successful response.
+      // APPLIED cancellations disappear immediately because the backend excludes
+      // CANCELLED operations. PENDING requests remain visible until approval.
+      if (typeof onOperationsWorkspaceRefresh === "function") {
+        void onOperationsWorkspaceRefresh();
+      } else {
+        void refreshOperations({ silent: true });
+      }
+
+      equipmentHistoryCacheRef.current.clear();
+
+      if (selectedEquipmentHistory) {
+        void loadEquipmentHistoryPage(
+          selectedEquipmentHistory,
+          equipmentHistoryPagination.page,
+          { useCache: false }
+        );
+      }
+    } catch (error) {
+      console.warn("Operation cancellation failed:", error);
+      notifyUser(
+        showToast,
+        "warning",
+        getFriendlyApiErrorMessage(
+          error,
+          language === "ar"
+            ? "تعذر إلغاء العملية."
+            : "Failed to cancel operation."
+        )
+      );
+    } finally {
+      setOperationCancellationSubmitting(false);
+    }
+  };
+
   const openDispenserCounterEdit = (readingItem) => {
     if (!hasPermission("operations", "edit")) return;
 
@@ -4041,16 +4255,28 @@ const payload = mapFrontendOperationToBackendPayload({
                 ) : null}
               </div>
 
-              <button
-                onClick={() => {
-                  equipmentHistoryRequestRef.current += 1;
-                  setSelectedEquipmentHistory(null);
-                  setEquipmentHistoryLoading(false);
-                }}
-                className="text-gray-400 hover:text-red-400 text-2xl"
-              >
-                ×
-              </button>
+              <div className="flex items-center gap-2">
+                {hasPermission("operations", "edit") && (
+                  <button
+                    type="button"
+                    onClick={openMissingOperationForm}
+                    className="rounded-xl border border-blue-400/40 bg-blue-500/10 px-3 py-2 text-xs sm:text-sm font-bold text-blue-200 shadow-sm transition hover:border-blue-300/60 hover:bg-blue-500/20 hover:text-blue-100 active:scale-[0.98]"
+                  >
+                    {t("operations.history.missingOperation.addButton")}
+                  </button>
+                )}
+
+                <button
+                  onClick={() => {
+                    equipmentHistoryRequestRef.current += 1;
+                    setSelectedEquipmentHistory(null);
+                    setEquipmentHistoryLoading(false);
+                  }}
+                  className="text-gray-400 hover:text-red-400 text-2xl"
+                >
+                  ×
+                </button>
+              </div>
             </div>
 
             <div className="max-h-[66vh] overflow-x-scroll overflow-y-auto [scrollbar-gutter:stable_both-edges] overscroll-contain">
@@ -4163,9 +4389,21 @@ const payload = mapFrontendOperationToBackendPayload({
                           <Td>{formatDisplayDate(row[dateIndex])}</Td>
 
                           <Td>
-                            {operationIdIndex !== -1
-                              ? row[operationIdIndex]
-                              : item.originalIndex + 1}
+                            <button
+                              type="button"
+                              onClick={() => openOperationActionModal(item)}
+                              className="text-blue-300 hover:text-yellow-400 font-bold underline-offset-2 hover:underline transition cursor-pointer"
+                              title={
+                                language === "ar"
+                                  ? "فتح تفاصيل العملية"
+                                  : "Open operation details"
+                              }
+                            >
+                              {operationIdIndex !== -1
+                                ? row[operationIdIndex]
+                                : row?.__operation?.operationNo ||
+                                  item.originalIndex + 1}
+                            </button>
                           </Td>
 
                           <Td>
@@ -4490,6 +4728,179 @@ const payload = mapFrontendOperationToBackendPayload({
         </ModalPortal>
       )}
 
+      {operationActionModal && (
+        <ModalPortal>
+          <div
+            dir={language === "ar" ? "rtl" : "ltr"}
+            className="fleet-portal-modal-backdrop fixed inset-0 z-[100120] flex items-center justify-center bg-black/80 p-4 backdrop-blur-[3px]"
+          >
+            <div
+              className={`w-full max-w-[520px] overflow-hidden rounded-2xl border border-slate-700 bg-slate-950 text-slate-100 shadow-2xl ${
+                language === "ar" ? "text-right" : "text-left"
+              }`}
+            >
+              <div className="flex items-center justify-between border-b border-slate-800 px-5 py-4">
+                <div>
+                  <h3 className="text-lg font-black text-slate-100">
+                    {language === "ar" ? "تفاصيل العملية" : "Operation Details"}
+                  </h3>
+                  <p className="mt-1 text-xs font-semibold text-blue-300">
+                    {operationActionModal.operationNo}
+                  </p>
+                </div>
+                <button
+                  type="button"
+                  onClick={closeOperationActionModal}
+                  disabled={operationCancellationSubmitting}
+                  className="text-2xl text-slate-400 transition hover:text-red-300 disabled:cursor-not-allowed disabled:opacity-50"
+                >
+                  ×
+                </button>
+              </div>
+
+              <div className="space-y-4 px-5 py-5">
+                <div className="grid grid-cols-1 gap-3 rounded-xl border border-slate-800 bg-slate-900/70 p-4 sm:grid-cols-2">
+                  <div>
+                    <p className="text-[11px] font-semibold uppercase tracking-wide text-slate-500">
+                      {language === "ar" ? "التاريخ" : "Date"}
+                    </p>
+                    <p className="mt-1 font-bold text-slate-100">
+                      {formatDisplayDate(operationActionModal.occurredAt)}
+                    </p>
+                  </div>
+                  <div>
+                    <p className="text-[11px] font-semibold uppercase tracking-wide text-slate-500">
+                      {language === "ar" ? "نوع العملية" : "Operation Type"}
+                    </p>
+                    <p className="mt-1 font-bold text-slate-100">
+                      {getOperationTypeDisplay(
+                        operationActionModal.operationType,
+                        t
+                      )}
+                    </p>
+                  </div>
+                  <div>
+                    <p className="text-[11px] font-semibold uppercase tracking-wide text-slate-500">
+                      {language === "ar" ? "المعدة" : "Equipment"}
+                    </p>
+                    <p className="mt-1 font-bold text-slate-100">
+                      {operationActionModal.equipment || "-"}
+                    </p>
+                  </div>
+                  <div>
+                    <p className="text-[11px] font-semibold uppercase tracking-wide text-slate-500">
+                      {language === "ar" ? "الكمية" : "Quantity"}
+                    </p>
+                    <p className="mt-1 font-bold text-slate-100">
+                      {formatNumber(operationActionModal.quantity)} L
+                    </p>
+                  </div>
+                </div>
+
+                {!operationCancellationConfirming ? (
+                  <>
+                    {!operationActionModal.canCancel && (
+                      <div className="rounded-xl border border-slate-800 bg-slate-900/70 px-4 py-3 text-sm text-slate-400">
+                        {language === "ar"
+                          ? "إلغاء هذه العملية غير متاح لهذا الحساب أو لهذا النوع من العمليات."
+                          : "Cancellation is not available for this account or operation type."}
+                      </div>
+                    )}
+                  </>
+                ) : (
+                  <div className="rounded-xl border border-red-500/40 bg-red-950/20 p-4">
+                    <h4 className="font-black text-red-300">
+                      {language === "ar"
+                        ? "تأكيد إلغاء العملية"
+                        : "Confirm Operation Cancellation"}
+                    </h4>
+                    <p className="mt-2 text-sm leading-6 text-slate-300">
+                      {language === "ar"
+                        ? "لن يتم حذف العملية. بعد الاعتماد ستتحول حالتها إلى CANCELLED وسيتم تنفيذ التسوية التاريخية تلقائيًا."
+                        : "The operation will not be deleted. After approval it will become CANCELLED and the historical reconciliation will be applied automatically."}
+                    </p>
+
+                    <label className="mt-4 block text-sm font-bold text-slate-200">
+                      {language === "ar"
+                        ? "سبب الإلغاء"
+                        : "Cancellation Reason"}
+                    </label>
+                    <textarea
+                      value={operationCancellationReason}
+                      disabled={operationCancellationSubmitting}
+                      onChange={(event) =>
+                        setOperationCancellationReason(event.target.value)
+                      }
+                      className="mt-2 h-24 w-full rounded-xl border border-slate-700 bg-slate-900 px-3 py-2 text-slate-100 outline-none transition focus:border-red-400 disabled:cursor-not-allowed disabled:opacity-60"
+                      placeholder={
+                        language === "ar"
+                          ? "اكتب سبب إلغاء العملية..."
+                          : "Enter the reason for cancelling this operation..."
+                      }
+                    />
+
+                    <div className="mt-4 flex flex-col-reverse gap-2 sm:flex-row sm:justify-end">
+                      <button
+                        type="button"
+                        disabled={operationCancellationSubmitting}
+                        onClick={() => {
+                          setOperationCancellationConfirming(false);
+                          setOperationCancellationReason("");
+                        }}
+                        className="rounded-lg bg-slate-800 px-4 py-2 font-bold text-slate-200 transition hover:bg-slate-700 disabled:cursor-not-allowed disabled:opacity-50"
+                      >
+                        {language === "ar" ? "رجوع" : "Back"}
+                      </button>
+                      <button
+                        type="button"
+                        disabled={
+                          operationCancellationSubmitting ||
+                          !String(operationCancellationReason || "").trim()
+                        }
+                        onClick={confirmOperationCancellation}
+                        className="rounded-lg bg-red-600 px-4 py-2 font-black text-white transition hover:bg-red-500 disabled:cursor-not-allowed disabled:bg-red-900/60 disabled:text-red-300"
+                      >
+                        {operationCancellationSubmitting
+                          ? language === "ar"
+                            ? "جارٍ التنفيذ..."
+                            : "Processing..."
+                          : language === "ar"
+                          ? "تأكيد الإلغاء"
+                          : "Confirm Cancellation"}
+                      </button>
+                    </div>
+                  </div>
+                )}
+              </div>
+
+              {!operationCancellationConfirming && (
+                <div className="flex justify-end gap-3 border-t border-slate-800 px-5 py-4">
+                  {operationActionModal.canCancel && (
+                    <button
+                      type="button"
+                      onClick={() => setOperationCancellationConfirming(true)}
+                      className="rounded-lg border border-red-500/50 bg-red-500/10 px-4 py-2 font-bold text-red-300 transition hover:bg-red-500/20"
+                    >
+                      {language === "ar"
+                        ? "إلغاء العملية"
+                        : "Cancel Operation"}
+                    </button>
+                  )}
+
+                  <button
+                    type="button"
+                    onClick={closeOperationActionModal}
+                    className="rounded-lg bg-slate-800 px-5 py-2 font-bold text-slate-200 transition hover:bg-slate-700"
+                  >
+                    {language === "ar" ? "إغلاق" : "Close"}
+                  </button>
+                </div>
+              )}
+            </div>
+          </div>
+        </ModalPortal>
+      )}
+
       <OperationCorrectionModal
         editCell={editCell}
         setEditCell={setEditCell}
@@ -4513,7 +4924,11 @@ const payload = mapFrontendOperationToBackendPayload({
         <AddOperationModal
           closeForm={closeForm}
           fuelers={fuelers}
-          stations={stations}
+          stations={
+            missingOperationContext
+              ? (allStations.length ? allStations : stations)
+              : stations
+          }
           allStations={allStations}
           assets={assets}
           projects={projects}
@@ -4535,6 +4950,14 @@ const payload = mapFrontendOperationToBackendPayload({
           getLastStationCounter={getLastStationCounter}
           externalStationHistory={externalStationHistory}
           externalSupplierHistory={externalSupplierHistory}
+          historicalMode={Boolean(missingOperationContext)}
+          fixedAssetId={missingOperationContext?.assetBackendId || ""}
+          fixedAssetLabel={missingOperationContext?.assetDisplayCode || ""}
+          allowedTransactionTypesOverride={
+            missingOperationContext
+              ? ["Direct_Refuel", "External_Direct_Refuel"]
+              : null
+          }
           onSaveOperation={saveNewOperation}
           showToast={showToast}
         />

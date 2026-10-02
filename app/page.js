@@ -6123,6 +6123,18 @@ export default function Home() {
           position: relative !important;
           z-index: 100001 !important;
         }
+
+        /* Nested historical operation modal must sit above history/photo portals. */
+        .fleet-nested-modal-backdrop {
+          position: fixed !important;
+          inset: 0 !important;
+          z-index: 100200 !important;
+        }
+
+        .fleet-nested-modal-panel {
+          position: relative !important;
+          z-index: 100201 !important;
+        }
       `}</style>
 
       <div

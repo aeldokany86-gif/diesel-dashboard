@@ -428,6 +428,10 @@ const en = {
       viewLocation: "View Location",
       locationNotRecorded: "Location was not recorded for this operation.",
       photos: "Photos",
+      missingOperation: {
+        addButton: "Add Missing Operation",
+        assetResolveFailed: "Could not resolve the equipment for the missing operation.",
+      },
     },
     photos: {
       title: "Operation Photos",
@@ -471,6 +475,17 @@ const en = {
     saveOperation: "Save Operation",
     searchPlaceholder: "Search {{field}}...",
     noMatchingResults: "No matching results found.",
+    missingOperation: {
+      title: "Add Missing Operation",
+      subtitle: "Add a historical refuel operation while preserving stock and odometer sequence.",
+      equipmentLabel: "Equipment:",
+      dateTimeLabel: "Operation Date & Time *",
+      validation: {
+        dateRequired: "Enter the missing operation date and time.",
+        dateInvalid: "The operation date and time is invalid.",
+        dateMustBePast: "A missing historical operation must have a past date and time.",
+      },
+    },
     transactionTypes: {
       directRefuel: "Direct Refuel",
       externalDirectRefuel: "External Direct Refuel",

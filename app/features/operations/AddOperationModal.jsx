@@ -3,6 +3,7 @@
 import React, {  useEffect, useMemo, useRef, useState } from "react";
 
 import Field from "../../components/forms/Field";
+import ModalPortal from "../../components/ui/ModalPortal";
 
 import {
   formatNumber,
@@ -167,6 +168,10 @@ export default function AddOperationModal({
   getLastStationCounter,
   externalStationHistory = [],
   externalSupplierHistory = [],
+  historicalMode = false,
+  fixedAssetId = "",
+  fixedAssetLabel = "",
+  allowedTransactionTypesOverride = null,
   onSaveOperation,
   showToast,
 }) {
@@ -183,6 +188,7 @@ export default function AddOperationModal({
   const [invoiceNumber, setInvoiceNumber] = useState("");
   const [externalInvoiceAmount, setExternalInvoiceAmount] = useState("");
   const [operationNotes, setOperationNotes] = useState("");
+  const [historicalOccurredAtLocal, setHistoricalOccurredAtLocal] = useState("");
   const uploadDraftOperationNoRef = useRef(`DRAFT-${Date.now()}`);
 
   const [transactionTypeSearch, setTransactionTypeSearch] = useState("");
@@ -279,7 +285,9 @@ export default function AddOperationModal({
   };
 
   const allowedTransactionTypes = getAllowedTransactionTypesForUser(currentUser);
-  const transactionTypesForAdd = allowedTransactionTypes;
+  const transactionTypesForAdd = Array.isArray(allowedTransactionTypesOverride)
+    ? allowedTransactionTypesOverride
+    : allowedTransactionTypes;
 
   const isAssetRefuel = isAssetRefuelTransactionType(transactionType);
   const isExternalDirectRefuel = isExternalDirectRefuelTransactionType(transactionType);
@@ -366,14 +374,27 @@ export default function AddOperationModal({
     return asset.id && isItemInUserProject(asset.project, asset) && status === "active";
   });
 
+  const historicalStationOptions = (allStations.length ? allStations : stations)
+    .filter(
+      (station) =>
+        station?.id &&
+        !isSameText(station.id, "External_Supply") &&
+        isStationEligibleAsSource(station)
+    )
+    .map((station) => station.id);
+
   const sourceStationOptions = isExternalSource
     ? []
+    : historicalMode
+    ? historicalStationOptions
     : currentProjectStations
         .filter(isStationEligibleAsSource)
         .map((station) => station.id);
 
   const destinationOptions = isAssetRefuel
-    ? currentProjectAssets.map((asset) => asset.id)
+    ? historicalMode && fixedAssetId
+      ? [fixedAssetId]
+      : currentProjectAssets.map((asset) => asset.id)
     : isInternalTransfer
     ? currentProjectStations
         .filter(isStationEligibleAsDestination)
@@ -389,7 +410,13 @@ export default function AddOperationModal({
         .map((station) => station.id)
     : [];
 
-  const selectedAsset = assets.find((asset) => isSameText(asset.id, destinationId));
+  const selectedAsset = assets.find(
+    (asset) =>
+      isSameText(asset.id, destinationId) ||
+      isSameText(asset.backendId, destinationId) ||
+      isSameText(asset.assetBackendId, destinationId) ||
+      isSameText(asset.assetId, destinationId)
+  );
   const tankCapacity = Number(selectedAsset?.fuelTank) || 0;
   const selectedSourceStation = stations.find((station) => isSameText(station.id, sourceStation));
   const selectedDestinationStation = (allStations.length ? allStations : stations).find(
@@ -581,6 +608,13 @@ export default function AddOperationModal({
       ? getLastStationCounter?.(destinationId) || 0
       : 0;
 
+  useEffect(() => {
+    if (!historicalMode || !fixedAssetId) return;
+    setDestinationId(fixedAssetId);
+    setOdometer("");
+    setDestinationSearch("");
+  }, [historicalMode, fixedAssetId]);
+
   const resetPhotos = () => {
     setStationMeterPhoto?.(null);
     setAssetPhoto?.(null);
@@ -590,7 +624,7 @@ export default function AddOperationModal({
 
   const resetAfterTransactionTypeChange = (nextType) => {
     setSourceStation("");
-    setDestinationId("");
+    setDestinationId(historicalMode && fixedAssetId ? fixedAssetId : "");
     setDieselQuantity("");
     setOdometer("");
     setDispenserReadings({});
@@ -791,6 +825,37 @@ export default function AddOperationModal({
     : "";
 
   const validateBeforeSave = () => {
+    if (historicalMode) {
+      if (!historicalOccurredAtLocal) {
+        notifyUser(
+          showToast,
+          "warning",
+          t("addOperation.missingOperation.validation.dateRequired")
+        );
+        return false;
+      }
+
+      const historicalTime = new Date(historicalOccurredAtLocal).getTime();
+
+      if (!Number.isFinite(historicalTime)) {
+        notifyUser(
+          showToast,
+          "warning",
+          t("addOperation.missingOperation.validation.dateInvalid")
+        );
+        return false;
+      }
+
+      if (historicalTime >= Date.now()) {
+        notifyUser(
+          showToast,
+          "warning",
+          t("addOperation.missingOperation.validation.dateMustBePast")
+        );
+        return false;
+      }
+    }
+
     if (!transactionType) {
       notifyUser(showToast, "warning", t("addOperation.validation.selectTransactionType"));
       return false;
@@ -940,7 +1005,12 @@ export default function AddOperationModal({
       return false;
     }
 
-    if (isAssetRefuel && lastOdometer > 0 && newReading < lastOdometer) {
+    if (
+      !historicalMode &&
+      isAssetRefuel &&
+      lastOdometer > 0 &&
+      newReading < lastOdometer
+    ) {
       notifyUser(
         showToast,
         "warning",
@@ -1056,13 +1126,16 @@ export default function AddOperationModal({
       return;
     }
 
-    const occurredAt = new Date().toISOString();
+    const occurredAt = historicalMode
+      ? new Date(historicalOccurredAtLocal).toISOString()
+      : new Date().toISOString();
 
     onSaveOperation?.({
       operationId,
       occurredAt,
       transactionDate: occurredAt,
-      currentProjectId: activeProjectId || "",
+      historicalMissingOperation: historicalMode,
+      currentProjectId: historicalMode ? "" : activeProjectId || "",
       transactionType,
       sourceStation: isExternalSource ? "" : sourceStation,
       fuelerId: currentUser?.id || createdByName,
@@ -1092,7 +1165,14 @@ export default function AddOperationModal({
     });
   };
 
+  const historicalDateReady =
+    !historicalMode ||
+    (Boolean(historicalOccurredAtLocal) &&
+      Number.isFinite(new Date(historicalOccurredAtLocal).getTime()) &&
+      new Date(historicalOccurredAtLocal).getTime() < Date.now());
+
   const canSaveOperation =
+    historicalDateReady &&
     Boolean(transactionType) &&
     (!needsSourceStation || Boolean(sourceStation)) &&
     Boolean(destinationId) &&
@@ -1117,13 +1197,20 @@ export default function AddOperationModal({
     requiredPhotosComplete;
 
   return (
-    <div className="fleet-modal-backdrop fixed inset-0 z-[9998] bg-black/70 flex items-center justify-center p-4" dir={isRtl ? "rtl" : "ltr"}>
-      <div className={`w-full max-w-3xl overflow-hidden rounded-2xl border border-slate-700 bg-slate-950 text-slate-100 shadow-2xl ${isRtl ? "text-right" : "text-left"}`}>
+    <ModalPortal>
+      <div className="fleet-nested-modal-backdrop fixed inset-0 bg-black/80 backdrop-blur-sm flex items-center justify-center p-4" dir={isRtl ? "rtl" : "ltr"}>
+      <div className={`fleet-nested-modal-panel w-full max-w-3xl overflow-hidden rounded-2xl border border-slate-700 bg-slate-950 text-slate-100 shadow-2xl ${isRtl ? "text-right" : "text-left"}`}>
         <div className="flex justify-between items-center gap-4 p-5 border-b border-slate-700">
           <div>
-            <h2 className="text-2xl font-extrabold text-white">{t("addOperation.title")}</h2>
+            <h2 className="text-2xl font-extrabold text-white">
+              {historicalMode
+                ? t("addOperation.missingOperation.title")
+                : t("addOperation.title")}
+            </h2>
             <p className="text-sm text-slate-400 mt-1">
-              {t("addOperation.subtitle")}
+              {historicalMode
+                ? t("addOperation.missingOperation.subtitle")
+                : t("addOperation.subtitle")}
             </p>
           </div>
 
@@ -1150,6 +1237,36 @@ export default function AddOperationModal({
             </span>
           </div>
 
+          {historicalMode && (
+            <>
+              <div className="rounded-xl border border-blue-500/30 bg-blue-500/10 p-3 text-sm text-blue-200">
+                <span className="text-slate-400">
+                  {t("addOperation.missingOperation.equipmentLabel")}{" "}
+                </span>
+                <span className="font-black text-blue-200">
+                  {fixedAssetLabel || fixedAssetId || "-"}
+                </span>
+              </div>
+
+              <div className="grid grid-cols-1 sm:grid-cols-3 items-start sm:items-center gap-2 sm:gap-4">
+                <label className="font-medium text-slate-300">
+                  {t("addOperation.missingOperation.dateTimeLabel")}
+                </label>
+                <input
+                  type="datetime-local"
+                  value={historicalOccurredAtLocal}
+                  max={new Date(Date.now() - new Date().getTimezoneOffset() * 60000)
+                    .toISOString()
+                    .slice(0, 16)}
+                  onChange={(event) =>
+                    setHistoricalOccurredAtLocal(event.target.value)
+                  }
+                  className="col-span-2 w-full rounded-lg border border-slate-700 bg-slate-900 p-3 text-slate-100 outline-none transition focus:border-amber-400 focus:ring-2 focus:ring-amber-400/20"
+                />
+              </div>
+            </>
+          )}
+
           <SearchableSelectField
             label={t("addOperation.fields.transactionType")}
             value={transactionType}
@@ -1175,7 +1292,9 @@ export default function AddOperationModal({
                     value={sourceStation}
                     onChange={(value) => {
                       setSourceStation(value);
-                      setDestinationId("");
+                      setDestinationId(
+                        historicalMode && fixedAssetId ? fixedAssetId : ""
+                      );
                       setOdometer("");
                       setDispenserReadings({});
                       setDestinationSearch("");
@@ -1241,23 +1360,37 @@ export default function AddOperationModal({
                 </>
               )}
 
-              <SearchableSelectField
-                label={destinationLabel}
-                value={destinationId}
-                onChange={(value) => handleDestinationChange(value)}
-                options={destinationOptions}
-                placeholder={
-                  isAssetRefuel
-                    ? t("addOperation.placeholders.selectActiveAsset")
-                    : isExternalTransfer
-                    ? t("addOperation.placeholders.selectOtherProjectStation")
-                    : t("addOperation.placeholders.selectDestinationStation")
-                }
-                searchValue={destinationSearch}
-                setSearchValue={setDestinationSearch}
-                language={language}
-                t={t}
-              />
+              {historicalMode && isAssetRefuel ? (
+                <div className="grid grid-cols-1 sm:grid-cols-3 items-start sm:items-center gap-2 sm:gap-4">
+                  <label className="font-medium text-slate-300">
+                    {destinationLabel}
+                  </label>
+                  <div className="col-span-2 rounded-lg border border-slate-700 bg-slate-900 p-3 font-bold text-blue-200">
+                    {fixedAssetLabel ||
+                      getDisplayAssetCode(selectedAsset) ||
+                      fixedAssetId ||
+                      "-"}
+                  </div>
+                </div>
+              ) : (
+                <SearchableSelectField
+                  label={destinationLabel}
+                  value={destinationId}
+                  onChange={(value) => handleDestinationChange(value)}
+                  options={destinationOptions}
+                  placeholder={
+                    isAssetRefuel
+                      ? t("addOperation.placeholders.selectActiveAsset")
+                      : isExternalTransfer
+                      ? t("addOperation.placeholders.selectOtherProjectStation")
+                      : t("addOperation.placeholders.selectDestinationStation")
+                  }
+                  searchValue={destinationSearch}
+                  setSearchValue={setDestinationSearch}
+                  language={language}
+                  t={t}
+                />
+              )}
 
               {shouldShowDestinationStationBalance && (
                 <div className="grid grid-cols-1 sm:grid-cols-3 gap-2 sm:gap-4 -mt-2">
@@ -1473,6 +1606,7 @@ export default function AddOperationModal({
         </div>
       </div>
     </div>
+    </ModalPortal>
   );
 }
 

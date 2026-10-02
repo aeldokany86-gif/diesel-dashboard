@@ -428,6 +428,10 @@ const ar = {
       viewLocation: "عرض الموقع",
       locationNotRecorded: "لم يتم تسجيل الموقع لهذه العملية.",
       photos: "الصور",
+      missingOperation: {
+        addButton: "إضافة عملية مفقودة",
+        assetResolveFailed: "تعذر تحديد المعدة المطلوبة لإضافة العملية المفقودة.",
+      },
     },
     photos: {
       title: "صور العملية",
@@ -471,6 +475,17 @@ const ar = {
     saveOperation: "حفظ العملية",
     searchPlaceholder: "ابحث في {{field}}...",
     noMatchingResults: "لا توجد نتائج مطابقة.",
+    missingOperation: {
+      title: "إضافة عملية مفقودة",
+      subtitle: "إضافة عملية تعبئة تاريخية للمعدة مع الحفاظ على تسلسل المخزون والعداد.",
+      equipmentLabel: "المعدة:",
+      dateTimeLabel: "تاريخ ووقت العملية *",
+      validation: {
+        dateRequired: "أدخل تاريخ ووقت العملية المفقودة.",
+        dateInvalid: "تاريخ ووقت العملية غير صالح.",
+        dateMustBePast: "تاريخ العملية المفقودة يجب أن يكون في الماضي.",
+      },
+    },
     transactionTypes: {
       directRefuel: "تعبئة مباشرة",
       externalDirectRefuel: "تعبئة مباشرة خارجية",
