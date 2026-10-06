@@ -5749,6 +5749,7 @@ const OPERATION_CORRECTION_FILTERS = {
 };
 
 const OPERATION_CORRECTION_HEADERS = [
+  "Correction Ref.",
   "Request Date",
   "Operation No.",
   "Operation Date",
@@ -5957,6 +5958,7 @@ function OperationCorrectionsReport({
       ],
       columns: OPERATION_CORRECTION_HEADERS,
       rows: rows.map((row) => [
+        row.referenceNo || row.correctionReferenceNo || "-",
         formatDateTime(row.requestDate),
         row.operationNo || "-",
         formatDateTime(row.operationDate),
@@ -5980,6 +5982,7 @@ function OperationCorrectionsReport({
       sheetName: "Corrections",
       ...reportMeta,
       rows: rows.map((row) => ({
+        "Correction Ref.": row.referenceNo || row.correctionReferenceNo || "",
         "Request Date": formatDateTime(row.requestDate),
         "Operation No.": row.operationNo || "",
         "Operation Date": formatDateTime(row.operationDate),
@@ -6001,7 +6004,8 @@ function OperationCorrectionsReport({
           : "",
       })),
       totals: {
-        "Request Date": "Totals",
+        "Correction Ref.": "Totals",
+        "Request Date": "",
         "Operation No.": summary.total,
         Project: `Pending: ${summary.pending}`,
         Field: `Applied: ${summary.applied}`,
@@ -6145,6 +6149,9 @@ function OperationCorrectionsReport({
                           key={row.correctionId || row.id}
                           className="border-b border-slate-800/70 transition hover:bg-slate-800/30"
                         >
+                          <td className="whitespace-nowrap px-3 py-3 font-black text-amber-300" dir="ltr">
+                            {row.referenceNo || row.correctionReferenceNo || "-"}
+                          </td>
                           <td className="whitespace-nowrap px-3 py-3 text-slate-300">
                             {formatDateTime(row.requestDate)}
                           </td>

@@ -36,6 +36,7 @@ import ReportsPage from "./features/reports/ReportsPage";
 import DataImportCenterPage from "./features/imports/DataImportCenterPage";
 import IntegrationsPage from "./features/integrations/IntegrationsPage";
 import ExternalMappingPage from "./features/integrations/ExternalMappingPage";
+import TelemetryPage from "./features/telemetry/TelemetryPage";
 
 import {
   normalizeSystemUserStatus,
@@ -758,6 +759,7 @@ export default function Home() {
   const [companyAdminDataImportAllowed, setCompanyAdminDataImportAllowed] = useState(false);
   const [companyAdminIntegrationAllowed, setCompanyAdminIntegrationAllowed] = useState(false);
   const [companyAdminIntegrationConfig, setCompanyAdminIntegrationConfig] = useState(null);
+  const [companyAdminTelemetryAllowed, setCompanyAdminTelemetryAllowed] = useState(false);
 
   const [assetProjectHistory, setAssetProjectHistory] = useState([]);
   const [assetOdometerHistory, setAssetOdometerHistory] = useState([]);
@@ -1280,6 +1282,10 @@ export default function Home() {
   };
 
   const canAccessPage = (pageKey) => {
+    if (pageKey === "telemetry") {
+      return Boolean(canOpenTelemetry);
+    }
+
     if (pageKey === "externalMapping") {
       return Boolean(canOpenExternalMapping);
     }
@@ -1869,6 +1875,7 @@ export default function Home() {
         backendAssetId: request.assetId,
         assetBackendId: request.assetId,
         backendActionRequestId: request.id,
+        referenceNo: request.referenceNo || "",
         projectId: request.projectId,
         reason: request.reason,
         values: {
@@ -1971,6 +1978,7 @@ export default function Home() {
 
     return {
       id: `STATION-ACTION-${request.id}`,
+      referenceNo: request.referenceNo || "",
       backendStationActionRequestId: request.id,
       isBackendStationAction: true,
       type: "station_action",
@@ -3744,6 +3752,41 @@ export default function Home() {
     (currentUser?.role === "Admin" && companyAdminDataImportAllowed);
 
   useEffect(() => {
+    if (!backendIsLoggedIn || currentUser?.role !== "Admin") {
+      setCompanyAdminTelemetryAllowed(false);
+      return;
+    }
+
+    let cancelled = false;
+
+    async function loadCompanyTelemetryAccess() {
+      try {
+        const response = await api.get("/companies/settings/telemetry-access", {
+          headers: { "X-Skip-Action-Loading": "true" },
+        });
+
+        if (!cancelled) {
+          setCompanyAdminTelemetryAllowed(Boolean(response?.data?.enabled));
+        }
+      } catch (error) {
+        if (!cancelled) {
+          console.warn("Failed to load company Telemetry access.", error);
+          setCompanyAdminTelemetryAllowed(false);
+        }
+      }
+    }
+
+    void loadCompanyTelemetryAccess();
+
+    return () => {
+      cancelled = true;
+    };
+  }, [backendIsLoggedIn, currentUser?.id, currentUser?.role, currentUser?.companyId]);
+
+  const canOpenTelemetry =
+    currentUser?.role === "Admin" && companyAdminTelemetryAllowed;
+
+  useEffect(() => {
     if (
       !backendIsLoggedIn ||
       currentUser?.role !== "Admin" ||
@@ -5189,6 +5232,22 @@ export default function Home() {
       );
     }
 
+    if (page === "telemetry") {
+      if (!canOpenTelemetry) {
+        return (
+          <div className="min-h-screen p-6 text-slate-100">
+            <div className="rounded-2xl border border-red-500/30 bg-red-500/10 p-5 font-bold text-red-300">
+              {language === "ar"
+                ? "التليماتري غير مفعلة لهذه الشركة."
+                : "Telemetry is not enabled for this company."}
+            </div>
+          </div>
+        );
+      }
+
+      return <TelemetryPage companyId={currentCompanyId} />;
+    }
+
     if (page === "reports") {
       return (
         <ReportsPage
@@ -5633,6 +5692,15 @@ export default function Home() {
     { key: "stations", label: t("sidebar.stations"), Icon: Fuel },
     { key: "team", label: t("sidebar.team"), Icon: Users },
     { key: "projects", label: t("sidebar.projects"), Icon: Building2 },
+    ...(canOpenTelemetry
+      ? [
+          {
+            key: "telemetry",
+            label: language === "ar" ? "التليماتري" : "Telemetry",
+            Icon: FileBarChart2,
+          },
+        ]
+      : []),
     ...(canOpenExternalMapping
       ? [
           {

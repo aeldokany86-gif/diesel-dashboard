@@ -1132,6 +1132,7 @@ export default function AddOperationModal({
 
     onSaveOperation?.({
       operationId,
+      clientOperationId: uploadDraftOperationNoRef.current,
       occurredAt,
       transactionDate: occurredAt,
       historicalMissingOperation: historicalMode,

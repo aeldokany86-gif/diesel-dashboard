@@ -11,6 +11,7 @@ export function mapFrontendOperationToBackendPayload(operation = {}) {
     type: normalizedType,
     quantity: Number(operation.dieselQuantity || 0),
     occurredAt: operation.occurredAt || operation.transactionDate || undefined,
+    clientOperationId: operation.clientOperationId || undefined,
     historicalMissingOperation:
       operation.historicalMissingOperation === true ? true : undefined,
     currentProjectId: operation.currentProjectId || undefined,

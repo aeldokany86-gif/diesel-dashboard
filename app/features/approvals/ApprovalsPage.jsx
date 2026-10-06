@@ -128,6 +128,16 @@ function makeFieldLabel(fieldName) {
     .replace(/\b\w/g, (char) => char.toUpperCase());
 }
 
+function getApprovalReferenceNo(request) {
+  return (
+    request?.referenceNo ||
+    request?.payload?.referenceNo ||
+    request?.payload?.correction?.referenceNo ||
+    request?.payload?.request?.referenceNo ||
+    ""
+  );
+}
+
 function getApprovalBatchId(request) {
   return (
     request?.transferBatchId ||
@@ -1469,6 +1479,12 @@ export default function ApprovalsPage({
                         {getApprovalTitle(request, group.isBatch, group.requests.length)}
                       </h2>
 
+                      {!group.isBatch && getApprovalReferenceNo(request) ? (
+                        <p className="mt-1 text-xs font-extrabold text-amber-300" dir="ltr">
+                          {getApprovalReferenceNo(request)}
+                        </p>
+                      ) : null}
+
                       {direction ? (
                         <div className="mt-2 flex flex-wrap items-center gap-3 text-xs">
                           <span className="text-slate-500">
@@ -1580,6 +1596,17 @@ export default function ApprovalsPage({
                   </section>
                 ) : (
                   <section className="flex flex-wrap items-center gap-x-2 gap-y-1 rounded-xl border border-slate-800 bg-slate-900/50 px-3 py-2">
+                    {getApprovalReferenceNo(primary) ? (
+                      <>
+                        <span className="text-[11px] font-bold text-slate-500">
+                          {isRtl ? "المرجع:" : "Reference:"}
+                        </span>
+                        <span className="text-sm font-black text-amber-300" dir="ltr">
+                          {getApprovalReferenceNo(primary)}
+                        </span>
+                        <span className="text-slate-600">•</span>
+                      </>
+                    ) : null}
                     <span className="text-[11px] font-bold text-slate-500">{t("approvals.sections.requestedBy")}:</span>
                     <span className="text-sm font-bold text-slate-100">
                       {primary.requestedByName || t("approvals.defaults.unknownUser")}

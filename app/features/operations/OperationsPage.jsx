@@ -139,6 +139,30 @@ function getFriendlyApiErrorMessage(
   return fallbackMessage;
 }
 
+function parsePossibleDuplicateError(error) {
+  const raw =
+    error?.response?.data?.message ??
+    error?.response?.data ??
+    error?.message ??
+    null;
+
+  const parseValue = (value) => {
+    if (!value) return null;
+    if (typeof value === "object") {
+      return value?.code === "POSSIBLE_DUPLICATE" ? value : null;
+    }
+    if (typeof value !== "string") return null;
+    try {
+      const parsed = JSON.parse(value);
+      return parsed?.code === "POSSIBLE_DUPLICATE" ? parsed : null;
+    } catch {
+      return null;
+    }
+  };
+
+  return parseValue(raw);
+}
+
 function canUseNetwork(showToastFn) {
   if (!isBrowserOffline()) return true;
 
@@ -601,6 +625,8 @@ export default function OperationsPage({
   const [operationCancellationReason, setOperationCancellationReason] = useState("");
   const [operationCancellationConfirming, setOperationCancellationConfirming] = useState(false);
   const [operationCancellationSubmitting, setOperationCancellationSubmitting] = useState(false);
+  const [possibleDuplicateDialog, setPossibleDuplicateDialog] = useState(null);
+  const [possibleDuplicateSubmitting, setPossibleDuplicateSubmitting] = useState(false);
 
 
   const dieselIndex = getHeaderIndex(headers, [
@@ -902,7 +928,7 @@ export default function OperationsPage({
     setShowForm(true);
   };
 
-  const saveNewOperation = async (operation) => {
+  const saveNewOperation = async (operation, { allowPossibleDuplicate = false } = {}) => {
     if (!canUseNetwork(showToast)) return;
 
     try {
@@ -943,6 +969,10 @@ const payload = mapFrontendOperationToBackendPayload({
     operation.destinationId,
 });
 
+      if (allowPossibleDuplicate) {
+        payload.allowPossibleDuplicate = true;
+      }
+
       const createdOperation = await createOperation(payload, currentUser);
 
       const backendMessage = getOperationApprovalSuccessMessage(
@@ -982,6 +1012,18 @@ const payload = mapFrontendOperationToBackendPayload({
         void refreshOperations({ silent: true });
       }
     } catch (error) {
+      const duplicateWarning = parsePossibleDuplicateError(error);
+
+      if (duplicateWarning) {
+        setPossibleDuplicateDialog({
+          operation,
+          duplicate: duplicateWarning.duplicate || null,
+          historicalWindow: Boolean(duplicateWarning.historicalWindow),
+          windowMinutes: Number(duplicateWarning.windowMinutes || 60),
+        });
+        return;
+      }
+
       showToast?.(
         "warning",
         getFriendlyApiErrorMessage(error, t("operations.messages.operationSaveFailed"))
@@ -2312,6 +2354,24 @@ const payload = mapFrontendOperationToBackendPayload({
       }
     }
   };
+
+  const equipmentHistoryDataRef = useRef(data);
+
+  useEffect(() => {
+    if (equipmentHistoryDataRef.current === data) return;
+
+    equipmentHistoryDataRef.current = data;
+
+    if (!selectedEquipmentHistory) return;
+
+    equipmentHistoryCacheRef.current.clear();
+
+    void loadEquipmentHistoryPage(
+      selectedEquipmentHistory,
+      equipmentHistoryPagination.page || 1,
+      { useCache: false }
+    );
+  }, [data]);
 
   const openEquipmentHistory = (equipmentSummaryItem) => {
     const asset =
@@ -4721,6 +4781,69 @@ const payload = mapFrontendOperationToBackendPayload({
                   className="rounded-lg bg-amber-400 px-5 py-2 font-bold text-slate-950 transition hover:bg-amber-300"
                 >
                   {t("common.ok")}
+                </button>
+              </div>
+            </div>
+          </div>
+        </ModalPortal>
+      )}
+
+      {possibleDuplicateDialog && (
+        <ModalPortal>
+          <div className="fixed inset-0 flex items-center justify-center bg-black/70 p-4" style={{ zIndex: 100300 }}>
+            <div className="w-full max-w-md rounded-2xl border border-amber-500/30 bg-slate-950 p-5 shadow-2xl">
+              <h3 className="text-lg font-black text-white">
+                {language === "ar" ? "عملية مكررة محتملة" : "Possible Duplicate Operation"}
+              </h3>
+              <p className="mt-3 text-sm leading-6 text-slate-300">
+                {language === "ar"
+                  ? `تم العثور على عملية مشابهة ${possibleDuplicateDialog.duplicate?.operationNo || ""} لنفس البيانات خلال ${possibleDuplicateDialog.windowMinutes} دقيقة من الوقت المحدد. راجعها قبل الاستمرار.`
+                  : `A similar operation ${possibleDuplicateDialog.duplicate?.operationNo || ""} was found with matching data within ${possibleDuplicateDialog.windowMinutes} minutes of the selected time. Review it before continuing.`}
+              </p>
+              {possibleDuplicateDialog.duplicate && (
+                <div className="mt-4 rounded-xl bg-slate-900 p-3 text-sm text-slate-300">
+                  <div className="flex justify-between gap-4">
+                    <span>{language === "ar" ? "رقم العملية" : "Operation"}</span>
+                    <strong className="text-white">{possibleDuplicateDialog.duplicate.operationNo || "-"}</strong>
+                  </div>
+                  <div className="mt-2 flex justify-between gap-4">
+                    <span>{language === "ar" ? "الكمية" : "Quantity"}</span>
+                    <strong className="text-white">{formatNumber(possibleDuplicateDialog.duplicate.quantity)} L</strong>
+                  </div>
+                  <div className="mt-2 flex justify-between gap-4">
+                    <span>{language === "ar" ? "الوقت" : "Time"}</span>
+                    <strong className="text-white">{formatDisplayDate(possibleDuplicateDialog.duplicate.occurredAt)}</strong>
+                  </div>
+                </div>
+              )}
+              <div className="mt-5 flex justify-end gap-3">
+                <button
+                  type="button"
+                  disabled={possibleDuplicateSubmitting}
+                  onClick={() => setPossibleDuplicateDialog(null)}
+                  className="rounded-lg bg-slate-800 px-4 py-2 font-bold text-slate-200 transition hover:bg-slate-700 disabled:opacity-50"
+                >
+                  {language === "ar" ? "إلغاء" : "Cancel"}
+                </button>
+                <button
+                  type="button"
+                  disabled={possibleDuplicateSubmitting}
+                  onClick={async () => {
+                    const pending = possibleDuplicateDialog;
+                    if (!pending) return;
+                    setPossibleDuplicateSubmitting(true);
+                    try {
+                      setPossibleDuplicateDialog(null);
+                      await saveNewOperation(pending.operation, { allowPossibleDuplicate: true });
+                    } finally {
+                      setPossibleDuplicateSubmitting(false);
+                    }
+                  }}
+                  className="rounded-lg bg-amber-500 px-4 py-2 font-black text-slate-950 transition hover:bg-amber-400 disabled:opacity-50"
+                >
+                  {possibleDuplicateSubmitting
+                    ? language === "ar" ? "جارٍ التنفيذ..." : "Processing..."
+                    : language === "ar" ? "استمرار على أي حال" : "Continue Anyway"}
                 </button>
               </div>
             </div>
