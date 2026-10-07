@@ -18,6 +18,26 @@
       return response.data;
     }
 
+export async function fetchTelemetryDeviceSensors(deviceId) {
+  const response = await api.get(`/telemetry/devices/${deviceId}/sensors`, {
+    headers: { "X-Skip-Action-Loading": "true" },
+  });
+  return Array.isArray(response.data) ? response.data : [];
+}
+
+export async function updateTelemetryDeviceSensor(deviceId, sensorDefinitionId, isEnabled) {
+  const response = await api.patch(
+    `/telemetry/devices/${deviceId}/sensors/${sensorDefinitionId}`,
+    { isEnabled },
+  );
+  return response.data;
+}
+
+export async function createTelemetrySensorDefinition(payload) {
+  const response = await api.post("/telemetry/sensors", payload);
+  return response.data;
+}
+
     export async function fetchTelemetryAssets(companyId) {
       const response = await api.get("/assets", {
         params: companyId ? { companyId } : {},

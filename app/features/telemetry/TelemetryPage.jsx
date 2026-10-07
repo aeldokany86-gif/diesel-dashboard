@@ -7,6 +7,9 @@
       fetchLatestTelemetry,
       fetchTelemetryAssets,
       fetchTelemetryDevices,
+      fetchTelemetryDeviceSensors,
+      updateTelemetryDeviceSensor,
+      createTelemetrySensorDefinition,
       unassignTelemetryDevice,
       updateTelemetryDevice,
     } from "../../services/telemetryService";
@@ -170,6 +173,14 @@ export default function TelemetryPage({ companyId = "" }) {
       const [confirmStatus, setConfirmStatus] = useState(null);
       const [confirmAsset, setConfirmAsset] = useState(null);
       const [sensorDetails, setSensorDetails] = useState(null);
+      const [sensorCatalog, setSensorCatalog] = useState([]);
+      const [sensorCatalogLoading, setSensorCatalogLoading] = useState(false);
+      const [sensorCatalogError, setSensorCatalogError] = useState("");
+      const [sensorBusy, setSensorBusy] = useState("");
+      const [addSensorOpen, setAddSensorOpen] = useState(false);
+      const [addSensorError, setAddSensorError] = useState("");
+      const emptySensorForm = { vendorSensorId: "", parameterCode: "", displayName: "", unit: "", multiplier: "1", offset: "0", dataSource: "UNKNOWN" };
+      const [sensorForm, setSensorForm] = useState(emptySensorForm);
       const emptyForm = { integrationKey: "", vendor: "", model: "", hardwareId: "", protocol: "", transport: "", firmwareVersion: "", assetId: "" };
       const [form, setForm] = useState(emptyForm);
 
@@ -196,8 +207,85 @@ export default function TelemetryPage({ companyId = "" }) {
         finally { setLatestLoading(false); }
       }, []);
 
+      const loadDeviceSensors = useCallback(async (id) => {
+        if (!id) return;
+        setSensorCatalogLoading(true);
+        setSensorCatalogError("");
+        try {
+          setSensorCatalog(await fetchTelemetryDeviceSensors(id));
+        } catch (e) {
+          setSensorCatalog([]);
+          setSensorCatalogError(errorText(e, "Failed to load sensor configuration."));
+        } finally {
+          setSensorCatalogLoading(false);
+        }
+      }, []);
+
+      const toggleSensor = async (sensor) => {
+        if (!detailsDevice?.id || !sensor?.id) return;
+        const nextEnabled = !sensor.isEnabled;
+        setSensorBusy(sensor.id);
+        setSensorCatalogError("");
+        try {
+          await updateTelemetryDeviceSensor(detailsDevice.id, sensor.id, nextEnabled);
+          setSensorCatalog((current) =>
+            current.map((item) =>
+              item.id === sensor.id
+                ? { ...item, isEnabled: nextEnabled, hasDeviceOverride: true }
+                : item,
+            ),
+          );
+          await loadLatest(detailsDevice.id);
+        } catch (e) {
+          setSensorCatalogError(errorText(e, "Failed to update sensor status."));
+        } finally {
+          setSensorBusy("");
+        }
+      };
+
+      const createSensorDefinition = async (event) => {
+        event.preventDefault();
+        if (!detailsDevice) return;
+        if (!sensorForm.vendorSensorId.trim() || !sensorForm.parameterCode.trim()) {
+          setAddSensorError("Sensor ID and Parameter Code are required.");
+          return;
+        }
+
+        setSaving(true);
+        setAddSensorError("");
+        try {
+          await createTelemetrySensorDefinition({
+            companyId,
+            vendor: detailsDevice.vendor,
+            protocol: detailsDevice.protocol || null,
+            vendorSensorId: sensorForm.vendorSensorId.trim(),
+            parameterCode: sensorForm.parameterCode.trim().toUpperCase(),
+            displayName: sensorForm.displayName.trim() || null,
+            unit: sensorForm.unit.trim() || null,
+            multiplier: sensorForm.multiplier === "" ? 1 : Number(sensorForm.multiplier),
+            offset: sensorForm.offset === "" ? 0 : Number(sensorForm.offset),
+            dataSource: sensorForm.dataSource || "UNKNOWN",
+          });
+          setAddSensorOpen(false);
+          setSensorForm(emptySensorForm);
+          await loadDeviceSensors(detailsDevice.id);
+        } catch (e) {
+          setAddSensorError(errorText(e, "Failed to add sensor definition."));
+        } finally {
+          setSaving(false);
+        }
+      };
+
       useEffect(() => { void load(); }, [load]);
-      useEffect(() => { if (detailsDevice?.id) void loadLatest(detailsDevice.id); else setLatest(null); }, [detailsDevice?.id, loadLatest]);
+      useEffect(() => {
+        if (detailsDevice?.id) {
+          void loadLatest(detailsDevice.id);
+          void loadDeviceSensors(detailsDevice.id);
+        } else {
+          setLatest(null);
+          setSensorCatalog([]);
+        }
+      }, [detailsDevice?.id, loadLatest, loadDeviceSensors]);
 
       const filtered = useMemo(() => {
         const q = search.trim().toLowerCase();
@@ -486,7 +574,7 @@ export default function TelemetryPage({ companyId = "" }) {
                 ? `${[detailsDevice.vendor, detailsDevice.model].filter(Boolean).join(" ") || "Telemetry Device"} - ${assetLabel(detailsDevice)}`
                 : "Telemetry Device"
             }
-            onClose={() => { setDetailsDevice(null); setSensorDetails(null); }}
+            onClose={() => { setDetailsDevice(null); setSensorDetails(null); setSensorCatalog([]); setSensorCatalogError(""); }}
             width="max-w-3xl"
           >
             {detailsDevice && <div className="bg-white text-slate-950 dark:bg-slate-950 dark:text-white">
@@ -521,6 +609,72 @@ export default function TelemetryPage({ companyId = "" }) {
                         <div className="opacity-70">{r.unit || "—"}</div>
                       </div>
                     ))}
+
+                <div className="mt-5 border-t border-slate-300 pt-4 dark:border-slate-700">
+                  <div className="flex flex-col gap-2 sm:flex-row sm:items-center sm:justify-between">
+                    <div>
+                      <div className="text-sm font-semibold">Sensor Configuration</div>
+                      <div className="text-xs opacity-60">Enable only the sensors that should be stored for this device.</div>
+                    </div>
+                    <div className="flex gap-2">
+                      <button
+                        type="button"
+                        onClick={() => void loadDeviceSensors(detailsDevice.id)}
+                        className="rounded-md border border-slate-300 px-3 py-1.5 text-xs font-medium dark:border-slate-700"
+                      >
+                        {sensorCatalogLoading ? "Refreshing..." : "Refresh Sensors"}
+                      </button>
+                      <button
+                        type="button"
+                        onClick={() => { setSensorForm(emptySensorForm); setAddSensorError(""); setAddSensorOpen(true); }}
+                        className="rounded-md bg-orange-500 px-3 py-1.5 text-xs font-semibold text-white hover:bg-orange-600"
+                      >
+                        + Add Sensor
+                      </button>
+                    </div>
+                  </div>
+
+                  {sensorCatalogError && <div className="mt-3 rounded-lg border border-rose-200 bg-rose-50 px-3 py-2 text-xs text-rose-700">{sensorCatalogError}</div>}
+
+                  <div className="mt-3 overflow-x-auto rounded-lg border border-slate-200 dark:border-slate-700">
+                    <table className="min-w-full text-sm">
+                      <thead className="bg-slate-50 text-left text-[11px] font-bold uppercase text-slate-600 dark:bg-slate-900 dark:text-slate-300">
+                        <tr>
+                          <th className="px-3 py-2">Sensor</th>
+                          <th className="px-3 py-2">ID</th>
+                          <th className="px-3 py-2">Unit</th>
+                          <th className="px-3 py-2 text-center">Status</th>
+                        </tr>
+                      </thead>
+                      <tbody>
+                        {sensorCatalogLoading && !sensorCatalog.length ? (
+                          <tr><td colSpan={4} className="px-3 py-6 text-center text-sm opacity-60">Loading sensors...</td></tr>
+                        ) : !sensorCatalog.length ? (
+                          <tr><td colSpan={4} className="px-3 py-6 text-center text-sm opacity-60">No sensor definitions found.</td></tr>
+                        ) : sensorCatalog.map((sensor) => (
+                          <tr key={sensor.id} className="border-t border-slate-200 dark:border-slate-700">
+                            <td className="px-3 py-2">
+                              <div className="font-medium">{sensor.displayName || sensor.parameterCode}</div>
+                              <div className="text-xs opacity-55">{sensor.parameterCode}</div>
+                            </td>
+                            <td className="px-3 py-2 tabular-nums">{sensor.vendorSensorId}</td>
+                            <td className="px-3 py-2">{sensor.unit || "—"}</td>
+                            <td className="px-3 py-2 text-center">
+                              <button
+                                type="button"
+                                disabled={sensorBusy === sensor.id}
+                                onClick={() => void toggleSensor(sensor)}
+                                className={`rounded-full border px-3 py-1 text-xs font-bold ${sensor.isEnabled ? "border-emerald-300 bg-emerald-50 text-emerald-700" : "border-slate-300 bg-slate-100 text-slate-600"} disabled:opacity-50`}
+                              >
+                                {sensorBusy === sensor.id ? "Saving..." : sensor.isEnabled ? "ACTIVE" : "INACTIVE"}
+                              </button>
+                            </td>
+                          </tr>
+                        ))}
+                      </tbody>
+                    </table>
+                  </div>
+                </div>
               </div>
 
               <details className="mx-5 mt-2 border-t border-slate-300 py-3 text-xs dark:border-slate-700">
@@ -536,6 +690,53 @@ export default function TelemetryPage({ companyId = "" }) {
                 </div>
               </details>
             </div>}
+          </Modal>
+
+          <Modal open={addSensorOpen} title="Add Sensor Definition" onClose={() => !saving && setAddSensorOpen(false)} width="max-w-2xl">
+            <form onSubmit={createSensorDefinition} className="space-y-4 p-5">
+              {addSensorError && <div className="rounded-lg border border-rose-200 bg-rose-50 px-4 py-3 text-sm text-rose-700">{addSensorError}</div>}
+              <div className="grid gap-4 sm:grid-cols-2">
+                <label className="text-sm font-medium">Vendor
+                  <input value={detailsDevice?.vendor || ""} readOnly className="mt-1.5 w-full rounded-lg border border-slate-200 bg-slate-50 px-3 py-2.5" />
+                </label>
+                <label className="text-sm font-medium">Protocol
+                  <input value={detailsDevice?.protocol || ""} readOnly className="mt-1.5 w-full rounded-lg border border-slate-200 bg-slate-50 px-3 py-2.5" />
+                </label>
+                <label className="text-sm font-medium">Sensor ID *
+                  <input value={sensorForm.vendorSensorId} onChange={(e) => setSensorForm((f) => ({ ...f, vendorSensorId: e.target.value }))} className="mt-1.5 w-full rounded-lg border border-slate-300 px-3 py-2.5 outline-none focus:border-orange-400" />
+                </label>
+                <label className="text-sm font-medium">Parameter Code *
+                  <input value={sensorForm.parameterCode} onChange={(e) => setSensorForm((f) => ({ ...f, parameterCode: e.target.value }))} placeholder="ENGINE_RPM" className="mt-1.5 w-full rounded-lg border border-slate-300 px-3 py-2.5 uppercase outline-none focus:border-orange-400" />
+                </label>
+                <label className="text-sm font-medium sm:col-span-2">Display Name
+                  <input value={sensorForm.displayName} onChange={(e) => setSensorForm((f) => ({ ...f, displayName: e.target.value }))} className="mt-1.5 w-full rounded-lg border border-slate-300 px-3 py-2.5 outline-none focus:border-orange-400" />
+                </label>
+                <label className="text-sm font-medium">Unit
+                  <input value={sensorForm.unit} onChange={(e) => setSensorForm((f) => ({ ...f, unit: e.target.value }))} placeholder="rpm / km/h / L" className="mt-1.5 w-full rounded-lg border border-slate-300 px-3 py-2.5 outline-none focus:border-orange-400" />
+                </label>
+                <label className="text-sm font-medium">Data Source
+                  <select value={sensorForm.dataSource} onChange={(e) => setSensorForm((f) => ({ ...f, dataSource: e.target.value }))} className="mt-1.5 w-full rounded-lg border border-slate-300 bg-white px-3 py-2.5 outline-none focus:border-orange-400">
+                    <option value="UNKNOWN">UNKNOWN</option>
+                    <option value="ECU_CAN">ECU_CAN</option>
+                    <option value="GNSS">GNSS</option>
+                    <option value="DEVICE">DEVICE</option>
+                    <option value="EXTERNAL_SENSOR">EXTERNAL_SENSOR</option>
+                    <option value="CALCULATED">CALCULATED</option>
+                  </select>
+                </label>
+                <label className="text-sm font-medium">Multiplier
+                  <input type="number" step="any" value={sensorForm.multiplier} onChange={(e) => setSensorForm((f) => ({ ...f, multiplier: e.target.value }))} className="mt-1.5 w-full rounded-lg border border-slate-300 px-3 py-2.5 outline-none focus:border-orange-400" />
+                </label>
+                <label className="text-sm font-medium">Offset
+                  <input type="number" step="any" value={sensorForm.offset} onChange={(e) => setSensorForm((f) => ({ ...f, offset: e.target.value }))} className="mt-1.5 w-full rounded-lg border border-slate-300 px-3 py-2.5 outline-none focus:border-orange-400" />
+                </label>
+              </div>
+              <p className="text-xs text-slate-500">New sensors are added as INACTIVE for all devices. Activate them only on the required device.</p>
+              <div className="flex justify-center gap-3">
+                <button type="button" onClick={() => setAddSensorOpen(false)} className="min-w-28 rounded-lg border border-slate-300 px-4 py-2.5 text-sm font-semibold">Cancel</button>
+                <button type="submit" disabled={saving} className="min-w-28 rounded-lg bg-orange-500 px-4 py-2.5 text-sm font-semibold text-white hover:bg-orange-600 disabled:opacity-60">{saving ? "Adding..." : "Add Sensor"}</button>
+              </div>
+            </form>
           </Modal>
 
           <Modal open={Boolean(sensorDetails)} title="Sensor Details" onClose={() => setSensorDetails(null)} width="max-w-md">
