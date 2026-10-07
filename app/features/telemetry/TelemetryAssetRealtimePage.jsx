@@ -302,107 +302,68 @@ export default function TelemetryAssetRealtimePage({ device, onBack }) {
             </div>
           </section>
 
-          <section className="grid gap-5 xl:grid-cols-[1.05fr_1.95fr]">
-            <div className="rounded-2xl border border-slate-200 bg-white p-5 shadow-sm">
-              <div className="flex items-start justify-between gap-4">
+          <section>
+            <div className="overflow-hidden rounded-2xl border border-slate-200 bg-white shadow-sm">
+              <div className="flex flex-col gap-3 border-b border-slate-200 px-5 py-4 sm:flex-row sm:items-start sm:justify-between">
                 <div>
                   <h2 className="text-lg font-bold text-slate-950">Current location</h2>
-                  <p className="mt-1 text-sm text-slate-500">Latest GNSS position received from the telemetry device.</p>
+                  <p className="mt-1 text-sm text-slate-500">
+                    Latest GNSS position received from the telemetry device.
+                  </p>
                 </div>
-                <span className={`rounded-full border px-2.5 py-1 text-xs font-bold ${coords ? "border-emerald-200 bg-emerald-50 text-emerald-700" : "border-slate-200 bg-slate-50 text-slate-500"}`}>
+                <span
+                  className={`w-fit rounded-full border px-2.5 py-1 text-xs font-bold ${
+                    coords
+                      ? "border-emerald-200 bg-emerald-50 text-emerald-700"
+                      : "border-slate-200 bg-slate-50 text-slate-500"
+                  }`}
+                >
                   {coords ? "AVAILABLE" : "NO POSITION"}
                 </span>
               </div>
 
               {coords ? (
-                <div className="mt-5">
-                  <div className="grid grid-cols-2 gap-3">
+                <>
+                  <div className="relative min-h-[460px] bg-slate-100">
+                    <iframe
+                      title="Asset current location"
+                      src={`https://www.google.com/maps?q=${coords.latitude},${coords.longitude}&z=15&output=embed`}
+                      className="h-[460px] w-full border-0"
+                      loading="lazy"
+                      referrerPolicy="no-referrer-when-downgrade"
+                    />
+                  </div>
+
+                  <div className="grid gap-3 border-t border-slate-200 p-4 sm:grid-cols-[1fr_1fr_auto] sm:items-center">
                     <div className="rounded-xl bg-slate-50 p-3">
                       <div className="text-xs font-semibold text-slate-500">Latitude</div>
-                      <div className="mt-1 font-mono text-sm font-bold text-slate-900">{coords.latitude}</div>
+                      <div className="mt-1 font-mono text-sm font-bold text-slate-900">
+                        {coords.latitude}
+                      </div>
                     </div>
+
                     <div className="rounded-xl bg-slate-50 p-3">
                       <div className="text-xs font-semibold text-slate-500">Longitude</div>
-                      <div className="mt-1 font-mono text-sm font-bold text-slate-900">{coords.longitude}</div>
+                      <div className="mt-1 font-mono text-sm font-bold text-slate-900">
+                        {coords.longitude}
+                      </div>
                     </div>
+
+                    <a
+                      href={googleMapsUrl(coords)}
+                      target="_blank"
+                      rel="noreferrer"
+                      className="inline-flex h-11 items-center justify-center rounded-xl bg-blue-700 px-4 text-sm font-bold text-white hover:bg-blue-800"
+                    >
+                      Open in Google Maps
+                    </a>
                   </div>
-                  <a
-                    href={googleMapsUrl(coords)}
-                    target="_blank"
-                    rel="noreferrer"
-                    className="mt-4 inline-flex w-full items-center justify-center rounded-xl bg-blue-700 px-4 py-3 text-sm font-bold text-white hover:bg-blue-800"
-                  >
-                    Open current location in Google Maps
-                  </a>
-                </div>
+                </>
               ) : (
-                <div className="mt-5 rounded-xl border border-dashed border-slate-300 bg-slate-50 px-4 py-10 text-center text-sm text-slate-500">
+                <div className="px-5 py-16 text-center text-sm text-slate-500">
                   No GNSS position is currently available for this asset.
                 </div>
               )}
-            </div>
-
-            <div className="overflow-hidden rounded-2xl border border-slate-200 bg-white shadow-sm">
-              <div className="flex flex-col gap-1 border-b border-slate-200 px-5 py-4 sm:flex-row sm:items-end sm:justify-between">
-                <div>
-                  <h2 className="text-lg font-bold text-slate-950">Telemetry detail</h2>
-                  <p className="text-sm text-slate-500">Complete latest reading set for active sensors.</p>
-                </div>
-                <div className="text-xs font-medium text-slate-500">
-                  Received {formatDateTime(latestReceivedAt)}
-                </div>
-              </div>
-
-              <div className="max-h-[520px] overflow-auto">
-                <table className="min-w-full text-sm">
-                  <thead className="sticky top-0 z-10 bg-slate-50 text-left text-[11px] font-bold uppercase tracking-wide text-slate-500">
-                    <tr>
-                      <th className="px-4 py-3">Parameter</th>
-                      <th className="px-4 py-3">Sensor ID</th>
-                      <th className="px-4 py-3 text-right">Value</th>
-                      <th className="px-4 py-3">Unit</th>
-                      <th className="px-4 py-3">Reading at</th>
-                    </tr>
-                  </thead>
-                  <tbody>
-                    {allReadings.length ? (
-                      allReadings.map((row) => {
-                        const position = gnssCoordinates(row);
-                        return (
-                          <tr key={row.parameterCode} className="border-t border-slate-100 hover:bg-slate-50">
-                            <td className="px-4 py-3">
-                              <div className="font-semibold text-slate-900">{row.parameterCode}</div>
-                              <div className="text-xs text-slate-500">{row.dataSource || "—"}</div>
-                            </td>
-                            <td className="px-4 py-3 font-mono text-xs text-slate-600">{row.vendorSensorId || "—"}</td>
-                            <td className="px-4 py-3 text-right font-semibold tabular-nums text-slate-900">
-                              {position ? (
-                                <a href={googleMapsUrl(position)} target="_blank" rel="noreferrer" className="text-blue-700 hover:text-orange-600 hover:underline">
-                                  Open in Google Maps
-                                </a>
-                              ) : row.value == null ? (
-                                "—"
-                              ) : typeof row.value === "object" ? (
-                                JSON.stringify(row.value)
-                              ) : (
-                                String(row.value)
-                              )}
-                            </td>
-                            <td className="px-4 py-3 text-slate-600">{row.unit || "—"}</td>
-                            <td className="whitespace-nowrap px-4 py-3 text-xs text-slate-500">{formatDateTime(row.readingAt)}</td>
-                          </tr>
-                        );
-                      })
-                    ) : (
-                      <tr>
-                        <td colSpan={5} className="px-4 py-10 text-center text-slate-500">
-                          No telemetry readings available.
-                        </td>
-                      </tr>
-                    )}
-                  </tbody>
-                </table>
-              </div>
             </div>
           </section>
         </>
