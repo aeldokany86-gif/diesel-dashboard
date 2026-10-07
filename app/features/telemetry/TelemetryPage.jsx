@@ -13,6 +13,7 @@
       unassignTelemetryDevice,
       updateTelemetryDevice,
     } from "../../services/telemetryService";
+    import TelemetryAssetRealtimePage from "./TelemetryAssetRealtimePage";
 
     const OFFLINE_TIMEOUT_MS = 10 * 60 * 1000;
 
@@ -101,7 +102,7 @@
       );
     }
 
-    function AssetPicker({ device, assets, devices, disabled, onRequestChange }) {
+    function AssetPicker({ device, assets, devices, disabled, onRequestChange, onOpenAsset }) {
       const [open, setOpen] = useState(false);
       const [query, setQuery] = useState("");
       const ref = useRef(null);
@@ -126,32 +127,75 @@
         })
         .sort((a, b) => String(a.assetId || "").localeCompare(String(b.assetId || ""), undefined, { numeric: true }));
 
+      const assigned = Boolean(device?.asset?.assetId);
+
       return (
         <div ref={ref} className="relative min-w-[170px]">
-          <button type="button" disabled={disabled} onClick={() => { setOpen((v) => !v); setQuery(""); }}
-            className="flex w-full items-center justify-between gap-2 rounded-md px-2 py-1.5 text-left font-semibold text-blue-700 hover:bg-slate-50 disabled:opacity-60">
-            <span>{assetLabel(device)}</span><span className="text-[10px] text-slate-400">▼</span>
-          </button>
+          <div className="flex items-center gap-1">
+            {assigned ? (
+              <button
+                type="button"
+                onClick={() => onOpenAsset?.(device)}
+                className="min-w-0 flex-1 truncate rounded-md px-2 py-1.5 text-left font-semibold text-blue-700 hover:bg-blue-50 hover:text-orange-600 hover:underline"
+                title={`Open real-time status for ${assetLabel(device)}`}
+              >
+                {assetLabel(device)}
+              </button>
+            ) : (
+              <span className="min-w-0 flex-1 px-2 py-1.5 font-semibold text-slate-500">
+                Unassigned
+              </span>
+            )}
+
+            <button
+              type="button"
+              disabled={disabled}
+              onClick={() => { setOpen((v) => !v); setQuery(""); }}
+              className="inline-flex h-8 w-8 shrink-0 items-center justify-center rounded-md border border-slate-200 bg-white text-[10px] text-slate-500 hover:border-orange-300 hover:bg-orange-50 hover:text-orange-600 disabled:opacity-60"
+              aria-label="Change asset assignment"
+              title="Change asset assignment"
+            >
+              ▼
+            </button>
+          </div>
+
           {open && (
             <div className="absolute left-0 top-full z-50 mt-1 w-72 overflow-hidden rounded-xl border border-slate-200 bg-white shadow-xl">
               <div className="border-b border-slate-200 p-2">
-                <input autoFocus value={query} onChange={(e) => setQuery(e.target.value)}
+                <input
+                  autoFocus
+                  value={query}
+                  onChange={(e) => setQuery(e.target.value)}
                   placeholder="Search asset number..."
-                  className="w-full rounded-lg border border-slate-300 px-3 py-2 text-sm outline-none focus:border-orange-400" />
+                  className="w-full rounded-lg border border-slate-300 px-3 py-2 text-sm outline-none focus:border-orange-400"
+                />
               </div>
               <div className="max-h-64 overflow-auto p-1">
-                <button type="button" onClick={() => { onRequestChange(""); setOpen(false); }}
-                  className="w-full rounded-lg px-3 py-2 text-left text-sm font-semibold hover:bg-slate-100">
+                <button
+                  type="button"
+                  onClick={() => { onRequestChange(""); setOpen(false); }}
+                  className="w-full rounded-lg px-3 py-2 text-left text-sm font-semibold hover:bg-slate-100"
+                >
                   Unassigned
                 </button>
                 {options.map((asset) => (
-                  <button key={asset.id} type="button" onClick={() => { onRequestChange(asset.id); setOpen(false); }}
-                    className="w-full rounded-lg px-3 py-2 text-left hover:bg-orange-50">
+                  <button
+                    key={asset.id}
+                    type="button"
+                    onClick={() => { onRequestChange(asset.id); setOpen(false); }}
+                    className="w-full rounded-lg px-3 py-2 text-left hover:bg-orange-50"
+                  >
                     <div className="text-sm font-semibold text-slate-800">{asset.assetId}</div>
-                    <div className="truncate text-xs text-slate-500">{[asset.type, asset.category].filter(Boolean).join(" · ")}</div>
+                    <div className="truncate text-xs text-slate-500">
+                      {[asset.type, asset.category].filter(Boolean).join(" · ")}
+                    </div>
                   </button>
                 ))}
-                {!options.length && <div className="px-3 py-5 text-center text-sm text-slate-400">No available assets found.</div>}
+                {!options.length && (
+                  <div className="px-3 py-5 text-center text-sm text-slate-400">
+                    No available assets found.
+                  </div>
+                )}
               </div>
             </div>
           )}
@@ -183,6 +227,7 @@ export default function TelemetryPage({ companyId = "" }) {
       const [loading, setLoading] = useState(false);
       const [error, setError] = useState("");
       const [detailsDevice, setDetailsDevice] = useState(null);
+      const [realtimeDevice, setRealtimeDevice] = useState(null);
       const [latest, setLatest] = useState(null);
       const [latestLoading, setLatestLoading] = useState(false);
       const [addOpen, setAddOpen] = useState(false);
@@ -445,6 +490,15 @@ export default function TelemetryPage({ companyId = "" }) {
         }
       };
 
+      if (realtimeDevice) {
+        return (
+          <TelemetryAssetRealtimePage
+            device={realtimeDevice}
+            onBack={() => setRealtimeDevice(null)}
+          />
+        );
+      }
+
       return (
         <div className="space-y-5">
           <div className="flex flex-col gap-3 lg:flex-row lg:items-end lg:justify-between">
@@ -494,8 +548,16 @@ export default function TelemetryPage({ companyId = "" }) {
                         </td>
                         <td className="border-b border-r border-slate-200 px-4 py-3">{device.hardwareId || "—"}</td>
                         <td className="border-b border-r border-slate-200 px-2 py-2">
-                          <AssetPicker device={device} assets={assets} devices={devices} disabled={busy === `asset:${device.id}`}
-                            onRequestChange={(assetId) => { if ((device.assetId || "") !== assetId) setConfirmAsset({ device, assetId }); }} />
+                          <AssetPicker
+                            device={device}
+                            assets={assets}
+                            devices={devices}
+                            disabled={busy === `asset:${device.id}`}
+                            onOpenAsset={() => setRealtimeDevice(device)}
+                            onRequestChange={(assetId) => {
+                              if ((device.assetId || "") !== assetId) setConfirmAsset({ device, assetId });
+                            }}
+                          />
                         </td>
                         <td className="border-b border-r border-slate-200 px-4 py-3">
                           <button type="button" disabled={busy === `status:${device.id}`}
