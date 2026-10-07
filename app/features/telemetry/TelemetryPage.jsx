@@ -173,6 +173,7 @@ export default function TelemetryPage({ companyId = "" }) {
       const [confirmStatus, setConfirmStatus] = useState(null);
       const [confirmAsset, setConfirmAsset] = useState(null);
       const [sensorDetails, setSensorDetails] = useState(null);
+      const [detailsTab, setDetailsTab] = useState("readings");
       const [sensorCatalog, setSensorCatalog] = useState([]);
       const [sensorCatalogLoading, setSensorCatalogLoading] = useState(false);
       const [sensorCatalogError, setSensorCatalogError] = useState("");
@@ -445,7 +446,7 @@ export default function TelemetryPage({ companyId = "" }) {
                       <tr key={device.id} className="hover:bg-slate-50/70">
                         <td className="border-b border-r border-slate-200 px-4 py-3 text-slate-500">{index + 1}</td>
                         <td className="border-b border-r border-slate-200 px-4 py-3">
-                          <button type="button" onClick={() => setDetailsDevice(device)}
+                          <button type="button" onClick={() => { setDetailsTab("readings"); setDetailsDevice(device); }}
                             className="font-bold text-blue-800 hover:text-orange-600 hover:underline">
                             {[device.vendor, device.model].filter(Boolean).join(" ") || "Telemetry Device"}
                           </button>
@@ -574,107 +575,157 @@ export default function TelemetryPage({ companyId = "" }) {
                 ? `${[detailsDevice.vendor, detailsDevice.model].filter(Boolean).join(" ") || "Telemetry Device"} - ${assetLabel(detailsDevice)}`
                 : "Telemetry Device"
             }
-            onClose={() => { setDetailsDevice(null); setSensorDetails(null); setSensorCatalog([]); setSensorCatalogError(""); }}
+            onClose={() => { setDetailsDevice(null); setSensorDetails(null); setSensorCatalog([]); setSensorCatalogError(""); setDetailsTab("readings"); }}
             width="max-w-3xl"
           >
             {detailsDevice && <div className="bg-white text-slate-950 dark:bg-slate-950 dark:text-white">
               <div className="px-5 pt-4">
-                <div className="flex items-center justify-between gap-4 border-b border-slate-300 pb-2 dark:border-slate-700">
-                  <div className="text-sm">
-                    <span className="font-semibold">Sensor Readings</span>
-                    <span className="ml-2 opacity-60">· {latest?.parameterCount ?? readings.length} sensors</span>
-                  </div>
+                <div className="mb-4 flex gap-1 rounded-lg bg-slate-100 p-1 dark:bg-slate-900">
                   <button
                     type="button"
-                    onClick={() => void loadLatest(detailsDevice.id)}
-                    className="rounded-md border border-slate-300 px-3 py-1.5 text-xs font-medium dark:border-slate-700"
+                    onClick={() => setDetailsTab("readings")}
+                    className={`flex-1 rounded-md px-4 py-2 text-sm font-semibold transition ${
+                      detailsTab === "readings"
+                        ? "bg-white text-orange-700 shadow-sm dark:bg-slate-800 dark:text-orange-400"
+                        : "text-slate-600 hover:text-slate-900 dark:text-slate-400 dark:hover:text-white"
+                    }`}
                   >
-                    {latestLoading ? "Refreshing..." : "Refresh"}
+                    Sensor Readings
+                  </button>
+                  <button
+                    type="button"
+                    onClick={() => setDetailsTab("configuration")}
+                    className={`flex-1 rounded-md px-4 py-2 text-sm font-semibold transition ${
+                      detailsTab === "configuration"
+                        ? "bg-white text-orange-700 shadow-sm dark:bg-slate-800 dark:text-orange-400"
+                        : "text-slate-600 hover:text-slate-900 dark:text-slate-400 dark:hover:text-white"
+                    }`}
+                  >
+                    Sensor Configuration
                   </button>
                 </div>
 
-                <div className="grid grid-cols-[minmax(0,1fr)_80px_110px_70px] gap-3 border-b border-slate-300 py-2 text-[11px] font-semibold uppercase dark:border-slate-700">
-                  <div>Sensor</div><div>ID</div><div className="text-right">Value</div><div>Unit</div>
-                </div>
-
-                {latestLoading && !readings.length
-                  ? <div className="py-8 text-center text-sm opacity-60">Loading telemetry...</div>
-                  : !readings.length
-                    ? <div className="py-8 text-center text-sm opacity-60">No telemetry readings received yet.</div>
-                    : readings.map((r) => (
-                      <div key={r.parameterCode} className="grid grid-cols-[minmax(0,1fr)_80px_110px_70px] items-center gap-3 py-2.5 text-sm">
-                        <button type="button" onClick={() => setSensorDetails(r)} className="truncate text-left font-medium hover:underline">{r.parameterCode}</button>
-                        <button type="button" onClick={() => setSensorDetails(r)} className="text-left tabular-nums opacity-70 hover:underline">{r.vendorSensorId || "—"}</button>
-                        <div className="text-right text-base font-semibold tabular-nums">{r.value == null ? "—" : typeof r.value === "object" ? JSON.stringify(r.value) : String(r.value)}</div>
-                        <div className="opacity-70">{r.unit || "—"}</div>
+                {detailsTab === "readings" ? (
+                  <div>
+                    <div className="flex flex-col gap-2 sm:flex-row sm:items-center sm:justify-between">
+                      <div>
+                        <div className="text-sm font-semibold">Sensor Readings</div>
+                        <div className="text-xs opacity-60">{latest?.parameterCount ?? readings.length} active sensors with stored readings.</div>
                       </div>
-                    ))}
-
-                <div className="mt-5 border-t border-slate-300 pt-4 dark:border-slate-700">
-                  <div className="flex flex-col gap-2 sm:flex-row sm:items-center sm:justify-between">
-                    <div>
-                      <div className="text-sm font-semibold">Sensor Configuration</div>
-                      <div className="text-xs opacity-60">Enable only the sensors that should be stored for this device.</div>
-                    </div>
-                    <div className="flex gap-2">
                       <button
                         type="button"
-                        onClick={() => void loadDeviceSensors(detailsDevice.id)}
+                        onClick={() => void loadLatest(detailsDevice.id)}
                         className="rounded-md border border-slate-300 px-3 py-1.5 text-xs font-medium dark:border-slate-700"
                       >
-                        {sensorCatalogLoading ? "Refreshing..." : "Refresh Sensors"}
-                      </button>
-                      <button
-                        type="button"
-                        onClick={() => { setSensorForm(emptySensorForm); setAddSensorError(""); setAddSensorOpen(true); }}
-                        className="rounded-md bg-orange-500 px-3 py-1.5 text-xs font-semibold text-white hover:bg-orange-600"
-                      >
-                        + Add Sensor
+                        {latestLoading ? "Refreshing..." : "Refresh"}
                       </button>
                     </div>
-                  </div>
 
-                  {sensorCatalogError && <div className="mt-3 rounded-lg border border-rose-200 bg-rose-50 px-3 py-2 text-xs text-rose-700">{sensorCatalogError}</div>}
-
-                  <div className="mt-3 overflow-x-auto rounded-lg border border-slate-200 dark:border-slate-700">
-                    <table className="min-w-full text-sm">
-                      <thead className="bg-slate-50 text-left text-[11px] font-bold uppercase text-slate-600 dark:bg-slate-900 dark:text-slate-300">
-                        <tr>
-                          <th className="px-3 py-2">Sensor</th>
-                          <th className="px-3 py-2">ID</th>
-                          <th className="px-3 py-2">Unit</th>
-                          <th className="px-3 py-2 text-center">Status</th>
-                        </tr>
-                      </thead>
-                      <tbody>
-                        {sensorCatalogLoading && !sensorCatalog.length ? (
-                          <tr><td colSpan={4} className="px-3 py-6 text-center text-sm opacity-60">Loading sensors...</td></tr>
-                        ) : !sensorCatalog.length ? (
-                          <tr><td colSpan={4} className="px-3 py-6 text-center text-sm opacity-60">No sensor definitions found.</td></tr>
-                        ) : sensorCatalog.map((sensor) => (
-                          <tr key={sensor.id} className="border-t border-slate-200 dark:border-slate-700">
-                            <td className="px-3 py-2">
-                              <div className="font-medium">{sensor.displayName || sensor.parameterCode}</div>
-                              <div className="text-xs opacity-55">{sensor.parameterCode}</div>
-                            </td>
-                            <td className="px-3 py-2 tabular-nums">{sensor.vendorSensorId}</td>
-                            <td className="px-3 py-2">{sensor.unit || "—"}</td>
-                            <td className="px-3 py-2 text-center">
-                              <button
-                                type="button"
-                                disabled={sensorBusy === sensor.id}
-                                onClick={() => void toggleSensor(sensor)}
-                                className={`rounded-full border px-3 py-1 text-xs font-bold ${sensor.isEnabled ? "border-emerald-300 bg-emerald-50 text-emerald-700" : "border-slate-300 bg-slate-100 text-slate-600"} disabled:opacity-50`}
-                              >
-                                {sensorBusy === sensor.id ? "Saving..." : sensor.isEnabled ? "ACTIVE" : "INACTIVE"}
-                              </button>
-                            </td>
+                    <div className="mt-3 overflow-x-auto rounded-lg border border-slate-200 dark:border-slate-700">
+                      <table className="min-w-full text-sm">
+                        <thead className="bg-slate-50 text-left text-[11px] font-bold uppercase text-slate-600 dark:bg-slate-900 dark:text-slate-300">
+                          <tr>
+                            <th className="px-3 py-2">Sensor</th>
+                            <th className="px-3 py-2">ID</th>
+                            <th className="px-3 py-2 text-right">Value</th>
+                            <th className="px-3 py-2">Unit</th>
                           </tr>
-                        ))}
-                      </tbody>
-                    </table>
+                        </thead>
+                        <tbody>
+                          {latestLoading && !readings.length ? (
+                            <tr><td colSpan={4} className="px-3 py-6 text-center text-sm opacity-60">Loading telemetry...</td></tr>
+                          ) : !readings.length ? (
+                            <tr><td colSpan={4} className="px-3 py-6 text-center text-sm opacity-60">No telemetry readings received yet.</td></tr>
+                          ) : readings.map((r) => (
+                            <tr key={r.parameterCode} className="border-t border-slate-200 dark:border-slate-700">
+                              <td className="px-3 py-2">
+                                <button type="button" onClick={() => setSensorDetails(r)} className="text-left">
+                                  <div className="font-medium hover:underline">{r.parameterCode}</div>
+                                  <div className="text-xs opacity-55">{r.dataSource || "—"}</div>
+                                </button>
+                              </td>
+                              <td className="px-3 py-2 tabular-nums">
+                                <button type="button" onClick={() => setSensorDetails(r)} className="hover:underline">
+                                  {r.vendorSensorId || "—"}
+                                </button>
+                              </td>
+                              <td className="px-3 py-2 text-right text-base font-semibold tabular-nums">
+                                {r.value == null ? "—" : typeof r.value === "object" ? JSON.stringify(r.value) : String(r.value)}
+                              </td>
+                              <td className="px-3 py-2">{r.unit || "—"}</td>
+                            </tr>
+                          ))}
+                        </tbody>
+                      </table>
+                    </div>
                   </div>
-                </div>
+                ) : (
+                  <div>
+                    <div className="flex flex-col gap-2 sm:flex-row sm:items-center sm:justify-between">
+                      <div>
+                        <div className="text-sm font-semibold">Sensor Configuration</div>
+                        <div className="text-xs opacity-60">Enable only the sensors that should be stored for this device.</div>
+                      </div>
+                      <div className="flex gap-2">
+                        <button
+                          type="button"
+                          onClick={() => void loadDeviceSensors(detailsDevice.id)}
+                          className="rounded-md border border-slate-300 px-3 py-1.5 text-xs font-medium dark:border-slate-700"
+                        >
+                          {sensorCatalogLoading ? "Refreshing..." : "Refresh Sensors"}
+                        </button>
+                        <button
+                          type="button"
+                          onClick={() => { setSensorForm(emptySensorForm); setAddSensorError(""); setAddSensorOpen(true); }}
+                          className="rounded-md bg-orange-500 px-3 py-1.5 text-xs font-semibold text-white hover:bg-orange-600"
+                        >
+                          + Add Sensor
+                        </button>
+                      </div>
+                    </div>
+
+                    {sensorCatalogError && <div className="mt-3 rounded-lg border border-rose-200 bg-rose-50 px-3 py-2 text-xs text-rose-700">{sensorCatalogError}</div>}
+
+                    <div className="mt-3 overflow-x-auto rounded-lg border border-slate-200 dark:border-slate-700">
+                      <table className="min-w-full text-sm">
+                        <thead className="bg-slate-50 text-left text-[11px] font-bold uppercase text-slate-600 dark:bg-slate-900 dark:text-slate-300">
+                          <tr>
+                            <th className="px-3 py-2">Sensor</th>
+                            <th className="px-3 py-2">ID</th>
+                            <th className="px-3 py-2">Unit</th>
+                            <th className="px-3 py-2 text-center">Status</th>
+                          </tr>
+                        </thead>
+                        <tbody>
+                          {sensorCatalogLoading && !sensorCatalog.length ? (
+                            <tr><td colSpan={4} className="px-3 py-6 text-center text-sm opacity-60">Loading sensors...</td></tr>
+                          ) : !sensorCatalog.length ? (
+                            <tr><td colSpan={4} className="px-3 py-6 text-center text-sm opacity-60">No sensor definitions found.</td></tr>
+                          ) : sensorCatalog.map((sensor) => (
+                            <tr key={sensor.id} className="border-t border-slate-200 dark:border-slate-700">
+                              <td className="px-3 py-2">
+                                <div className="font-medium">{sensor.displayName || sensor.parameterCode}</div>
+                                <div className="text-xs opacity-55">{sensor.parameterCode}</div>
+                              </td>
+                              <td className="px-3 py-2 tabular-nums">{sensor.vendorSensorId}</td>
+                              <td className="px-3 py-2">{sensor.unit || "—"}</td>
+                              <td className="px-3 py-2 text-center">
+                                <button
+                                  type="button"
+                                  disabled={sensorBusy === sensor.id}
+                                  onClick={() => void toggleSensor(sensor)}
+                                  className={`rounded-full border px-3 py-1 text-xs font-bold ${sensor.isEnabled ? "border-emerald-300 bg-emerald-50 text-emerald-700" : "border-slate-300 bg-slate-100 text-slate-600"} disabled:opacity-50`}
+                                >
+                                  {sensorBusy === sensor.id ? "Saving..." : sensor.isEnabled ? "ACTIVE" : "INACTIVE"}
+                                </button>
+                              </td>
+                            </tr>
+                          ))}
+                        </tbody>
+                      </table>
+                    </div>
+                  </div>
+                )}
               </div>
 
               <details className="mx-5 mt-2 border-t border-slate-300 py-3 text-xs dark:border-slate-700">
