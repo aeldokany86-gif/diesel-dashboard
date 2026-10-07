@@ -134,7 +134,7 @@ export default function TelemetryAssetRealtimePage({ device, onBack }) {
   const distance = valueFrom(parameters, ["TOTAL_DISTANCE", "ODOMETER", "GNSS_DISTANCE"]);
   const fuel = valueFrom(parameters, ["FUEL_LEVEL_PERCENT", "FUEL_LEVEL_GENERIC", "FUEL_LEVEL"]);
   const fuelRate = valueFrom(parameters, ["FUEL_RATE"]);
-  const ignition = valueFrom(parameters, ["IGNITION", "ENGINE_WORKING", "CAN_ACTIVITY_PRESENT"]);
+  const ignition = valueFrom(parameters, ["IGNITION", "ENGINE_WORKING"]);
   const gnss = valueFrom(parameters, ["GNSS_POSITION", "GNSS", "POSITION"]);
   const coords = gnssCoordinates(gnss);
 
@@ -149,6 +149,11 @@ export default function TelemetryAssetRealtimePage({ device, onBack }) {
   const fuelRateValue = numberValue(fuelRate);
 
   const engineOn = useMemo(() => {
+    // RPM is the strongest direct evidence that the engine is physically running.
+    // Some devices may report ENGINE_WORKING = 0 even while valid RPM is present,
+    // so a live RPM reading must take precedence over that boolean flag.
+    if (rpmValue !== null) return rpmValue > 100;
+
     const ignitionValue = ignition?.value;
     if (typeof ignitionValue === "boolean") return ignitionValue;
     if (typeof ignitionValue === "number") return ignitionValue > 0;
@@ -157,7 +162,7 @@ export default function TelemetryAssetRealtimePage({ device, onBack }) {
       if (["TRUE", "ON", "RUNNING", "1"].includes(normalized)) return true;
       if (["FALSE", "OFF", "STOPPED", "0"].includes(normalized)) return false;
     }
-    if (rpmValue !== null) return rpmValue > 0;
+
     return null;
   }, [ignition?.value, rpmValue]);
 
@@ -240,40 +245,39 @@ export default function TelemetryAssetRealtimePage({ device, onBack }) {
       ) : null}
 
       <section className="rounded-2xl border border-slate-200 bg-slate-950 p-5 text-white shadow-sm">
-        <div className="grid gap-5 lg:grid-cols-[1.4fr_1fr]">
+        <div className="text-xs font-bold uppercase tracking-[0.18em] text-orange-400">
+          Real-time overview
+        </div>
+        <div className="mt-4 grid gap-5 sm:grid-cols-3">
           <div>
-            <div className="text-xs font-bold uppercase tracking-[0.18em] text-orange-400">
-              Real-time overview
-            </div>
-            <div className="mt-3 flex flex-wrap items-end gap-x-8 gap-y-4">
-              <div>
-                <div className="text-sm text-slate-400">Engine</div>
-                <div className={`mt-1 text-3xl font-bold ${engineOn === true ? "text-emerald-400" : engineOn === false ? "text-slate-300" : "text-amber-300"}`}>
-                  {engineOn === true ? "RUNNING" : engineOn === false ? "OFF" : "UNKNOWN"}
-                </div>
-              </div>
-              <div>
-                <div className="text-sm text-slate-400">Current speed</div>
-                <div className="mt-1 text-3xl font-bold">
-                  {formatNumber(speedValue, 1)} <span className="text-base font-semibold text-slate-400">{speed?.unit || "km/h"}</span>
-                </div>
-              </div>
-              <div>
-                <div className="text-sm text-slate-400">Last data</div>
-                <div className="mt-1 text-sm font-semibold text-slate-100">
-                  {formatDateTime(latestReadingAt || latestReceivedAt)}
-                </div>
-              </div>
+            <div className="text-sm text-slate-400">Engine</div>
+            <div
+              className={`mt-1 text-3xl font-bold ${
+                engineOn === true
+                  ? "text-emerald-400"
+                  : engineOn === false
+                    ? "text-slate-300"
+                    : "text-amber-300"
+              }`}
+            >
+              {engineOn === true ? "RUNNING" : engineOn === false ? "OFF" : "UNKNOWN"}
             </div>
           </div>
 
-          <div className="rounded-xl border border-white/10 bg-white/5 p-4">
-            <div className="text-xs font-bold uppercase tracking-[0.14em] text-slate-400">Device</div>
-            <div className="mt-3 grid grid-cols-2 gap-x-4 gap-y-2 text-sm">
-              <div className="text-slate-400">Hardware ID</div><div className="text-right font-semibold">{device?.hardwareId || "—"}</div>
-              <div className="text-slate-400">Protocol</div><div className="text-right font-semibold">{device?.protocol || "—"}</div>
-              <div className="text-slate-400">Transport</div><div className="text-right font-semibold">{device?.transport || "—"}</div>
-              <div className="text-slate-400">Last seen</div><div className="text-right font-semibold">{formatDateTime(latest?.device?.lastSeenAt || device?.lastSeenAt)}</div>
+          <div>
+            <div className="text-sm text-slate-400">Current speed</div>
+            <div className="mt-1 text-3xl font-bold">
+              {formatNumber(speedValue, 1)}
+              <span className="ml-1 text-base font-semibold text-slate-400">
+                {speed?.unit || "km/h"}
+              </span>
+            </div>
+          </div>
+
+          <div>
+            <div className="text-sm text-slate-400">Last data</div>
+            <div className="mt-2 text-base font-semibold text-slate-100">
+              {formatDateTime(latestReadingAt || latestReceivedAt)}
             </div>
           </div>
         </div>
