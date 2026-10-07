@@ -56,6 +56,25 @@
       return Array.isArray(message) ? message.join(", ") : String(message);
     };
 
+    const getGnssCoordinates = (reading) => {
+      const value = reading?.value;
+      if (!value || typeof value !== "object") return null;
+
+      const latitude = Number(value.latitude ?? value.lat);
+      const longitude = Number(value.longitude ?? value.lng ?? value.lon);
+
+      if (!Number.isFinite(latitude) || !Number.isFinite(longitude)) return null;
+      if (latitude < -90 || latitude > 90 || longitude < -180 || longitude > 180) return null;
+
+      return { latitude, longitude };
+    };
+
+    const googleMapsUrl = (reading) => {
+      const coordinates = getGnssCoordinates(reading);
+      if (!coordinates) return null;
+      return `https://www.google.com/maps/search/?api=1&query=${coordinates.latitude},${coordinates.longitude}`;
+    };
+
     const statusClass = (status) =>
       String(status).toUpperCase() === "ACTIVE"
         ? "border-emerald-300 bg-emerald-50 text-emerald-700 hover:bg-emerald-100"
@@ -174,6 +193,8 @@ export default function TelemetryPage({ companyId = "" }) {
       const [confirmAsset, setConfirmAsset] = useState(null);
       const [sensorDetails, setSensorDetails] = useState(null);
       const [detailsTab, setDetailsTab] = useState("readings");
+      const [readingSearch, setReadingSearch] = useState("");
+      const [sensorSearch, setSensorSearch] = useState("");
       const [sensorCatalog, setSensorCatalog] = useState([]);
       const [sensorCatalogLoading, setSensorCatalogLoading] = useState(false);
       const [sensorCatalogError, setSensorCatalogError] = useState("");
@@ -298,6 +319,26 @@ export default function TelemetryPage({ companyId = "" }) {
       const readings = useMemo(() => Object.entries(latest?.parameters || {})
         .map(([parameterCode, item]) => ({ parameterCode, ...(item || {}) }))
         .sort((a, b) => a.parameterCode.localeCompare(b.parameterCode)), [latest]);
+
+      const filteredReadings = useMemo(() => {
+        const q = readingSearch.trim().toLowerCase();
+        if (!q) return readings;
+        return readings.filter((r) =>
+          [r.parameterCode, r.vendorSensorId, r.unit, r.dataSource]
+            .filter(Boolean)
+            .some((value) => String(value).toLowerCase().includes(q)),
+        );
+      }, [readings, readingSearch]);
+
+      const filteredSensorCatalog = useMemo(() => {
+        const q = sensorSearch.trim().toLowerCase();
+        if (!q) return sensorCatalog;
+        return sensorCatalog.filter((sensor) =>
+          [sensor.displayName, sensor.parameterCode, sensor.vendorSensorId, sensor.unit]
+            .filter(Boolean)
+            .some((value) => String(value).toLowerCase().includes(q)),
+        );
+      }, [sensorCatalog, sensorSearch]);
 
       const changeIntegration = (integrationKey) => {
         const integration = TELEMETRY_INTEGRATIONS.find((item) => item.key === integrationKey);
@@ -575,12 +616,13 @@ export default function TelemetryPage({ companyId = "" }) {
                 ? `${[detailsDevice.vendor, detailsDevice.model].filter(Boolean).join(" ") || "Telemetry Device"} - ${assetLabel(detailsDevice)}`
                 : "Telemetry Device"
             }
-            onClose={() => { setDetailsDevice(null); setSensorDetails(null); setSensorCatalog([]); setSensorCatalogError(""); setDetailsTab("readings"); }}
+            onClose={() => { setDetailsDevice(null); setSensorDetails(null); setSensorCatalog([]); setSensorCatalogError(""); setDetailsTab("readings"); setReadingSearch(""); setSensorSearch(""); }}
             width="max-w-3xl"
           >
             {detailsDevice && <div className="bg-white text-slate-950 dark:bg-slate-950 dark:text-white">
               <div className="px-5 pt-4">
-                <div className="mb-4 flex gap-1 rounded-lg bg-slate-100 p-1 dark:bg-slate-900">
+                <div className="sticky top-0 z-20 -mx-5 mb-4 border-b border-slate-200 bg-white/95 px-5 pb-3 pt-1 backdrop-blur dark:border-slate-800 dark:bg-slate-950/95">
+                  <div className="flex gap-1 rounded-lg bg-slate-100 p-1 dark:bg-slate-900">
                   <button
                     type="button"
                     onClick={() => setDetailsTab("readings")}
@@ -603,6 +645,27 @@ export default function TelemetryPage({ companyId = "" }) {
                   >
                     Sensor Configuration
                   </button>
+                  </div>
+
+                  <div className="mt-3 flex justify-end">
+                    {detailsTab === "readings" ? (
+                      <button
+                        type="button"
+                        onClick={() => void loadLatest(detailsDevice.id)}
+                        className="rounded-md border border-slate-300 bg-white px-3 py-1.5 text-xs font-medium dark:border-slate-700 dark:bg-slate-900"
+                      >
+                        {latestLoading ? "Refreshing..." : "Refresh"}
+                      </button>
+                    ) : (
+                      <button
+                        type="button"
+                        onClick={() => void loadDeviceSensors(detailsDevice.id)}
+                        className="rounded-md border border-slate-300 bg-white px-3 py-1.5 text-xs font-medium dark:border-slate-700 dark:bg-slate-900"
+                      >
+                        {sensorCatalogLoading ? "Refreshing..." : "Refresh Sensors"}
+                      </button>
+                    )}
+                  </div>
                 </div>
 
                 {detailsTab === "readings" ? (
@@ -612,13 +675,15 @@ export default function TelemetryPage({ companyId = "" }) {
                         <div className="text-sm font-semibold">Sensor Readings</div>
                         <div className="text-xs opacity-60">{latest?.parameterCount ?? readings.length} active sensors with stored readings.</div>
                       </div>
-                      <button
-                        type="button"
-                        onClick={() => void loadLatest(detailsDevice.id)}
-                        className="rounded-md border border-slate-300 px-3 py-1.5 text-xs font-medium dark:border-slate-700"
-                      >
-                        {latestLoading ? "Refreshing..." : "Refresh"}
-                      </button>
+                    </div>
+
+                    <div className="mt-3">
+                      <input
+                        value={readingSearch}
+                        onChange={(e) => setReadingSearch(e.target.value)}
+                        placeholder="Search sensor name, ID, unit or source..."
+                        className="w-full rounded-lg border border-slate-300 bg-white px-3 py-2 text-sm outline-none focus:border-orange-400 dark:border-slate-700 dark:bg-slate-900 dark:text-white"
+                      />
                     </div>
 
                     <div className="mt-3 overflow-x-auto rounded-lg border border-slate-200 dark:border-slate-700">
@@ -636,7 +701,9 @@ export default function TelemetryPage({ companyId = "" }) {
                             <tr><td colSpan={4} className="px-3 py-6 text-center text-sm opacity-60">Loading telemetry...</td></tr>
                           ) : !readings.length ? (
                             <tr><td colSpan={4} className="px-3 py-6 text-center text-sm opacity-60">No telemetry readings received yet.</td></tr>
-                          ) : readings.map((r) => (
+                          ) : !filteredReadings.length ? (
+                            <tr><td colSpan={4} className="px-3 py-6 text-center text-sm opacity-60">No matching sensors found.</td></tr>
+                          ) : filteredReadings.map((r) => (
                             <tr key={r.parameterCode} className="border-t border-slate-200 dark:border-slate-700">
                               <td className="px-3 py-2">
                                 <button type="button" onClick={() => setSensorDetails(r)} className="text-left">
@@ -650,7 +717,18 @@ export default function TelemetryPage({ companyId = "" }) {
                                 </button>
                               </td>
                               <td className="px-3 py-2 text-right text-base font-semibold tabular-nums">
-                                {r.value == null ? "—" : typeof r.value === "object" ? JSON.stringify(r.value) : String(r.value)}
+                                {googleMapsUrl(r) ? (
+                                  <a
+                                    href={googleMapsUrl(r)}
+                                    target="_blank"
+                                    rel="noreferrer"
+                                    className="font-semibold text-blue-700 hover:text-orange-600 hover:underline dark:text-blue-400"
+                                  >
+                                    Open in Google Maps
+                                  </a>
+                                ) : (
+                                  r.value == null ? "—" : typeof r.value === "object" ? JSON.stringify(r.value) : String(r.value)
+                                )}
                               </td>
                               <td className="px-3 py-2">{r.unit || "—"}</td>
                             </tr>
@@ -669,13 +747,6 @@ export default function TelemetryPage({ companyId = "" }) {
                       <div className="flex gap-2">
                         <button
                           type="button"
-                          onClick={() => void loadDeviceSensors(detailsDevice.id)}
-                          className="rounded-md border border-slate-300 px-3 py-1.5 text-xs font-medium dark:border-slate-700"
-                        >
-                          {sensorCatalogLoading ? "Refreshing..." : "Refresh Sensors"}
-                        </button>
-                        <button
-                          type="button"
                           onClick={() => { setSensorForm(emptySensorForm); setAddSensorError(""); setAddSensorOpen(true); }}
                           className="rounded-md bg-orange-500 px-3 py-1.5 text-xs font-semibold text-white hover:bg-orange-600"
                         >
@@ -685,6 +756,15 @@ export default function TelemetryPage({ companyId = "" }) {
                     </div>
 
                     {sensorCatalogError && <div className="mt-3 rounded-lg border border-rose-200 bg-rose-50 px-3 py-2 text-xs text-rose-700">{sensorCatalogError}</div>}
+
+                    <div className="mt-3">
+                      <input
+                        value={sensorSearch}
+                        onChange={(e) => setSensorSearch(e.target.value)}
+                        placeholder="Search sensor name, parameter code, ID or unit..."
+                        className="w-full rounded-lg border border-slate-300 bg-white px-3 py-2 text-sm outline-none focus:border-orange-400 dark:border-slate-700 dark:bg-slate-900 dark:text-white"
+                      />
+                    </div>
 
                     <div className="mt-3 overflow-x-auto rounded-lg border border-slate-200 dark:border-slate-700">
                       <table className="min-w-full text-sm">
@@ -701,7 +781,9 @@ export default function TelemetryPage({ companyId = "" }) {
                             <tr><td colSpan={4} className="px-3 py-6 text-center text-sm opacity-60">Loading sensors...</td></tr>
                           ) : !sensorCatalog.length ? (
                             <tr><td colSpan={4} className="px-3 py-6 text-center text-sm opacity-60">No sensor definitions found.</td></tr>
-                          ) : sensorCatalog.map((sensor) => (
+                          ) : !filteredSensorCatalog.length ? (
+                            <tr><td colSpan={4} className="px-3 py-6 text-center text-sm opacity-60">No matching sensors found.</td></tr>
+                          ) : filteredSensorCatalog.map((sensor) => (
                             <tr key={sensor.id} className="border-t border-slate-200 dark:border-slate-700">
                               <td className="px-3 py-2">
                                 <div className="font-medium">{sensor.displayName || sensor.parameterCode}</div>
@@ -791,7 +873,7 @@ export default function TelemetryPage({ companyId = "" }) {
           </Modal>
 
           <Modal open={Boolean(sensorDetails)} title="Sensor Details" onClose={() => setSensorDetails(null)} width="max-w-md">
-            {sensorDetails && <div className="bg-white px-5 py-4 text-sm text-slate-950 dark:bg-slate-950 dark:text-white"><div className="border-b border-slate-300 pb-3 dark:border-slate-700"><div className="text-base font-semibold">{sensorDetails.parameterCode}</div><div className="mt-1 text-xs opacity-60">Sensor ID: {sensorDetails.vendorSensorId || "—"}</div></div><div className="space-y-2 pt-4"><div className="flex justify-between gap-6"><span className="opacity-60">Value</span><span className="font-semibold">{sensorDetails.value == null ? "—" : typeof sensorDetails.value === "object" ? JSON.stringify(sensorDetails.value) : String(sensorDetails.value)} {sensorDetails.unit || ""}</span></div><div className="flex justify-between gap-6"><span className="opacity-60">Source</span><span>{sensorDetails.dataSource || "—"}</span></div><div className="flex justify-between gap-6"><span className="opacity-60">Parameter Code</span><span>{sensorDetails.parameterCode || "—"}</span></div><div className="flex justify-between gap-6"><span className="opacity-60">Reading At</span><span className="text-right">{formatDateTime(sensorDetails.readingAt)}</span></div><div className="flex justify-between gap-6"><span className="opacity-60">Received At</span><span className="text-right">{formatDateTime(sensorDetails.receivedAt)}</span></div></div></div>}
+            {sensorDetails && <div className="bg-white px-5 py-4 text-sm text-slate-950 dark:bg-slate-950 dark:text-white"><div className="border-b border-slate-300 pb-3 dark:border-slate-700"><div className="text-base font-semibold">{sensorDetails.parameterCode}</div><div className="mt-1 text-xs opacity-60">Sensor ID: {sensorDetails.vendorSensorId || "—"}</div></div><div className="space-y-2 pt-4"><div className="flex justify-between gap-6"><span className="opacity-60">Value</span><span className="font-semibold">{googleMapsUrl(sensorDetails) ? <a href={googleMapsUrl(sensorDetails)} target="_blank" rel="noreferrer" className="text-blue-700 hover:text-orange-600 hover:underline dark:text-blue-400">Open in Google Maps</a> : <>{sensorDetails.value == null ? "—" : typeof sensorDetails.value === "object" ? JSON.stringify(sensorDetails.value) : String(sensorDetails.value)} {sensorDetails.unit || ""}</>}</span></div><div className="flex justify-between gap-6"><span className="opacity-60">Source</span><span>{sensorDetails.dataSource || "—"}</span></div><div className="flex justify-between gap-6"><span className="opacity-60">Parameter Code</span><span>{sensorDetails.parameterCode || "—"}</span></div><div className="flex justify-between gap-6"><span className="opacity-60">Reading At</span><span className="text-right">{formatDateTime(sensorDetails.readingAt)}</span></div><div className="flex justify-between gap-6"><span className="opacity-60">Received At</span><span className="text-right">{formatDateTime(sensorDetails.receivedAt)}</span></div></div></div>}
           </Modal>
 
           <Modal open={Boolean(confirmStatus)} title="Change Device Status" onClose={() => !busy && setConfirmStatus(null)} width="max-w-md">
